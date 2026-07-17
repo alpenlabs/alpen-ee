@@ -17,6 +17,7 @@ use strata_db_types::{
     l1_broadcast::L1TxStatus,
 };
 use strata_identifiers::{Buf32, L1BlockCommitment, L1Height, WtxidsRoot};
+use strata_l1_envelope_fmt::builder::MAX_ENVELOPE_PAYLOAD_SIZE;
 use strata_l1_txfmt::MagicBytes;
 use tracing::*;
 
@@ -89,6 +90,7 @@ pub struct ChunkedEnvelopeDaProvider {
     broadcast_ops: Arc<BroadcastDbOps>,
     l1_blocks: Arc<dyn L1BlockReader>,
     magic_bytes: MagicBytes,
+    max_chunk_payload: usize,
 }
 
 impl fmt::Debug for ChunkedEnvelopeDaProvider {
@@ -107,6 +109,10 @@ impl ChunkedEnvelopeDaProvider {
         l1_blocks: Arc<dyn L1BlockReader>,
         magic_bytes: MagicBytes,
     ) -> eyre::Result<Self> {
+        // The DA verification path baked into the acct proof guest
+        // (`alpen-ee-da-runtime`) is pinned to the `EE_DA_MAGIC_BYTES`
+        // constant, so a params file carrying any other magic must keep
+        // failing sequencer startup until the guest reads it as an input.
         let actual_magic = *magic_bytes.as_bytes();
         ensure!(
             actual_magic == EE_DA_MAGIC_BYTES,
@@ -121,7 +127,25 @@ impl ChunkedEnvelopeDaProvider {
             broadcast_ops,
             l1_blocks,
             magic_bytes,
+            max_chunk_payload: MAX_ENVELOPE_PAYLOAD_SIZE,
         })
+    }
+
+    /// Overrides the maximum per-chunk payload size used when splitting
+    /// blobs for envelope inscription. Builder-side knob only.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the size is zero or exceeds the envelope builder's
+    /// [`MAX_ENVELOPE_PAYLOAD_SIZE`] — either would make every subsequent
+    /// `post_batch_da` fail.
+    pub fn with_max_chunk_payload(mut self, max_chunk_payload: usize) -> Self {
+        assert!(
+            (1..=MAX_ENVELOPE_PAYLOAD_SIZE).contains(&max_chunk_payload),
+            "max_chunk_payload must be in 1..={MAX_ENVELOPE_PAYLOAD_SIZE}, got {max_chunk_payload}"
+        );
+        self.max_chunk_payload = max_chunk_payload;
+        self
     }
 }
 
@@ -133,7 +157,7 @@ impl BatchDaProvider for ChunkedEnvelopeDaProvider {
         }
 
         let blob = self.blob_provider.get_blob(batch_id).await?;
-        let chunks = prepare_da_chunks(&blob)?;
+        let chunks = prepare_da_chunks(&blob, self.max_chunk_payload)?;
         ensure!(!chunks.is_empty(), "prepare_da_chunks returned empty");
 
         let entry = ChunkedEnvelopeEntry::new_unsigned(chunks, self.magic_bytes, DA_BLOB_VERSION);
