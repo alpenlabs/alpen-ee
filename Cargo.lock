@@ -1176,11 +1176,13 @@ name = "alpen-ee-config"
 version = "0.3.0-alpha.1"
 dependencies = [
  "alloy-primitives",
+ "alpen-chainspec",
  "alpen-ee-common",
- "serde",
+ "alpen-ee-params",
  "serde_json",
- "strata-acct-types",
+ "strata-bridge-params",
  "strata-config",
+ "strata-l1-txfmt",
  "strata-predicate",
 ]
 
@@ -1329,6 +1331,7 @@ version = "0.3.0-alpha.1"
 dependencies = [
  "alpen-ee-common",
  "alpen-ee-config",
+ "alpen-ee-params",
  "eyre",
  "strata-acct-types",
  "strata-ee-acct-types",
