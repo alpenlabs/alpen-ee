@@ -27,6 +27,7 @@ sp1 = [
   "dep:strata-zkvm-hosts",
   "dep:zkaleido-sp1-host",
   "strata-paas/remote",
+  "strata-proofimpl-predicate-keys/sp1",
   "strata-zkvm-hosts?/sp1",
 ]
 
