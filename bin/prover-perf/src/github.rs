@@ -14,8 +14,10 @@ pub async fn post_to_github_pr(
 ) -> Result<(), Box<dyn error::Error>> {
     let client = Client::new();
 
-    const BASE_URL: &str = "https://api.github.com/repos/alpenlabs/strata";
-    let comments_url = format!("{}/issues/{}/comments", BASE_URL, args.pr_number);
+    let comments_url = format!(
+        "https://api.github.com/repos/{}/issues/{}/comments",
+        args.github_repo, args.pr_number
+    );
 
     // Get all comments on the PR
     let comments_response = set_github_headers(client.get(&comments_url), &args.github_token)
