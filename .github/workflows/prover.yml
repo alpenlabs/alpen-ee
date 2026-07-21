@@ -2,7 +2,8 @@ name: Run prover guest code checks
 
 on: pull_request
 
-permissions: {}
+permissions:
+  contents: read
 
 jobs:
   extract-rust-version:
