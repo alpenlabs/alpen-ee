@@ -290,7 +290,7 @@ reth-trie = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1", featu
 reth-trie-common = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1", default-features = false }
 reth-trie-db = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
 
-rsp-client-executor = { git = "https://github.com/succinctlabs/rsp", tag = "reth-1.9.1b" }
+rsp-client-executor = { git = "https://github.com/succinctlabs/rsp", tag = "reth-2.2.0-sp1-6.2.4" }
 rsp-mpt = { git = "https://github.com/succinctlabs/rsp", tag = "reth-1.9.1b" }
 rsp-primitives = { git = "https://github.com/succinctlabs/rsp", tag = "reth-1.9.1b" }
 sp1-helper = "6.1.0"
