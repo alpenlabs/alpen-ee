@@ -248,7 +248,7 @@ reth-consensus-common = { git = "https://github.com/paradigmxyz/reth", tag = "v1
 reth-db = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
 reth-engine-local = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
 reth-engine-primitives = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
-reth-errors = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
+reth-errors = { git = "https://github.com/paradigmxyz/reth", tag = "v2.3.0" }
 reth-eth-wire = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
 reth-ethereum-engine-primitives = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
 reth-ethereum-forks = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
