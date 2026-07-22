@@ -228,7 +228,7 @@ alloy-trie = { version = "0.9.1", default-features = false, features = [
   "arbitrary",
   "serde",
 ] }
-revm = { version = "31.0.1", features = [
+revm = { version = "41.0.0", features = [
   "serde",
   "bn",
 ], default-features = false }
