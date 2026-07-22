@@ -2,7 +2,8 @@ name: Run prover guest code checks
 
 on: pull_request
 
-permissions: {}
+permissions:
+  contents: read
 
 jobs:
   extract-rust-version:
@@ -92,6 +93,7 @@ jobs:
           --github-token "${{ secrets.GITHUB_TOKEN }}" \
           --pr-number "${{ github.event.pull_request.number }}" \
           --commit-hash "${{ github.sha }}" \
+          --github-repo "${{ github.repository }}" \
           --programs alpen-chunk,alpen-acct
         working-directory: bin/prover-perf
         env:

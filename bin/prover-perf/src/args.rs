@@ -1,6 +1,12 @@
+use std::env;
+
 use argh::FromArgs;
 
 use crate::programs::GuestProgram;
+
+fn default_github_repo() -> String {
+    env::var("GITHUB_REPOSITORY").unwrap_or_default()
+}
 
 /// Evaluate the performance of SP1 on programs.
 #[derive(Debug, Clone, FromArgs)]
@@ -20,6 +26,10 @@ pub struct EvalArgs {
     /// the commit hash
     #[argh(option, default = "String::from(\"local_commit\")")]
     pub commit_hash: String,
+
+    /// the GitHub repository in `owner/repo` format
+    #[argh(option, default = "default_github_repo()")]
+    pub github_repo: String,
 
     /// programs to run (comma-delimited and/or repeated),
     /// e.g. `--programs alpen-chunk,alpen-acct` or `--programs alpen-chunk
