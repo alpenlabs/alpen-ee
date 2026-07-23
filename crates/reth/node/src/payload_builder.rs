@@ -4,7 +4,8 @@ use alloy_consensus::{Header, Transaction};
 use alpen_reth_evm::{evm::AlpenEvmFactory, extract_withdrawal_intents};
 use alpen_reth_primitives::WithdrawalIntent;
 use reth_basic_payload_builder::*;
-use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use alpen_chainspec::AlpenChainSpec;
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{BlockExecutionError, BlockValidationError};
 use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_ethereum_primitives::TransactionSigned;
@@ -38,13 +39,13 @@ use crate::{
 #[non_exhaustive]
 pub struct AlpenPayloadBuilderBuilder;
 
-impl<Node, Pool> PayloadBuilderBuilder<Node, Pool, EthEvmConfig<ChainSpec, AlpenEvmFactory>>
+impl<Node, Pool> PayloadBuilderBuilder<Node, Pool, EthEvmConfig<AlpenChainSpec, AlpenEvmFactory>>
     for AlpenPayloadBuilderBuilder
 where
     Node: FullNodeTypes<
         Types: NodeTypes<
             Payload = AlpenEngineTypes,
-            ChainSpec = ChainSpec,
+            ChainSpec = AlpenChainSpec,
             Primitives = EthPrimitives,
         >,
     >,
@@ -58,7 +59,7 @@ where
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-        evm_config: EthEvmConfig<ChainSpec, AlpenEvmFactory>,
+        evm_config: EthEvmConfig<AlpenChainSpec, AlpenEvmFactory>,
     ) -> eyre::Result<Self::PayloadBuilder> {
         let conf = ctx.payload_builder_config();
         let chain = ctx.chain_spec().chain();
@@ -82,7 +83,7 @@ pub struct AlpenPayloadBuilder<Pool, Client> {
     /// Transaction pool.
     pool: Pool,
     /// The type responsible for creating the evm.
-    evm_config: EthEvmConfig<ChainSpec, AlpenEvmFactory>,
+    evm_config: EthEvmConfig<AlpenChainSpec, AlpenEvmFactory>,
     /// Payload builder configuration.
     builder_config: EthereumBuilderConfig,
 }
@@ -92,7 +93,7 @@ impl<Pool, Client> AlpenPayloadBuilder<Pool, Client> {
     pub fn new(
         client: Client,
         pool: Pool,
-        evm_config: EthEvmConfig<ChainSpec, AlpenEvmFactory>,
+        evm_config: EthEvmConfig<AlpenChainSpec, AlpenEvmFactory>,
         builder_config: EthereumBuilderConfig,
     ) -> Self {
         Self {
@@ -107,7 +108,7 @@ impl<Pool, Client> AlpenPayloadBuilder<Pool, Client> {
 impl<Pool, Client> PayloadBuilder for AlpenPayloadBuilder<Pool, Client>
 where
     Client: StateProviderFactory
-        + ChainSpecProvider<ChainSpec = ChainSpec>
+        + ChainSpecProvider<ChainSpec = AlpenChainSpec>
         + HeaderProvider<Header = Header>
         + Clone,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
@@ -161,7 +162,7 @@ type BestTransactionsIter<Pool> = Box<
 /// [default_ethereum_payload](reth_ethereum_payload_builder::default_ethereum_payload)
 #[inline]
 fn try_build_payload<Pool, Client, F>(
-    evm_config: EthEvmConfig<ChainSpec, AlpenEvmFactory>,
+    evm_config: EthEvmConfig<AlpenChainSpec, AlpenEvmFactory>,
     client: Client,
     _pool: Pool,
     builder_config: EthereumBuilderConfig,

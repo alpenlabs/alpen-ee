@@ -4,7 +4,7 @@ use alloy_rpc_types::engine::{
     payload::ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV3,
     ExecutionPayloadEnvelopeV5, ExecutionPayloadV1,
 };
-use reth_chainspec::ChainSpec;
+use alpen_chainspec::AlpenChainSpec;
 use reth_ethereum_payload_builder::EthereumExecutionPayloadValidator;
 use reth_node_api::{
     payload::PayloadTypes, validate_version_specific_fields, AddOnsContext, BuiltPayload,
@@ -53,12 +53,12 @@ impl EngineTypes for AlpenEngineTypes {
 /// Strata engine validator
 #[derive(Debug, Clone)]
 pub struct AlpenEngineValidator {
-    inner: EthereumExecutionPayloadValidator<ChainSpec>,
+    inner: EthereumExecutionPayloadValidator<AlpenChainSpec>,
 }
 
 impl AlpenEngineValidator {
     /// Instantiates a new validator.
-    pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
+    pub fn new(chain_spec: Arc<AlpenChainSpec>) -> Self {
         Self {
             inner: EthereumExecutionPayloadValidator::new(chain_spec),
         }
@@ -66,7 +66,7 @@ impl AlpenEngineValidator {
 
     /// Returns the chain spec used by the validator.
     #[inline]
-    fn chain_spec(&self) -> &ChainSpec {
+    fn chain_spec(&self) -> &AlpenChainSpec {
         self.inner.chain_spec()
     }
 }
@@ -121,7 +121,7 @@ where
     N: FullNodeComponents<
         Types: NodeTypes<
             Payload = AlpenEngineTypes,
-            ChainSpec = ChainSpec,
+            ChainSpec = AlpenChainSpec,
             Primitives = EthPrimitives,
         >,
     >,

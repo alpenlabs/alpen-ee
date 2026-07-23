@@ -8,6 +8,7 @@ workspace = true
 
 [dependencies]
 alloy-eips.workspace = true
+alpen-chainspec.workspace = true
 alloy-network.workspace = true
 alloy-primitives.workspace = true
 eyre.workspace = true

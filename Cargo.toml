@@ -208,6 +208,7 @@ alloy = { version = "1.0.41", features = [
 ] }
 alloy-consensus = { version = "1.0.41", default-features = false }
 alloy-eips = { version = "1.0.41", default-features = false }
+alloy-evm = { version = "0.23.3", default-features = false }
 alloy-genesis = { version = "1.0.41", default-features = false }
 alloy-network = { version = "1.0.41", default-features = false }
 alloy-primitives = { version = "1.4.1", default-features = false, features = [
@@ -261,6 +262,7 @@ reth-evm-ethereum = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1
 reth-exex = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
 reth-ipc = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
 reth-network = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
+reth-network-peers = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
 reth-network-api = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
 reth-network-p2p = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
 reth-node-api = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }

@@ -1,6 +1,7 @@
 //! Loads and formats OP block RPC response.
 
-use reth_chainspec::{ChainSpec, ChainSpecProvider};
+use alpen_chainspec::AlpenChainSpec;
+use reth_chainspec::ChainSpecProvider;
 use reth_provider::HeaderProvider;
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock},
@@ -12,7 +13,7 @@ use crate::{AlpenEthApi, StrataNodeCore};
 
 impl<N, Rpc> EthBlocks for AlpenEthApi<N, Rpc>
 where
-    N: StrataNodeCore<Provider: ChainSpecProvider<ChainSpec = ChainSpec> + HeaderProvider>,
+    N: StrataNodeCore<Provider: ChainSpecProvider<ChainSpec = AlpenChainSpec> + HeaderProvider>,
     EthApiError: FromEvmError<N::Evm>,
     Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError>,
 {

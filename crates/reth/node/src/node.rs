@@ -1,5 +1,5 @@
 use alpen_reth_rpc::{eth::AlpenEthApiBuilder, SequencerClient};
-use reth_chainspec::ChainSpec;
+use alpen_chainspec::AlpenChainSpec;
 use reth_evm::{ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes};
 use reth_node_api::{FullNodeComponents, NodeAddOns};
 use reth_node_builder::{
@@ -39,7 +39,7 @@ impl AlpenEthereumNode {
 
 impl NodeTypes for AlpenEthereumNode {
     type Primitives = EthPrimitives;
-    type ChainSpec = ChainSpec;
+    type ChainSpec = AlpenChainSpec;
     type Storage = EthStorage;
     type Payload = AlpenEngineTypes;
 }
@@ -49,7 +49,7 @@ where
     N: FullNodeTypes<
         Types: NodeTypes<
             Payload = AlpenEngineTypes,
-            ChainSpec = ChainSpec,
+            ChainSpec = AlpenChainSpec,
             Primitives = EthPrimitives,
             Storage = EthStorage,
         >,
@@ -165,7 +165,7 @@ impl<N, EthB, PVB, EB, EVB> NodeAddOns<N> for AlpenRethNodeAddOns<N, EthB, PVB, 
 where
     N: FullNodeComponents<
         Types: NodeTypes<
-            ChainSpec = ChainSpec,
+            ChainSpec = AlpenChainSpec,
             Primitives = EthPrimitives,
             Storage = EthStorage,
             Payload = AlpenEngineTypes,
@@ -193,7 +193,7 @@ impl<N, EthB, PVB, EB, EVB> RethRpcAddOns<N> for AlpenRethNodeAddOns<N, EthB, PV
 where
     N: FullNodeComponents<
         Types: NodeTypes<
-            ChainSpec = ChainSpec,
+            ChainSpec = AlpenChainSpec,
             Primitives = EthPrimitives,
             Storage = EthStorage,
             Payload = AlpenEngineTypes,
@@ -218,7 +218,7 @@ impl<N, EthB, PVB, EB, EVB> EngineValidatorAddOn<N> for AlpenRethNodeAddOns<N, E
 where
     N: FullNodeComponents<
         Types: NodeTypes<
-            ChainSpec = ChainSpec,
+            ChainSpec = AlpenChainSpec,
             Primitives = EthPrimitives,
             Payload = AlpenEngineTypes,
         >,

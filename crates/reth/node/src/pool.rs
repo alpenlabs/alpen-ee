@@ -1,7 +1,8 @@
 use std::{default::Default, time::SystemTime};
 
 use alloy_eips::merge::EPOCH_SLOTS;
-use reth_chainspec::{ChainSpec, EthChainSpec};
+use alpen_chainspec::AlpenChainSpec;
+use reth_chainspec::EthChainSpec;
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{components::PoolBuilder, BuilderContext};
 use reth_primitives::EthPrimitives;
@@ -25,7 +26,7 @@ pub struct AlpenEthereumPoolBuilder {
 }
 impl<Types, Node> PoolBuilder<Node> for AlpenEthereumPoolBuilder
 where
-    Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
+    Types: NodeTypes<ChainSpec = AlpenChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
 {
     type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore>;
@@ -44,7 +45,7 @@ where
             let blob_params = ctx
                 .chain_spec()
                 .blob_params_at_timestamp(current_timestamp)
-                .unwrap_or(ctx.chain_spec().blob_params.cancun);
+                .unwrap_or(ctx.chain_spec().cancun_blob_params());
 
             // Derive the blob cache size from the target blob count, to auto scale it by
             // multiplying it with the slot count for 2 epochs: 384 for pectra

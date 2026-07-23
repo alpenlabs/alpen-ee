@@ -35,7 +35,8 @@ use std::{
 };
 
 use alpen_chainspec::{
-    chain_value_parser, ee_genesis_block_info, AlpenChainSpecParser, AlpenEeGenesisBlockInfo,
+    alpen_chain_value_parser, ee_genesis_block_info, AlpenChainSpec, AlpenChainSpecParser,
+    AlpenEeGenesisBlockInfo,
 };
 use alpen_ee_common::{
     chain_status_checked, BatchStorage, BlockNumHash, ChunkStorage, ExecBlockStorage, OLClient,
@@ -73,7 +74,7 @@ use bitcoind_async_client::{
 };
 use clap::{ArgAction, Parser};
 use eyre::Context;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::EthChainSpec as _;
 use reth_cli_commands::{launcher::FnLauncher, node::NodeCommand};
 use reth_cli_runner::{tokio_runtime, CliRunner};
 use reth_cli_util::sigsegv_handler;
@@ -190,7 +191,7 @@ fn main() {
 
     if let Err(err) = run(
         command,
-        |builder: WithLaunchContext<NodeBuilder<Arc<reth_db::DatabaseEnv>, ChainSpec>>,
+        |builder: WithLaunchContext<NodeBuilder<Arc<reth_db::DatabaseEnv>, AlpenChainSpec>>,
          ext: AdditionalConfig| async move {
             let service_executor = ServiceExecutor::from_reth(builder.task_executor().clone());
             let health_check_state = HealthCheckState::new();
@@ -220,7 +221,7 @@ fn main() {
             let datadir = builder.config().datadir().data_dir().to_path_buf();
 
             // TODO(STR-2982): read config, params from file
-            let genesis_info = ee_genesis_block_info(&ext.custom_chain);
+            let genesis_info = ee_genesis_block_info(ext.custom_chain.current());
 
             info!(target: "alpen-client", component = "alpen", blockhash=%genesis_info.blockhash(), "EE genesis info");
             let params = load_ee_params(&ext.ee_params)?;
@@ -1006,10 +1007,10 @@ pub struct AdditionalConfig {
         long,
         value_name = "CHAIN_OR_PATH",
         default_value = "testnet",
-        value_parser = chain_value_parser,
+        value_parser = alpen_chain_value_parser,
         required = false,
     )]
-    pub custom_chain: Arc<ChainSpec>,
+    pub custom_chain: Arc<AlpenChainSpec>,
 
     /// JSON-serialized Alpen EE chain params.
     #[arg(long, value_name = "PATH", required = true)]
@@ -1301,7 +1302,7 @@ fn run<L>(
 ) -> eyre::Result<()>
 where
     L: std::ops::AsyncFnOnce(
-        WithLaunchContext<NodeBuilder<Arc<reth_db::DatabaseEnv>, ChainSpec>>,
+        WithLaunchContext<NodeBuilder<Arc<reth_db::DatabaseEnv>, AlpenChainSpec>>,
         AdditionalConfig,
     ) -> eyre::Result<()>,
 {

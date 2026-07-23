@@ -982,13 +982,18 @@ dependencies = [
 name = "alpen-chainspec"
 version = "0.3.0-alpha.1"
 dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
  "eyre",
  "reth-chainspec",
  "reth-cli",
+ "reth-network-peers",
  "serde_json",
  "shellexpand",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1510,6 +1515,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types",
+ "alpen-chainspec",
  "alpen-reth-evm",
  "alpen-reth-primitives",
  "alpen-reth-rpc",
@@ -1565,6 +1571,7 @@ dependencies = [
  "alloy-eips",
  "alloy-network",
  "alloy-primitives",
+ "alpen-chainspec",
  "eyre",
  "jsonrpsee-types",
  "reqwest 0.12.28",

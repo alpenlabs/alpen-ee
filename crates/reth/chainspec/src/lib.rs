@@ -1,9 +1,12 @@
 //! Chain specification for the reth node.
 
+mod live;
+
 use std::{fs, path::PathBuf, sync::Arc};
 
 use alloy_genesis::Genesis;
 use alloy_primitives::B256;
+pub use live::{AlpenChainSpec, ForkActivationError};
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 
@@ -42,13 +45,19 @@ impl AlpenEeGenesisBlockInfo {
 pub struct AlpenChainSpecParser;
 
 impl ChainSpecParser for AlpenChainSpecParser {
-    type ChainSpec = ChainSpec;
+    type ChainSpec = AlpenChainSpec;
 
     const SUPPORTED_CHAINS: &'static [&'static str] = &["dev", "devnet", "testnet", "testnet3"];
 
     fn parse(s: &str) -> eyre::Result<Arc<Self::ChainSpec>> {
-        chain_value_parser(s)
+        alpen_chain_value_parser(s)
     }
+}
+
+/// Parses a chain name / path / inline JSON into a live [`AlpenChainSpec`].
+pub fn alpen_chain_value_parser(s: &str) -> eyre::Result<Arc<AlpenChainSpec>> {
+    let base = chain_value_parser(s)?;
+    Ok(Arc::new(AlpenChainSpec::new((*base).clone())))
 }
 
 pub fn chain_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
