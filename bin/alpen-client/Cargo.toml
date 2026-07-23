@@ -40,6 +40,7 @@ alloy-rlp.workspace = true
 alpen-chainspec.workspace = true
 alpen-ee-common.workspace = true
 alpen-ee-config.workspace = true
+alpen-ee-params.workspace = true
 alpen-ee-da-provider = { workspace = true, optional = true }
 alpen-ee-da-runtime = { workspace = true, optional = true, features = [
   "builders",
@@ -72,7 +73,6 @@ strata-ee-chain-types.workspace = true
 strata-ee-chunk-runtime.workspace = true
 strata-evm-ee.workspace = true
 strata-identifiers.workspace = true
-strata-l1-txfmt.workspace = true
 strata-logging.workspace = true
 strata-ol-rpc-api = { workspace = true, features = ["client"] }
 strata-ol-rpc-types.workspace = true
@@ -99,7 +99,6 @@ clap.workspace = true
 eyre.workspace = true
 http.workspace = true
 jsonrpsee = { workspace = true, features = ["http-client", "server", "macros"] }
-reth-chainspec.workspace = true
 reth-cli-commands.workspace = true
 reth-cli-runner.workspace = true
 reth-cli-util.workspace = true

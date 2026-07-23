@@ -15,7 +15,7 @@ pub const DEVNET_CHAIN_SPEC: &str = include_str!("res/devnet-chain.json");
 pub const DEV_CHAIN_SPEC: &str = include_str!("res/alpen-dev-chain.json");
 pub const TESTNET3_CHAIN_SPEC: &str = include_str!("res/testnet3-chain.json");
 
-/// Genesis block data that must match the Alpen EE params file.
+/// Genesis block data derived from the embedded EVM chain spec.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AlpenEeGenesisBlockInfo {
     blockhash: B256,

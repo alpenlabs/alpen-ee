@@ -34,15 +34,13 @@ use std::{
     sync::Arc,
 };
 
-use alpen_chainspec::{
-    alpen_chain_value_parser, ee_genesis_block_info, AlpenChainSpec, AlpenChainSpecParser,
-    AlpenEeGenesisBlockInfo,
-};
+use alpen_chainspec::{AlpenChainSpec, AlpenChainSpecParser};
 use alpen_ee_common::{
     chain_status_checked, BatchStorage, BlockNumHash, ChunkStorage, ExecBlockStorage, OLClient,
     Storage,
 };
 use alpen_ee_config::{AlpenEeConfig, AlpenEeParams};
+use alpen_ee_params::AlpenParams;
 use alpen_ee_database::init_db_storage;
 use alpen_ee_engine::{create_engine_control_task, sync_chainstate_to_engine, AlpenRethExecEngine};
 #[cfg(feature = "sequencer")]
@@ -74,17 +72,12 @@ use bitcoind_async_client::{
 };
 use clap::{ArgAction, Parser};
 use eyre::Context;
-use reth_chainspec::EthChainSpec as _;
 use reth_cli_commands::{launcher::FnLauncher, node::NodeCommand};
 use reth_cli_runner::{tokio_runtime, CliRunner};
 use reth_cli_util::sigsegv_handler;
 use reth_network::{protocol::IntoRlpxSubProtocol, NetworkProtocols};
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_provider::CanonStateSubscriptions;
-use strata_bridge_params::{
-    BridgeParams, DEFAULT_DENOMINATION_SATS, DEFAULT_MAX_WITHDRAWAL_DESCRIPTOR_LEN,
-    DEFAULT_MAX_WITHDRAWAL_SATS,
-};
 #[cfg(feature = "sequencer")]
 use strata_btcio::{
     broadcaster::BroadcasterBuilder, writer::chunked_envelope::create_chunked_envelope_task,
@@ -97,7 +90,6 @@ use strata_config::btcio::{
     MempoolExplorerFeePolicy, WriterConfig,
 };
 use strata_identifiers::{EpochCommitment, OLBlockId};
-use strata_l1_txfmt::MagicBytes;
 use strata_logging::{init_logging_from_config, LoggingInitConfig};
 use strata_predicate::PredicateKey;
 use strata_primitives::{buf::Buf32, L1Height};
@@ -180,8 +172,20 @@ fn main() {
 
     let mut command = NodeCommand::<AlpenChainSpecParser, AdditionalConfig>::parse();
 
-    // use provided alpen chain spec
-    command.chain = command.ext.custom_chain.clone();
+    // Load the consolidated Alpen params artifact and hand its embedded EVM
+    // spec to reth, wrapped in the live-updatable chainspec. The same handle
+    // is shared by every node component, so runtime fork activations are
+    // observed everywhere.
+    let alpen_params = match load_params(&command.ext.params) {
+        Ok(params) => Arc::new(params),
+        Err(err) => {
+            eprintln!("Error: {err:?}");
+            process::exit(1);
+        }
+    };
+    command.chain = Arc::new(AlpenChainSpec::new(
+        (**alpen_params.chain_spec()).clone(),
+    ));
     // enable engine api v4
     command.engine.accept_execution_requests_hash = true;
     // allow chain fork blocks to be created
@@ -191,8 +195,8 @@ fn main() {
 
     if let Err(err) = run(
         command,
-        |builder: WithLaunchContext<NodeBuilder<Arc<reth_db::DatabaseEnv>, AlpenChainSpec>>,
-         ext: AdditionalConfig| async move {
+        move |builder: WithLaunchContext<NodeBuilder<Arc<reth_db::DatabaseEnv>, AlpenChainSpec>>,
+              ext: AdditionalConfig| async move {
             let service_executor = ServiceExecutor::from_reth(builder.task_executor().clone());
             let health_check_state = HealthCheckState::new();
             let health_check_addr = format!("{}:{}", ext.health_check_host, ext.health_check_port);
@@ -205,27 +209,22 @@ fn main() {
 
             // --- CONFIGS ---
 
-            // Resolve withdrawal cap: 0 → no cap, omitted → default 10 BTC.
-            let resolved_max_withdrawal = match ext.max_withdrawal_amount {
-                Some(0) => None,
-                Some(v) => Some(v),
-                None => Some(DEFAULT_MAX_WITHDRAWAL_SATS),
-            };
-            let bridge_params = BridgeParams::new_with_descriptor_limit(
-                ext.bridge_denomination,
-                resolved_max_withdrawal,
-                ext.max_withdrawal_descriptor_len,
-            )
-            .expect("invalid withdrawal params");
+            let bridge_params = *alpen_params.bridge_params();
 
             let datadir = builder.config().datadir().data_dir().to_path_buf();
 
-            // TODO(STR-2982): read config, params from file
-            let genesis_info = ee_genesis_block_info(ext.custom_chain.current());
+            // Genesis facts are a projection of the embedded EVM spec, so
+            // agreement between the params artifact and the chain genesis is
+            // structural rather than checked at boot.
+            let genesis_info = alpen_params.genesis_block_info();
 
             info!(target: "alpen-client", component = "alpen", blockhash=%genesis_info.blockhash(), "EE genesis info");
-            let params = load_ee_params(&ext.ee_params)?;
-            validate_ee_params_genesis(&params, &genesis_info)?;
+            let params = AlpenEeParams::new(
+                alpen_params.account_id(),
+                genesis_info.blockhash(),
+                genesis_info.stateroot(),
+                genesis_info.blocknum(),
+            );
             info!(target: "alpen-client", component = "alpen", ?params, sequencer = ext.sequencer, "Starting EE Node");
 
             // Resolve btcio writer config up front so flag misuse surfaces before I/O.
@@ -604,7 +603,7 @@ fn main() {
                 // --- DA pipeline ---
                 //
                 // clap `requires_all` on --sequencer guarantees all DA args are present.
-                let magic_bytes = ext.ee_da_magic_bytes.expect("enforced by clap");
+                let magic_bytes = alpen_params.blob_spec().magic_bytes();
                 let btc_url = ext.btc_rpc_url.as_ref().expect("enforced by clap");
                 let btc_user = ext.btc_rpc_user.as_ref().expect("enforced by clap");
                 let btc_pass = ext.btc_rpc_password.as_ref().expect("enforced by clap");
@@ -727,7 +726,7 @@ fn main() {
 
                 let genesis = {
                     use alpen_reth_exex::alloy2reth::IntoRspChainConfig as _;
-                    ext.custom_chain.genesis().config.clone().into_rsp()
+                    alpen_params.evm_spec().genesis().config.clone().into_rsp()
                 };
 
                 let chunk_builder = ProverBuilder::new(ChunkSpec::new(
@@ -895,14 +894,18 @@ fn main() {
                 // gas limit as a conservative floor to accommodate this drift
                 // while still catching obvious misconfigurations.
                 if let Some(configured) = ext.chunk_sealing_gas_limit {
-                    let min_chunk_gas = ext.custom_chain.genesis().gas_limit.saturating_mul(2);
+                    let min_chunk_gas = alpen_params
+                        .evm_spec()
+                        .genesis()
+                        .gas_limit
+                        .saturating_mul(2);
                     eyre::ensure!(
                         configured >= min_chunk_gas,
                         "--chunk-sealing-gas-limit ({configured}) is below the minimum \
                          ({min_chunk_gas}, 2× genesis block gas limit {}). A single block \
                          can use up to the per-block gas limit, so the chunk budget must \
                          be large enough to always fit at least one block.",
-                        ext.custom_chain.genesis().gas_limit,
+                        alpen_params.evm_spec().genesis().gas_limit,
                     );
                 }
 
@@ -999,22 +1002,11 @@ pub struct AdditionalConfig {
     #[arg(long)]
     pub service_label: Option<String>,
 
-    /// The chain this node is running.
-    ///
-    /// Possible values are either a built-in chain or the path to a chain specification file.
-    /// Cannot override existing `chain` arg, so this is a workaround.
-    #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        default_value = "testnet",
-        value_parser = alpen_chain_value_parser,
-        required = false,
-    )]
-    pub custom_chain: Arc<AlpenChainSpec>,
-
-    /// JSON-serialized Alpen EE chain params.
+    /// JSON-serialized consolidated Alpen chain params (account identity,
+    /// bridge economics, DA stream identity, fork schedule, and the embedded
+    /// EVM chain spec).
     #[arg(long, value_name = "PATH", required = true)]
-    pub ee_params: PathBuf,
+    pub params: PathBuf,
 
     /// Rpc of sequencer's reth node to forward transactions to.
     #[arg(long, required = false)]
@@ -1061,7 +1053,7 @@ pub struct AdditionalConfig {
     #[arg(
         long,
         default_value_t = false,
-        requires_all = ["ee_da_magic_bytes", "btc_rpc_url", "btc_rpc_user", "btc_rpc_password"],
+        requires_all = ["btc_rpc_url", "btc_rpc_user", "btc_rpc_password"],
     )]
     pub sequencer: bool,
 
@@ -1070,11 +1062,6 @@ pub struct AdditionalConfig {
     pub sequencer_pubkey: Buf32,
 
     // --- DA Configuration ---
-    /// Magic bytes (hex-encoded, 4 bytes) for tagging EE DA envelope transactions.
-    /// Example: `ALPN`.
-    #[arg(long, required = false, value_parser = parse_magic_bytes)]
-    pub ee_da_magic_bytes: Option<MagicBytes>,
-
     /// Bitcoin Core RPC URL. Required when `--sequencer` is set.
     #[arg(long, required = false)]
     pub btc_rpc_url: Option<String>,
@@ -1117,23 +1104,6 @@ pub struct AdditionalConfig {
     #[cfg(feature = "sequencer")]
     #[arg(long, required = false)]
     pub batch_event_channel_capacity: Option<usize>,
-
-    /// Bridge denomination in satoshis (1 BTC default).
-    #[arg(long, default_value_t = DEFAULT_DENOMINATION_SATS)]
-    pub bridge_denomination: u64,
-
-    /// Maximum withdrawal BOSD descriptor length in bytes, including the type tag.
-    #[arg(long, default_value_t = DEFAULT_MAX_WITHDRAWAL_DESCRIPTOR_LEN)]
-    pub max_withdrawal_descriptor_len: u32,
-
-    /// Maximum withdrawal amount in satoshis.
-    ///
-    /// When omitted, defaults to 1_000_000_000 (10 BTC) at runtime.
-    /// Pass 0 to disable the cap entirely. Kept as `Option` (no
-    /// `default_value`) so we can distinguish "not set" (→ safe default)
-    /// from an explicit value.
-    #[arg(long)]
-    pub max_withdrawal_amount: Option<u64>,
 
     /// Use the zkaleido `NativeHost` for the EE chunk + acct provers
     /// instead of the SP1 remote host.
@@ -1217,81 +1187,12 @@ impl AdditionalConfig {
     }
 }
 
-/// Loads Alpen EE chain params from a JSON file.
-fn load_ee_params(path: &Path) -> eyre::Result<AlpenEeParams> {
+/// Loads the consolidated Alpen chain params from a JSON file.
+fn load_params(path: &Path) -> eyre::Result<AlpenParams> {
     let json = fs::read_to_string(path)
-        .with_context(|| format!("failed to read EE params file {path:?}"))?;
-    AlpenEeParams::from_json_str(&json)
-        .with_context(|| format!("failed to parse EE params file {path:?}"))
-}
-
-/// Validates that EE params describe the selected execution genesis block.
-fn validate_ee_params_genesis(
-    params: &AlpenEeParams,
-    genesis_info: &AlpenEeGenesisBlockInfo,
-) -> eyre::Result<()> {
-    if params.genesis_blockhash() != genesis_info.blockhash() {
-        eyre::bail!(
-            "EE params genesis blockhash {} does not match chain genesis blockhash {}",
-            params.genesis_blockhash(),
-            genesis_info.blockhash()
-        );
-    }
-
-    if params.genesis_stateroot() != genesis_info.stateroot() {
-        eyre::bail!(
-            "EE params genesis stateroot {} does not match chain genesis stateroot {}",
-            params.genesis_stateroot(),
-            genesis_info.stateroot()
-        );
-    }
-
-    if params.genesis_blocknum() != genesis_info.blocknum() {
-        eyre::bail!(
-            "EE params genesis block number {} does not match chain genesis block number {}",
-            params.genesis_blocknum(),
-            genesis_info.blocknum()
-        );
-    }
-
-    Ok(())
-}
-
-#[cfg(test)]
-mod additional_config_tests {
-    use super::*;
-
-    const SEQUENCER_PUBKEY: &str =
-        "0000000000000000000000000000000000000000000000000000000000000000";
-
-    fn parse_additional_config(args: &[&str]) -> AdditionalConfig {
-        let mut argv = vec![
-            "alpen-client",
-            "--ee-params",
-            "/tmp/ee-params.json",
-            "--sequencer-pubkey",
-            SEQUENCER_PUBKEY,
-        ];
-        argv.extend_from_slice(args);
-        <AdditionalConfig as clap::Parser>::parse_from(argv)
-    }
-
-    #[test]
-    fn max_withdrawal_descriptor_len_defaults_to_policy_limit() {
-        let config = parse_additional_config(&[]);
-
-        assert_eq!(
-            config.max_withdrawal_descriptor_len,
-            DEFAULT_MAX_WITHDRAWAL_DESCRIPTOR_LEN
-        );
-    }
-
-    #[test]
-    fn max_withdrawal_descriptor_len_can_be_configured() {
-        let config = parse_additional_config(&["--max-withdrawal-descriptor-len", "100"]);
-
-        assert_eq!(config.max_withdrawal_descriptor_len, 100);
-    }
+        .with_context(|| format!("failed to read Alpen params file {path:?}"))?;
+    AlpenParams::from_json_str(&json)
+        .with_context(|| format!("failed to parse Alpen params file {path:?}"))
 }
 
 /// Run node with logging
@@ -1362,12 +1263,6 @@ where
 fn parse_buf32(s: &str) -> eyre::Result<Buf32> {
     s.parse::<Buf32>()
         .map_err(|e| eyre::eyre!("Failed to parse hex string as Buf32: {e}"))
-}
-
-/// Parse a magic bytes string using the [`MagicBytes`] parser from `strata-l1-txfmt`.
-fn parse_magic_bytes(s: &str) -> eyre::Result<MagicBytes> {
-    s.parse::<MagicBytes>()
-        .map_err(|e| eyre::eyre!("Failed to parse magic bytes: {e}"))
 }
 
 #[cfg(feature = "sequencer")]
@@ -1523,8 +1418,8 @@ mod resolve_writer_config_tests {
     ) -> AdditionalConfig {
         let argv = [
             "alpen-client",
-            "--ee-params",
-            "/tmp/ee-params.json",
+            "--params",
+            "/tmp/alpen-params.json",
             "--sequencer-pubkey",
             &"0".repeat(64),
         ];

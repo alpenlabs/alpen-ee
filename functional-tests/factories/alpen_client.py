@@ -10,6 +10,7 @@ from pathlib import Path
 
 import flexitest
 
+from common.alpen_params import DEFAULT_GENESIS_UPDATE_VK, compose_alpen_params
 from common.config import EeDaConfig
 from common.config.constants import DEFAULT_EE_BLOCK_TIME_MS
 from common.datatool import generate_ee_params
@@ -74,6 +75,8 @@ class AlpenClientFactory(flexitest.Factory):
         bridge_denomination: int = 100_000_000,
         max_withdrawal_amount: int | None = 1_000_000_000,
         beneficiary_address: str | None = None,
+        genesis_update_vk: str = DEFAULT_GENESIS_UPDATE_VK,
+        pending_evm_forks: list[str] | None = None,
         **kwargs,
     ) -> AlpenClientService:
         """
@@ -115,6 +118,18 @@ class AlpenClientFactory(flexitest.Factory):
 
         if ee_params_path is None:
             ee_params_path = generate_ee_params(datadir)
+        alpen_params_path = compose_alpen_params(
+            datadir,
+            ee_params_path,
+            chain=custom_chain,
+            genesis_update_vk=genesis_update_vk,
+            bridge_denomination=bridge_denomination,
+            max_withdrawal_amount=max_withdrawal_amount,
+            da_magic_bytes=(
+                da_config.magic_bytes.decode("ascii") if da_config is not None else "ALPN"
+            ),
+            pending_evm_forks=pending_evm_forks,
+        )
 
         # fmt: off
         cmd = [
@@ -122,7 +137,7 @@ class AlpenClientFactory(flexitest.Factory):
             "--datadir", str(datadir),
             "--sequencer",
             "--sequencer-pubkey", sequencer_pubkey,
-            "--ee-params", str(ee_params_path),
+            "--params", str(alpen_params_path),
             *ol_client_args,
             "--addr", "127.0.0.1",  # Force IPv4 for testing
             "--nat", "extip:127.0.0.1",  # Force enode to show 127.0.0.1
@@ -134,7 +149,6 @@ class AlpenClientFactory(flexitest.Factory):
             "--health-check-host", "127.0.0.1",
             "--health-check-port", "0",
             "--p2p-secret-key", str(p2p_secret_key_file),
-            "--custom-chain", custom_chain,
             "--batch-sealing-block-count", str(batch_sealing_block_count),
             "-vvvv",
             # Functional tests don't ship the SP1 guest ELFs, so run the
@@ -166,11 +180,6 @@ class AlpenClientFactory(flexitest.Factory):
             # Disable all discovery - peers connect via admin_addPeer or --trusted-peers
             cmd.append("-d")
 
-        # Withdrawal denomination and cap (bridge params)
-        cmd.extend(["--bridge-denomination", str(bridge_denomination)])
-        if max_withdrawal_amount is not None:
-            cmd.extend(["--max-withdrawal-amount", str(max_withdrawal_amount)])
-
         if beneficiary_address is not None:
             cmd.extend(["--beneficiary-address", beneficiary_address])
 
@@ -178,7 +187,6 @@ class AlpenClientFactory(flexitest.Factory):
         if da_config is not None:
             # fmt: off
             cmd.extend([
-                "--ee-da-magic-bytes", da_config.magic_bytes.decode("ascii"),
                 "--btc-rpc-url", da_config.btc_rpc_url,
                 "--btc-rpc-user", da_config.btc_rpc_user,
                 "--btc-rpc-password", da_config.btc_rpc_password,
@@ -241,6 +249,8 @@ class AlpenClientFactory(flexitest.Factory):
         ol_endpoint: str | None = None,
         bridge_denomination: int = 100_000_000,
         max_withdrawal_amount: int | None = 1_000_000_000,
+        genesis_update_vk: str = DEFAULT_GENESIS_UPDATE_VK,
+        pending_evm_forks: list[str] | None = None,
         **kwargs,
     ) -> AlpenClientService:
         """
@@ -282,13 +292,22 @@ class AlpenClientFactory(flexitest.Factory):
         ol_client_args = ["--ol-client-url", ol_endpoint] if ol_endpoint else ["--dummy-ol-client"]
         if ee_params_path is None:
             ee_params_path = generate_ee_params(datadir)
+        alpen_params_path = compose_alpen_params(
+            datadir,
+            ee_params_path,
+            chain=custom_chain,
+            genesis_update_vk=genesis_update_vk,
+            bridge_denomination=bridge_denomination,
+            max_withdrawal_amount=max_withdrawal_amount,
+            pending_evm_forks=pending_evm_forks,
+        )
 
         # fmt: off
         cmd = [
             "alpen-client",
             "--datadir", str(datadir),
             "--sequencer-pubkey", sequencer_pubkey,
-            "--ee-params", str(ee_params_path),
+            "--params", str(alpen_params_path),
             *ol_client_args,
             "--addr", "127.0.0.1",  # Force IPv4 for testing
             "--nat", "extip:127.0.0.1",  # Force enode to show 127.0.0.1
@@ -300,7 +319,6 @@ class AlpenClientFactory(flexitest.Factory):
             "--health-check-host", "127.0.0.1",
             "--health-check-port", "0",
             "--p2p-secret-key", str(p2p_secret_key_file),
-            "--custom-chain", custom_chain,
             "-vvvv",
         ]
         # fmt: on
@@ -333,11 +351,6 @@ class AlpenClientFactory(flexitest.Factory):
         else:
             # Disable all discovery - peers connect via admin_addPeer or --trusted-peers
             cmd.append("-d")
-
-        # Withdrawal denomination and cap (bridge params)
-        cmd.extend(["--bridge-denomination", str(bridge_denomination)])
-        if max_withdrawal_amount is not None:
-            cmd.extend(["--max-withdrawal-amount", str(max_withdrawal_amount)])
 
         http_url = f"http://127.0.0.1:{http_port}"
 
