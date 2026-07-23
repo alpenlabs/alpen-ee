@@ -41,6 +41,7 @@ class AlpenClientEnvParams:
     batch_sealing_block_count: int = 10
     dev_track_latest_epoch: bool = False
     beneficiary_address: str | None = None
+    pending_evm_forks: list[str] | None = None
 
 
 class AlpenClientEnv(flexitest.EnvConfig):
@@ -166,6 +167,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
             batch_sealing_block_count=envparams.batch_sealing_block_count,
             dev_track_latest_epoch=envparams.dev_track_latest_epoch,
             beneficiary_address=envparams.beneficiary_address,
+            pending_evm_forks=envparams.pending_evm_forks,
         )
         sequencer.wait_for_ready(timeout=60)
         seq_enode = sequencer.get_enode()

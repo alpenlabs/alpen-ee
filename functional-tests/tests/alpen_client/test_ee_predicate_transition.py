@@ -1,7 +1,15 @@
 """EE predicate transition functional test.
 
-Verifies that a sequence of admin `PredicateUpdate`s rotates the Alpen snark
-account's `update_vk` through each target predicate in OL state.
+Verifies that admin `PredicateUpdate`s rotate the Alpen snark account's
+`update_vk` with consumption-activated semantics: the rotation rides the
+account inbox and takes effect only when an account update consumes the
+message — the consuming update is the last one verified under the old key
+(the Alpen upgrade design's consensus-level fork boundary).
+
+The rotation sequence keeps the account provable at each step so the EE can
+actually consume each message: first to `AlwaysAccept` (consumed under the
+initial Bip340 test key), then to a junk `Sp1Groth16` key (consumed under
+`AlwaysAccept`; afterwards the account is frozen, which ends the test).
 """
 
 import logging
@@ -21,12 +29,11 @@ logger = logging.getLogger(__name__)
 
 INITIAL_BLOCKS = 5
 POST_ADMIN_UPDATE_L1_BLOCKS = 5
-PREDICATE_SETTLE_TIMEOUT_SECONDS = 120
+PREDICATE_SETTLE_TIMEOUT_SECONDS = 240
 
 # Dummy condition bytes for predicates that require them. Admin updates do not
 # validate the condition format, so any bytes round-trip through OL state.
 SP1_CONDITION_HEX = "11" * 32
-BIP340_CONDITION_HEX = "22" * 32
 
 # Initial Alpen account predicate matches `EeAcctProgram::test_predicate_key()`
 # (deterministic test SK = [0x02; 32] in strata_proofimpl_alpen_acct).
@@ -34,11 +41,11 @@ INITIAL_ACCT_PREDICATE = (
     "Bip340Schnorr:4d4b6cd1361032ca9bd2aeb9d900aa4d45d9ead80ac9423374c451a7254d0766"
 )
 
+# Each target must leave the account able to consume the *next* rotation
+# message; the last one may freeze it.
 PREDICATE_TRANSITIONS = [
-    "NeverAccept",
     "AlwaysAccept",
     f"Sp1Groth16:{SP1_CONDITION_HEX}",
-    f"Bip340Schnorr:{BIP340_CONDITION_HEX}",
 ]
 
 
@@ -101,12 +108,16 @@ class TestEePredicateTransition(BaseTest):
 
             btc_rpc.proxy.generatetoaddress(POST_ADMIN_UPDATE_L1_BLOCKS, mine_addr)
 
+            # The rotation activates only when the EE's account update
+            # consumes the inbox message, so this wait covers the full
+            # pipeline: inbox delivery, batch seal at the boundary, DA,
+            # proof under the pre-rotation key, and OL acceptance.
             wait_until_with_value(
                 fetch_update_vk_and_mine,
                 lambda vk, target=target: vk == target,
-                error_with=f"update_vk did not transition to {target} in OL state",
+                error_with=f"update_vk did not transition to {target} on consumption",
                 timeout=PREDICATE_SETTLE_TIMEOUT_SECONDS,
             )
-            logger.info("update_vk transitioned to %s", target)
+            logger.info("update_vk transitioned to %s on consumption", target)
 
         return True

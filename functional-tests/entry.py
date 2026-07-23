@@ -310,10 +310,15 @@ def main(argv: list[str]) -> int:
         ),
         # Environments containing both ee and ol
         "el_ol": EeOLEnv(pre_generate_blocks=110),
+        # Rotations activate on inbox consumption, so the EE must be able to
+        # consume messages and land updates quickly: track the latest OL
+        # epoch and seal small batches.
         "el_ol_ee_predicate_transition": EeOLEnv(
             pre_generate_blocks=110,
             admin_confirmation_depth=2,
             fund_test_cli_wallet=True,
+            dev_track_latest_epoch=True,
+            batch_sealing_block_count=3,
         ),
         # Same as `el_ol` but with a tighter OL block time so bridge tests can
         # drive a deposit -> bridgeout -> WF cycle within reasonable runtime.

@@ -15558,6 +15558,7 @@ dependencies = [
  "reth-chainspec",
  "rkyv",
  "rsp-primitives",
+ "serde_json",
  "ssz",
  "strata-bridge-params",
  "strata-codec",

@@ -13,7 +13,9 @@ from pathlib import Path
 
 # Repo-relative chain spec documents (the same files the old --custom-chain
 # flag resolved by name).
-_CHAINSPEC_DIR = Path(__file__).resolve().parents[2] / "crates" / "reth" / "chainspec" / "src" / "res"
+_CHAINSPEC_DIR = (
+    Path(__file__).resolve().parents[2] / "crates" / "reth" / "chainspec" / "src" / "res"
+)
 CHAIN_SPEC_FILES = {
     "dev": _CHAINSPEC_DIR / "alpen-dev-chain.json",
     "devnet": _CHAINSPEC_DIR / "devnet-chain.json",

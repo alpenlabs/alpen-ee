@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 INITIAL_EE_BLOCKS = 5
 POST_ADMIN_UPDATE_L1_BLOCKS = 5
-PREDICATE_SETTLE_TIMEOUT_SECONDS = 120
+PREDICATE_SETTLE_TIMEOUT_SECONDS = 240
 HISTORICAL_EE_BLOCKS_AFTER_ROTATION = 8
 FRESH_EE_BLOCKS_AFTER_LATE_JOIN = 3
 
@@ -42,6 +42,10 @@ class TestEePredicateFullnodeSync(BaseTest):
                 pre_generate_blocks=110,
                 admin_confirmation_depth=2,
                 fund_test_cli_wallet=True,
+                # Rotations activate on inbox consumption; keep the EE able
+                # to consume and land updates quickly.
+                dev_track_latest_epoch=True,
+                batch_sealing_block_count=3,
             )
         )
 

@@ -232,3 +232,21 @@ mod tests {
         assert_eq!(result.new_state().inner_state(), state_root);
     }
 }
+
+#[cfg(test)]
+mod v2_key_tests {
+    use super::EeAcctProgram;
+
+    /// The v2 test predicate in CLI string form, for functional tests that
+    /// rotate the account to the native prover's second key. Keep in sync
+    /// with `V2_ACCT_PREDICATE` in
+    /// `functional-tests/tests/alpen_client/test_ee_live_fork_upgrade.py`.
+    const V2_PREDICATE_STR: &str = "Bip340Schnorr:462779ad4aad39514614751a71085f2f10e1c7a593e4e030efb5b8721ce55b0b";
+
+    #[test]
+    fn v2_predicate_key_matches_pinned_string() {
+        let key = EeAcctProgram::test_predicate_key_v2();
+        let encoded = serde_json::to_string(&key).expect("predicate key serializes");
+        assert_eq!(encoded.trim_matches('"'), V2_PREDICATE_STR);
+    }
+}
