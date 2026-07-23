@@ -15,7 +15,8 @@ use std::{fmt, sync::Arc};
 use alloy_primitives::B256;
 use alpen_ee_common::{
     build_ledger_refs_from_da, decode_batch_task_key, encode_batch_task_key, BatchId, BatchStatus,
-    BatchStorage, ChunkStorage, ExecBlockStorage, L1DaBlockRef, ProverTaskKeyDecodeError, Storage,
+    BatchStorage, ChunkStorage, ExecBlockStorage, ForkScheduleStorage, L1DaBlockRef,
+    ProverTaskKeyDecodeError, Storage,
 };
 use alpen_ee_da_runtime::builders::{build_da_witness, DaDedupResolver, DaWitnessBuildError};
 use alpen_ee_database::EeNodeStorage;
@@ -167,6 +168,14 @@ impl ProofSpec for AcctSpec {
     type Program = EeAcctProgram;
 
     async fn fetch_input(&self, task: &Self::Task) -> ProverResult<EeAcctProofInput> {
+        // Prove under the rules the blocks were built with: patch the
+        // runtime-derived fork activations into the guest chain config.
+        let fork_activations = ForkScheduleStorage::get_fork_activations(&*self.storage)
+            .await
+            .map_err(|e| PaasError::Storage(format!("get_fork_activations: {e}")))?;
+        let genesis =
+            crate::prover::fork_config::apply_fork_activations(&self.genesis, &fork_activations);
+
         let batch_id = task.0;
 
         // 1. Chunk inputs: per-chunk transitions + their proofs, in order.
@@ -402,7 +411,7 @@ impl ProofSpec for AcctSpec {
         .map_err(map_witness_build_err)?;
 
         Ok(EeAcctProofInput {
-            genesis: self.genesis.clone(),
+            genesis,
             ee_private_input,
             snark_acct_private_input,
             da_witness,

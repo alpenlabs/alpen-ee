@@ -28,6 +28,7 @@
 //! ```
 
 mod batch_prover;
+mod fork_config;
 mod hooks;
 mod spec_acct;
 mod spec_chunk;

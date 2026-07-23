@@ -164,6 +164,9 @@ where
         let mut gas_limit = tx.gas_limit;
         let mut basefee = 0;
         let mut disable_nonce_check = true;
+        // System calls are not subject to EIP-7825; without lifting the cap
+        // the 30M-gas system tx fails validation from Osaka onward.
+        let mut tx_gas_limit_cap = Some(tx.gas_limit);
 
         // ensure the block gas limit is >= the tx
         mem::swap(&mut self.block.gas_limit, &mut gas_limit);
@@ -171,6 +174,8 @@ where
         mem::swap(&mut self.block.basefee, &mut basefee);
         // disable the nonce check
         mem::swap(&mut self.cfg.disable_nonce_check, &mut disable_nonce_check);
+        // lift the per-tx gas cap for the system call
+        mem::swap(&mut self.cfg.tx_gas_limit_cap, &mut tx_gas_limit_cap);
 
         let mut res = ExecuteEvm::transact(self, tx);
 
@@ -180,6 +185,8 @@ where
         mem::swap(&mut self.block.basefee, &mut basefee);
         // swap back to the previous nonce check flag
         mem::swap(&mut self.cfg.disable_nonce_check, &mut disable_nonce_check);
+        // swap back the per-tx gas cap
+        mem::swap(&mut self.cfg.tx_gas_limit_cap, &mut tx_gas_limit_cap);
 
         // NOTE: We assume that only the contract storage is modified. Revm currently marks the
         // caller and block beneficiary accounts as "touched" when we do the above transact calls,

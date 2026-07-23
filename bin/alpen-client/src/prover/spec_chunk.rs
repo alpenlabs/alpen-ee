@@ -10,7 +10,7 @@ use std::{fmt, sync::Arc};
 
 use alpen_ee_common::{
     decode_chunk_task_key, encode_chunk_task_key, BlockWitnessStore, ChunkId, ChunkStorage,
-    ExecBlockStorage, ProverTaskKeyDecodeError,
+    ExecBlockStorage, ForkScheduleStorage, ProverTaskKeyDecodeError,
 };
 use alpen_ee_database::EeNodeStorage;
 use alpen_reth_node::BlockWitnessRecord;
@@ -108,6 +108,14 @@ impl ProofSpec for ChunkSpec {
     type Program = EeChunkProgram;
 
     async fn fetch_input(&self, task: &Self::Task) -> ProverResult<EeChunkProofInput> {
+        // Prove under the rules the blocks were built with: patch the
+        // runtime-derived fork activations into the guest chain config.
+        let fork_activations = ForkScheduleStorage::get_fork_activations(&*self.storage)
+            .await
+            .map_err(|e| PaasError::Storage(format!("get_fork_activations: {e}")))?;
+        let genesis =
+            crate::prover::fork_config::apply_fork_activations(&self.genesis, &fork_activations);
+
         let chunk_id = task.0;
 
         // 1. Read the chunk's block list.
@@ -291,7 +299,7 @@ impl ProofSpec for ChunkSpec {
         );
 
         Ok(EeChunkProofInput {
-            genesis: self.genesis.clone(),
+            genesis,
             private_input,
             bridge_params: self.bridge_params,
         })

@@ -241,7 +241,8 @@ mod v2_key_tests {
     /// rotate the account to the native prover's second key. Keep in sync
     /// with `V2_ACCT_PREDICATE` in
     /// `functional-tests/tests/alpen_client/test_ee_live_fork_upgrade.py`.
-    const V2_PREDICATE_STR: &str = "Bip340Schnorr:462779ad4aad39514614751a71085f2f10e1c7a593e4e030efb5b8721ce55b0b";
+    const V2_PREDICATE_STR: &str =
+        "Bip340Schnorr:462779ad4aad39514614751a71085f2f10e1c7a593e4e030efb5b8721ce55b0b";
 
     #[test]
     fn v2_predicate_key_matches_pinned_string() {
