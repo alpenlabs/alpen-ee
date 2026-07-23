@@ -465,6 +465,100 @@ mod additional_config_tests {
         NodeCommand::<AlpenChainSpecParser, AdditionalConfig>::command().debug_assert();
     }
 
+    /// Locks the CLI flag surface: docker entrypoints, compose files, and
+    /// the functional-test factories all pass these long flags, so a field
+    /// rename that forgets to pin the old name via `#[arg(long = "...")]`
+    /// must fail here.
+    #[cfg(feature = "sequencer")]
+    #[test]
+    fn legacy_flag_names_still_parse() {
+        let config = parse_additional_config(&[
+            "--verbosity",
+            "--quiet",
+            "--otlp-url",
+            "http://localhost:4317",
+            "--service-label",
+            "test",
+            "--custom-chain",
+            "testnet",
+            "--sequencer-http",
+            "http://localhost:8545",
+            "--ol-client-url",
+            "ws://localhost:8432",
+            "--ol-submit-url",
+            "ws://localhost:8435",
+            "--ol-submit-bearer-token",
+            "token",
+            "--dummy-ol-client",
+            "--health-check-host",
+            "127.0.0.1",
+            "--health-check-port",
+            "8081",
+            "--db-retry-count",
+            "3",
+            "--sequencer",
+            "--ee-da-magic-bytes",
+            "ALPN",
+            "--btc-rpc-url",
+            "http://localhost:18443",
+            "--btc-rpc-user",
+            "user",
+            "--btc-rpc-password",
+            "pass",
+            "--l1-reorg-safe-depth",
+            "6",
+            "--genesis-l1-height",
+            "0",
+            "--batch-sealing-block-count",
+            "100",
+            "--chunk-sealing-block-count",
+            "50",
+            "--chunk-sealing-gas-limit",
+            "100000000",
+            "--batch-event-channel-capacity",
+            "64",
+            "--bridge-denomination",
+            "100000000",
+            "--max-withdrawal-descriptor-len",
+            "100",
+            "--max-withdrawal-amount",
+            "1000",
+            "--dev-native-prover",
+            "--dev-track-latest-epoch",
+            "--sp1-proof-deadline-secs",
+            "60",
+            "--btcio-fee-policy",
+            "fixed",
+            "--btcio-conf-target",
+            "2",
+            "--btcio-fee-rate",
+            "1.5",
+            "--btcio-mempool-base-url",
+            "https://mempool.space",
+            "--btcio-mempool-tier",
+            "fastest",
+            "--btcio-retry-count",
+            "3",
+            "--btcio-retry-interval",
+            "500",
+            "--beneficiary-address",
+            "0x5400000000000000000000000000000000000010",
+        ]);
+
+        // Spot-check that renamed fields map back to their pinned flags.
+        assert!(config.sequencer.enabled);
+        assert_eq!(
+            config.sequencer.http_url.as_deref(),
+            Some("http://localhost:8545")
+        );
+        assert_eq!(config.ol.client_url.as_deref(), Some("ws://localhost:8432"));
+        assert!(config.ol.dummy_client);
+        assert_eq!(config.bridge.denomination, 100_000_000);
+        assert!(config.da.magic_bytes.is_some());
+        assert_eq!(config.btcio.fee_policy, BtcioFeePolicyArg::Fixed);
+        assert_eq!(config.btcio.fee_rate, Some(1.5));
+    }
+
     #[test]
     fn max_withdrawal_descriptor_len_defaults_to_policy_limit() {
         let config = parse_additional_config(&[]);
