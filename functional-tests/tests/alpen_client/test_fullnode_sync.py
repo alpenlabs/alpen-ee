@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 CANONICAL_BLOCK_RE = re.compile(
     r"Block added to canonical chain number=(?P<number>\d+) hash=(?P<hash>0x[0-9a-fA-F]+)"
 )
+# Service logs include tracing ANSI colour codes even when written to file.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def wait_for_canonical_block_log(
@@ -46,7 +48,7 @@ def wait_for_canonical_block_log(
 
         with log_path.open("r", encoding="utf-8", errors="ignore") as log_file:
             for line in log_file:
-                match = CANONICAL_BLOCK_RE.search(line)
+                match = CANONICAL_BLOCK_RE.search(_ANSI_RE.sub("", line))
                 if not match:
                     continue
 
