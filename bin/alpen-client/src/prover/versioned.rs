@@ -40,18 +40,23 @@ impl ProveStrategy<AcctSpec> for VersionedNativeAcctStrategy {
         input: &<<AcctSpec as strata_paas::ProofSpec>::Program as ZkVmProgram>::Input,
         _ctx: ProveContext,
     ) -> ProverResult<ProofReceiptWithMetadata> {
-        let host = self
-            .hosts
-            .iter()
-            .find(|(vk, _)| *vk == input.update_vk)
-            .map(|(_, host)| host)
-            .ok_or_else(|| {
-                ProverError::PermanentFailure(format!(
+        let host = match self.hosts.iter().find(|(vk, _)| *vk == input.update_vk) {
+            Some((_, host)) => host,
+            // AlwaysAccept verifies any witness, so any resident host will do.
+            None if input.update_vk == PredicateKey::always_accept() => {
+                let (_, host) = self.hosts.first().ok_or_else(|| {
+                    ProverError::PermanentFailure("no prover hosts resident".to_string())
+                })?;
+                host
+            }
+            None => {
+                return Err(ProverError::PermanentFailure(format!(
                     "no resident prover host for batch VK {:?}; the rollout for this \
                      version is not provisioned",
                     input.update_vk.id()
-                ))
-            })?;
+                )));
+            }
+        };
 
         <<AcctSpec as strata_paas::ProofSpec>::Program as ZkVmProgram>::prove(input, host)
             .map_err(|e| ProverError::PermanentFailure(e.to_string()))
