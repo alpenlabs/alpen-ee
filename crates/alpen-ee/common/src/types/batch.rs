@@ -4,6 +4,7 @@ use bitcoin::{Txid, Wtxid};
 use strata_acct_types::Hash;
 use strata_codec::Codec;
 use strata_identifiers::{L1BlockCommitment, L1BlockId, L1Height, WtxidsRoot};
+use strata_predicate::PredicateKey;
 
 use crate::{BlockNumHash, ProofId};
 
@@ -174,6 +175,19 @@ pub struct Batch {
     last_blocknum: u64,
     /// Rest of the blocks in this batch, cached here for easier processing.
     inner_blocks: Vec<Hash>,
+    /// The account update VK this batch must be proven under.
+    ///
+    /// Stamped at seal time by the batch builder — the component that
+    /// observes VK-update messages in the inbox ordering — so the prover
+    /// never has to re-derive which key a batch needs.
+    update_vk: PredicateKey,
+    /// The update VK in effect for the batch after this one.
+    ///
+    /// Differs from `update_vk` exactly when this batch consumed a VK-update
+    /// message: the consuming batch is the last one proven under the old
+    /// key. Persisting it lets a restarted builder resume the current key
+    /// from the latest sealed batch without rescanning block records.
+    next_update_vk: PredicateKey,
 }
 
 impl Batch {
@@ -184,6 +198,8 @@ impl Batch {
         last_block: Hash,
         last_blocknum: u64,
         inner_blocks: Vec<Hash>,
+        update_vk: PredicateKey,
+        next_update_vk: PredicateKey,
     ) -> Result<Self, &'static str> {
         if idx == 0 {
             return Err("non-genesis batch cannot have idx == 0");
@@ -203,6 +219,8 @@ impl Batch {
             last_block,
             last_blocknum,
             inner_blocks,
+            update_vk,
+            next_update_vk,
         })
     }
 
@@ -214,6 +232,7 @@ impl Batch {
     pub fn new_genesis_batch(
         genesis_hash: Hash,
         genesis_blocknum: u64,
+        genesis_update_vk: PredicateKey,
     ) -> Result<Self, &'static str> {
         if genesis_hash.is_zero() {
             return Err("genesis block cannot be ZERO");
@@ -225,6 +244,8 @@ impl Batch {
             last_block: genesis_hash,
             last_blocknum: genesis_blocknum,
             inner_blocks: Vec::new(),
+            update_vk: genesis_update_vk.clone(),
+            next_update_vk: genesis_update_vk,
         })
     }
 
@@ -272,6 +293,16 @@ impl Batch {
     /// Get the inner blocks (blocks between prev_block and last_block, exclusive of last_block).
     pub fn inner_blocks(&self) -> &[Hash] {
         &self.inner_blocks
+    }
+
+    /// The account update VK this batch must be proven under.
+    pub fn update_vk(&self) -> &PredicateKey {
+        &self.update_vk
+    }
+
+    /// The update VK in effect for the batch after this one.
+    pub fn next_update_vk(&self) -> &PredicateKey {
+        &self.next_update_vk
     }
 
     /// Iterate over all blocks in range of this batch.

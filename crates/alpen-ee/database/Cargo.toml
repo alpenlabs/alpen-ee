@@ -27,6 +27,7 @@ borsh.workspace = true
 eyre.workspace = true
 sled.workspace = true
 ssz.workspace = true
+strata-predicate.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

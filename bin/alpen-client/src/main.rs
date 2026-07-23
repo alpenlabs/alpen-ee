@@ -36,11 +36,10 @@ use std::{
 
 use alpen_chainspec::{AlpenChainSpec, AlpenChainSpecParser};
 use alpen_ee_common::{
-    chain_status_checked, BatchStorage, BlockNumHash, ChunkStorage, ExecBlockStorage, OLClient,
-    Storage,
+    chain_status_checked, BatchStorage, BlockNumHash, ChunkStorage, ExecBlockStorage,
+    ForkScheduleManager, OLClient, Storage,
 };
 use alpen_ee_config::{AlpenEeConfig, AlpenEeParams};
-use alpen_ee_params::AlpenParams;
 use alpen_ee_database::init_db_storage;
 use alpen_ee_engine::{create_engine_control_task, sync_chainstate_to_engine, AlpenRethExecEngine};
 #[cfg(feature = "sequencer")]
@@ -49,6 +48,7 @@ use alpen_ee_exec_chain::init_exec_chain_state_from_storage;
 use alpen_ee_genesis::ensure_finalized_exec_chain_genesis;
 use alpen_ee_genesis::{ensure_batch_genesis, ensure_genesis_ee_account_state};
 use alpen_ee_ol_tracker::init_ol_tracker_state;
+use alpen_ee_params::AlpenParams;
 use alpen_ee_rpc_server::{AlpenEeRpcServer, EeRpcServer};
 #[cfg(feature = "sequencer")]
 use alpen_ee_sequencer::{
@@ -125,6 +125,7 @@ mod sequencer_imports {
         prover::{
             AcctRangeWitnessFn, AcctReceiptHook, AcctSpec, ChunkReceiptHook, ChunkSpec,
             EeBatchProofDbManager, EeChunkReceiptStore, EeProverTaskDbManager, PaasBatchProver,
+            VersionedNativeAcctStrategy,
         },
     };
 
@@ -183,9 +184,7 @@ fn main() {
             process::exit(1);
         }
     };
-    command.chain = Arc::new(AlpenChainSpec::new(
-        (**alpen_params.chain_spec()).clone(),
-    ));
+    command.chain = Arc::new(AlpenChainSpec::new((**alpen_params.chain_spec()).clone()));
     // enable engine api v4
     command.engine.accept_execution_requests_hash = true;
     // allow chain fork blocks to be created
@@ -195,7 +194,9 @@ fn main() {
 
     if let Err(err) = run(
         command,
-        move |builder: WithLaunchContext<NodeBuilder<Arc<reth_db::DatabaseEnv>, AlpenChainSpec>>,
+        move |builder: WithLaunchContext<
+            NodeBuilder<Arc<reth_db::DatabaseEnv>, AlpenChainSpec>,
+        >,
               ext: AdditionalConfig| async move {
             let service_executor = ServiceExecutor::from_reth(builder.task_executor().clone());
             let health_check_state = HealthCheckState::new();
@@ -224,6 +225,7 @@ fn main() {
                 genesis_info.blockhash(),
                 genesis_info.stateroot(),
                 genesis_info.blocknum(),
+                alpen_params.genesis_update_vk().clone(),
             );
             info!(target: "alpen-client", component = "alpen", ?params, sequencer = ext.sequencer, "Starting EE Node");
 
@@ -292,6 +294,27 @@ fn main() {
             let db_handle = Handle::current();
             let storage: Arc<_> = dbs.node_storage(db_handle.clone()).into();
 
+            // Rehydrate runtime-derived fork activations into the live
+            // chainspec before the node launches — reth components capture
+            // the (shared) spec at launch and consult it for every block
+            // they build or (re-)execute.
+            let pending_evm_forks: Vec<_> = alpen_params
+                .pending_upgrade()
+                .map(|upgrade| upgrade.evm_forks().iter().map(|f| f.fork()).collect())
+                .unwrap_or_default();
+            let fork_manager = ForkScheduleManager::new(
+                builder.config().chain.clone(),
+                pending_evm_forks,
+                storage.clone(),
+            );
+            let rehydrated = fork_manager
+                .rehydrate()
+                .await
+                .map_err(|e| eyre::eyre!("rehydrating fork schedule: {e}"))?;
+            if rehydrated > 0 {
+                info!(target: "alpen-client", component = "alpen", count = rehydrated, "rehydrated fork activations from storage");
+            }
+
             let ol_client = if ext.dummy_ol_client {
                 use strata_identifiers::Buf32;
                 use strata_primitives::EpochCommitment;
@@ -354,6 +377,24 @@ fn main() {
                 .instrument(info_span!("init_exec_chain", component = "alpen"))
                 .await
                 .context("exec chain state initialization should not fail")?;
+
+            // Heal the crash window between saving a boundary block and
+            // persisting its derived fork activation: only the tip can be
+            // missing a record, so a single check suffices.
+            #[cfg(feature = "sequencer")]
+            if ext.sequencer {
+                let tip = exec_chain_state.tip_blocknumhash();
+                if let Some(tip_record) = storage
+                    .get_exec_block(tip.hash())
+                    .await
+                    .context("reading tip block for fork boundary check")?
+                {
+                    fork_manager
+                        .ensure_boundary_applied(&tip_record)
+                        .await
+                        .map_err(|e| eyre::eyre!("applying fork boundary at tip: {e}"))?;
+                }
+            }
 
             let initial_preconf_head = {
                 #[cfg(feature = "sequencer")]
@@ -789,7 +830,20 @@ fn main() {
                         .predicate_key()
                         .expect("native chunk predicate key must be available");
                     let acct_program = EeAcctProgram::new(chunk_predicate_key);
-                    let acct = acct_builder.native(acct_program.native_host());
+                    // Both native "versions" stay resident so the prover can
+                    // cross a VK-update boundary live: each batch routes to
+                    // the host matching the VK it was stamped with at seal.
+                    let acct_strategy = VersionedNativeAcctStrategy::new(vec![
+                        (
+                            EeAcctProgram::test_predicate_key(),
+                            acct_program.native_host(),
+                        ),
+                        (
+                            EeAcctProgram::test_predicate_key_v2(),
+                            acct_program.native_host_v2(),
+                        ),
+                    ]);
+                    let acct = acct_builder.with_strategy(Arc::new(acct_strategy));
                     (chunk, acct)
                 } else {
                     #[cfg(feature = "sp1")]
@@ -875,6 +929,7 @@ fn main() {
                         ol_chain_tracker,
                         payload_engine,
                         storage.clone(),
+                        fork_manager.clone(),
                     )
                     .instrument(info_span!("block_assembly", component = "alpen")),
                 );

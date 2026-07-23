@@ -30,13 +30,20 @@ pub(crate) fn make_batch(idx: u64, prev_n: u8, last_n: u8) -> Batch {
         test_hash(last_n),
         last_n as u64,
         vec![],
+        strata_predicate::PredicateKey::always_accept(),
+        strata_predicate::PredicateKey::always_accept(),
     )
     .expect("valid batch")
 }
 
 /// Helper to create a genesis batch for testing.
 pub(crate) fn make_genesis_batch(n: u8) -> Batch {
-    Batch::new_genesis_batch(test_hash(n), n as u64).expect("valid genesis batch")
+    Batch::new_genesis_batch(
+        test_hash(n),
+        n as u64,
+        strata_predicate::PredicateKey::always_accept(),
+    )
+    .expect("valid genesis batch")
 }
 
 /// Helper to create a test Txid.

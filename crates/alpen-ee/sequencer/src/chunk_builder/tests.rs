@@ -17,6 +17,10 @@ use crate::sealing_policy::block_count_policy::{
 // Helpers
 // ---------------------------------------------------------------------------
 
+fn test_update_vk() -> strata_predicate::PredicateKey {
+    strata_predicate::PredicateKey::always_accept()
+}
+
 fn test_hash(n: u8) -> Hash {
     let mut buf = [0u8; 32];
     buf[0] = 1; // avoid zero hash
@@ -34,7 +38,8 @@ fn test_batch_id(prev: u8, last: u8) -> BatchId {
 
 /// Seed storage with a genesis batch (batch 0, single genesis block).
 async fn seed_genesis_batch(storage: &InMemoryStorage, genesis: BlockNumHash) {
-    let batch = Batch::new_genesis_batch(genesis.hash(), genesis.blocknum()).unwrap();
+    let batch =
+        Batch::new_genesis_batch(genesis.hash(), genesis.blocknum(), test_update_vk()).unwrap();
     storage.save_genesis_batch(batch).await.unwrap();
 }
 
@@ -46,6 +51,8 @@ async fn save_test_batch(storage: &InMemoryStorage, idx: u64, prev: u8, last: u8
         test_hash(last),
         last as u64,
         inner_blocks,
+        test_update_vk(),
+        test_update_vk(),
     )
     .unwrap();
     storage.save_next_batch(batch.clone()).await.unwrap();
@@ -536,6 +543,8 @@ async fn cleanup_noop_when_consistent() {
         test_hash(3),
         3,
         vec![test_hash(1), test_hash(2)],
+        test_update_vk(),
+        test_update_vk(),
     )
     .unwrap();
     storage.save_next_batch(batch1).await.unwrap();
@@ -573,6 +582,8 @@ async fn cleanup_reverts_when_batch_missing() {
         test_hash(3),
         3,
         vec![test_hash(1), test_hash(2)],
+        test_update_vk(),
+        test_update_vk(),
     )
     .unwrap();
     storage.save_next_batch(batch1).await.unwrap();
@@ -618,6 +629,8 @@ async fn cleanup_reverts_mid_batch_chunks() {
             test_hash(4),
             test_hash(5),
         ],
+        test_update_vk(),
+        test_update_vk(),
     )
     .unwrap();
     storage.save_next_batch(batch1).await.unwrap();
@@ -663,6 +676,8 @@ async fn backfill_enqueues_unchunked_batches() {
         test_hash(3),
         3,
         vec![test_hash(1), test_hash(2)],
+        test_update_vk(),
+        test_update_vk(),
     )
     .unwrap();
     storage.save_next_batch(batch1.clone()).await.unwrap();
@@ -818,6 +833,8 @@ async fn repair_linkage_noop_when_already_linked() {
         test_hash(3),
         3,
         vec![test_hash(1), test_hash(2)],
+        test_update_vk(),
+        test_update_vk(),
     )
     .unwrap();
     let batch1_id = batch1.id();
@@ -868,6 +885,8 @@ async fn repair_linkage_reconstructs_missing_link() {
             test_hash(4),
             test_hash(5),
         ],
+        test_update_vk(),
+        test_update_vk(),
     )
     .unwrap();
     let batch1_id = batch1.id();
@@ -926,6 +945,8 @@ async fn full_startup_sequence() {
         test_hash(3),
         3,
         vec![test_hash(1), test_hash(2)],
+        test_update_vk(),
+        test_update_vk(),
     )
     .unwrap();
     let batch1_id = batch1.id();
@@ -935,6 +956,8 @@ async fn full_startup_sequence() {
         test_hash(6),
         6,
         vec![test_hash(4), test_hash(5)],
+        test_update_vk(),
+        test_update_vk(),
     )
     .unwrap();
     storage.save_next_batch(batch1).await.unwrap();

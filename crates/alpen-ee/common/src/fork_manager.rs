@@ -4,17 +4,15 @@
 //! coordinate is derived when the VK-update message is observed in the EE
 //! inbox ordering. This module owns that derivation and its durability:
 //!
-//! - the sequencer applies the boundary right after the boundary block is
-//!   saved and before the next block is built, so the next block is the
-//!   first one under the new rules;
-//! - derived activations are persisted, and a restarted node rehydrates the
-//!   live chainspec from the table before executing or building anything;
-//! - a crash between saving the boundary block and persisting the derived
-//!   activation is healed at boot by re-checking the tip block, which is the
-//!   only block a record can be missing for (later blocks are never built
-//!   before the record is durable).
+//! - the sequencer applies the boundary right after the boundary block is saved and before the next
+//!   block is built, so the next block is the first one under the new rules;
+//! - derived activations are persisted, and a restarted node rehydrates the live chainspec from the
+//!   table before executing or building anything;
+//! - a crash between saving the boundary block and persisting the derived activation is healed at
+//!   boot by re-checking the tip block, which is the only block a record can be missing for (later
+//!   blocks are never built before the record is durable).
 
-use std::{str::FromStr, sync::Arc};
+use std::{fmt, str::FromStr, sync::Arc};
 
 use alpen_chainspec::AlpenChainSpec;
 use eyre::{bail, Context};
@@ -33,8 +31,8 @@ pub struct ForkScheduleManager {
     storage: Arc<dyn ForkScheduleStorage>,
 }
 
-impl std::fmt::Debug for ForkScheduleManager {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for ForkScheduleManager {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ForkScheduleManager")
             .field("pending_evm_forks", &self.pending_evm_forks)
             .finish()
@@ -133,9 +131,7 @@ impl ForkScheduleManager {
             self.apply_record(&record)?;
             info!(
                 fork = fork.name(),
-                activation_ts,
-                boundary_blocknum,
-                "activated fork at VK-update boundary"
+                activation_ts, boundary_blocknum, "activated fork at VK-update boundary"
             );
         }
 

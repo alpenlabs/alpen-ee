@@ -2,7 +2,9 @@
 
 use std::time::Duration;
 
-use alpen_ee_common::{Batch, BatchId, BatchStorage, BlockNumHash, ExecBlockStorage};
+use alpen_ee_common::{
+    find_vk_update, Batch, BatchId, BatchStorage, BlockNumHash, ExecBlockStorage,
+};
 use eyre::{eyre, Result};
 use strata_acct_types::Hash;
 use tokio::{sync::mpsc, time};
@@ -85,12 +87,22 @@ async fn seal_batch<P: AccumulationPolicy>(
     let inner_blocks: Vec<Hash> = inner_blocks.into_iter().map(|b| b.hash()).collect();
 
     let batch_idx = state.next_batch_idx();
+    // Stamp the VK this batch must be proven under. When the batch consumed
+    // a VK-update message, the *next* batch starts under the rotated key —
+    // this batch is the last one under the old key.
+    let update_vk = state.current_update_vk().clone();
+    let next_update_vk = state
+        .pending_update_vk()
+        .unwrap_or(state.current_update_vk())
+        .clone();
     let batch = Batch::new(
         batch_idx,
         prev_block.hash(),
         last_block.hash(),
         last_block.blocknum(),
         inner_blocks,
+        update_vk,
+        next_update_vk,
     )
     .map_err(|err| eyre!(err))?;
     let batch_id = batch.id();
@@ -272,12 +284,14 @@ where
         // Data is ready, remove from pending queue
         state.pop_pending_block();
 
-        // Check if adding this block would exceed threshold
+        // Check if adding this block would exceed threshold, or the previous
+        // block was a VK-update boundary the batch must seal at.
         let mut batch_sealed = None;
         if !state.accumulator().is_empty()
-            && state
-                .accumulator()
-                .would_exceed(&ctx.sealing_policy, &block_data)
+            && (state.is_seal_pending()
+                || state
+                    .accumulator()
+                    .would_exceed(&ctx.sealing_policy, &block_data))
         {
             if let Some(batch_id) = seal_batch(state, ctx.batch_storage.as_ref()).await? {
                 // Notify watchers of new batch
@@ -288,6 +302,19 @@ where
 
         // Add block to accumulator
         state.accumulator_mut().add_block(block, &block_data);
+
+        // A block that consumed a VK-update message terminates its batch:
+        // mark the boundary so the next processed block seals first, and the
+        // sealed batch's successor is stamped with the rotated key.
+        let block_record = ctx
+            .block_storage
+            .get_exec_block(block.hash())
+            .await?
+            .ok_or_else(|| eyre!("Block not found: {}", block.hash()))?;
+        if let Some(new_vk) = find_vk_update(block_record.messages()) {
+            debug!(hash = %block.hash(), "block consumed VK-update message; sealing batch at it");
+            state.mark_vk_update_boundary(new_vk);
+        }
 
         // Notify downstream (chunk builder) of the processed block.
         // `batch_sealed` is set when this block triggered a batch seal

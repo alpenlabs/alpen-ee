@@ -19,6 +19,12 @@ fn test_signing_key() -> SigningKey {
     SigningKey::from_bytes(&[0x02u8; 32]).expect("valid test signing key")
 }
 
+/// Second deterministic test signing key, standing in for the "new ELF" of a
+/// live VK rotation in native-prover tests.
+fn test_signing_key_v2() -> SigningKey {
+    SigningKey::from_bytes(&[0x04u8; 32]).expect("valid test signing key")
+}
+
 /// Host-side input for the EE account update proof.
 ///
 /// Note: the chunk predicate key (VK of the chunk SP1 program) is NOT
@@ -42,6 +48,14 @@ pub struct EeAcctProofInput {
     pub da_witness: DaWitness,
     /// Bridge withdrawal denomination and cap, parameterizing the EVM.
     pub bridge_params: BridgeParams,
+    /// The VK the batch this proof covers was stamped with at seal time.
+    ///
+    /// Host-side routing metadata only: a version-aware prove strategy uses
+    /// it to pick the host matching the batch's VK across a live rotation.
+    /// It is deliberately NOT written into the guest input (see
+    /// `prepare_input`) — the verifier's key choice is authoritative on OL,
+    /// not attested by the proof itself.
+    pub update_vk: PredicateKey,
 }
 
 #[derive(Debug)]
@@ -103,16 +117,30 @@ impl ZkVmProgram for EeAcctProgram {
 
 impl EeAcctProgram {
     pub fn native_host(&self) -> NativeHost {
+        self.native_host_with_key(test_signing_key())
+    }
+
+    /// Native host signing under the v2 test key — the "new ELF" of a live
+    /// VK rotation in native-prover tests.
+    pub fn native_host_v2(&self) -> NativeHost {
+        self.native_host_with_key(test_signing_key_v2())
+    }
+
+    fn native_host_with_key(&self, signing_key: SigningKey) -> NativeHost {
         let key = self.chunk_predicate_key.clone();
-        NativeHost::new(test_signing_key(), move |zkvm| {
-            process_ee_acct_update(zkvm, &key)
-        })
+        NativeHost::new(signing_key, move |zkvm| process_ee_acct_update(zkvm, &key))
     }
 
     /// Predicate key matching the signing key the native host uses, for wiring into
     /// functional-test params so the resulting witness verifies under `Bip340Schnorr`.
     pub fn test_predicate_key() -> PredicateKey {
         let pk = test_signing_key().verifying_key().to_bytes().to_vec();
+        PredicateKey::new(PredicateTypeId::Bip340Schnorr, pk)
+    }
+
+    /// Predicate key matching the v2 native host's signing key.
+    pub fn test_predicate_key_v2() -> PredicateKey {
+        let pk = test_signing_key_v2().verifying_key().to_bytes().to_vec();
         PredicateKey::new(PredicateTypeId::Bip340Schnorr, pk)
     }
 
@@ -179,6 +207,7 @@ mod tests {
         let genesis = Genesis::Mainnet;
 
         let proof_input = EeAcctProofInput {
+            update_vk: EeAcctProgram::test_predicate_key(),
             genesis,
             ee_private_input,
             snark_acct_private_input,

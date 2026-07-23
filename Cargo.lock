@@ -1121,6 +1121,7 @@ dependencies = [
  "tokio",
  "tracing",
  "zkaleido",
+ "zkaleido-native-adapter",
  "zkaleido-sp1-host",
 ]
 
@@ -1284,6 +1285,7 @@ dependencies = [
  "strata-ee-chain-types",
  "strata-identifiers",
  "strata-paas",
+ "strata-predicate",
  "strata-storage",
  "strata-storage-common",
  "thiserror 2.0.18",
@@ -1441,6 +1443,7 @@ dependencies = [
  "strata-ee-acct-types",
  "strata-ee-chain-types",
  "strata-identifiers",
+ "strata-predicate",
  "strata-service",
  "strata-snark-acct-types",
  "thiserror 2.0.18",

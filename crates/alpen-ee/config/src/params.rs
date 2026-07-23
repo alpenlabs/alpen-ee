@@ -1,6 +1,7 @@
 use alloy_primitives::B256;
 use serde::{Deserialize, Serialize};
 use strata_acct_types::AccountId;
+use strata_predicate::PredicateKey;
 
 /// Default Alpen EE account id registered in generated OL params.
 pub const DEFAULT_ALPEN_EE_ACCOUNT_ID: AccountId = AccountId::new([1u8; 32]);
@@ -21,6 +22,10 @@ pub struct AlpenEeParams {
     /// Block number of execution chain genesis block
     /// This can potentially be non-zero, but is very unlikely.
     genesis_blocknum: u64,
+
+    /// The account's update predicate key (VK) at genesis, before any
+    /// rotation.
+    genesis_update_vk: PredicateKey,
 }
 
 impl AlpenEeParams {
@@ -30,12 +35,14 @@ impl AlpenEeParams {
         genesis_blockhash: B256,
         genesis_stateroot: B256,
         genesis_blocknum: u64,
+        genesis_update_vk: PredicateKey,
     ) -> Self {
         Self {
             account_id,
             genesis_blockhash,
             genesis_stateroot,
             genesis_blocknum,
+            genesis_update_vk,
         }
     }
 
@@ -68,10 +75,17 @@ impl AlpenEeParams {
     pub fn genesis_blocknum(&self) -> u64 {
         self.genesis_blocknum
     }
+
+    /// Returns the account's genesis update predicate key.
+    pub fn genesis_update_vk(&self) -> &PredicateKey {
+        &self.genesis_update_vk
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use strata_predicate::PredicateKey;
+
     use super::{AlpenEeParams, DEFAULT_ALPEN_EE_ACCOUNT_ID};
 
     #[test]
@@ -81,6 +95,7 @@ mod tests {
             [2u8; 32].into(),
             [3u8; 32].into(),
             42,
+            PredicateKey::always_accept(),
         );
 
         let json = params
@@ -97,7 +112,8 @@ mod tests {
             "account_id": "01",
             "genesis_blockhash": "0x0202020202020202020202020202020202020202020202020202020202020202",
             "genesis_stateroot": "0x0303030303030303030303030303030303030303030303030303030303030303",
-            "genesis_blocknum": 0
+            "genesis_blocknum": 0,
+            "genesis_update_vk": "AlwaysAccept"
         }"#;
 
         assert!(AlpenEeParams::from_json_str(json).is_err());

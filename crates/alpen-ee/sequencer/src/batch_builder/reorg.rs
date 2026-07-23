@@ -107,7 +107,7 @@ pub(crate) async fn check_and_handle_reorg<P: AccumulationPolicy>(
     };
 
     batch_storage.revert_batches(batch.idx()).await?;
-    *state = BatchBuilderState::from_last_batch(batch.idx(), batch.last_blocknumhash());
+    *state = BatchBuilderState::from_last_batch(&batch);
     warn!(
         reverted_to_idx = batch.idx(),
         "Deep reorg detected, reverted batches"
@@ -118,6 +118,7 @@ pub(crate) async fn check_and_handle_reorg<P: AccumulationPolicy>(
 #[cfg(test)]
 mod tests {
     use alpen_ee_common::{Batch, BatchStatus, MockBatchStorage};
+    use strata_predicate::PredicateKey;
 
     use super::*;
     use crate::{
@@ -133,12 +134,30 @@ mod tests {
             last_block.hash(),
             last_block.blocknum(),
             vec![],
+            PredicateKey::always_accept(),
+            PredicateKey::always_accept(),
         )
         .unwrap()
     }
 
     fn make_genesis_batch(block: BlockNumHash) -> Batch {
-        Batch::new_genesis_batch(block.hash(), block.blocknum()).unwrap()
+        Batch::new_genesis_batch(
+            block.hash(),
+            block.blocknum(),
+            PredicateKey::always_accept(),
+        )
+        .unwrap()
+    }
+
+    /// Builds state as if `idx` batches were sealed, the last one ending at
+    /// `last`.
+    fn state_from_last(idx: u64, last: BlockNumHash) -> BatchBuilderState<BlockCountPolicy> {
+        let batch = if idx == 0 {
+            make_genesis_batch(last)
+        } else {
+            make_batch(idx, test_blocknumhash(200 + idx as u8), last)
+        };
+        BatchBuilderState::from_last_batch(&batch)
     }
 
     mod no_reorg_tests {
@@ -153,8 +172,7 @@ mod tests {
             // Expected:     No reorg
 
             let genesis = test_blocknumhash(0);
-            let mut state: BatchBuilderState<BlockCountPolicy> =
-                BatchBuilderState::from_last_batch(0, genesis);
+            let mut state: BatchBuilderState<BlockCountPolicy> = state_from_last(0, genesis);
 
             let mut canonical = MockCanonicalChainReader::new();
             canonical
@@ -183,8 +201,7 @@ mod tests {
             let block1 = test_blocknumhash(1);
             let block2 = test_blocknumhash(2);
 
-            let mut state: BatchBuilderState<BlockCountPolicy> =
-                BatchBuilderState::from_last_batch(0, genesis);
+            let mut state: BatchBuilderState<BlockCountPolicy> = state_from_last(0, genesis);
             state.accumulator_mut().add_block(block1, &BlockCountData);
             state.accumulator_mut().add_block(block2, &BlockCountData);
 
@@ -222,8 +239,7 @@ mod tests {
             let block3 = test_blocknumhash(3);
             let block4 = test_blocknumhash(4);
 
-            let mut state: BatchBuilderState<BlockCountPolicy> =
-                BatchBuilderState::from_last_batch(0, genesis);
+            let mut state: BatchBuilderState<BlockCountPolicy> = state_from_last(0, genesis);
             state.accumulator_mut().add_block(block1, &BlockCountData);
             state.accumulator_mut().add_block(block2, &BlockCountData);
             state.push_pending_blocks(vec![block3, block4]);
@@ -270,8 +286,7 @@ mod tests {
             let genesis_batch = make_genesis_batch(genesis);
             let genesis_batch_id = genesis_batch.id();
 
-            let mut state: BatchBuilderState<BlockCountPolicy> =
-                BatchBuilderState::from_last_batch(1, batch1_end);
+            let mut state: BatchBuilderState<BlockCountPolicy> = state_from_last(1, batch1_end);
 
             let mut canonical = MockCanonicalChainReader::new();
             // batch1_end is not canonical (checked twice: once for last_known_block, once for
@@ -338,8 +353,7 @@ mod tests {
             let batch1 = make_batch(1, batch0_end, batch1_end);
             let batch1_id = batch1.id();
 
-            let mut state: BatchBuilderState<BlockCountPolicy> =
-                BatchBuilderState::from_last_batch(2, batch2_end);
+            let mut state: BatchBuilderState<BlockCountPolicy> = state_from_last(2, batch2_end);
 
             let mut canonical = MockCanonicalChainReader::new();
             canonical
@@ -399,8 +413,7 @@ mod tests {
             let genesis = test_blocknumhash(0);
             let batch1_end = test_blocknumhash(20);
 
-            let mut state: BatchBuilderState<BlockCountPolicy> =
-                BatchBuilderState::from_last_batch(1, batch1_end);
+            let mut state: BatchBuilderState<BlockCountPolicy> = state_from_last(1, batch1_end);
 
             let mut canonical = MockCanonicalChainReader::new();
             canonical.expect_is_canonical().returning(|_| Ok(false));
@@ -443,8 +456,7 @@ mod tests {
             let genesis = test_blocknumhash(0);
             let batch1_end = test_blocknumhash(20);
 
-            let mut state: BatchBuilderState<BlockCountPolicy> =
-                BatchBuilderState::from_last_batch(1, batch1_end);
+            let mut state: BatchBuilderState<BlockCountPolicy> = state_from_last(1, batch1_end);
 
             let mut canonical = MockCanonicalChainReader::new();
             canonical.expect_is_canonical().returning(|_| Ok(false));

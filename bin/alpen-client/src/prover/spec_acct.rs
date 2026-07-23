@@ -407,6 +407,9 @@ impl ProofSpec for AcctSpec {
             snark_acct_private_input,
             da_witness,
             bridge_params: self.bridge_params,
+            // The VK the batch was stamped with at seal time; a
+            // version-aware strategy routes the proof to the matching host.
+            update_vk: batch.update_vk().clone(),
         })
     }
 }

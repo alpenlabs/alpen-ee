@@ -11,6 +11,7 @@ pub async fn ensure_batch_genesis<TStorage: BatchStorage>(
     let expected_genesis_batch = Batch::new_genesis_batch(
         config.params().genesis_blockhash().0.into(),
         config.params().genesis_blocknum(),
+        config.params().genesis_update_vk().clone(),
     )
     .map_err(|err| eyre!("ensure_batch_genesis: {err}"))?;
 

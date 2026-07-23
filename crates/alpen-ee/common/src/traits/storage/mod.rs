@@ -27,9 +27,9 @@ pub use chunk::ChunkStorage;
 pub use chunk::{tests as chunk_storage_test_fns, MockChunkStorage};
 pub use errors::StorageError;
 pub use exec_block::ExecBlockStorage;
-pub use fork::ForkScheduleStorage;
 #[cfg(feature = "test-utils")]
 pub use exec_block::{exec_block_storage_test_fns, MockExecBlockStorage};
+pub use fork::ForkScheduleStorage;
 #[cfg(feature = "test-utils")]
 pub use in_memory::InMemoryStorage;
 pub use utils::{

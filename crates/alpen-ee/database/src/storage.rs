@@ -3,8 +3,8 @@ use std::{num::NonZeroUsize, sync::Arc};
 use alpen_ee_common::{
     AccessedStateRecord, AccessedStateStore, Batch, BatchId, BatchStatus, BatchStorage,
     BlockWitnessStore, Chunk, ChunkId, ChunkStatus, ChunkStorage, EeAccountStateAtEpoch,
-    ExecBlockPayload, ExecBlockRecord, ExecBlockStorage, ForkActivationRecord,
-    ForkScheduleStorage, OLBlockOrEpoch, Storage, StorageError,
+    ExecBlockPayload, ExecBlockRecord, ExecBlockStorage, ForkActivationRecord, ForkScheduleStorage,
+    OLBlockOrEpoch, Storage, StorageError,
 };
 use async_trait::async_trait;
 use strata_acct_types::Hash;

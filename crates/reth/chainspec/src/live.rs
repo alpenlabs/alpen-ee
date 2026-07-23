@@ -14,6 +14,7 @@
 //! one consistent `&'static` snapshot. A swap happens once per fork
 //! activation over the life of the chain, so the leak is bounded and tiny.
 
+use core::fmt::Display;
 use std::sync::{
     atomic::{AtomicPtr, Ordering},
     Arc,
@@ -82,6 +83,11 @@ impl AlpenChainSpec {
     /// Refuses to move an existing concrete activation — the caller derives
     /// activations deterministically from chain history, so a conflicting
     /// value indicates a bug, not a legitimate reschedule.
+    #[expect(
+        clippy::result_large_err,
+        reason = "fork activations are rare, cold-path calls; the error carries the \
+                  conflicting conditions for diagnostics"
+    )]
     pub fn set_fork_activation<HF: Hardfork + Copy>(
         &self,
         fork: HF,
@@ -159,7 +165,7 @@ impl EthChainSpec for AlpenChainSpec {
         self.current().prune_delete_limit()
     }
 
-    fn display_hardforks(&self) -> Box<dyn core::fmt::Display> {
+    fn display_hardforks(&self) -> Box<dyn Display> {
         Box::new(self.current().display_hardforks())
     }
 

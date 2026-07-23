@@ -9,7 +9,6 @@ mod types;
 mod utils;
 
 pub use fork_manager::ForkScheduleManager;
-
 #[cfg(feature = "test-utils")]
 pub use traits::{
     da::MockBatchDaProvider,
@@ -45,11 +44,11 @@ pub use types::{
     consensus_heads::ConsensusHeads,
     ee_account_state::EeAccountStateAtEpoch,
     exec_record::{ExecBlockPayload, ExecBlockRecord},
-    fork::{find_vk_update, decode_predicate_key, ForkActivation, ForkActivationRecord},
     fees::{
         FeeBreakdown, FeeModelConfig, FeeModelError, FeeQuoteInputs, GasEquivalentQuote,
         L1FeeRateSource, DA_OVERHEAD_MULTIPLIER_SCALE_BPS,
     },
+    fork::{decode_predicate_key, find_vk_update, ForkActivation, ForkActivationRecord},
     ol_account_epoch_summary::{SnarkAccountEpochSummary, SnarkAccountUpdateInfo},
     ol_chain_status::{OLChainStatus, OLFinalizedStatus},
     payload_builder::{DepositInfo, PayloadBuildAttributes},

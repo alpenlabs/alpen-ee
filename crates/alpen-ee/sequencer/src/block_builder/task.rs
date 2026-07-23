@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use alpen_ee_block_assembly::{build_next_exec_block, BlockAssemblyInputs, BlockAssemblyOutputs};
 use alpen_ee_common::{
-    Clock, EnginePayload, ExecBlockPayload, ExecBlockRecord, ExecBlockStorage,
-    PayloadBuilderEngine, SystemClock,
+    find_vk_update, Clock, EnginePayload, ExecBlockPayload, ExecBlockRecord, ExecBlockStorage,
+    ForkScheduleManager, PayloadBuilderEngine, SystemClock,
 };
 use alpen_ee_exec_chain::ExecChainHandle;
 use eyre::Context;
@@ -153,6 +153,7 @@ pub async fn block_builder_task<
     ol_chain_handle: OLChainTrackerHandle,
     payload_builder: Arc<TPayloadBuilder>,
     storage: Arc<TStorage>,
+    fork_manager: ForkScheduleManager,
 ) {
     let last_local_block = exec_chain_handle
         .get_best_block()
@@ -173,6 +174,7 @@ pub async fn block_builder_task<
             &ol_chain_handle,
             payload_builder.as_ref(),
             storage.as_ref(),
+            &fork_manager,
             &clock,
         )
         .await
@@ -192,6 +194,10 @@ pub async fn block_builder_task<
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "task wiring carries many handles"
+)]
 async fn block_builder_task_inner<TEngine: PayloadBuilderEngine>(
     next_block_target: &BlockTarget,
     config: &BlockBuilderConfig,
@@ -199,6 +205,7 @@ async fn block_builder_task_inner<TEngine: PayloadBuilderEngine>(
     ol_chain_handle: &OLChainTrackerHandle,
     payload_builder: &TEngine,
     storage: &impl ExecBlockStorage,
+    fork_manager: &ForkScheduleManager,
     clock: &impl Clock,
 ) -> Result<(Hash, BlockTarget), BlockBuilderError> {
     // if we are not ready, sleep
@@ -227,12 +234,26 @@ async fn block_builder_task_inner<TEngine: PayloadBuilderEngine>(
 
     // cache next block target before the block is consumed by the save below
     let next_block_target = compute_next_block_target(&block, config);
+    let vk_update_boundary = find_vk_update(block.messages()).is_some();
+    let boundary_record = vk_update_boundary.then(|| block.clone());
 
     // save block outputs to Alpen storage (the source of truth)
     storage
         .save_exec_block(block, payload)
         .await
         .context("block_builder: save exec block to storage")?;
+
+    // This block consumed a VK-update message, making it the boundary block:
+    // derive, persist, and apply the pending forks' activations now — after
+    // the boundary block is durable and strictly before the next block is
+    // built, so the next block is the first one under the new rules. The
+    // builder loop is sequential, which makes the ordering structural.
+    if let Some(boundary) = boundary_record {
+        fork_manager
+            .apply_boundary(&boundary)
+            .await
+            .context("block_builder: apply fork activations at VK-update boundary")?;
+    }
 
     // submit block to chain tracker
     exec_chain_handle

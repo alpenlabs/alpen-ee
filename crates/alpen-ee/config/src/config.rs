@@ -132,6 +132,7 @@ mod tests {
             [2u8; 32].into(),
             [3u8; 32].into(),
             0,
+            PredicateKey::always_accept(),
         );
 
         let config = AlpenEeConfig::new(

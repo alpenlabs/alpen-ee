@@ -46,6 +46,7 @@ fn prepare_input() -> EeAcctProofInput {
     let ee_private_input = EePrivateInput::new(Vec::new(), Vec::new(), Vec::new());
 
     EeAcctProofInput {
+        update_vk: EeAcctProgram::test_predicate_key(),
         genesis: Genesis::Mainnet,
         ee_private_input,
         snark_acct_private_input,

@@ -5,8 +5,10 @@ use alpen_ee_common::{
 };
 use bitcoin::{hashes::Hash as _, Txid, Wtxid};
 use borsh::{BorshDeserialize, BorshSerialize};
+use ssz::{Decode, Encode};
 use strata_acct_types::Hash;
 use strata_identifiers::{Buf32, L1BlockCommitment, WtxidsRoot};
+use strata_predicate::PredicateKey;
 
 /// Database representation of a (Txid, Wtxid) pair.
 ///
@@ -57,6 +59,10 @@ pub(crate) struct DBBatch {
     last_block: [u8; 32],
     last_blocknum: u64,
     inner_blocks: Vec<[u8; 32]>,
+    /// SSZ-encoded [`PredicateKey`] the batch is proven under.
+    update_vk: Vec<u8>,
+    /// SSZ-encoded [`PredicateKey`] in effect for the following batch.
+    next_update_vk: Vec<u8>,
 }
 
 impl From<Batch> for DBBatch {
@@ -67,6 +73,8 @@ impl From<Batch> for DBBatch {
             last_block: value.last_block().into(),
             last_blocknum: value.last_blocknum(),
             inner_blocks: value.inner_blocks().iter().map(|h| (*h).into()).collect(),
+            update_vk: value.update_vk().as_ssz_bytes(),
+            next_update_vk: value.next_update_vk().as_ssz_bytes(),
         }
     }
 }
@@ -80,9 +88,13 @@ impl TryFrom<DBBatch> for Batch {
     /// already return `Result<Batch, &'static str>`, which is propagated directly here.
     fn try_from(value: DBBatch) -> Result<Self, Self::Error> {
         let inner_blocks: Vec<Hash> = value.inner_blocks.into_iter().map(Hash::from).collect();
+        let update_vk = PredicateKey::from_ssz_bytes(&value.update_vk)
+            .map_err(|_| "invalid update_vk encoding")?;
+        let next_update_vk = PredicateKey::from_ssz_bytes(&value.next_update_vk)
+            .map_err(|_| "invalid next_update_vk encoding")?;
 
         if value.idx == 0 {
-            Batch::new_genesis_batch(Hash::from(value.last_block), value.last_blocknum)
+            Batch::new_genesis_batch(Hash::from(value.last_block), value.last_blocknum, update_vk)
         } else {
             Batch::new(
                 value.idx,
@@ -90,6 +102,8 @@ impl TryFrom<DBBatch> for Batch {
                 Hash::from(value.last_block),
                 value.last_blocknum,
                 inner_blocks,
+                update_vk,
+                next_update_vk,
             )
         }
     }

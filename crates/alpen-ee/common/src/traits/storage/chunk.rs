@@ -145,14 +145,28 @@ pub mod tests {
     /// Create a genesis batch for testing (needed by isolation tests).
     fn create_test_genesis_batch() -> Batch {
         let genesis_hash = create_test_hash(1);
-        Batch::new_genesis_batch(genesis_hash, 0).unwrap()
+        Batch::new_genesis_batch(
+            genesis_hash,
+            0,
+            strata_predicate::PredicateKey::always_accept(),
+        )
+        .unwrap()
     }
 
     /// Create a non-genesis batch for testing (needed by isolation tests).
     fn create_test_batch(idx: u64, prev_block_val: u8, last_block_val: u8) -> Batch {
         let prev_block = create_test_hash(prev_block_val);
         let last_block = create_test_hash(last_block_val);
-        Batch::new(idx, prev_block, last_block, idx * 10, Vec::new()).unwrap()
+        Batch::new(
+            idx,
+            prev_block,
+            last_block,
+            idx * 10,
+            Vec::new(),
+            strata_predicate::PredicateKey::always_accept(),
+            strata_predicate::PredicateKey::always_accept(),
+        )
+        .unwrap()
     }
 
     /// Test saving chunks.

@@ -8,7 +8,7 @@
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use ssz::Decode;
-use strata_acct_types::{ADMIN_MSG_ACCT_ID, MessageEntry};
+use strata_acct_types::{MessageEntry, ADMIN_MSG_ACCT_ID};
 use strata_ee_acct_types::DecodedEeMessageData;
 use strata_predicate::PredicateKey;
 
@@ -71,10 +71,12 @@ pub fn find_vk_update(messages: &[MessageEntry]) -> Option<PredicateKey> {
     messages
         .iter()
         .filter(|entry| entry.source() == ADMIN_MSG_ACCT_ID)
-        .filter_map(|entry| match DecodedEeMessageData::decode_raw(entry.payload_buf()) {
-            Ok(DecodedEeMessageData::VkUpdate(data)) => Some(data.new_update_vk().clone()),
-            _ => None,
-        })
+        .filter_map(
+            |entry| match DecodedEeMessageData::decode_raw(entry.payload_buf()) {
+                Ok(DecodedEeMessageData::VkUpdate(data)) => Some(data.new_update_vk().clone()),
+                _ => None,
+            },
+        )
         .next_back()
 }
 
