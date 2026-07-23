@@ -10,6 +10,7 @@
 //! `RUST_LOG=alpen_client=warn`) or capping the compile-time level below info
 //! (`tracing/release_max_level_*`) disables the spans and silently drops the tag.
 
+mod args;
 mod dummy_ol_client;
 #[cfg(feature = "sequencer")]
 mod gas_data_provider;
@@ -27,16 +28,9 @@ mod services;
 
 #[cfg(feature = "sequencer")]
 use std::time::Duration;
-use std::{
-    env, fs,
-    path::{Path, PathBuf},
-    process,
-    sync::Arc,
-};
+use std::{env, fs, path::Path, process, sync::Arc};
 
-use alpen_chainspec::{
-    chain_value_parser, ee_genesis_block_info, AlpenChainSpecParser, AlpenEeGenesisBlockInfo,
-};
+use alpen_chainspec::{ee_genesis_block_info, AlpenChainSpecParser, AlpenEeGenesisBlockInfo};
 use alpen_ee_common::{
     chain_status_checked, BatchStorage, BlockNumHash, ChunkStorage, ExecBlockStorage, OLClient,
     SequencerOLClient, Storage,
@@ -72,7 +66,7 @@ use bitcoind_async_client::{
     traits::Wallet as _,
     Auth, Client as BtcClient,
 };
-use clap::{ArgAction, Parser};
+use clap::Parser;
 use eyre::Context;
 use reth_chainspec::ChainSpec;
 use reth_cli_commands::{launcher::FnLauncher, node::NodeCommand};
@@ -81,10 +75,7 @@ use reth_cli_util::sigsegv_handler;
 use reth_network::{protocol::IntoRlpxSubProtocol, NetworkProtocols};
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_provider::CanonStateSubscriptions;
-use strata_bridge_params::{
-    BridgeParams, DEFAULT_DENOMINATION_SATS, DEFAULT_MAX_WITHDRAWAL_DESCRIPTOR_LEN,
-    DEFAULT_MAX_WITHDRAWAL_SATS,
-};
+use strata_bridge_params::{BridgeParams, DEFAULT_MAX_WITHDRAWAL_SATS};
 #[cfg(feature = "sequencer")]
 use strata_btcio::{
     broadcaster::BroadcasterBuilder, writer::chunked_envelope::create_chunked_envelope_task,
@@ -92,15 +83,12 @@ use strata_btcio::{
 };
 use strata_common::healthz::{start_health_check_server, HealthCheckState};
 #[cfg(feature = "sequencer")]
-use strata_config::btcio::{
-    fee_rate_from_sat_per_vb, fee_rate_to_sat_per_vb, FeePolicy, L1FeePolicyConfig,
-    MempoolExplorerFeePolicy, WriterConfig,
-};
+use strata_config::btcio::{fee_rate_to_sat_per_vb, FeePolicy, WriterConfig};
 use strata_identifiers::{EpochCommitment, OLBlockId};
-use strata_l1_txfmt::MagicBytes;
 use strata_logging::{init_logging_from_config, LoggingInitConfig};
 use strata_predicate::PredicateKey;
-use strata_primitives::{buf::Buf32, L1Height};
+#[cfg(feature = "sequencer")]
+use strata_primitives::buf::Buf32;
 use tokio::{
     runtime::Handle,
     sync::{mpsc, watch},
@@ -109,7 +97,6 @@ use tracing::{error, info, info_span, Instrument};
 
 #[cfg(feature = "sequencer")]
 mod sequencer_imports {
-    pub(super) use alloy_primitives::{address, Address};
     pub(super) use alpen_ee_da_provider::{
         ChunkedEnvelopeDaProvider, DaBlobSource, StateDiffBlobProvider,
     };
@@ -137,15 +124,13 @@ mod sequencer_imports {
             EeBatchProofDbManager, EeChunkReceiptStore, EeProverTaskDbManager, PaasBatchProver,
         },
     };
-
-    pub(super) const DEFAULT_BENEFICIARY_ADDRESS: Address =
-        address!("5400000000000000000000000000000000000010");
 }
 
 #[cfg(feature = "sequencer")]
 use sequencer_imports::*;
 
 use crate::{
+    args::AdditionalConfig,
     dummy_ol_client::DummyOLClient,
     gossip::{create_gossip_task, GossipConfig},
     ol_client::OLClientKind,
@@ -156,9 +141,6 @@ use crate::{
 /// Environment variable for overriding the default EE block time.
 #[cfg(feature = "sequencer")]
 const ALPEN_EE_BLOCK_TIME_MS_ENV_VAR: &str = "ALPEN_EE_BLOCK_TIME_MS";
-
-const DEFAULT_HEALTH_CHECK_HOST: &str = "0.0.0.0";
-const DEFAULT_HEALTH_CHECK_PORT: u16 = 8080;
 
 /// Default end-to-end deadline applied to the SP1 prover network for the EE
 /// chunk + acct provers when `--sp1-proof-deadline-secs` is not set. Chosen
@@ -195,7 +177,7 @@ fn main() {
     let mut command = NodeCommand::<AlpenChainSpecParser, AdditionalConfig>::parse();
 
     // use provided alpen chain spec
-    command.chain = command.ext.custom_chain.clone();
+    command.chain = command.ext.chain.custom_chain.clone();
     // enable engine api v4
     command.engine.accept_execution_requests_hash = true;
     // allow chain fork blocks to be created
@@ -209,7 +191,10 @@ fn main() {
          ext: AdditionalConfig| async move {
             let service_executor = ServiceExecutor::from_reth(builder.task_executor().clone());
             let health_check_state = HealthCheckState::new();
-            let health_check_addr = format!("{}:{}", ext.health_check_host, ext.health_check_port);
+            let health_check_addr = format!(
+                "{}:{}",
+                ext.node.health_check_host, ext.node.health_check_port
+            );
             let _health_check_handle =
                 start_health_check_server(health_check_addr.clone(), health_check_state.clone())
                     .instrument(info_span!("start_health_check_server", component = "alpen"))
@@ -220,54 +205,54 @@ fn main() {
             // --- CONFIGS ---
 
             // Resolve withdrawal cap: 0 → no cap, omitted → default 10 BTC.
-            let resolved_max_withdrawal = match ext.max_withdrawal_amount {
+            let resolved_max_withdrawal = match ext.bridge.max_withdrawal_amount {
                 Some(0) => None,
                 Some(v) => Some(v),
                 None => Some(DEFAULT_MAX_WITHDRAWAL_SATS),
             };
             let bridge_params = BridgeParams::new_with_descriptor_limit(
-                ext.bridge_denomination,
+                ext.bridge.denomination,
                 resolved_max_withdrawal,
-                ext.max_withdrawal_descriptor_len,
+                ext.bridge.max_withdrawal_descriptor_len,
             )
             .expect("invalid withdrawal params");
 
             let datadir = builder.config().datadir().data_dir().to_path_buf();
 
             // TODO(STR-2982): read config, params from file
-            let genesis_info = ee_genesis_block_info(&ext.custom_chain);
+            let genesis_info = ee_genesis_block_info(&ext.chain.custom_chain);
 
             info!(target: "alpen-client", component = "alpen", blockhash=%genesis_info.blockhash(), "EE genesis info");
-            let params = load_ee_params(&ext.ee_params)?;
+            let params = load_ee_params(&ext.chain.ee_params)?;
             validate_ee_params_genesis(&params, &genesis_info)?;
-            info!(target: "alpen-client", component = "alpen", ?params, sequencer = ext.sequencer, "Starting EE Node");
+            info!(target: "alpen-client", component = "alpen", ?params, sequencer = ext.sequencer.enabled, "Starting EE Node");
 
             // Resolve btcio writer config up front so flag misuse surfaces before I/O.
             #[cfg(feature = "sequencer")]
-            let writer_config = if ext.sequencer {
-                let cfg = Arc::new(resolve_writer_config(&ext)?);
+            let writer_config = if ext.sequencer.enabled {
+                let cfg = Arc::new(ext.btcio.writer_config()?);
                 log_writer_config(&cfg);
                 Some(cfg)
             } else {
                 None
             };
 
-            // OL client URL is not used when dummy_ol_client is enabled
-            let ol_client_url = ext.ol_client_url.clone().unwrap_or_default();
+            // OL client URL is not used when the dummy OL client is enabled
+            let ol_client_url = ext.ol.client_url.clone().unwrap_or_default();
 
             let config = Arc::new(AlpenEeConfig::new(
                 params,
                 PredicateKey::always_accept(),
                 ol_client_url,
-                ext.sequencer_http.clone(),
-                ext.db_retry_count,
+                ext.sequencer.http_url.clone(),
+                ext.node.db_retry_count,
             ));
 
             #[cfg(feature = "sequencer")]
-            let block_builder_config = block_builder_config_from_env(ext.sequencer)?;
+            let block_builder_config = block_builder_config_from_env(ext.sequencer.enabled)?;
 
             #[cfg(feature = "sequencer")]
-            let sequencer_privkey = sequencer_privkey_from_env(ext.sequencer)?;
+            let sequencer_privkey = sequencer_privkey_from_env(ext.sequencer.enabled)?;
 
             #[cfg(feature = "sequencer")]
             // NOTE: ATM we reuse `SEQUENCER_PRIVATE_KEY` for both gossip
@@ -284,8 +269,8 @@ fn main() {
                 #[cfg(feature = "sequencer")]
                 {
                     GossipConfig {
-                        sequencer_pubkey: ext.sequencer_pubkey,
-                        sequencer_enabled: ext.sequencer,
+                        sequencer_pubkey: ext.sequencer.pubkey,
+                        sequencer_enabled: ext.sequencer.enabled,
                         sequencer_privkey,
                     }
                 }
@@ -293,7 +278,7 @@ fn main() {
                 #[cfg(not(feature = "sequencer"))]
                 {
                     GossipConfig {
-                        sequencer_pubkey: ext.sequencer_pubkey,
+                        sequencer_pubkey: ext.sequencer.pubkey,
                         sequencer_enabled: false,
                     }
                 }
@@ -307,17 +292,17 @@ fn main() {
             let db_handle = Handle::current();
             let storage: Arc<_> = dbs.node_storage(db_handle.clone()).into();
 
-            let ol_client = if ext.dummy_ol_client {
+            let ol_client = if ext.ol.dummy_client {
                 use strata_identifiers::Buf32;
                 use strata_primitives::EpochCommitment;
                 let genesis_epoch = EpochCommitment::new(0, 0, OLBlockId::from(Buf32([1; 32])));
                 info!(target: "alpen-client", component = "alpen", "Using dummy OL client (no real OL connection)");
                 OLClientKind::Dummy(DummyOLClient { genesis_epoch })
             } else {
-                let ol_url = ext.ol_client_url.as_ref().ok_or_else(|| {
+                let ol_url = ext.ol.client_url.as_ref().ok_or_else(|| {
                     eyre::eyre!("--ol-client-url is required when not using --dummy-ol-client")
                 })?;
-                if ext.sequencer && ext.ol_submit_url.is_none() {
+                if ext.sequencer.enabled && ext.ol.submit_url.is_none() {
                     eyre::bail!(
                         "--ol-submit-url is required with --sequencer when not using \
                          --dummy-ol-client"
@@ -327,8 +312,8 @@ fn main() {
                     RpcOLClient::try_new(
                         config.params().account_id(),
                         ol_url,
-                        ext.ol_submit_url.as_deref(),
-                        ext.ol_submit_bearer_token.as_deref(),
+                        ext.ol.submit_url.as_deref(),
+                        ext.ol.submit_bearer_token.as_deref(),
                     )
                     .map_err(|e| eyre::eyre!("failed to create OL client: {e}"))?,
                 )
@@ -346,7 +331,7 @@ fn main() {
                 config.as_ref(),
                 &genesis_epoch,
                 storage.as_ref(),
-                ext.sequencer,
+                ext.sequencer.enabled,
             )
             .instrument(info_span!("ensure_genesis", component = "alpen"))
             .await
@@ -364,7 +349,7 @@ fn main() {
 
             // Sequencer-only startup state. Gated on the runtime `--sequencer` flag.
             #[cfg(feature = "sequencer")]
-            let sequencer_boot_state = if ext.sequencer {
+            let sequencer_boot_state = if ext.sequencer.enabled {
                 let ol_chain_tracker =
                     init_ol_chain_tracker_state(storage.as_ref(), ol_client.as_ref())
                         .instrument(info_span!("init_ol_chain_tracker", component = "alpen"))
@@ -427,7 +412,7 @@ fn main() {
                 genesis_epoch.epoch(),
                 storage.clone(),
                 ol_client.clone(),
-                ext.dev_track_latest_epoch,
+                ext.ol.dev_track_latest_epoch,
                 &service_executor,
             )
             .await
@@ -435,7 +420,7 @@ fn main() {
 
             let evm_factory = AlpenEvmFactory::from_bridge_params(&bridge_params);
             let node_args = AlpenNodeArgs {
-                sequencer_http: ext.sequencer_http.clone(),
+                sequencer_http: ext.sequencer.http_url.clone(),
                 evm_factory,
             };
 
@@ -463,7 +448,7 @@ fn main() {
             // Install state diff exex for sequencer DA.
             // The exex persists per-block state diffs that the blob provider reads.
             #[cfg(feature = "sequencer")]
-            if ext.sequencer {
+            if ext.sequencer.enabled {
                 node_builder = node_builder.install_exex("state_diffs", {
                     let state_diff_db = dbs.witness_db();
                     |ctx| async { Ok(StateDiffGenerator::new(ctx, state_diff_db).start()) }
@@ -508,7 +493,7 @@ fn main() {
 
             // Sync chainstate to engine for sequencer nodes before starting other tasks
             #[cfg(feature = "sequencer")]
-            if ext.sequencer {
+            if ext.sequencer.enabled {
                 let engine = AlpenRethExecEngine::new(node.beacon_engine_handle.clone());
                 let storage_clone = storage.clone();
                 let provider_clone = node.provider.clone();
@@ -578,7 +563,7 @@ fn main() {
                 let payload_engine = Arc::new(AlpenRethPayloadEngine::new(
                     node.payload_builder_handle.clone(),
                     node.beacon_engine_handle.clone(),
-                    ext.beneficiary_address,
+                    ext.sequencer.beneficiary_address,
                     storage.clone(),
                 ));
 
@@ -605,7 +590,7 @@ fn main() {
                     .await?;
 
                 let batch_sealing_policy =
-                    FixedBlockCountSealing::new(ext.batch_sealing_block_count);
+                    FixedBlockCountSealing::new(ext.sequencer.batch_sealing_block_count);
                 let block_data_provider = Arc::new(BlockCountDataProvider);
 
                 // Per-block proof witnesses are captured inline during payload
@@ -616,7 +601,8 @@ fn main() {
 
                 // Channel from batch builder → chunk builder.
                 let (batch_event_tx, batch_event_rx) = mpsc::channel::<BatchBuilderEvent>(
-                    ext.batch_event_channel_capacity
+                    ext.sequencer
+                        .batch_event_channel_capacity
                         .unwrap_or(DEFAULT_BATCH_EVENT_CHANNEL_CAPACITY),
                 );
 
@@ -636,30 +622,33 @@ fn main() {
                 // --- DA pipeline ---
                 //
                 // clap `requires_all` on --sequencer guarantees all DA args are present.
-                let magic_bytes = ext.ee_da_magic_bytes.expect("enforced by clap");
-                let btc_url = ext.btc_rpc_url.as_ref().expect("enforced by clap");
-                let btc_user = ext.btc_rpc_user.as_ref().expect("enforced by clap");
-                let btc_pass = ext.btc_rpc_password.as_ref().expect("enforced by clap");
+                let magic_bytes = ext.da.magic_bytes.expect("enforced by clap");
+                let btc_url = ext.da.btc_rpc_url.as_ref().expect("enforced by clap");
+                let btc_user = ext.da.btc_rpc_user.as_ref().expect("enforced by clap");
+                let btc_pass = ext.da.btc_rpc_password.as_ref().expect("enforced by clap");
 
                 // Create BtcioParams directly from CLI args.
-                let btcio_params =
-                    BtcioParams::new(ext.l1_reorg_safe_depth, magic_bytes, ext.genesis_l1_height);
+                let btcio_params = BtcioParams::new(
+                    ext.da.l1_reorg_safe_depth,
+                    magic_bytes,
+                    ext.da.genesis_l1_height,
+                );
 
                 // Bitcoin RPC client.
                 let btc_client = Arc::new(
                     BtcClient::new(
                         btc_url.clone(),
                         Auth::UserPass(btc_user.clone(), btc_pass.clone()),
-                        Some(ext.btcio_retry_count),
-                        Some(ext.btcio_retry_interval),
+                        Some(ext.btcio.retry_count),
+                        Some(ext.btcio.retry_interval),
                         None,
                     )
                     .map_err(|e| eyre::eyre!("creating Bitcoin RPC client: {e}"))?,
                 );
                 info!(
                     target: "alpen-client", component = "alpen",
-                    retry_count = ext.btcio_retry_count,
-                    retry_interval_ms = ext.btcio_retry_interval,
+                    retry_count = ext.btcio.retry_count,
+                    retry_interval_ms = ext.btcio.retry_interval,
                     "btcio Bitcoin RPC retry policy configured",
                 );
 
@@ -759,7 +748,7 @@ fn main() {
 
                 let genesis = {
                     use alpen_reth_exex::alloy2reth::IntoRspChainConfig as _;
-                    ext.custom_chain.genesis().config.clone().into_rsp()
+                    ext.chain.custom_chain.genesis().config.clone().into_rsp()
                 };
 
                 let chunk_builder = ProverBuilder::new(ChunkSpec::new(
@@ -820,8 +809,8 @@ fn main() {
                         chunk_storage: chunk_storage_dyn,
                         batch_proofs,
                     },
-                    ext.dev_native_prover,
-                    ext.sp1_proof_deadline_secs,
+                    ext.sequencer.dev_native_prover,
+                    ext.sequencer.sp1_proof_deadline_secs,
                 )
                 .await?;
 
@@ -874,8 +863,9 @@ fn main() {
 
                 // --- Chunk builder service ---
                 let chunk_block_count = ext
+                    .sequencer
                     .chunk_sealing_block_count
-                    .unwrap_or(ext.batch_sealing_block_count);
+                    .unwrap_or(ext.sequencer.batch_sealing_block_count);
                 let genesis_blocknumhash =
                     BlockNumHash::new(genesis_info.blockhash().0.into(), genesis_info.blocknum());
 
@@ -886,21 +876,22 @@ fn main() {
                 // may be slightly higher than genesis. We use 2× the genesis
                 // gas limit as a conservative floor to accommodate this drift
                 // while still catching obvious misconfigurations.
-                if let Some(configured) = ext.chunk_sealing_gas_limit {
-                    let min_chunk_gas = ext.custom_chain.genesis().gas_limit.saturating_mul(2);
+                if let Some(configured) = ext.sequencer.chunk_sealing_gas_limit {
+                    let min_chunk_gas =
+                        ext.chain.custom_chain.genesis().gas_limit.saturating_mul(2);
                     eyre::ensure!(
                         configured >= min_chunk_gas,
                         "--chunk-sealing-gas-limit ({configured}) is below the minimum \
                          ({min_chunk_gas}, 2× genesis block gas limit {}). A single block \
                          can use up to the per-block gas limit, so the chunk budget must \
                          be large enough to always fit at least one block.",
-                        ext.custom_chain.genesis().gas_limit,
+                        ext.chain.custom_chain.genesis().gas_limit,
                     );
                 }
 
                 // u64::MAX effectively disables the gas policy while keeping a
                 // single monomorphic code path (no dyn / enum branching).
-                let chunk_gas_limit = ext.chunk_sealing_gas_limit.unwrap_or(u64::MAX);
+                let chunk_gas_limit = ext.sequencer.chunk_sealing_gas_limit.unwrap_or(u64::MAX);
                 let chunk_sealing_policy = OrSealing::new(
                     FixedBlockCountSealing::new(chunk_block_count),
                     MaxGasSealing::new(chunk_gas_limit),
@@ -942,270 +933,6 @@ fn main() {
     ) {
         eprintln!("Error: {err:?}");
         process::exit(1);
-    }
-}
-
-/// Our custom cli args extension that adds one flag to reth default CLI.
-#[derive(Debug, clap::Parser)]
-pub struct AdditionalConfig {
-    /// Set the minimum log level.
-    ///
-    /// -v      Errors
-    /// -vv     Warnings
-    /// -vvv    Info
-    /// -vvvv   Debug
-    /// -vvvvv  Traces (warning: very verbose!)
-    #[arg(
-        short,
-        long,
-        action = ArgAction::Count,
-        global = true,
-        verbatim_doc_comment,
-        help_heading = "Display"
-    )]
-    pub verbosity: u8,
-
-    /// Silence all log output.
-    #[arg(
-        long,
-        alias = "silent",
-        short = 'q',
-        global = true,
-        help_heading = "Display"
-    )]
-    pub quiet: bool,
-
-    /// OTLP gRPC endpoint for the OpenTelemetry collector.
-    ///
-    /// When set, `strata-logging` builds a tracer provider against this
-    /// endpoint. Metrics stay on Reth's native recorder and Prometheus
-    /// endpoint; use Reth's `--metrics` flag for `/metrics`.
-    /// Falls back to the standard `OTEL_EXPORTER_OTLP_ENDPOINT` env var
-    /// when the flag isn't passed.
-    #[arg(long, env = "OTEL_EXPORTER_OTLP_ENDPOINT")]
-    pub otlp_url: Option<String>,
-
-    /// Optional service label suffix appended to the OpenTelemetry
-    /// `service.name` resource attribute (e.g. `prod`, `dev`,
-    /// `staging-v2`). Mirrors `bin/strata`'s `--service-label`.
-    #[arg(long)]
-    pub service_label: Option<String>,
-
-    /// The chain this node is running.
-    ///
-    /// Possible values are either a built-in chain or the path to a chain specification file.
-    /// Cannot override existing `chain` arg, so this is a workaround.
-    #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        default_value = "testnet",
-        value_parser = chain_value_parser,
-        required = false,
-    )]
-    pub custom_chain: Arc<ChainSpec>,
-
-    /// JSON-serialized Alpen EE chain params.
-    #[arg(long, value_name = "PATH", required = true)]
-    pub ee_params: PathBuf,
-
-    /// Rpc of sequencer's reth node to forward transactions to.
-    #[arg(long, required = false)]
-    pub sequencer_http: Option<String>,
-
-    /// URL of OL node RPC (can be either `http[s]://` or `ws[s]://`).
-    /// Required unless `--dummy-ol-client` is specified.
-    #[arg(long)]
-    pub ol_client_url: Option<String>,
-
-    /// URL of the authenticated OL transaction submission RPC.
-    /// Required with `--sequencer` unless `--dummy-ol-client` is specified.
-    #[arg(long)]
-    pub ol_submit_url: Option<String>,
-
-    /// Bearer token for the authenticated OL transaction submission RPC.
-    #[arg(long, env = "STRATA_SUBMIT_RPC_TOKEN")]
-    pub ol_submit_bearer_token: Option<String>,
-
-    /// Use a dummy OL client instead of connecting to a real OL node.
-    /// This is useful for testing EE functionality in isolation.
-    ///
-    /// NOTE: This is intentionally separate from OL-EE integration tests which
-    /// need the real OL RPC client. The dummy client is only for EE-specific
-    /// tests that don't need OL interaction.
-    #[arg(long, default_value_t = false)]
-    pub dummy_ol_client: bool,
-
-    /// Host for the HTTP health check endpoint.
-    #[arg(long, default_value = DEFAULT_HEALTH_CHECK_HOST)]
-    pub health_check_host: String,
-
-    /// Port for the HTTP health check endpoint.
-    #[arg(long, default_value_t = DEFAULT_HEALTH_CHECK_PORT)]
-    pub health_check_port: u16,
-
-    #[arg(long, required = false)]
-    pub db_retry_count: Option<u16>,
-
-    /// Run the node as a sequencer. Requires the `sequencer` feature,
-    /// a `SEQUENCER_PRIVATE_KEY` environment variable, and all DA-related
-    /// arguments (`--ee-da-magic-bytes`, `--btc-rpc-url`, `--btc-rpc-user`,
-    /// `--btc-rpc-password`).
-    #[arg(
-        long,
-        default_value_t = false,
-        requires_all = ["ee_da_magic_bytes", "btc_rpc_url", "btc_rpc_user", "btc_rpc_password"],
-    )]
-    pub sequencer: bool,
-
-    /// Sequencer's public key (hex-encoded, 32 bytes) for signature validation.
-    #[arg(long, required = true, value_parser = parse_buf32)]
-    pub sequencer_pubkey: Buf32,
-
-    // --- DA Configuration ---
-    /// Magic bytes (hex-encoded, 4 bytes) for tagging EE DA envelope transactions.
-    /// Example: `ALPN`.
-    #[arg(long, required = false, value_parser = parse_magic_bytes)]
-    pub ee_da_magic_bytes: Option<MagicBytes>,
-
-    /// Bitcoin Core RPC URL. Required when `--sequencer` is set.
-    #[arg(long, required = false)]
-    pub btc_rpc_url: Option<String>,
-
-    /// Bitcoin Core RPC username. Required when `--sequencer` is set.
-    #[arg(long, required = false)]
-    pub btc_rpc_user: Option<String>,
-
-    /// Bitcoin Core RPC password. Required when `--sequencer` is set.
-    #[arg(long, required = false)]
-    pub btc_rpc_password: Option<String>,
-
-    /// L1 reorg safe depth (number of confirmations for finality).
-    #[arg(long, default_value = "6")]
-    pub l1_reorg_safe_depth: u32,
-
-    /// Genesis L1 block height (the first L1 block the rollup cares about).
-    #[arg(long, default_value = "0")]
-    pub genesis_l1_height: L1Height,
-
-    /// Number of blocks per batch before sealing.
-    /// Lower values seal batches more frequently (useful for testing).
-    #[arg(long, default_value = "100")]
-    pub batch_sealing_block_count: u64,
-
-    /// Number of blocks per chunk before sealing.
-    /// Defaults to `batch_sealing_block_count` if not set.
-    #[arg(long, required = false)]
-    pub chunk_sealing_block_count: Option<u64>,
-
-    /// Cumulative gas limit per chunk before sealing.
-    /// When set, a chunk is sealed when either the block count or the gas
-    /// limit is reached (whichever comes first). When omitted, only the
-    /// block count policy is used.
-    #[arg(long, required = false)]
-    pub chunk_sealing_gas_limit: Option<u64>,
-
-    /// Capacity of the batch builder → chunk builder event channel.
-    /// Defaults to 64 if not set.
-    #[cfg(feature = "sequencer")]
-    #[arg(long, required = false)]
-    pub batch_event_channel_capacity: Option<usize>,
-
-    /// Bridge denomination in satoshis (1 BTC default).
-    #[arg(long, default_value_t = DEFAULT_DENOMINATION_SATS)]
-    pub bridge_denomination: u64,
-
-    /// Maximum withdrawal BOSD descriptor length in bytes, including the type tag.
-    #[arg(long, default_value_t = DEFAULT_MAX_WITHDRAWAL_DESCRIPTOR_LEN)]
-    pub max_withdrawal_descriptor_len: u32,
-
-    /// Maximum withdrawal amount in satoshis.
-    ///
-    /// When omitted, defaults to 1_000_000_000 (10 BTC) at runtime.
-    /// Pass 0 to disable the cap entirely. Kept as `Option` (no
-    /// `default_value`) so we can distinguish "not set" (→ safe default)
-    /// from an explicit value.
-    #[arg(long)]
-    pub max_withdrawal_amount: Option<u64>,
-
-    /// Use the zkaleido `NativeHost` for the EE chunk + acct provers
-    /// instead of the SP1 remote host.
-    ///
-    /// Dev/test only: skips real Groth16 proving and the compiled guest
-    /// ELFs. Functional tests enable this so the sequencer can start
-    /// without the SP1 prover ELFs present on disk.
-    #[arg(long, default_value_t = false)]
-    pub dev_native_prover: bool,
-
-    /// Have the OL chain tracker advance against the latest completed OL
-    /// epoch in the connected Strata node instead of the canonical
-    /// `confirmed` epoch (CSM-based). Dev/test only. Useful when the CSM
-    /// checkpoint pipeline can't keep up with rapid SAU emission and would
-    /// otherwise stall the EE block builder's inbox-message fetch.
-    #[arg(long, default_value_t = false)]
-    pub dev_track_latest_epoch: bool,
-
-    /// End-to-end deadline (seconds) passed to the SP1 prover network on
-    /// every chunk/acct proof request. Only used with the remote SP1
-    /// backend. When unset, a built-in default is applied (see
-    /// `DEFAULT_SP1_DEADLINE_SECS`).
-    #[arg(long, required = false)]
-    pub sp1_proof_deadline_secs: Option<u64>,
-
-    /// btcio writer fee policy: `bitcoind`, `fixed`, or `mempool`.
-    #[cfg(feature = "sequencer")]
-    #[arg(long, value_enum, default_value_t = BtcioFeePolicyArg::Bitcoind)]
-    pub btcio_fee_policy: BtcioFeePolicyArg,
-
-    /// Confirmation target for `bitcoind`; also the mempool fallback.
-    #[cfg(feature = "sequencer")]
-    #[arg(long, default_value = "1")]
-    pub btcio_conf_target: u16,
-
-    /// Fixed fee rate in sat/vB. Required when policy is `fixed`.
-    #[cfg(feature = "sequencer")]
-    #[arg(long)]
-    pub btcio_fee_rate: Option<f64>,
-
-    /// mempool.space-compatible base URL. Required when policy is `mempool`.
-    #[cfg(feature = "sequencer")]
-    #[arg(long)]
-    pub btcio_mempool_base_url: Option<String>,
-
-    /// Mempool fee tier when policy is `mempool`.
-    #[cfg(feature = "sequencer")]
-    #[arg(long, value_enum, default_value_t = BtcioMempoolTierArg::Fastest)]
-    pub btcio_mempool_tier: BtcioMempoolTierArg,
-
-    /// Max retries for Bitcoin RPC requests.
-    #[cfg(feature = "sequencer")]
-    #[arg(long, default_value_t = DEFAULT_BTCIO_RETRY_COUNT)]
-    pub btcio_retry_count: u16,
-
-    /// Bitcoin RPC retry interval in ms.
-    #[cfg(feature = "sequencer")]
-    #[arg(long, default_value_t = DEFAULT_BTCIO_RETRY_INTERVAL_MS)]
-    pub btcio_retry_interval: u64,
-
-    #[cfg(feature = "sequencer")]
-    #[arg(long, default_value_t = DEFAULT_BENEFICIARY_ADDRESS)]
-    pub beneficiary_address: Address,
-}
-
-impl AdditionalConfig {
-    /// Returns an EnvFilter-compatible directive for CLI verbosity flags.
-    fn verbosity_filter_directive(&self) -> Option<&'static str> {
-        if self.quiet {
-            return Some("off");
-        }
-
-        match self.verbosity {
-            0 => None,
-            1 => Some("error"),
-            2 => Some("warn"),
-            3 => Some("info"),
-            4 => Some("debug"),
-            _ => Some("trace"),
-        }
     }
 }
 
@@ -1413,45 +1140,12 @@ fn validate_ee_account_prover_predicate_key(
     })
 }
 
-#[cfg(test)]
-mod additional_config_tests {
+#[cfg(all(test, feature = "sequencer"))]
+mod prover_predicate_key_tests {
     use strata_predicate::PredicateTypeId;
 
     use super::*;
 
-    const SEQUENCER_PUBKEY: &str =
-        "0000000000000000000000000000000000000000000000000000000000000000";
-
-    fn parse_additional_config(args: &[&str]) -> AdditionalConfig {
-        let mut argv = vec![
-            "alpen-client",
-            "--ee-params",
-            "/tmp/ee-params.json",
-            "--sequencer-pubkey",
-            SEQUENCER_PUBKEY,
-        ];
-        argv.extend_from_slice(args);
-        <AdditionalConfig as clap::Parser>::parse_from(argv)
-    }
-
-    #[test]
-    fn max_withdrawal_descriptor_len_defaults_to_policy_limit() {
-        let config = parse_additional_config(&[]);
-
-        assert_eq!(
-            config.max_withdrawal_descriptor_len,
-            DEFAULT_MAX_WITHDRAWAL_DESCRIPTOR_LEN
-        );
-    }
-
-    #[test]
-    fn max_withdrawal_descriptor_len_can_be_configured() {
-        let config = parse_additional_config(&["--max-withdrawal-descriptor-len", "100"]);
-
-        assert_eq!(config.max_withdrawal_descriptor_len, 100);
-    }
-
-    #[cfg(feature = "sequencer")]
     #[test]
     fn ee_account_prover_predicate_key_validation_accepts_match() {
         let predicate = PredicateKey::new(PredicateTypeId::Bip340Schnorr, vec![1, 2, 3]);
@@ -1459,7 +1153,6 @@ mod additional_config_tests {
         validate_ee_account_prover_predicate_key(&predicate, &predicate).unwrap();
     }
 
-    #[cfg(feature = "sequencer")]
     #[test]
     fn ee_account_prover_predicate_key_validation_rejects_mismatch() {
         let ol_update_vk = PredicateKey::new(PredicateTypeId::Bip340Schnorr, vec![1, 2, 3]);
@@ -1486,7 +1179,7 @@ where
         AdditionalConfig,
     ) -> eyre::Result<()>,
 {
-    if command.ext.sequencer && !cfg!(feature = "sequencer") {
+    if command.ext.sequencer.enabled && !cfg!(feature = "sequencer") {
         error!(
             target: "alpen-client",
             component = "alpen",
@@ -1505,14 +1198,14 @@ where
 
         let mut extra_filter_directives =
             vec!["sp1_core_executor=warn", "jsonrpsee_server::server=warn"];
-        if let Some(verbosity_filter) = command.ext.verbosity_filter_directive() {
+        if let Some(verbosity_filter) = command.ext.display.verbosity_filter_directive() {
             extra_filter_directives.push(verbosity_filter);
         }
 
         init_logging_from_config(LoggingInitConfig {
             service_base_name: "alpen-client",
-            service_label: command.ext.service_label.as_deref(),
-            otlp_url: command.ext.otlp_url.as_deref(),
+            service_label: command.ext.display.service_label.as_deref(),
+            otlp_url: command.ext.display.otlp_url.as_deref(),
             log_dir: None,
             log_file_prefix: None,
             json_format: None,
@@ -1536,18 +1229,6 @@ where
     strata_logging::finalize();
 
     result
-}
-
-/// Parse a hex-encoded string into a [`Buf32`].
-fn parse_buf32(s: &str) -> eyre::Result<Buf32> {
-    s.parse::<Buf32>()
-        .map_err(|e| eyre::eyre!("Failed to parse hex string as Buf32: {e}"))
-}
-
-/// Parse a magic bytes string using the [`MagicBytes`] parser from `strata-l1-txfmt`.
-fn parse_magic_bytes(s: &str) -> eyre::Result<MagicBytes> {
-    s.parse::<MagicBytes>()
-        .map_err(|e| eyre::eyre!("Failed to parse magic bytes: {e}"))
 }
 
 #[cfg(feature = "sequencer")]
@@ -1574,84 +1255,6 @@ fn sequencer_bitcoin_keypair(privkey: &Buf32) -> eyre::Result<Keypair> {
     let sk = SecretKey::from_slice(privkey.as_ref()).context("invalid sequencer private key")?;
     let secp = Secp256k1::signing_only();
     Ok(Keypair::from_secret_key(&secp, &sk))
-}
-
-// Mirrors `bitcoind-async-client`'s upstream defaults.
-#[cfg(feature = "sequencer")]
-const DEFAULT_BTCIO_RETRY_COUNT: u16 = 3;
-#[cfg(feature = "sequencer")]
-const DEFAULT_BTCIO_RETRY_INTERVAL_MS: u64 = 1_000;
-
-/// CLI mirror of [`FeePolicy`].
-#[cfg(feature = "sequencer")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum BtcioFeePolicyArg {
-    Bitcoind,
-    Fixed,
-    Mempool,
-}
-
-/// CLI mirror of [`MempoolExplorerFeePolicy`].
-#[cfg(feature = "sequencer")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum BtcioMempoolTierArg {
-    Fastest,
-    HalfHour,
-    Hour,
-    Economy,
-    Minimum,
-}
-
-#[cfg(feature = "sequencer")]
-impl From<BtcioMempoolTierArg> for MempoolExplorerFeePolicy {
-    fn from(value: BtcioMempoolTierArg) -> Self {
-        match value {
-            BtcioMempoolTierArg::Fastest => Self::Fastest,
-            BtcioMempoolTierArg::HalfHour => Self::HalfHour,
-            BtcioMempoolTierArg::Hour => Self::Hour,
-            BtcioMempoolTierArg::Economy => Self::Economy,
-            BtcioMempoolTierArg::Minimum => Self::Minimum,
-        }
-    }
-}
-
-/// Builds [`WriterConfig`] from CLI flags. Empty-string mempool URL is
-/// treated as absent so docker-compose `${VAR:-}` doesn't yield `Some("")`.
-#[cfg(feature = "sequencer")]
-fn resolve_writer_config(ext: &AdditionalConfig) -> eyre::Result<WriterConfig> {
-    let mempool_base_url = ext
-        .btcio_mempool_base_url
-        .as_deref()
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned);
-
-    let fee_policy = match ext.btcio_fee_policy {
-        BtcioFeePolicyArg::Bitcoind => FeePolicy::BitcoinD {
-            conf_target: ext.btcio_conf_target,
-        },
-        BtcioFeePolicyArg::Fixed => {
-            let fee_rate_sat_per_vb = ext.btcio_fee_rate.ok_or_else(|| {
-                eyre::eyre!("--btcio-fee-rate is required when --btcio-fee-policy=fixed")
-            })?;
-            let fee_rate = fee_rate_from_sat_per_vb(fee_rate_sat_per_vb)
-                .map_err(|err| eyre::eyre!("invalid --btcio-fee-rate: {err}"))?;
-            FeePolicy::Fixed { fee_rate }
-        }
-        BtcioFeePolicyArg::Mempool => {
-            let base_url = mempool_base_url.clone().ok_or_else(|| {
-                eyre::eyre!("--btcio-mempool-base-url is required when --btcio-fee-policy=mempool")
-            })?;
-            FeePolicy::MempoolExplorer {
-                policy: ext.btcio_mempool_tier.into(),
-                mempool_base_url: base_url,
-                fallback_conf_target: ext.btcio_conf_target,
-            }
-        }
-    };
-    Ok(WriterConfig {
-        l1_fee_policy_config: L1FeePolicyConfig::new(fee_policy),
-        ..WriterConfig::default()
-    })
 }
 
 #[cfg(feature = "sequencer")]
@@ -1687,97 +1290,6 @@ fn log_writer_config(cfg: &WriterConfig) {
                 "btcio writer configured",
             );
         }
-    }
-}
-
-#[cfg(all(test, feature = "sequencer"))]
-mod resolve_writer_config_tests {
-    use bitcoind_async_client::corepc_types::bitcoin::FeeRate;
-
-    use super::*;
-
-    fn args(
-        policy: BtcioFeePolicyArg,
-        fee_rate: Option<f64>,
-        mempool_url: Option<&str>,
-    ) -> AdditionalConfig {
-        let argv = [
-            "alpen-client",
-            "--ee-params",
-            "/tmp/ee-params.json",
-            "--sequencer-pubkey",
-            &"0".repeat(64),
-        ];
-        let mut cfg = <AdditionalConfig as clap::Parser>::parse_from(argv);
-        cfg.btcio_fee_policy = policy;
-        cfg.btcio_fee_rate = fee_rate;
-        cfg.btcio_mempool_base_url = mempool_url.map(str::to_owned);
-        cfg
-    }
-
-    #[test]
-    fn fixed_requires_fee_rate() {
-        let err = resolve_writer_config(&args(BtcioFeePolicyArg::Fixed, None, None)).unwrap_err();
-        assert!(err.to_string().contains("--btcio-fee-rate"));
-    }
-
-    #[test]
-    fn fixed_one_sat_vb() {
-        let cfg = resolve_writer_config(&args(BtcioFeePolicyArg::Fixed, Some(1.0), None)).unwrap();
-        assert_eq!(
-            cfg.fee_policy(),
-            &FeePolicy::Fixed {
-                fee_rate: FeeRate::from_sat_per_vb_u32(1)
-            }
-        );
-    }
-
-    #[test]
-    fn fixed_half_sat_vb() {
-        let cfg = resolve_writer_config(&args(BtcioFeePolicyArg::Fixed, Some(0.5), None)).unwrap();
-        assert_eq!(
-            cfg.fee_policy(),
-            &FeePolicy::Fixed {
-                fee_rate: FeeRate::from_sat_per_kwu(125)
-            }
-        );
-    }
-
-    #[test]
-    fn mempool_requires_base_url() {
-        let err = resolve_writer_config(&args(BtcioFeePolicyArg::Mempool, None, None)).unwrap_err();
-        assert!(err.to_string().contains("--btcio-mempool-base-url"));
-    }
-
-    #[test]
-    fn mempool_rejects_empty_base_url() {
-        let err =
-            resolve_writer_config(&args(BtcioFeePolicyArg::Mempool, None, Some(""))).unwrap_err();
-        assert!(err.to_string().contains("--btcio-mempool-base-url"));
-    }
-
-    #[test]
-    fn mempool_with_url_succeeds() {
-        let cfg = resolve_writer_config(&args(
-            BtcioFeePolicyArg::Mempool,
-            None,
-            Some("https://mempool.space/signet"),
-        ))
-        .unwrap();
-        match cfg.fee_policy() {
-            FeePolicy::MempoolExplorer {
-                mempool_base_url, ..
-            } => assert_eq!(mempool_base_url, "https://mempool.space/signet"),
-            other => panic!("expected MempoolExplorer, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn bitcoind_uses_conf_target() {
-        let mut a = args(BtcioFeePolicyArg::Bitcoind, None, None);
-        a.btcio_conf_target = 4;
-        let cfg = resolve_writer_config(&a).unwrap();
-        assert_eq!(cfg.fee_policy(), &FeePolicy::BitcoinD { conf_target: 4 });
     }
 }
 
