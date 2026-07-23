@@ -1,6 +1,6 @@
 use alpen_ee_common::{
     AccessedStateRecord, Batch, BatchId, BatchStatus, Chunk, ChunkId, ChunkStatus,
-    EeAccountStateAtEpoch, ExecBlockRecord,
+    EeAccountStateAtEpoch, ExecBlockRecord, ForkActivationRecord,
 };
 use strata_acct_types::Hash;
 use strata_db_macros::gen_proxy;
@@ -90,6 +90,14 @@ pub(crate) trait EeNodeDb: Send + Sync + 'static {
 
     /// Get the batch with the highest idx, if it exists.
     fn get_latest_batch(&self) -> DbResult<Option<(Batch, BatchStatus)>>;
+
+    // Fork schedule operations
+
+    /// Persist a derived fork activation, keyed by fork name.
+    fn save_fork_activation(&self, record: ForkActivationRecord) -> DbResult<()>;
+
+    /// Get all persisted fork activations.
+    fn get_fork_activations(&self) -> DbResult<Vec<ForkActivationRecord>>;
 
     // Chunk storage operations
 

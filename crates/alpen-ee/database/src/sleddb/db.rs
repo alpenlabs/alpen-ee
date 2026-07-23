@@ -2,7 +2,7 @@ use std::{error::Error, sync::Arc, thread, time::Duration};
 
 use alpen_ee_common::{
     AccessedStateRecord, Batch, BatchId, BatchStatus, Chunk, ChunkId, ChunkStatus,
-    EeAccountStateAtEpoch, ExecBlockRecord,
+    EeAccountStateAtEpoch, ExecBlockRecord, ForkActivationRecord,
 };
 use strata_acct_types::Hash;
 use strata_db_store_sled::SledDbConfig;
@@ -21,7 +21,7 @@ use crate::{
         BatchByIdxSchema, BatchChunksSchema, BatchIdToIdxSchema, BlockAccessedStateSchema,
         BlockWitnessSchema, BytecodeSchema, ChunkByIdxSchema, ChunkIdToIdxSchema,
         ExecBlockFinalizedSchema, ExecBlockPayloadSchema, ExecBlockSchema,
-        ExecBlocksAtHeightSchema,
+        ExecBlocksAtHeightSchema, ForkActivationSchema,
     },
     DbError, DbResult,
 };
@@ -90,6 +90,7 @@ pub(crate) struct EeNodeDBSled {
     block_accessed_state_tree: SledTree<BlockAccessedStateSchema>,
     bytecode_tree: SledTree<BytecodeSchema>,
     block_witness_tree: SledTree<BlockWitnessSchema>,
+    fork_activation_tree: SledTree<ForkActivationSchema>,
     config: SledDbConfig,
 }
 
@@ -110,6 +111,7 @@ impl EeNodeDBSled {
             block_accessed_state_tree: db.get_tree()?,
             bytecode_tree: db.get_tree()?,
             block_witness_tree: db.get_tree()?,
+            fork_activation_tree: db.get_tree()?,
             config,
         })
     }
@@ -815,6 +817,21 @@ impl EeNodeDb for EeNodeDBSled {
         let (batch, status) = parts_result.map_err(|e| DbError::BatchDeserialize(e.to_string()))?;
 
         Ok(Some((batch, status)))
+    }
+
+    fn save_fork_activation(&self, record: ForkActivationRecord) -> DbResult<()> {
+        self.fork_activation_tree
+            .insert(&record.fork().as_bytes().to_vec(), &record)?;
+        Ok(())
+    }
+
+    fn get_fork_activations(&self) -> DbResult<Vec<ForkActivationRecord>> {
+        let mut records = vec![];
+        for entry in self.fork_activation_tree.iter() {
+            let (_, record) = entry?;
+            records.push(record);
+        }
+        Ok(records)
     }
 
     fn get_latest_batch(&self) -> DbResult<Option<(Batch, BatchStatus)>> {

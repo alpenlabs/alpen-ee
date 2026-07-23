@@ -1,4 +1,4 @@
-use alpen_ee_common::AccessedStateRecord;
+use alpen_ee_common::{AccessedStateRecord, ForkActivationRecord};
 use strata_acct_types::Hash;
 use strata_db_store_sled::{
     define_table_with_default_codec, define_table_without_codec, /* impl_bincode_key_codec, */
@@ -44,6 +44,13 @@ impl_borsh_value_codec!(ExecBlockFinalizedSchema, Hash);
 define_table_with_default_codec!(
     /// ExecBlock payloads
     (ExecBlockPayloadSchema) Hash => Vec<u8>
+);
+
+define_table_with_default_codec!(
+    /// Runtime-derived fork activations, keyed by fork-name bytes. Written
+    /// when the VK-update boundary is crossed; read at boot to rehydrate the
+    /// live chainspec before any block executes.
+    (ForkActivationSchema) Vec<u8> => ForkActivationRecord
 );
 
 // Batch storage schemas

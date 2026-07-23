@@ -3,7 +3,8 @@ use std::{num::NonZeroUsize, sync::Arc};
 use alpen_ee_common::{
     AccessedStateRecord, AccessedStateStore, Batch, BatchId, BatchStatus, BatchStorage,
     BlockWitnessStore, Chunk, ChunkId, ChunkStatus, ChunkStorage, EeAccountStateAtEpoch,
-    ExecBlockPayload, ExecBlockRecord, ExecBlockStorage, OLBlockOrEpoch, Storage, StorageError,
+    ExecBlockPayload, ExecBlockRecord, ExecBlockStorage, ForkActivationRecord,
+    ForkScheduleStorage, OLBlockOrEpoch, Storage, StorageError,
 };
 use async_trait::async_trait;
 use strata_acct_types::Hash;
@@ -214,6 +215,23 @@ impl ExecBlockStorage for EeNodeStorage {
     async fn delete_exec_block(&self, hash: Hash) -> Result<(), StorageError> {
         self.ops
             .delete_exec_block_async(hash)
+            .await
+            .map_err(Into::into)
+    }
+}
+
+#[async_trait]
+impl ForkScheduleStorage for EeNodeStorage {
+    async fn save_fork_activation(&self, record: ForkActivationRecord) -> Result<(), StorageError> {
+        self.ops
+            .save_fork_activation_async(record)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn get_fork_activations(&self) -> Result<Vec<ForkActivationRecord>, StorageError> {
+        self.ops
+            .get_fork_activations_async()
             .await
             .map_err(Into::into)
     }

@@ -3,9 +3,12 @@
 #[cfg(test)]
 use mockall as _;
 
+mod fork_manager;
 mod traits;
 mod types;
 mod utils;
+
+pub use fork_manager::ForkScheduleManager;
 
 #[cfg(feature = "test-utils")]
 pub use traits::{
@@ -31,7 +34,7 @@ pub use traits::{
     storage::{
         require_best_ee_account_state, require_best_finalized_block, require_genesis_batch,
         require_latest_batch, AccessedStateStore, BatchStorage, BlockWitnessStore, ChunkStorage,
-        ExecBlockStorage, OLBlockOrEpoch, Storage, StorageError,
+        ExecBlockStorage, ForkScheduleStorage, OLBlockOrEpoch, Storage, StorageError,
     },
 };
 pub use types::{
@@ -42,6 +45,7 @@ pub use types::{
     consensus_heads::ConsensusHeads,
     ee_account_state::EeAccountStateAtEpoch,
     exec_record::{ExecBlockPayload, ExecBlockRecord},
+    fork::{find_vk_update, decode_predicate_key, ForkActivation, ForkActivationRecord},
     fees::{
         FeeBreakdown, FeeModelConfig, FeeModelError, FeeQuoteInputs, GasEquivalentQuote,
         L1FeeRateSource, DA_OVERHEAD_MULTIPLIER_SCALE_BPS,

@@ -195,6 +195,14 @@ pub(crate) fn apply_decoded_message(
             // Just ignore this one for now because we're not handling it.
             // TODO(STR-3685): support this
         }
+
+        DecodedEeMessageData::VkUpdate(_data) => {
+            // No EE account state changes: the rotation is applied to the
+            // OL-side account when the update consuming this message is
+            // processed, and the EE's fork/proving boundary is derived from
+            // the message's position by the sequencer and batch machinery.
+            // The message only needs to be consumed here.
+        }
     }
 
     Ok(())

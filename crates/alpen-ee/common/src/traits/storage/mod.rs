@@ -5,6 +5,7 @@ mod block_witness;
 mod chunk;
 mod errors;
 mod exec_block;
+mod fork;
 #[cfg(feature = "test-utils")]
 mod in_memory;
 mod utils;
@@ -26,6 +27,7 @@ pub use chunk::ChunkStorage;
 pub use chunk::{tests as chunk_storage_test_fns, MockChunkStorage};
 pub use errors::StorageError;
 pub use exec_block::ExecBlockStorage;
+pub use fork::ForkScheduleStorage;
 #[cfg(feature = "test-utils")]
 pub use exec_block::{exec_block_storage_test_fns, MockExecBlockStorage};
 #[cfg(feature = "test-utils")]
