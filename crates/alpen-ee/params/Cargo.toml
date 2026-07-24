@@ -16,5 +16,7 @@ strata-predicate.workspace = true
 
 alloy-genesis.workspace = true
 reth-chainspec.workspace = true
+reth-ethereum-forks.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true

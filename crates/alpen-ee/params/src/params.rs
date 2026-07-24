@@ -9,7 +9,7 @@ use strata_acct_types::AccountId;
 use strata_bridge_params::BridgeParams;
 use strata_predicate::PredicateKey;
 
-use crate::{AlpenSpecActivations, BlobSpec, EvmSpec};
+use crate::{AlpenSpecActivations, BlobSpec, EvmSpec, PendingUpgrade};
 
 /// Default Alpen EE account id registered in generated OL params.
 pub const DEFAULT_ALPEN_EE_ACCOUNT_ID: AccountId = AccountId::new([1u8; 32]);
@@ -47,6 +47,10 @@ pub struct AlpenParams {
     #[serde(default)]
     spec_activations: AlpenSpecActivations,
 
+    /// Forks this rollout activates at the next VK-update boundary, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pending_upgrade: Option<PendingUpgrade>,
+
     /// Embedded EVM chain spec (genesis document + fork configuration).
     evm_spec: EvmSpec,
 }
@@ -59,6 +63,7 @@ impl AlpenParams {
         bridge_params: BridgeParams,
         blob_spec: BlobSpec,
         spec_activations: AlpenSpecActivations,
+        pending_upgrade: Option<PendingUpgrade>,
         evm_spec: EvmSpec,
     ) -> Self {
         Self {
@@ -67,6 +72,7 @@ impl AlpenParams {
             bridge_params,
             blob_spec,
             spec_activations,
+            pending_upgrade,
             evm_spec,
         }
     }
@@ -106,6 +112,11 @@ impl AlpenParams {
         &self.spec_activations
     }
 
+    /// Returns the pending upgrade declaration, if any.
+    pub fn pending_upgrade(&self) -> Option<&PendingUpgrade> {
+        self.pending_upgrade.as_ref()
+    }
+
     /// Returns the embedded EVM chain spec.
     pub fn evm_spec(&self) -> &EvmSpec {
         &self.evm_spec
@@ -143,6 +154,7 @@ mod tests {
                 .expect("valid bridge params"),
             BlobSpec::new(MagicBytes::new(*b"ALPN")),
             AlpenSpecActivations::default(),
+            None,
             evm_spec,
         )
     }

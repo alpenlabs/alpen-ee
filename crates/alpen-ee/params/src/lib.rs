@@ -11,8 +11,10 @@ mod blob_spec;
 mod evm_spec;
 mod params;
 mod spec_activations;
+mod upgrade;
 
 pub use blob_spec::BlobSpec;
 pub use evm_spec::EvmSpec;
 pub use params::{AlpenParams, DEFAULT_ALPEN_EE_ACCOUNT_ID};
 pub use spec_activations::{AlpenSpecActivations, AlpenSpecId};
+pub use upgrade::{EvmForkName, PendingUpgrade, PendingUpgradeError};

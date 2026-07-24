@@ -1366,12 +1366,14 @@ dependencies = [
  "alloy-genesis",
  "alpen-chainspec",
  "reth-chainspec",
+ "reth-ethereum-forks",
  "serde",
  "serde_json",
  "strata-acct-types",
  "strata-bridge-params",
  "strata-l1-txfmt",
  "strata-predicate",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
