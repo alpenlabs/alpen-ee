@@ -32,25 +32,21 @@ updates:
     # Cooldown
     cooldown:
       default-days: 14
+    # The reth/alloy/revm/rsp family is version-locked together (reth is a
+    # pinned git tag and rsp tags track specific reth releases), so upgrading
+    # any of them requires a coordinated migration of all four plus code
+    # changes. Dependabot cannot do that, so its PRs for these deps can never
+    # compile — ignore them and upgrade the family deliberately instead.
+    ignore:
+      - dependency-name: "reth*"
+      - dependency-name: "alloy*"
+      - dependency-name: "revm*"
+      - dependency-name: "rsp-*"
     # Group non-security updates
     groups:
       rust-dependencies:
         patterns:
           - "*"
-        exclude-patterns:
-          # Keep reth updates separate due to version pinning requirements
-          - "reth*"
-          - "alloy-*"
-          - "revm*"
-        update-types:
-          - "minor"
-          - "patch"
-      # Keep major framework dependencies separate for careful review
-      reth-ecosystem:
-        patterns:
-          - "reth*"
-          - "alloy-*"
-          - "revm*"
         update-types:
           - "minor"
           - "patch"
@@ -60,46 +56,12 @@ updates:
       prefix: "chore(deps)"
       include: "scope"
 
-  # SP1 guest programs (standalone workspaces, not workspace members)
-  - package-ecosystem: "cargo"
-    directory: "/provers/sp1/guest-alpen-chunk"
-    schedule:
-      interval: "monthly"
-      time: "00:00"
-    # Cooldown
-    cooldown:
-      default-days: 14
-    groups:
-      sp1-guest-programs:
-        patterns:
-          - "*"
-        update-types:
-          - "minor"
-          - "patch"
-    open-pull-requests-limit: 10
-    commit-message:
-      prefix: "chore(deps)"
-      include: "scope"
-
-  - package-ecosystem: "cargo"
-    directory: "/provers/sp1/guest-alpen-acct"
-    schedule:
-      interval: "monthly"
-      time: "00:00"
-    # Cooldown
-    cooldown:
-      default-days: 14
-    groups:
-      sp1-guest-programs:
-        patterns:
-          - "*"
-        update-types:
-          - "minor"
-          - "patch"
-    open-pull-requests-limit: 10
-    commit-message:
-      prefix: "chore(deps)"
-      include: "scope"
+  # SP1 guest programs (/provers/sp1/guest-*) are intentionally NOT covered:
+  # their manifests only contain path deps into the workspace and pinned
+  # sp1-patches git tags, so anything dependabot can touch is a transitive
+  # lockfile entry whose version is dictated by the workspace pins. Any guest
+  # lockfile change also alters the guest ELF and proof verification keys, so
+  # guest deps are updated deliberately alongside workspace upgrades.
 
   # Python dependencies using uv
   - package-ecosystem: "uv"
