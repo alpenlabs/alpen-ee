@@ -7,6 +7,7 @@ use reth_chainspec::ChainSpec;
 use serde::{Deserialize, Serialize};
 use strata_acct_types::AccountId;
 use strata_bridge_params::BridgeParams;
+use strata_predicate::PredicateKey;
 
 use crate::{AlpenSpecActivations, BlobSpec, EvmSpec};
 
@@ -29,6 +30,13 @@ pub struct AlpenParams {
     /// Account id of the EE in OL. Fork-invariant.
     account_id: AccountId,
 
+    /// The account's update predicate key (VK) at genesis.
+    ///
+    /// Batches are proven under the VK in effect when they are sealed; this
+    /// is the VK in effect before any rotation. Serialized in the standard
+    /// predicate string form, e.g. `"Bip340Schnorr:<hex>"`.
+    genesis_update_vk: PredicateKey,
+
     /// Bridge denomination and withdrawal policy.
     bridge_params: BridgeParams,
 
@@ -47,6 +55,7 @@ impl AlpenParams {
     /// Creates new chain params.
     pub fn new(
         account_id: AccountId,
+        genesis_update_vk: PredicateKey,
         bridge_params: BridgeParams,
         blob_spec: BlobSpec,
         spec_activations: AlpenSpecActivations,
@@ -54,6 +63,7 @@ impl AlpenParams {
     ) -> Self {
         Self {
             account_id,
+            genesis_update_vk,
             bridge_params,
             blob_spec,
             spec_activations,
@@ -74,6 +84,11 @@ impl AlpenParams {
     /// Returns the EE account ID in the OL chain.
     pub fn account_id(&self) -> AccountId {
         self.account_id
+    }
+
+    /// Returns the account's genesis update predicate key.
+    pub fn genesis_update_vk(&self) -> &PredicateKey {
+        &self.genesis_update_vk
     }
 
     /// Returns the bridge denomination and withdrawal policy.
@@ -113,6 +128,7 @@ mod tests {
     use serde_json::{json, Value};
     use strata_bridge_params::BridgeParams;
     use strata_l1_txfmt::MagicBytes;
+    use strata_predicate::PredicateKey;
 
     use super::{AlpenParams, DEFAULT_ALPEN_EE_ACCOUNT_ID};
     use crate::{AlpenSpecActivations, BlobSpec, EvmSpec};
@@ -122,6 +138,7 @@ mod tests {
             serde_json::from_str(DEV_CHAIN_SPEC).expect("dev chain should parse");
         AlpenParams::new(
             DEFAULT_ALPEN_EE_ACCOUNT_ID,
+            PredicateKey::always_accept(),
             BridgeParams::new_with_descriptor_limit(100_000_000, Some(1_000_000_000), 81)
                 .expect("valid bridge params"),
             BlobSpec::new(MagicBytes::new(*b"ALPN")),

@@ -1371,6 +1371,7 @@ dependencies = [
  "strata-acct-types",
  "strata-bridge-params",
  "strata-l1-txfmt",
+ "strata-predicate",
 ]
 
 [[package]]
