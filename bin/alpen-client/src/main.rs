@@ -39,13 +39,13 @@ use alpen_chainspec::{
 };
 use alpen_ee_common::{
     chain_status_checked, BatchStorage, BlockNumHash, ChunkStorage, ExecBlockStorage, OLClient,
-    Storage,
+    SequencerOLClient, Storage,
 };
 use alpen_ee_config::{AlpenEeConfig, AlpenEeParams};
 use alpen_ee_database::init_db_storage;
 use alpen_ee_engine::{create_engine_control_task, sync_chainstate_to_engine, AlpenRethExecEngine};
 #[cfg(feature = "sequencer")]
-use alpen_ee_exec_chain::init_exec_chain_state_from_storage;
+use alpen_ee_exec_chain::{init_exec_chain_state_from_storage, ExecChainState};
 #[cfg(feature = "sequencer")]
 use alpen_ee_genesis::ensure_finalized_exec_chain_genesis;
 use alpen_ee_genesis::{ensure_batch_genesis, ensure_genesis_ee_account_state};
@@ -53,9 +53,10 @@ use alpen_ee_ol_tracker::init_ol_tracker_state;
 use alpen_ee_rpc_server::{AlpenEeRpcServer, EeRpcServer};
 #[cfg(feature = "sequencer")]
 use alpen_ee_sequencer::{
-    block_builder_task, build_ol_chain_tracker, init_ol_chain_tracker_state, BlockBuilderConfig,
+    block_builder_task, build_ol_chain_tracker, init_batch_builder_state, init_lifecycle_state,
+    init_ol_chain_tracker_state, sealing_policy::block_count_policy::BlockCountPolicy,
+    BatchBuilderState, BatchLifecycleState, BlockBuilderConfig, OLChainTrackerState,
 };
-use alpen_ee_sequencer::{init_batch_builder_state, init_lifecycle_state};
 use alpen_reth_evm::evm::AlpenEvmFactory;
 #[cfg(feature = "sequencer")]
 use alpen_reth_exex::{AccessedStateGenerator, StateDiffGenerator};
@@ -114,12 +115,14 @@ mod sequencer_imports {
     };
     pub(super) use alpen_reth_witness::RangeWitnessExtractor;
     pub(super) use strata_paas::{
-        ProverBuilder, ProverServiceBuilder, ReceiptStore, RetryConfig, TaskStore,
+        Prover, ProverBuilder, ProverHandle, ProverServiceBuilder, ReceiptStore, RetryConfig,
+        TaskStore,
     };
     pub(super) use strata_proofimpl_alpen_acct::EeAcctProgram;
     pub(super) use strata_proofimpl_alpen_chunk::EeChunkProgram;
     pub(super) use strata_proofimpl_predicate_keys::{
-        NativeAlpenChunkPredicateKey, PredicateKeyProvider,
+        validate_expected_predicate_key, NativeAlpenAcctPredicateKey, NativeAlpenChunkPredicateKey,
+        PredicateKeyProvider, Sp1Groth16PredicateKey,
     };
     #[cfg(feature = "sp1")]
     pub(super) use strata_zkvm_hosts::sp1::{alpen_acct_host, alpen_chunk_host};
@@ -167,6 +170,18 @@ const DEFAULT_SP1_DEADLINE_SECS: u64 = 4 * 60 * 60;
 /// Default capacity for the batch builder → chunk builder event channel.
 #[cfg(feature = "sequencer")]
 const DEFAULT_BATCH_EVENT_CHANNEL_CAPACITY: usize = 64;
+
+/// Startup state that only the EE sequencer needs.
+///
+/// Bundled into one value so it can be gated behind a single runtime
+/// `--sequencer` check and carried as a single `Option`.
+#[cfg(feature = "sequencer")]
+struct SequencerBootState {
+    ol_chain_tracker: OLChainTrackerState,
+    exec_chain: ExecChainState,
+    batch_builder: BatchBuilderState<BlockCountPolicy>,
+    batch_lifecycle: BatchLifecycleState,
+}
 
 fn main() {
     sigsegv_handler::install();
@@ -327,10 +342,15 @@ fn main() {
                 .await
                 .context("failed to fetch account genesis epoch from OL")?;
 
-            ensure_genesis(config.as_ref(), &genesis_epoch, storage.as_ref())
-                .instrument(info_span!("ensure_genesis", component = "alpen"))
-                .await
-                .context("genesis should not fail")?;
+            ensure_genesis(
+                config.as_ref(),
+                &genesis_epoch,
+                storage.as_ref(),
+                ext.sequencer,
+            )
+            .instrument(info_span!("ensure_genesis", component = "alpen"))
+            .await
+            .context("genesis should not fail")?;
 
             let ol_chain_status = chain_status_checked(ol_client.as_ref())
                 .instrument(info_span!("chain_status_check", component = "alpen"))
@@ -342,24 +362,41 @@ fn main() {
                 .await
                 .context("ol tracker state initialization should not fail")?;
 
+            // Sequencer-only startup state. Gated on the runtime `--sequencer` flag.
             #[cfg(feature = "sequencer")]
-            let ol_chain_tracker_state =
-                init_ol_chain_tracker_state(storage.as_ref(), ol_client.as_ref())
-                    .instrument(info_span!("init_ol_chain_tracker", component = "alpen"))
+            let sequencer_boot_state = if ext.sequencer {
+                let ol_chain_tracker =
+                    init_ol_chain_tracker_state(storage.as_ref(), ol_client.as_ref())
+                        .instrument(info_span!("init_ol_chain_tracker", component = "alpen"))
+                        .await
+                        .context("ol chain tracker state initialization should not fail")?;
+                let exec_chain = init_exec_chain_state_from_storage(storage.as_ref())
+                    .instrument(info_span!("init_exec_chain", component = "alpen"))
                     .await
-                    .context("ol chain tracker state initialization should not fail")?;
-
-            #[cfg(feature = "sequencer")]
-            let exec_chain_state = init_exec_chain_state_from_storage(storage.as_ref())
-                .instrument(info_span!("init_exec_chain", component = "alpen"))
-                .await
-                .context("exec chain state initialization should not fail")?;
+                    .context("exec chain state initialization should not fail")?;
+                let batch_builder = init_batch_builder_state(storage.as_ref())
+                    .instrument(info_span!("init_batch_builder", component = "alpen"))
+                    .await
+                    .context("batch builder state initialization should not fail")?;
+                let batch_lifecycle = init_lifecycle_state(storage.as_ref())
+                    .instrument(info_span!("init_lifecycle", component = "alpen"))
+                    .await
+                    .context("batch lifecycle state initialization should not fail")?;
+                Some(SequencerBootState {
+                    ol_chain_tracker,
+                    exec_chain,
+                    batch_builder,
+                    batch_lifecycle,
+                })
+            } else {
+                None
+            };
 
             let initial_preconf_head = {
                 #[cfg(feature = "sequencer")]
                 {
-                    if ext.sequencer {
-                        exec_chain_state.tip_blocknumhash()
+                    if let Some(boot) = sequencer_boot_state.as_ref() {
+                        boot.exec_chain.tip_blocknumhash()
                     } else {
                         // In non-sequencer mode, we only have the hash from OL tracker.
                         // Use block number 0 as initial value; it will be updated by gossip.
@@ -375,16 +412,6 @@ fn main() {
                     BlockNumHash::new(hash, 0)
                 }
             };
-
-            let batch_builder_state = init_batch_builder_state(storage.as_ref())
-                .instrument(info_span!("init_batch_builder", component = "alpen"))
-                .await
-                .context("batch builder state initialization should not fail")?;
-
-            let batch_lifecycle_state = init_lifecycle_state(storage.as_ref())
-                .instrument(info_span!("init_lifecycle", component = "alpen"))
-                .await
-                .context("batch lifecycle state initialization should not fail")?;
             // --- INITIALIZE SERVICES ---
 
             // Create gossip channel before building the node so we can register it early
@@ -525,7 +552,13 @@ fn main() {
             );
 
             #[cfg(feature = "sequencer")]
-            if ext.sequencer {
+            if let Some(SequencerBootState {
+                ol_chain_tracker: ol_chain_tracker_state,
+                exec_chain: exec_chain_state,
+                batch_builder: batch_builder_state,
+                batch_lifecycle: batch_lifecycle_state,
+            }) = sequencer_boot_state
+            {
                 // sequencer specific tasks
 
                 use alpen_ee_common::{require_latest_batch, BlockNumHash};
@@ -776,67 +809,27 @@ fn main() {
                 ))
                 .retry(RetryConfig::default());
 
-                // Dev/test escape hatch: use zkaleido NativeHost instead of
-                // the SP1 remote host. This skips real Groth16 proving and
-                // the need for compiled guest ELFs — only safe for
-                // functional tests. The acct program is wired with the
-                // chunk program's deterministic test predicate key so the
-                // native-host Schnorr signature actually verifies.
-                let (chunk_prover, acct_prover) = if ext.dev_native_prover {
-                    info!(target: "alpen-client", component = "alpen", "EE chunk + acct provers: native host (dev/test only)");
-                    let chunk = chunk_builder.native(EeChunkProgram::native_host());
-                    let chunk_predicate_key = NativeAlpenChunkPredicateKey
-                        .predicate_key()
-                        .expect("native chunk predicate key must be available");
-                    let acct_program = EeAcctProgram::new(chunk_predicate_key);
-                    let acct = acct_builder.native(acct_program.native_host());
-                    (chunk, acct)
-                } else {
-                    #[cfg(feature = "sp1")]
-                    {
-                        let deadline_secs = ext
-                            .sp1_proof_deadline_secs
-                            .unwrap_or(DEFAULT_SP1_DEADLINE_SECS);
-                        let deadline = Duration::from_secs(deadline_secs);
-                        info!(target: "alpen-client", component = "alpen", deadline_secs, "sp1 EE prover deadline configured");
-                        let sp1_config = SP1HostConfig::default().with_deadline(deadline);
-                        let chunk_host: SP1Host =
-                            (**alpen_chunk_host(sp1_config.clone()).await).clone();
-                        let acct_host: SP1Host = (**alpen_acct_host(sp1_config).await).clone();
-                        (
-                            chunk_builder.remote(chunk_host),
-                            acct_builder.remote(acct_host),
-                        )
-                    }
-                    #[cfg(not(feature = "sp1"))]
-                    {
-                        return Err(eyre::eyre!(
-                            "remote SP1 prover is not compiled in; pass --dev-native-prover \
-                             or build with the `sp1` feature"
-                        ));
-                    }
-                };
+                let batch_prover = launch_validated_ee_batch_prover(
+                    ol_client.as_ref(),
+                    &service_executor,
+                    EeProverBuilders {
+                        chunk: chunk_builder,
+                        account: acct_builder,
+                    },
+                    EeProverStores {
+                        chunk_storage: chunk_storage_dyn,
+                        batch_proofs,
+                    },
+                    ext.dev_native_prover,
+                    ext.sp1_proof_deadline_secs,
+                )
+                .await?;
 
-                let prover_tick = Duration::from_secs(5);
-                let chunk_handle = ProverServiceBuilder::new(chunk_prover)
-                    .tick_interval(prover_tick)
-                    .launch(&service_executor)
-                    .await
-                    .map_err(|e| eyre::eyre!("launching chunk prover service: {e}"))?;
-                let acct_handle = ProverServiceBuilder::new(acct_prover)
-                    .tick_interval(prover_tick)
-                    .launch(&service_executor)
-                    .await
-                    .map_err(|e| eyre::eyre!("launching acct prover service: {e}"))?;
-
-                let batch_prover = Arc::new(PaasBatchProver::new(
-                    chunk_handle,
-                    acct_handle,
-                    chunk_storage_dyn,
-                    batch_proofs,
-                ));
-
-                info!(target: "alpen-client", component = "alpen", "EE chunk + acct paas provers started (SP1 remote)");
+                info!(
+                    target: "alpen-client",
+                    component = "alpen",
+                    "EE chunk + acct paas provers started"
+                );
 
                 let (batch_lifecycle_handle, batch_lifecycle_task) = create_batch_lifecycle_task(
                     None,
@@ -1256,8 +1249,174 @@ fn validate_ee_params_genesis(
     Ok(())
 }
 
+#[cfg(feature = "sequencer")]
+async fn launch_validated_ee_batch_prover(
+    ol_client: &(impl SequencerOLClient + Send + Sync),
+    service_executor: &ServiceExecutor,
+    builders: EeProverBuilders,
+    stores: EeProverStores,
+    use_native_prover: bool,
+    sp1_deadline_secs: Option<u64>,
+) -> eyre::Result<Arc<PaasBatchProver>> {
+    let ol_account_update_vk = ol_client
+        .get_latest_account_update_vk()
+        .await
+        .context("failed to fetch OL account update_vk for prover validation")?;
+    let backend = if use_native_prover {
+        EeProverBackend::Native
+    } else {
+        EeProverBackend::Sp1 {
+            deadline_secs: sp1_deadline_secs,
+        }
+    };
+    let prover_config = build_ee_prover_config(builders, backend).await?;
+
+    validate_ee_account_prover_predicate_key(
+        &ol_account_update_vk,
+        &prover_config.account_predicate_key,
+    )?;
+
+    let (chunk_handle, acct_handle) =
+        launch_ee_prover_services(service_executor, prover_config.provers).await?;
+
+    Ok(Arc::new(PaasBatchProver::new(
+        chunk_handle,
+        acct_handle,
+        stores.chunk_storage,
+        stores.batch_proofs,
+    )))
+}
+
+#[cfg(feature = "sequencer")]
+struct EeProverBuilders {
+    chunk: ProverBuilder<ChunkSpec>,
+    account: ProverBuilder<AcctSpec>,
+}
+
+#[cfg(feature = "sequencer")]
+struct EeProverStores {
+    chunk_storage: Arc<dyn ChunkStorage>,
+    batch_proofs: Arc<EeBatchProofDbManager>,
+}
+
+#[cfg(feature = "sequencer")]
+struct EeProverConfig {
+    provers: EeProvers,
+    account_predicate_key: PredicateKey,
+}
+
+#[cfg(feature = "sequencer")]
+struct EeProvers {
+    chunk: Prover<ChunkSpec>,
+    account: Prover<AcctSpec>,
+}
+
+#[cfg(feature = "sequencer")]
+enum EeProverBackend {
+    Native,
+    Sp1 { deadline_secs: Option<u64> },
+}
+
+#[cfg(feature = "sequencer")]
+async fn build_ee_prover_config(
+    builders: EeProverBuilders,
+    backend: EeProverBackend,
+) -> eyre::Result<EeProverConfig> {
+    match backend {
+        EeProverBackend::Native => {
+            info!(
+                target: "alpen-client",
+                "EE chunk + acct provers: native host (dev/test only)"
+            );
+
+            let chunk = builders.chunk.native(EeChunkProgram::native_host());
+            let chunk_predicate_key = NativeAlpenChunkPredicateKey
+                .predicate_key()
+                .expect("native chunk predicate key must be available");
+            let acct_program = EeAcctProgram::new(chunk_predicate_key);
+            let account = builders.account.native(acct_program.native_host());
+            let account_predicate_key = NativeAlpenAcctPredicateKey
+                .predicate_key()
+                .expect("native account predicate key must be available");
+
+            Ok(EeProverConfig {
+                provers: EeProvers { chunk, account },
+                account_predicate_key,
+            })
+        }
+        #[cfg(feature = "sp1")]
+        EeProverBackend::Sp1 { deadline_secs } => {
+            use zkaleido::ZkVmExecutor;
+
+            let deadline_secs = deadline_secs.unwrap_or(DEFAULT_SP1_DEADLINE_SECS);
+            let deadline = Duration::from_secs(deadline_secs);
+            info!(
+                target: "alpen-client",
+                deadline_secs,
+                "sp1 EE prover deadline configured"
+            );
+
+            let sp1_config = SP1HostConfig::default().with_deadline(deadline);
+            let chunk_host: SP1Host = (**alpen_chunk_host(sp1_config.clone()).await).clone();
+            let acct_host: SP1Host = (**alpen_acct_host(sp1_config).await).clone();
+            let account_predicate_key = Sp1Groth16PredicateKey::new(acct_host.program_id().0)
+                .predicate_key()
+                .map_err(|e| {
+                    eyre::eyre!("failed to derive local SP1 account prover predicate key: {e}")
+                })?;
+
+            Ok(EeProverConfig {
+                provers: EeProvers {
+                    chunk: builders.chunk.remote(chunk_host),
+                    account: builders.account.remote(acct_host),
+                },
+                account_predicate_key,
+            })
+        }
+        #[cfg(not(feature = "sp1"))]
+        EeProverBackend::Sp1 { .. } => Err(eyre::eyre!(
+            "remote SP1 prover is not compiled in; pass --dev-native-prover \
+             or build with the `sp1` feature"
+        )),
+    }
+}
+
+#[cfg(feature = "sequencer")]
+async fn launch_ee_prover_services(
+    service_executor: &ServiceExecutor,
+    provers: EeProvers,
+) -> eyre::Result<(ProverHandle<ChunkSpec>, ProverHandle<AcctSpec>)> {
+    let prover_tick = Duration::from_secs(5);
+    let chunk_handle = ProverServiceBuilder::new(provers.chunk)
+        .tick_interval(prover_tick)
+        .launch(service_executor)
+        .await
+        .map_err(|e| eyre::eyre!("launching chunk prover service: {e}"))?;
+    let acct_handle = ProverServiceBuilder::new(provers.account)
+        .tick_interval(prover_tick)
+        .launch(service_executor)
+        .await
+        .map_err(|e| eyre::eyre!("launching acct prover service: {e}"))?;
+
+    Ok((chunk_handle, acct_handle))
+}
+
+#[cfg(feature = "sequencer")]
+fn validate_ee_account_prover_predicate_key(
+    ol_update_vk: &PredicateKey,
+    local_predicate_key: &PredicateKey,
+) -> eyre::Result<()> {
+    validate_expected_predicate_key(ol_update_vk, local_predicate_key).map_err(|e| {
+        eyre::eyre!(
+            "OL account update_vk does not match local EE account prover predicate key: {e}"
+        )
+    })
+}
+
 #[cfg(test)]
 mod additional_config_tests {
+    use strata_predicate::PredicateTypeId;
+
     use super::*;
 
     const SEQUENCER_PUBKEY: &str =
@@ -1290,6 +1449,28 @@ mod additional_config_tests {
         let config = parse_additional_config(&["--max-withdrawal-descriptor-len", "100"]);
 
         assert_eq!(config.max_withdrawal_descriptor_len, 100);
+    }
+
+    #[cfg(feature = "sequencer")]
+    #[test]
+    fn ee_account_prover_predicate_key_validation_accepts_match() {
+        let predicate = PredicateKey::new(PredicateTypeId::Bip340Schnorr, vec![1, 2, 3]);
+
+        validate_ee_account_prover_predicate_key(&predicate, &predicate).unwrap();
+    }
+
+    #[cfg(feature = "sequencer")]
+    #[test]
+    fn ee_account_prover_predicate_key_validation_rejects_mismatch() {
+        let ol_update_vk = PredicateKey::new(PredicateTypeId::Bip340Schnorr, vec![1, 2, 3]);
+        let local_predicate_key = PredicateKey::new(PredicateTypeId::Sp1Groth16, vec![4, 5, 6]);
+
+        let err = validate_ee_account_prover_predicate_key(&ol_update_vk, &local_predicate_key)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("OL account update_vk does not match local EE account prover"));
+        assert!(err.contains("predicate key mismatch"));
     }
 }
 
@@ -1651,12 +1832,18 @@ async fn ensure_genesis<TStorage: Storage + ExecBlockStorage + BatchStorage>(
     config: &AlpenEeConfig,
     genesis_epoch: &EpochCommitment,
     storage: &TStorage,
+    is_sequencer: bool,
 ) -> eyre::Result<()> {
     ensure_genesis_ee_account_state(config, genesis_epoch, storage).await?;
+
     #[cfg(feature = "sequencer")]
-    ensure_finalized_exec_chain_genesis(config, genesis_epoch.to_block_commitment(), storage)
-        .await?;
-    #[cfg(feature = "sequencer")]
-    ensure_batch_genesis(config, storage).await?;
+    if is_sequencer {
+        ensure_finalized_exec_chain_genesis(config, genesis_epoch.to_block_commitment(), storage)
+            .await?;
+        ensure_batch_genesis(config, storage).await?;
+    }
+    #[cfg(not(feature = "sequencer"))]
+    let _ = is_sequencer;
+
     Ok(())
 }

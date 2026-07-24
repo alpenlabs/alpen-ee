@@ -1016,11 +1016,9 @@ dependencies = [
  "rand_core 0.6.4",
  "reqwest 0.12.28",
  "serde",
- "serde_json",
  "sha2",
  "shrex",
  "sled",
- "strata-asm-params",
  "strata-asm-proto-bridge-v1-txs",
  "strata-bridge-params",
  "strata-cli-common",
@@ -1166,6 +1164,7 @@ dependencies = [
  "strata-ee-acct-types",
  "strata-ee-chain-types",
  "strata-identifiers",
+ "strata-predicate",
  "strata-snark-acct-types",
  "thiserror 2.0.18",
  "tokio",
@@ -1573,6 +1572,7 @@ dependencies = [
 name = "alpen-reth-statediff"
 version = "0.3.0-alpha.1"
 dependencies = [
+ "alloy-genesis",
  "alloy-primitives",
  "alpen-chainspec",
  "bincode",
@@ -1585,6 +1585,7 @@ dependencies = [
  "serde_json",
  "strata-codec",
  "strata-da-framework",
+ "strata-identifiers",
  "strata-mpt",
  "thiserror 2.0.18",
 ]
@@ -14493,23 +14494,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tree_hash 0.16.0",
  "tree_hash_derive 0.16.0",
-]
-
-[[package]]
-name = "strata-asm-params"
-version = "0.1.0"
-source = "git+https://github.com/alpenlabs/asm?tag=v0.3.0-rc.2#45a1fa2f52289b483dd9767b4ec9c80545d5789b"
-dependencies = [
- "serde",
- "ssz",
- "ssz_derive",
- "strata-asm-proto-bridge-v1-types",
- "strata-btc-types",
- "strata-btc-verification",
- "strata-crypto",
- "strata-identifiers",
- "strata-l1-txfmt",
- "strata-predicate",
 ]
 
 [[package]]
