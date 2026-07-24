@@ -18,8 +18,6 @@
 //!
 //! - **`SP1_SKIP_PROGRAM_BUILD`** — when set to `true`, skip guest compilation (the same variable
 //!   sp1-build honors internally).
-//! - **`ZKVM_MOCK`** — when set to `1`/`true`, guests are built with the `mock-verify` feature so
-//!   recursive proof verification becomes a no-op. Never use in production.
 
 use std::{env, fs, path::Path};
 
@@ -38,7 +36,6 @@ const ALPEN_ACCT: &str = "guest-alpen-acct";
 
 fn main() {
     println!("cargo:rerun-if-env-changed=SP1_SKIP_PROGRAM_BUILD");
-    println!("cargo:rerun-if-env-changed=ZKVM_MOCK");
 
     if skip_elf_build() {
         println!(
@@ -47,20 +44,17 @@ fn main() {
         return;
     }
 
-    let features = guest_features();
-
     // The account guest embeds the chunk guest's verifying key, so the chunk
     // guest must be built (and its VK derived) first.
-    build_guest(ALPEN_CHUNK, &features);
+    build_guest(ALPEN_CHUNK);
     write_acct_vks(&chunk_vk_condition());
-    build_guest(ALPEN_ACCT, &features);
+    build_guest(ALPEN_ACCT);
 }
 
-fn build_guest(program: &str, features: &[String]) {
+fn build_guest(program: &str) {
     let build_args = BuildArgs {
         output_directory: Some(ELFS_DIR.to_owned()),
         elf_name: Some(format!("{program}.elf")),
-        features: features.to_vec(),
         #[cfg(feature = "docker-build")]
         docker: true,
         // Override the guest's workspace root with the repo root so Docker
@@ -102,22 +96,6 @@ fn write_acct_vks(condition: &[u8]) {
     );
     let vks_path = Path::new(ALPEN_ACCT).join("src").join("vks.rs");
     fs::write(&vks_path, content).unwrap_or_else(|e| panic!("write {}: {e}", vks_path.display()));
-}
-
-/// Returns the guest cargo features implied by `ZKVM_MOCK`.
-fn guest_features() -> Vec<String> {
-    let mock = env::var("ZKVM_MOCK")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false);
-
-    if mock {
-        println!("cargo:warning=ZKVM_MOCK is set. ----------------------------------------");
-        println!("cargo:warning=ZKVM_MOCK is set. This should never be used in production.");
-        println!("cargo:warning=ZKVM_MOCK is set. ----------------------------------------");
-        vec!["mock-verify".to_owned()]
-    } else {
-        vec!["zkvm-verify".to_owned()]
-    }
 }
 
 /// Returns `true` when sp1-build itself would skip the build — under

@@ -88,7 +88,7 @@ jobs:
 
       - name: Run performance evaluation
         run: |
-          RUST_LOG=info SP1_PROVER=light ZKVM_MOCK=1 cargo run --profile prover-ci -- \
+          RUST_LOG=info SP1_PROVER=light cargo run --profile prover-ci -- \
           --post-to-gh \
           --github-token "${{ secrets.GITHUB_TOKEN }}" \
           --pr-number "${{ github.event.pull_request.number }}" \

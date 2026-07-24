@@ -30,5 +30,3 @@ condition bytes are code-generated into `guest-alpen-acct/src/vks.rs`
 
 - `docker-build` — compile the guests inside Docker for reproducible ELFs.
 - `SP1_SKIP_PROGRAM_BUILD=true` — skip guest compilation.
-- `ZKVM_MOCK=1` — build the guests with `mock-verify` so recursive proof
-  verification is a no-op. Testing only; never use in production.
