@@ -252,8 +252,8 @@ data/
 jwt.hex
 seq_key.bin
 
-# the proof verification key generated at build time
-provers/**/vks.rs
+# the proof predicate conditions generated at build time
+provers/**/predicates.rs
 
 # Prover generated files
 provers/**/*.elf
