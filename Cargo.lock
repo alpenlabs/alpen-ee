@@ -15693,7 +15693,6 @@ dependencies = [
 name = "strata-sp1-guest-builder"
 version = "0.3.0-alpha.1"
 dependencies = [
- "cfg-if",
  "sp1-build",
  "sp1-sdk",
  "sp1-verifier",

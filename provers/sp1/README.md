@@ -5,15 +5,16 @@ the compiled ELFs to host crates via `strata_sp1_guest_builder::GUEST_*_ELF`.
 
 ## Building
 
-Guest compilation only happens in release builds with the `sp1-dev` feature and
-requires the [SP1 toolchain](https://docs.succinct.xyz/docs/sp1/getting-started/install):
+Building this crate compiles the guest programs, which requires the
+[SP1 toolchain](https://docs.succinct.xyz/docs/sp1/getting-started/install):
 
 ```sh
-cargo build --release -p strata-sp1-guest-builder --features sp1-dev
+cargo build --release -p strata-sp1-guest-builder
 ```
 
-Plain debug builds (and clippy) skip guest compilation entirely, so everyday
-development doesn't need the SP1 toolchain.
+To build without the SP1 toolchain (e.g. when running workspace-wide tests or
+docs), skip guest compilation with `SP1_SKIP_PROGRAM_BUILD=true`. Clippy skips
+it automatically.
 
 ELFs are written to `provers/sp1/elfs/` (gitignored), a stable location that
 survives `cargo clean`.
@@ -27,7 +28,7 @@ condition bytes are code-generated into `guest-alpen-acct/src/vks.rs`
 
 ## Features and environment variables
 
-- `sp1-dev` — actually build the guests (see above).
 - `docker-build` — compile the guests inside Docker for reproducible ELFs.
+- `SP1_SKIP_PROGRAM_BUILD=true` — skip guest compilation.
 - `ZKVM_MOCK=1` — build the guests with `mock-verify` so recursive proof
   verification is a no-op. Testing only; never use in production.

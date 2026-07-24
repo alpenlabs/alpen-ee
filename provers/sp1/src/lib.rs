@@ -1,7 +1,7 @@
 //! Exposes the SP1 guest ELFs compiled by this crate's build script.
 //!
-//! The build script emits ELFs to `<crate>/elfs/` only in release builds with the
-//! `sp1-dev` feature; accessing these statics in any other build panics.
+//! The build script emits ELFs to `<crate>/elfs/`; accessing these static items after
+//! a build that skipped guest compilation (`SP1_SKIP_PROGRAM_BUILD=true`) panics.
 
 use std::{fs, sync::LazyLock};
 
@@ -16,6 +16,6 @@ pub static GUEST_ALPEN_ACCT_ELF: LazyLock<Vec<u8>> = LazyLock::new(|| read_elf("
 fn read_elf(program: &str) -> Vec<u8> {
     let path = format!("{ELFS_DIR}/{program}.elf");
     fs::read(&path).unwrap_or_else(|e| {
-        panic!("cannot read guest ELF {path}: {e}; build with --release --features sp1-dev")
+        panic!("cannot read guest ELF {path}: {e}; rebuild without SP1_SKIP_PROGRAM_BUILD")
     })
 }
