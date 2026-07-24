@@ -1367,6 +1367,8 @@ dependencies = [
  "reth-chainspec",
  "serde",
  "serde_json",
+ "strata-acct-types",
+ "strata-bridge-params",
  "strata-l1-txfmt",
  "thiserror 2.0.18",
 ]
