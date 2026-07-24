@@ -1,411 +1,143 @@
-use std::{
-    collections::{HashMap, HashSet},
-    env, fs,
-    path::{Path, PathBuf},
-};
+//! Build script for the SP1 guest programs (`guest-alpen-chunk`, `guest-alpen-acct`).
+//!
+//! Guests are built sequentially in dependency order: the account guest verifies chunk
+//! proofs, so the chunk guest's Groth16 verifying-key condition bytes are code-generated
+//! into `guest-alpen-acct/src/vks.rs` between the two builds. Compiled ELFs are emitted
+//! to `<crate>/elfs/`, a stable location that survives `cargo clean` and that `lib.rs`
+//! and CI reference directly.
+//!
+//! Guest programs are only compiled in release builds with the `sp1-dev` feature (and
+//! not under clippy), so everyday development doesn't require the SP1 toolchain.
+//!
+//! # Features
+//!
+//! - **`docker-build`** — compile the guests inside Docker via `build_program_with_args` for
+//!   reproducible ELFs. The output location is unchanged.
+//!
+//! # Environment variables
+//!
+//! - **`ZKVM_MOCK`** — when set to `1`/`true`, guests are built with the `mock-verify` feature so
+//!   recursive proof verification becomes a no-op. Never use in production.
 
 use cfg_if::cfg_if;
 
 cfg_if! {
     if #[cfg(all(feature = "sp1-dev", not(debug_assertions)))] {
-        use bincode::{deserialize, serialize};
-        use cargo_metadata::MetadataCommand;
-        use sha2::{Digest, Sha256};
-        use sp1_helper::{build_program_with_args, BuildArgs};
+        use std::{env, fs, path::Path};
+
+        use sp1_build::{build_program_with_args, BuildArgs};
         use sp1_sdk::{
             blocking::{Prover, ProverClient},
-            HashableKey, ProvingKey, SP1VerifyingKey,
+            HashableKey, ProvingKey,
         };
+        use sp1_verifier::{GROTH16_VK_BYTES, VK_ROOT_BYTES};
         use zkaleido_sp1_groth16_verifier::SP1Groth16Verifier;
     }
 }
 
-/// Per-program VK hash representations needed during build.
-struct VkHashes {
-    /// Poseidon/BabyBear hash, used as the ELF program ID in guest `vks.rs`.
-    hash_u32: [u32; 8],
-    /// BN254 program ID (see [`vk_program_id`]), required by `SP1Groth16Verifier::load`.
-    program_id: [u8; 32],
+fn main() {
+    println!("cargo:rerun-if-env-changed=ZKVM_MOCK");
+    build_guests();
 }
 
-// Guest program names
+/// Debug and non-`sp1-dev` builds skip guest compilation entirely.
+#[cfg(not(all(feature = "sp1-dev", not(debug_assertions))))]
+fn build_guests() {}
+
+#[cfg(all(feature = "sp1-dev", not(debug_assertions)))]
+const ELFS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/elfs");
+
+#[cfg(all(feature = "sp1-dev", not(debug_assertions)))]
 const ALPEN_CHUNK: &str = "guest-alpen-chunk";
+#[cfg(all(feature = "sp1-dev", not(debug_assertions)))]
 const ALPEN_ACCT: &str = "guest-alpen-acct";
 
-/// Returns a map of program dependencies.
-///
-/// The account proof guest depends on the chunk proof guest's VK hash
-/// to construct the chunk predicate key.
-fn get_program_dependencies() -> HashMap<&'static str, Vec<&'static str>> {
-    let mut deps = HashMap::new();
-    deps.insert(ALPEN_ACCT, vec![ALPEN_CHUNK]);
-    deps
-}
-
-fn main() {
-    // List of guest programs to build
-    let guest_programs = [ALPEN_CHUNK, ALPEN_ACCT];
-
-    // HashSet to keep track of programs that have been built
-    let mut built_programs = HashSet::new();
-
-    // Get the dependencies between programs
-    let dependencies = get_program_dependencies();
-
-    // HashMap to store results: mapping from elf_name to (elf_contents, vk_hash_u32, vk_hash_str)
-    let mut results = HashMap::new();
-
-    let mut vk_hashes: HashMap<String, VkHashes> = HashMap::new();
-
-    // Build each guest program along with its dependencies
-    for program in &guest_programs {
-        build_program_with_dependencies(
-            program,
-            &dependencies,
-            &mut built_programs,
-            &mut results,
-            &mut vk_hashes,
-        );
-    }
-
-    // String to accumulate the contents of methods.rs file
-    // Start with the necessary use statements
-    let mut methods_file_content = String::from(
-        r#"
-use once_cell::sync::Lazy;
-use std::fs;
-"#,
-    );
-
-    // Write the methods.rs file with ELF contents and VK hashes
-    for (program_name, (vk_hash_u32, vk_hash_str)) in &results {
-        let program_name_upper = program_name.to_uppercase().replace("-", "_");
-        let base_path = Path::new(program_name)
-            .canonicalize()
-            .expect("Cache directory not found");
-        let base_path_str = base_path
-            .to_str()
-            .expect("Failed to convert path to string");
-
-        let full_path_str = format!("{base_path_str}/cache/{program_name}");
-        methods_file_content.push_str(&format!(
-            r#"
-pub static {program_name_upper}_ELF: Lazy<Vec<u8>> = Lazy::new(||{{ fs::read("{full_path_str}.elf").expect("Cannot find ELF") }});
-pub static {program_name_upper}_VK: Lazy<Vec<u8>> = Lazy::new(||{{ fs::read("{full_path_str}.vk").expect("Cannot find VK") }});
-pub const {program_name_upper}_VK_HASH_U32: &[u32] = &{vk_hash_u32:?};
-pub const {program_name_upper}_VK_HASH_STR: &str = "{vk_hash_str}";
-"#
-        ));
-    }
-
-    // Write the accumulated methods_file_content to methods.rs in the output directory
-    let out_dir = get_output_dir();
-    let methods_path = out_dir.join("methods.rs");
-    fs::write(&methods_path, methods_file_content).unwrap_or_else(|e| {
-        panic!(
-            "Failed to write methods.rs file at {}: {}",
-            methods_path.display(),
-            e
-        )
-    });
-}
-
-/// Recursively builds the given program along with its dependencies.
-fn build_program_with_dependencies(
-    program: &str,
-    dependencies: &HashMap<&str, Vec<&str>>,
-    built_programs: &mut HashSet<String>,
-    results: &mut HashMap<String, ([u32; 8], String)>,
-    vk_hashes: &mut HashMap<String, VkHashes>,
-) {
-    // If the program has already been built, return early
-    if built_programs.contains(program) {
+#[cfg(all(feature = "sp1-dev", not(debug_assertions)))]
+fn build_guests() {
+    if is_clippy() {
         return;
     }
 
-    // Build dependencies first
-    if let Some(deps) = dependencies.get(program) {
-        for dep in deps {
-            build_program_with_dependencies(dep, dependencies, built_programs, results, vk_hashes);
-        }
+    let features = guest_features();
 
-        // After dependencies are built, write vks.rs for the current program
-        let mut vks_content = String::new();
-        for dep in deps {
-            if let Some(vk) = vk_hashes.get(*dep) {
-                let elf_name = format!("{}_ELF", dep.to_uppercase().replace("-", "_"));
-                let elf_name_id = format!("{elf_name}_ID");
-                let hash_u32 = vk.hash_u32;
-                vks_content.push_str(&format!(
-                    "pub const {elf_name_id}: &[u32; 8] = &{hash_u32:?};\n"
-                ));
-
-                // Also embed the full Groth16 verifying key condition bytes so
-                // dependent guest programs can construct a PredicateKey at
-                // compile time without pulling in heavy SP1 SDK dependencies.
-                let condition = compute_groth16_condition(&vk.program_id);
-                let condition_name =
-                    format!("{}_VK_CONDITION", dep.to_uppercase().replace("-", "_"));
-                vks_content.push_str(&format!(
-                    "pub const {condition_name}: &[u8] = &{condition:?};\n"
-                ));
-            }
-        }
-
-        // Only write vks.rs if there are dependencies
-        if !vks_content.is_empty() {
-            let vks_path = Path::new(program).join("src").join("vks.rs");
-            fs::write(&vks_path, vks_content)
-                .unwrap_or_else(|e| panic!("Failed to write vks.rs for {program}: {e}"));
-        }
-    }
-
-    // Build the program and generate ELF contents and VK hashes
-    let (vk_hash_u32, vk_hash_str, program_id) = generate_elf_contents_and_vk_hash(program);
-
-    results.insert(program.to_string(), (vk_hash_u32, vk_hash_str));
-    vk_hashes.insert(
-        program.to_string(),
-        VkHashes {
-            hash_u32: vk_hash_u32,
-            program_id,
-        },
-    );
-    built_programs.insert(program.to_string());
+    // The account guest embeds the chunk guest's verifying key, so the chunk
+    // guest must be built (and its VK derived) first.
+    build_guest(ALPEN_CHUNK, &features);
+    write_acct_vks(&chunk_vk_condition());
+    build_guest(ALPEN_ACCT, &features);
 }
 
-/// Returns the output directory for the build artifacts.
-fn get_output_dir() -> PathBuf {
-    env::var_os("OUT_DIR")
-        .map(PathBuf::from)
-        .expect("OUT_DIR environment variable is not set. Cannot determine output directory.")
-}
-
-/// Checks if the cache is valid by comparing the expected ID with the saved ID.
 #[cfg(all(feature = "sp1-dev", not(debug_assertions)))]
-fn is_cache_valid(expected_id: &[u8; 32], paths: &[PathBuf; 3]) -> bool {
-    // Check if any required files are missing
-    if paths.iter().any(|path| !path.exists()) {
-        return false;
-    }
-
-    // Attempt to read the saved ID
-    let saved_id = match fs::read(&paths[1]) {
-        Ok(data) => data,
-        Err(_) => return false,
-    };
-
-    expected_id == saved_id.as_slice()
-}
-
-/// Ensures the cache is valid and returns the ELF contents and SP1 Verifying Key.
-#[cfg(all(feature = "sp1-dev", not(debug_assertions)))]
-fn ensure_cache_validity(program: &str) -> Result<SP1VerifyingKey, String> {
-    let cache_dir = format!("{}/cache", program);
-    let paths =
-        ["elf", "id", "vk"].map(|file| Path::new(&cache_dir).join(format!("{}.{}", program, file)));
-
-    // Attempt to read the ELF file
-    let elf = fs::read(&paths[0])
-        .map_err(|e| format!("Failed to read ELF file {}: {}", paths[0].display(), e))?;
-    let elf_hash: [u8; 32] = Sha256::digest(&elf).into();
-
-    if !is_cache_valid(&elf_hash, &paths) {
-        // Cache is invalid, need to generate the verifying key.
-        let client = ProverClient::from_env();
-        let pk = client
-            .setup(elf.clone().into())
-            .map_err(|e| format!("Failed to set up proving key: {e}"))?;
-        let vk = pk.verifying_key().clone();
-
-        fs::write(&paths[1], elf_hash)
-            .map_err(|e| format!("Failed to write ID file {}: {}", paths[1].display(), e))?;
-
-        fs::write(&paths[2], serialize(&vk).expect("VK serialization failed"))
-            .map_err(|e| format!("Failed to write VK file {}: {}", paths[2].display(), e))?;
-
-        Ok(vk)
-    } else {
-        // Cache is valid, read the VK
-        let serialized_vk = fs::read(&paths[2])
-            .map_err(|e| format!("Failed to read VK file {}: {}", paths[2].display(), e))?;
-        let vk: SP1VerifyingKey =
-            deserialize(&serialized_vk).map_err(|e| format!("VK deserialization failed: {}", e))?;
-        Ok(vk)
-    }
-}
-
-/// Generates the ELF contents and VK hashes for a given program.
-///
-/// Returns `(hash_u32, bytes32_hex, program_id)` where `program_id` is the
-/// BN254-based bytes needed by `SP1Groth16Verifier::load`.
-#[cfg(all(feature = "sp1-dev", not(debug_assertions)))]
-fn generate_elf_contents_and_vk_hash(program: &str) -> ([u32; 8], String, [u8; 32]) {
-    // Check if the Clippy linter is enabled by examining the "RUSTC_WORKSPACE_WRAPPER" environment
-    // variable. If it contains "clippy-driver", Clippy is active; in that case, return mock ELF
-    // contents and VK hash.
-    let is_clippy_enabled = std::env::var("RUSTC_WORKSPACE_WRAPPER")
-        .map(|val| val.contains("clippy-driver"))
-        .unwrap_or(false);
-
-    if is_clippy_enabled {
-        return get_mock_elf_contents_and_vk_hash();
-    }
-
-    let mut build_args = BuildArgs {
+fn build_guest(program: &str, features: &[String]) {
+    let build_args = BuildArgs {
+        output_directory: Some(ELFS_DIR.to_owned()),
+        elf_name: Some(format!("{program}.elf")),
+        features: features.to_vec(),
+        #[cfg(feature = "docker-build")]
+        docker: true,
+        // Override the guest's workspace root with the repo root so Docker
+        // mounts the entire workspace and the guest can import local crates.
+        #[cfg(feature = "docker-build")]
+        workspace_directory: Some("../../".to_owned()),
         ..Default::default()
     };
+    build_program_with_args(program, build_args);
+}
 
-    // Tell Cargo to re-run the build script if ZKVM_MOCK changes.
-    println!("cargo:rerun-if-env-changed=ZKVM_MOCK");
+/// Derives the chunk guest's Groth16 verifying-key condition bytes from its
+/// freshly built ELF. These are the canonical uncompressed encoding of an
+/// [`SP1Groth16Verifier`] that the runtime `Sp1Groth16` predicate verifier in
+/// `strata-predicate` decodes via `SP1Groth16Verifier::parse`.
+#[cfg(all(feature = "sp1-dev", not(debug_assertions)))]
+fn chunk_vk_condition() -> Vec<u8> {
+    let elf_path = Path::new(ELFS_DIR).join(format!("{ALPEN_CHUNK}.elf"));
+    let elf = fs::read(&elf_path)
+        .unwrap_or_else(|e| panic!("read built ELF {}: {e}", elf_path.display()));
 
-    // If the environment variable "ZKVM_MOCK" is set to "1" or "true" (case-insensitive),
-    // then do not activate SP1 proof recursive verification. Instead make the recursive
-    // verification a no-op
-    build_args.features = if std::env::var("ZKVM_MOCK")
-        .map(|v| v == "1" || v.to_lowercase() == "true")
-        .unwrap_or(false)
-    {
+    let prover = ProverClient::builder().cpu().build();
+    let pk = prover
+        .setup(elf.into())
+        .unwrap_or_else(|e| panic!("sp1 key setup for {ALPEN_CHUNK}: {e}"));
+    let vkey_hash = pk.verifying_key().bytes32_raw();
+
+    let verifier = SP1Groth16Verifier::load(&GROTH16_VK_BYTES, vkey_hash, *VK_ROOT_BYTES, true)
+        .unwrap_or_else(|e| panic!("load SP1 Groth16 verifier: {e}"));
+    verifier.to_uncompressed_bytes()
+}
+
+/// Writes the chunk guest's VK condition into `guest-alpen-acct/src/vks.rs` so
+/// the account guest can construct the chunk predicate key at compile time
+/// without pulling in heavy SP1 SDK dependencies.
+#[cfg(all(feature = "sp1-dev", not(debug_assertions)))]
+fn write_acct_vks(condition: &[u8]) {
+    let content = format!(
+        "//! Generated by `build.rs` — do not edit.\n\
+         pub const GUEST_ALPEN_CHUNK_VK_CONDITION: &[u8] = &{condition:?};\n"
+    );
+    let vks_path = Path::new(ALPEN_ACCT).join("src").join("vks.rs");
+    fs::write(&vks_path, content).unwrap_or_else(|e| panic!("write {}: {e}", vks_path.display()));
+}
+
+/// Returns the guest cargo features implied by `ZKVM_MOCK`.
+#[cfg(all(feature = "sp1-dev", not(debug_assertions)))]
+fn guest_features() -> Vec<String> {
+    let mock = env::var("ZKVM_MOCK")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+
+    if mock {
         println!("cargo:warning=ZKVM_MOCK is set. ----------------------------------------");
         println!("cargo:warning=ZKVM_MOCK is set. This should never be used in production.");
         println!("cargo:warning=ZKVM_MOCK is set. ----------------------------------------");
-        vec!["mock-verify".to_string()]
+        vec!["mock-verify".to_owned()]
     } else {
-        println!("cargo:warning=ZKVM_MOCK is not set. Good for production");
-        vec!["zkvm-verify".to_string()]
-    };
-
-    // In the Docker build, override the guest program's Cargo workspace root with the Strata
-    // workspace root so Docker mounts the entire Strata workspace, enabling the guest program
-    // to import Strata crates relatively.
-    #[cfg(feature = "docker-build")]
-    {
-        build_args.docker = true;
-        build_args.workspace_directory = Some("../../".to_owned());
+        vec!["zkvm-verify".to_owned()]
     }
-
-    // Build the program with the specified arguments
-    // Note: SP1_v4's build_programs_with_args does not handle ELF migration
-    // Applying a temporary workaround; remove once SP1 supports ELF migration internally
-    build_program_with_args(program, build_args);
-    migrate_elf(program);
-
-    // Now, ensure cache validity
-    let vk = ensure_cache_validity(program)
-        .expect("Failed to ensure cache validity after building program");
-    (vk.hash_u32(), vk.bytes32(), vk_program_id(&vk))
 }
 
-/// Computes the BN254 program ID (`[u8; 32]`) for a verifying key.
-///
-/// Equivalent in value to `HashableKey::bytes32_raw`, but without its panic:
-/// `bytes32_raw` does `result[1..].copy_from_slice(&digest.to_bytes_be())`,
-/// which assumes the big-endian digest is exactly 31 bytes — yet `to_bytes_be`
-/// strips leading zero bytes, so a digest with extra leading zeros serializes
-/// shorter (e.g. 30 bytes) and the copy panics. `bytes32()` is the same value
-/// zero-padded to a fixed 32 bytes, so we decode that instead and stay robust
-/// to whatever digest a given guest ELF happens to produce.
-///
-/// N.B. The upstream fix: https://github.com/succinctlabs/sp1/pull/2508
 #[cfg(all(feature = "sp1-dev", not(debug_assertions)))]
-fn vk_program_id(vk: &SP1VerifyingKey) -> [u8; 32] {
-    let bytes32 = vk.bytes32();
-    let hex = bytes32.strip_prefix("0x").unwrap_or(&bytes32);
-    assert_eq!(hex.len(), 64, "bytes32() must encode exactly 32 bytes");
-    let mut out = [0u8; 32];
-    for (i, byte) in out.iter_mut().enumerate() {
-        *byte =
-            u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).expect("bytes32() returns valid hex");
-    }
-    out
-}
-
-#[cfg(debug_assertions)]
-fn generate_elf_contents_and_vk_hash(_program: &str) -> ([u32; 8], String, [u8; 32]) {
-    get_mock_elf_contents_and_vk_hash()
-}
-
-fn get_mock_elf_contents_and_vk_hash() -> ([u32; 8], String, [u8; 32]) {
-    (
-        [0u32; 8],
-        "0x0000000000000000000000000000000000000000000000000000000000000000".to_owned(),
-        [0u8; 32],
-    )
-}
-
-/// Computes the Groth16 verifying key condition bytes for the given BN254
-/// program ID. The output is the canonical uncompressed encoding of an
-/// [`SP1Groth16Verifier`] that the runtime `Sp1Groth16` predicate verifier in
-/// `strata-predicate` decodes via `SP1Groth16Verifier::parse`. The verifier
-/// object embeds the SP1 circuit VK merged with the program-specific ID and the
-/// VK root.
-#[cfg(all(feature = "sp1-dev", not(debug_assertions)))]
-fn compute_groth16_condition(program_id: &[u8; 32]) -> Vec<u8> {
-    let sp1_verifier = SP1Groth16Verifier::load(
-        &sp1_verifier::GROTH16_VK_BYTES,
-        *program_id,
-        *sp1_verifier::VK_ROOT_BYTES,
-        true,
-    )
-    .expect("Failed to load SP1 Groth16 verifier");
-
-    sp1_verifier.to_uncompressed_bytes()
-}
-
-/// Returns empty condition bytes in debug/mock builds.
-#[cfg(debug_assertions)]
-fn compute_groth16_condition(_program_id: &[u8; 32]) -> Vec<u8> {
-    Vec::new()
-}
-
-/// Copies the compiled ELF file of the specified program to its cache directory.
-#[cfg(all(feature = "sp1-dev", not(debug_assertions)))]
-fn migrate_elf(program: &str) {
-    // Get the build directory from the environment
-    let sp1_build_dir =
-        PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is not set"));
-
-    // Form the path to the program directory
-    let program_path = sp1_build_dir.join(program);
-
-    // Fetch metadata for this program
-    let metadata = MetadataCommand::new()
-        .manifest_path(program_path.join("Cargo.toml"))
-        .exec()
-        .expect("Failed to get metadata");
-
-    // Use the root package name as the built ELF name
-    let built_elf_name = metadata
-        .root_package()
-        .expect("Failed to get root package")
-        .name
-        .clone();
-
-    // Create the cache directory
-    let cache_dir = program_path.join("cache");
-    fs::create_dir_all(&cache_dir).expect("failed to create cache dir");
-
-    // Destination path: cache/program.elf
-    let destination_elf_path = cache_dir.join(format!("{}.elf", program));
-
-    // Source path: program/target/elf-compilation/.../release/{built_elf_name}
-    let elf_subdir = if cfg!(feature = "docker-build") {
-        "docker/riscv64im-succinct-zkvm-elf"
-    } else {
-        "riscv64im-succinct-zkvm-elf"
-    };
-
-    let built_elf_path = program_path
-        .join("target")
-        .join("elf-compilation")
-        .join(elf_subdir)
-        .join("release")
-        .join(&built_elf_name);
-
-    eprintln!("Got the source: {:?}", built_elf_path);
-    eprintln!("Got the destination: {:?}", destination_elf_path);
-
-    // Copy the file
-    fs::copy(&built_elf_path, &destination_elf_path)
-        .expect("Failed to copy the built ELF file to the cache directory");
+fn is_clippy() -> bool {
+    env::var("RUSTC_WORKSPACE_WRAPPER")
+        .map(|val| val.contains("clippy-driver"))
+        .unwrap_or(false)
 }
