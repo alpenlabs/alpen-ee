@@ -1,8 +1,10 @@
 //! Definitions for EE message types.
 
+use ssz::Decode;
 use strata_acct_types::{MAX_MSG_PAYLOAD_DATA_BYTES, SubjectId};
 use strata_codec::{Codec, VarVec, decode_buf_exact, impl_type_flat_struct};
 use strata_msg_fmt::{Msg, MsgRef, TypeId};
+use strata_predicate::PredicateKey;
 use strata_snark_acct_runtime::IAcctMsg;
 
 use crate::{MessageDecodeError, MessageDecodeResult};
@@ -20,6 +22,13 @@ pub const SUBJ_TRANSFER_MSG_TYPE: TypeId = 0x01;
 /// Message type ID for commit messages.
 pub const COMMIT_MSG_TYPE: TypeId = 0x10;
 
+/// Message type ID for predicate key (update VK) rotations.
+///
+/// Mirrors `PREDICATE_UPDATE_MSG_TYPE_ID` in `strata-ol-msg-types`: the OL
+/// STF stages a rotation enacted by the admin subprotocol as an inbox message
+/// of this type, sourced from the reserved admin account.
+pub const PREDICATE_UPDATE_MSG_TYPE: TypeId = 0x20;
+
 /// Decoded possible EE account messages we want to honor.
 ///
 /// This is not intended to capture all possible message types.
@@ -34,6 +43,9 @@ pub enum DecodedEeMessageData {
 
     /// Commit an update.
     Commit(CommitMsgData),
+
+    /// Rotate the account's update predicate key (admin-enacted).
+    PredicateUpdate(PredicateUpdateMsgData),
 }
 
 impl DecodedEeMessageData {
@@ -56,6 +68,17 @@ impl DecodedEeMessageData {
             COMMIT_MSG_TYPE => {
                 let data = decode_codec_msg_body::<CommitMsgData>(body)?;
                 Ok(DecodedEeMessageData::Commit(data))
+            }
+
+            PREDICATE_UPDATE_MSG_TYPE => {
+                // The body is the raw SSZ encoding of the new key, not a
+                // codec struct; this matches how the OL STF builds the
+                // message.
+                let new_key = PredicateKey::from_ssz_bytes(body)
+                    .map_err(|_| MessageDecodeError::InvalidBody)?;
+                Ok(DecodedEeMessageData::PredicateUpdate(
+                    PredicateUpdateMsgData::new(new_key),
+                ))
             }
 
             ty => Err(MessageDecodeError::UnsupportedType(ty)),
@@ -105,5 +128,62 @@ impl_type_flat_struct! {
     pub struct CommitMsgData {
         // TODO(STR-3685): rename to new_tip_exec_blkid
         new_tip_exec_blkid: [u8; 32],
+    }
+}
+
+/// Describes a rotation of the account's update predicate key.
+///
+/// Decoding says nothing about who sent it: a rotation is only meaningful
+/// when the entry's source is the reserved admin account, which consumers
+/// must check on the [`MessageEntry`](strata_acct_types::MessageEntry)
+/// itself.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PredicateUpdateMsgData {
+    new_key: PredicateKey,
+}
+
+impl PredicateUpdateMsgData {
+    /// Creates data rotating to `new_key`.
+    pub fn new(new_key: PredicateKey) -> Self {
+        Self { new_key }
+    }
+
+    /// Returns the predicate key the rotation activates.
+    pub fn new_key(&self) -> &PredicateKey {
+        &self.new_key
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ssz::Encode;
+    use strata_msg_fmt::OwnedMsg;
+
+    use super::*;
+
+    /// Decodes the message shape the OL STF stages for a rotation: SPS-52
+    /// type `0x20` with the raw SSZ encoding of the new key as body.
+    #[test]
+    fn decode_predicate_update_message() {
+        let new_key = PredicateKey::always_accept();
+        let msg = OwnedMsg::new(PREDICATE_UPDATE_MSG_TYPE, new_key.as_ssz_bytes())
+            .expect("valid message");
+
+        let decoded = DecodedEeMessageData::decode_raw(&msg.to_vec()).expect("decodes");
+
+        assert_eq!(
+            decoded,
+            DecodedEeMessageData::PredicateUpdate(PredicateUpdateMsgData::new(new_key))
+        );
+    }
+
+    #[test]
+    fn predicate_update_with_garbage_body_is_invalid() {
+        let msg = OwnedMsg::new(PREDICATE_UPDATE_MSG_TYPE, vec![0xff]).expect("valid message");
+
+        assert!(matches!(
+            DecodedEeMessageData::decode_raw(&msg.to_vec()),
+            Err(MessageDecodeError::InvalidBody)
+        ));
     }
 }
