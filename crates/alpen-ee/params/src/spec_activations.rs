@@ -156,6 +156,20 @@ impl AlpenSpecSchedule {
             .is_some_and(|activation| coord >= activation)
     }
 
+    /// Returns the newest version active at `coord` — the version whose
+    /// rules govern that coordinate.
+    ///
+    /// Total: [`AlpenSpecId::V0`] is active from coordinate 0 in every
+    /// schedule, so some version always governs.
+    pub fn active_spec_at(&self, coord: u64) -> AlpenSpecId {
+        // Activation coordinates are nondecreasing, so the versions active
+        // at `coord` are exactly a prefix of the scheduled run.
+        let active_upgrades = self.upgrades.partition_point(|&activation| activation <= coord);
+        AlpenSpecId::try_from(active_upgrades as u16).expect(
+            "AlpenSpecSchedule invariant: every scheduled version has an AlpenSpecId variant",
+        )
+    }
+
     /// Schedules the successor of the newest scheduled version at `coord`
     /// and returns which version that is.
     ///
@@ -299,6 +313,18 @@ mod tests {
         assert_eq!(schedule.activation_of(AlpenSpecId::V1), None);
         assert!(!schedule.is_active(AlpenSpecId::V1, 0));
         assert!(!schedule.is_active(AlpenSpecId::V1, u64::MAX));
+    }
+
+    #[test]
+    fn active_spec_at_resolves_the_governing_version() {
+        let genesis = AlpenSpecSchedule::genesis();
+        assert_eq!(genesis.active_spec_at(0), AlpenSpecId::V0);
+        assert_eq!(genesis.active_spec_at(u64::MAX), AlpenSpecId::V0);
+
+        let schedule = v1_at(100);
+        assert_eq!(schedule.active_spec_at(99), AlpenSpecId::V0);
+        assert_eq!(schedule.active_spec_at(100), AlpenSpecId::V1);
+        assert_eq!(schedule.active_spec_at(u64::MAX), AlpenSpecId::V1);
     }
 
     #[test]
