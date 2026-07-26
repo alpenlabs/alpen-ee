@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use strata_acct_types::AccountId;
 use strata_bridge_params::BridgeParams;
 
-use crate::{AlpenSpecSchedule, BlobSpec, EvmSpec};
+use crate::{AlpenSpecId, AlpenSpecSchedule, BlobSpec, EvmSpec};
 
 /// Default Alpen EE account id registered in generated OL params.
 pub const DEFAULT_ALPEN_EE_ACCOUNT_ID: AccountId = AccountId::new([1u8; 32]);
@@ -96,9 +96,9 @@ impl AlpenParams {
         &self.evm_spec
     }
 
-    /// Returns the derived reth chain spec.
-    pub fn chain_spec(&self) -> &Arc<ChainSpec> {
-        self.evm_spec.chain_spec()
+    /// Returns the derived reth chain spec of `version`.
+    pub fn chain_spec(&self, version: AlpenSpecId) -> &Arc<ChainSpec> {
+        self.evm_spec.chain_spec(version)
     }
 
     /// Returns the derived execution genesis block facts.
