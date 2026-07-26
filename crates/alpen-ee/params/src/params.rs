@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use strata_acct_types::AccountId;
 use strata_bridge_params::BridgeParams;
 
-use crate::{AlpenSpecActivations, BlobSpec, EvmSpec};
+use crate::{AlpenSpecSchedule, BlobSpec, EvmSpec};
 
 /// Default Alpen EE account id registered in generated OL params.
 pub const DEFAULT_ALPEN_EE_ACCOUNT_ID: AccountId = AccountId::new([1u8; 32]);
@@ -35,9 +35,9 @@ pub struct AlpenParams {
     /// DA stream identity.
     blob_spec: BlobSpec,
 
-    /// Alpen protocol spec activations.
+    /// Alpen spec activation schedule.
     #[serde(default)]
-    spec_activations: AlpenSpecActivations,
+    spec_schedule: AlpenSpecSchedule,
 
     /// Embedded EVM chain spec (genesis document + fork configuration).
     evm_spec: EvmSpec,
@@ -49,14 +49,14 @@ impl AlpenParams {
         account_id: AccountId,
         bridge_params: BridgeParams,
         blob_spec: BlobSpec,
-        spec_activations: AlpenSpecActivations,
+        spec_schedule: AlpenSpecSchedule,
         evm_spec: EvmSpec,
     ) -> Self {
         Self {
             account_id,
             bridge_params,
             blob_spec,
-            spec_activations,
+            spec_schedule,
             evm_spec,
         }
     }
@@ -86,9 +86,9 @@ impl AlpenParams {
         self.blob_spec
     }
 
-    /// Returns the Alpen spec activations.
-    pub fn spec_activations(&self) -> &AlpenSpecActivations {
-        &self.spec_activations
+    /// Returns the Alpen spec activation schedule.
+    pub fn spec_schedule(&self) -> &AlpenSpecSchedule {
+        &self.spec_schedule
     }
 
     /// Returns the embedded EVM chain spec.
@@ -115,7 +115,7 @@ mod tests {
     use strata_l1_txfmt::MagicBytes;
 
     use super::{AlpenParams, DEFAULT_ALPEN_EE_ACCOUNT_ID};
-    use crate::{AlpenSpecActivations, BlobSpec, EvmSpec};
+    use crate::{AlpenSpecSchedule, BlobSpec, EvmSpec};
 
     fn sample_params() -> AlpenParams {
         let evm_spec: EvmSpec =
@@ -125,7 +125,7 @@ mod tests {
             BridgeParams::new_with_descriptor_limit(100_000_000, Some(1_000_000_000), 81)
                 .expect("valid bridge params"),
             BlobSpec::new(MagicBytes::new(*b"ALPN")),
-            AlpenSpecActivations::default(),
+            AlpenSpecSchedule::genesis(),
             evm_spec,
         )
     }
@@ -147,15 +147,15 @@ mod tests {
     }
 
     #[test]
-    fn json_defaults_missing_spec_activations_to_empty() {
+    fn json_defaults_missing_spec_schedule_to_genesis() {
         let mut json = sample_json();
         json.as_object_mut()
             .expect("params should be an object")
-            .remove("spec_activations")
-            .expect("spec_activations should be present");
+            .remove("spec_schedule")
+            .expect("spec_schedule should be present");
 
         let decoded: AlpenParams = serde_json::from_value(json).expect("params should deserialize");
-        assert!(decoded.spec_activations().is_empty());
+        assert_eq!(decoded.spec_schedule(), &AlpenSpecSchedule::genesis());
     }
 
     #[test]
