@@ -1,6 +1,7 @@
 use std::num::NonZero;
 
 use alpen_ee_common::{EnginePayload, ExecBlockPayload, PayloadBuilderEngine};
+use alpen_ee_params::AlpenSpecId;
 use eyre::Context;
 use strata_acct_types::{AccountId, Hash, MessageEntry};
 use strata_ee_acct_runtime::apply_input_messages;
@@ -27,6 +28,8 @@ pub struct BlockAssemblyInputs<'a> {
     pub bridge_gateway_account_id: AccountId,
     /// Monotonically incrementing index for next deposit to use.
     pub next_deposit_idx: u64,
+    /// Alpen spec version governing this block.
+    pub spec_version: AlpenSpecId,
 }
 
 /// Outputs from block assembly
@@ -55,6 +58,7 @@ pub async fn build_next_exec_block<E: PayloadBuilderEngine>(
         max_deposits_per_block,
         bridge_gateway_account_id,
         next_deposit_idx,
+        spec_version,
     } = inputs;
 
     // 1. apply new inbox messages to account state
@@ -68,6 +72,7 @@ pub async fn build_next_exec_block<E: PayloadBuilderEngine>(
         timestamp_ms,
         max_deposits_per_block,
         next_deposit_idx,
+        spec_version,
         payload_builder,
     )
     .await?;

@@ -852,6 +852,7 @@ fn main() {
                     "block_assembly",
                     block_builder_task(
                         block_builder_config,
+                        params.spec_schedule().clone(),
                         exec_chain_handle,
                         ol_chain_tracker,
                         payload_engine,

@@ -6,7 +6,7 @@
 //! carries the activation schedule that gates them.
 
 use core::convert::identity;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt};
 
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Serialize};
@@ -59,6 +59,16 @@ pub enum AlpenSpecId {
     /// First protocol upgrade; placeholder name until that upgrade is
     /// defined.
     V1 = 1,
+}
+
+impl fmt::Display for AlpenSpecId {
+    /// Matches this type's snake_case serde representation (e.g. `v0`).
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::V0 => f.write_str("v0"),
+            Self::V1 => f.write_str("v1"),
+        }
+    }
 }
 
 /// The Alpen spec activation schedule: which versions are scheduled and from
