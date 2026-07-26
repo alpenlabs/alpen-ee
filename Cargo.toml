@@ -104,31 +104,31 @@ strata-proofimpl-predicate-keys = { path = "crates/proof-impl/predicate-keys" }
 strata-simple-ee = { path = "crates/simple-ee" }
 strata-zkvm-hosts = { path = "crates/zkvm/hosts" }
 
-# strata dependencies, pinned to the pre-split repo at its last main rev
-# before the alpen/strata repo split.
-strata-acct-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
-strata-bridge-params = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
-strata-btcio = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
-strata-cli-common = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
-strata-common = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
-strata-config = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
-strata-da-framework = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
-strata-db-store-sled = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
-strata-db-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
-strata-mpt = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
-strata-ol-bridge-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
-strata-ol-msg-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
-strata-ol-rpc-api = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
-strata-ol-rpc-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
-strata-open-rpc = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
-strata-paas = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
-strata-primitives = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
-strata-snark-acct-runtime = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
-strata-snark-acct-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
-strata-storage = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
-strata-storage-common = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
-strata-test-utils-btcio = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
-strata-test-utils-ssz = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
+# strata dependencies, pinned to the pre-split repo's `feat/alpen-upgradability-ol`
+# branch (https://github.com/alpenlabs/alpen/pull/2153).
+strata-acct-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "0c5c0219a1fd9795f238dc7e717729f6055ac975" }
+strata-bridge-params = { git = "https://github.com/alpenlabs/alpen.git", rev = "0c5c0219a1fd9795f238dc7e717729f6055ac975" }
+strata-btcio = { git = "https://github.com/alpenlabs/alpen.git", rev = "0c5c0219a1fd9795f238dc7e717729f6055ac975" }
+strata-cli-common = { git = "https://github.com/alpenlabs/alpen.git", rev = "0c5c0219a1fd9795f238dc7e717729f6055ac975" }
+strata-common = { git = "https://github.com/alpenlabs/alpen.git", rev = "0c5c0219a1fd9795f238dc7e717729f6055ac975" }
+strata-config = { git = "https://github.com/alpenlabs/alpen.git", rev = "0c5c0219a1fd9795f238dc7e717729f6055ac975" }
+strata-da-framework = { git = "https://github.com/alpenlabs/alpen.git", rev = "0c5c0219a1fd9795f238dc7e717729f6055ac975" }
+strata-db-store-sled = { git = "https://github.com/alpenlabs/alpen.git", rev = "0c5c0219a1fd9795f238dc7e717729f6055ac975" }
+strata-db-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "0c5c0219a1fd9795f238dc7e717729f6055ac975" }
+strata-mpt = { git = "https://github.com/alpenlabs/alpen.git", rev = "0c5c0219a1fd9795f238dc7e717729f6055ac975" }
+strata-ol-bridge-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "0c5c0219a1fd9795f238dc7e717729f6055ac975" }
+strata-ol-msg-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "0c5c0219a1fd9795f238dc7e717729f6055ac975" }
+strata-ol-rpc-api = { git = "https://github.com/alpenlabs/alpen.git", rev = "0c5c0219a1fd9795f238dc7e717729f6055ac975" }
+strata-ol-rpc-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "0c5c0219a1fd9795f238dc7e717729f6055ac975" }
+strata-open-rpc = { git = "https://github.com/alpenlabs/alpen.git", rev = "0c5c0219a1fd9795f238dc7e717729f6055ac975" }
+strata-paas = { git = "https://github.com/alpenlabs/alpen.git", rev = "0c5c0219a1fd9795f238dc7e717729f6055ac975" }
+strata-primitives = { git = "https://github.com/alpenlabs/alpen.git", rev = "0c5c0219a1fd9795f238dc7e717729f6055ac975" }
+strata-snark-acct-runtime = { git = "https://github.com/alpenlabs/alpen.git", rev = "0c5c0219a1fd9795f238dc7e717729f6055ac975" }
+strata-snark-acct-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "0c5c0219a1fd9795f238dc7e717729f6055ac975" }
+strata-storage = { git = "https://github.com/alpenlabs/alpen.git", rev = "0c5c0219a1fd9795f238dc7e717729f6055ac975" }
+strata-storage-common = { git = "https://github.com/alpenlabs/alpen.git", rev = "0c5c0219a1fd9795f238dc7e717729f6055ac975" }
+strata-test-utils-btcio = { git = "https://github.com/alpenlabs/alpen.git", rev = "0c5c0219a1fd9795f238dc7e717729f6055ac975" }
+strata-test-utils-ssz = { git = "https://github.com/alpenlabs/alpen.git", rev = "0c5c0219a1fd9795f238dc7e717729f6055ac975" }
 
 # strata-common
 strata-btc-types = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.3.0-rc.2" }
