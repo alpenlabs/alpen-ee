@@ -68,6 +68,8 @@ fn infallible<T>(result: Result<T, Infallible>) -> T {
 /// Version-aware [`ConfigureEvm`] over the per-version chain spec table.
 #[derive(Debug, Clone)]
 pub struct AlpenEvmConfig {
+    /// The embedded EVM chain spec the table was derived from.
+    evm_spec: EvmSpec,
     /// EVM config of each known [`AlpenSpecId`], indexed by discriminant.
     configs: Vec<VersionedEvmConfig>,
     executor_factory: AlpenBlockExecutorFactory,
@@ -83,7 +85,7 @@ impl AlpenEvmConfig {
             .map(|spec| DaEvmConfig::new(spec.clone(), evm_factory.clone()))
             .collect();
 
-        Self::from_configs(configs)
+        Self::from_configs(evm_spec.clone(), configs)
     }
 
     /// Rebuilds the outer table's dispatchers over `configs`.
@@ -91,7 +93,7 @@ impl AlpenEvmConfig {
     /// The executor factory and assembler hold clones of the inner configs'
     /// own, so they must be re-derived whenever an inner config changes (see
     /// [`Self::with_pending_da_rate`]).
-    fn from_configs(configs: Vec<VersionedEvmConfig>) -> Self {
+    fn from_configs(evm_spec: EvmSpec, configs: Vec<VersionedEvmConfig>) -> Self {
         let executor_factory = AlpenBlockExecutorFactory {
             inners: configs
                 .iter()
@@ -106,10 +108,16 @@ impl AlpenEvmConfig {
         };
 
         Self {
+            evm_spec,
             configs,
             executor_factory,
             assembler,
         }
+    }
+
+    /// Returns the embedded EVM chain spec the table was derived from.
+    pub fn evm_spec(&self) -> &EvmSpec {
+        &self.evm_spec
     }
 
     /// Sets the DA rate (wei per byte) applied when building the next block,
@@ -119,12 +127,12 @@ impl AlpenEvmConfig {
     /// decided separately, by the payload attributes — so pinning it across
     /// the whole table keeps the two concerns orthogonal.
     pub fn with_pending_da_rate(self, da_rate: U256) -> Self {
-        Self::from_configs(
-            self.configs
-                .into_iter()
-                .map(|config| config.with_pending_da_rate(da_rate))
-                .collect(),
-        )
+        let configs = self
+            .configs
+            .into_iter()
+            .map(|config| config.with_pending_da_rate(da_rate))
+            .collect();
+        Self::from_configs(self.evm_spec, configs)
     }
 
     /// Returns the inner EVM config governing `spec_version`.
