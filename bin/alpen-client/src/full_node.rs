@@ -14,6 +14,7 @@ use alpen_reth_evm::evm::AlpenEvmFactory;
 use alpen_reth_node::{
     AlpenEthereumNode, AlpenGossipProtocolHandler, AlpenGossipState, AlpenNodeMode,
 };
+use alpen_reth_rpc::AlpenFeeApiServer;
 use reth_chainspec::ChainSpec;
 use reth_network::{protocol::IntoRlpxSubProtocol, NetworkProtocols};
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
@@ -78,6 +79,12 @@ pub(crate) async fn run(
                     storage.clone(),
                 );
                 ctx.modules.merge_configured(ee_rpc_server.into_rpc())?;
+
+                // Register `alpen_estimateFees` (execution + DA fee quote) on the
+                // configured eth API, which carries the simulation + state access.
+                let fee_api = ctx.registry.eth_api().clone();
+                ctx.modules
+                    .merge_configured(AlpenFeeApiServer::into_rpc(fee_api))?;
                 Ok(())
             }
         })

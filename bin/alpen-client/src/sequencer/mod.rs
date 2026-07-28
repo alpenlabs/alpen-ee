@@ -45,6 +45,7 @@ use alpen_reth_node::{
     AlpenEngineTypes, AlpenEthereumNode, AlpenGossipProtocolHandler, AlpenGossipState,
     AlpenNodeMode,
 };
+use alpen_reth_rpc::AlpenFeeApiServer;
 use bitcoind_async_client::corepc_types::bitcoin::{
     key::Keypair,
     secp256k1::{Secp256k1, SecretKey},
@@ -302,6 +303,12 @@ pub(crate) async fn run(
                     storage.clone(),
                 );
                 ctx.modules.merge_configured(ee_rpc_server.into_rpc())?;
+
+                // Register `alpen_estimateFees` (execution + DA fee quote) on the
+                // configured eth API, which carries the simulation + state access.
+                let fee_api = ctx.registry.eth_api().clone();
+                ctx.modules
+                    .merge_configured(AlpenFeeApiServer::into_rpc(fee_api))?;
                 Ok(())
             }
         })

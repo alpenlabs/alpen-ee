@@ -1,6 +1,7 @@
 //! Strata `eth_` endpoint implementation.
 //! adapted from reth-node-optimism::rpc
 
+pub mod fees;
 pub mod receipt;
 pub mod transaction;
 
