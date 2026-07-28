@@ -1522,6 +1522,7 @@ dependencies = [
  "proptest",
  "reth-basic-payload-builder",
  "reth-chainspec",
+ "reth-consensus",
  "reth-errors",
  "reth-eth-wire",
  "reth-ethereum-engine-primitives",

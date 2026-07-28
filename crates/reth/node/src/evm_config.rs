@@ -138,7 +138,7 @@ impl AlpenEvmConfig {
 }
 
 /// Indexes a per-version table by discriminant.
-fn version_indexed<T>(table: &[T], spec_version: AlpenSpecId) -> &T {
+pub(crate) fn version_indexed<T>(table: &[T], spec_version: AlpenSpecId) -> &T {
     table
         .get(usize::from(u16::from(spec_version)))
         .expect("EvmSpec invariant: the table covers every known version")
