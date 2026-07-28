@@ -62,6 +62,13 @@ impl EvmSpec {
             .expect("EvmSpec invariant: the table covers every known version")
     }
 
+    /// Returns the chain spec of every known version, indexed by
+    /// discriminant — the whole table behind [`EvmSpec::chain_spec`], for
+    /// consumers that resolve versions per block rather than fixing one.
+    pub fn chain_specs(&self) -> &[Arc<ChainSpec>] {
+        &self.chain_specs
+    }
+
     /// Returns the genesis block facts, derived from the chain spec on demand.
     ///
     /// Served from [`AlpenSpecId::V0`]'s spec but version-invariant: deltas
