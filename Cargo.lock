@@ -1365,6 +1365,7 @@ dependencies = [
 name = "alpen-ee-params"
 version = "0.3.0-alpha.1"
 dependencies = [
+ "alloy-consensus",
  "alloy-genesis",
  "alpen-chainspec",
  "num_enum 0.7.6",
