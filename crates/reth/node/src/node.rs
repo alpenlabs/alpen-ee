@@ -23,7 +23,7 @@ use crate::{
     payload_builder::AlpenPayloadBuilderBuilder, pool::AlpenEthereumPoolBuilder, AlpenEngineTypes,
 };
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct AlpenEthereumNode {
     // Strata node args.
@@ -74,7 +74,10 @@ where
         ComponentsBuilder::default()
             .node_types::<N>()
             .pool(AlpenEthereumPoolBuilder::default())
-            .executor(AlpenExecutorBuilder::new(self.args.evm_factory.clone()))
+            .executor(AlpenExecutorBuilder::new(
+                self.args.evm_factory.clone(),
+                self.args.evm_spec.clone(),
+            ))
             .payload(BasicPayloadServiceBuilder::default())
             .network(EthereumNetworkBuilder::default())
             .consensus(EthereumConsensusBuilder::default())

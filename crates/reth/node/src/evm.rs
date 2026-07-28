@@ -1,21 +1,25 @@
+use alpen_ee_params::EvmSpec;
 use alpen_reth_evm::evm::AlpenEvmFactory;
-// use alpen_reth_evm::evm::AlpenEvmFactory;
 use reth_chainspec::ChainSpec;
-use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{components::ExecutorBuilder, BuilderContext};
-// use reth_node_ethereum::BasicBlockExecutorProvider;
 use reth_primitives::EthPrimitives;
 
-/// Builds a regular ethereum block executor that uses the custom EVM.
-#[derive(Debug, Clone, Default)]
+use crate::evm_config::AlpenEvmConfig;
+
+/// Builds the version-aware block executor over the custom EVM.
+#[derive(Debug, Clone)]
 pub struct AlpenExecutorBuilder {
     evm_factory: AlpenEvmFactory,
+    evm_spec: EvmSpec,
 }
 
 impl AlpenExecutorBuilder {
-    pub fn new(evm_factory: AlpenEvmFactory) -> Self {
-        Self { evm_factory }
+    pub fn new(evm_factory: AlpenEvmFactory, evm_spec: EvmSpec) -> Self {
+        Self {
+            evm_factory,
+            evm_spec,
+        }
     }
 }
 
@@ -23,10 +27,9 @@ impl<Node> ExecutorBuilder<Node> for AlpenExecutorBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
 {
-    type EVM = EthEvmConfig<ChainSpec, AlpenEvmFactory>;
+    type EVM = AlpenEvmConfig;
 
-    async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
-        let evm_config = EthEvmConfig::new_with_evm_factory(ctx.chain_spec(), self.evm_factory);
-        Ok(evm_config.clone())
+    async fn build_evm(self, _ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
+        Ok(AlpenEvmConfig::new(&self.evm_spec, self.evm_factory))
     }
 }

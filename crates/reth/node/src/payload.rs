@@ -1,5 +1,3 @@
-use std::convert::Infallible;
-
 use alloy_eips::{eip4895::Withdrawals, eip7685::Requests};
 use alloy_rpc_types::{
     engine::{
@@ -9,6 +7,7 @@ use alloy_rpc_types::{
     },
     Withdrawal,
 };
+use alpen_ee_params::{AlpenSpecId, HeaderExtraError};
 use alpen_reth_primitives::WithdrawalIntent;
 use reth_ethereum_engine_primitives::BuiltPayloadConversionError;
 use reth_node_api::{BuiltPayload, PayloadAttributes, PayloadBuilderAttributes};
@@ -22,13 +21,28 @@ pub struct AlpenPayloadAttributes {
     /// Original Ethereum payload attributes
     #[serde(flatten)]
     pub inner: EthPayloadAttributes,
+    /// Alpen spec version governing the block, as the raw discriminant.
+    /// Version resolution happens at the Alpen layer; this wire type only
+    /// carries the choice (the enum's serde form is a variant name, wrong
+    /// for engine-API JSON). Typed — and an unknown discriminant refused —
+    /// when the builder attributes are created. Defaults to 0 (the genesis
+    /// version) for attribute sources that predate versioning.
+    #[serde(default)]
+    pub spec_version: u16,
 }
 
 impl AlpenPayloadAttributes {
     pub fn new_from_eth(payload_attributes: EthPayloadAttributes) -> Self {
         Self {
             inner: payload_attributes,
+            spec_version: 0,
         }
+    }
+
+    /// Sets the Alpen spec version governing the block.
+    pub fn with_spec_version(mut self, spec_version: u16) -> Self {
+        self.spec_version = spec_version;
+        self
     }
 }
 
@@ -50,19 +64,34 @@ impl PayloadAttributes for AlpenPayloadAttributes {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AlpenPayloadBuilderAttributes {
     pub(crate) inner: EthPayloadBuilderAttributes,
+    /// The typed form of [`AlpenPayloadAttributes::spec_version`].
+    pub(crate) spec_version: AlpenSpecId,
+}
+
+impl AlpenPayloadBuilderAttributes {
+    /// Returns the Alpen spec version governing the block.
+    pub fn spec_version(&self) -> AlpenSpecId {
+        self.spec_version
+    }
 }
 
 impl PayloadBuilderAttributes for AlpenPayloadBuilderAttributes {
     type RpcPayloadAttributes = AlpenPayloadAttributes;
-    type Error = Infallible;
+    type Error = HeaderExtraError;
 
+    /// Errs when the attributes name a spec version this binary has no
+    /// variant for: they were resolved by newer code, and failing beats
+    /// building under rules older than the ones asked for.
     fn try_new(
         parent: B256,
         attributes: AlpenPayloadAttributes,
         _version: u8,
-    ) -> Result<Self, Infallible> {
+    ) -> Result<Self, Self::Error> {
+        let spec_version = AlpenSpecId::try_from(attributes.spec_version)
+            .map_err(HeaderExtraError::UnknownVersion)?;
         Ok(Self {
             inner: EthPayloadBuilderAttributes::new(parent, attributes.inner),
+            spec_version,
         })
     }
 

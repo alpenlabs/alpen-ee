@@ -1,9 +1,7 @@
 use std::{io, sync::Arc};
 
 use alloy_consensus::{Header, Transaction};
-use alpen_reth_evm::{
-    constants::BRIDGEOUT_PRECOMPILE_ADDRESS, evm::AlpenEvmFactory, extract_withdrawal_intents,
-};
+use alpen_reth_evm::{constants::BRIDGEOUT_PRECOMPILE_ADDRESS, extract_withdrawal_intents};
 use alpen_reth_primitives::WithdrawalIntent;
 use reth_basic_payload_builder::*;
 use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec, EthereumHardforks};
@@ -14,7 +12,6 @@ use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     Evm, NextBlockEnvAttributes,
 };
-use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::{ConfigureEvm, FullNodeTypes, NodeTypes, PayloadBuilderAttributes};
 use reth_node_builder::{components::PayloadBuilderBuilder, BuilderContext, PayloadBuilderConfig};
 use reth_payload_builder::{BlobSidecars, EthBuiltPayload, PayloadBuilderError};
@@ -32,6 +29,7 @@ use tracing::{debug, info, trace, warn};
 use crate::{
     block_witness::build_block_witness_from_executed_state,
     engine::AlpenEngineTypes,
+    evm_config::AlpenEvmConfig,
     payload::{AlpenBuiltPayload, AlpenPayloadBuilderAttributes},
 };
 
@@ -40,8 +38,7 @@ use crate::{
 #[non_exhaustive]
 pub struct AlpenPayloadBuilderBuilder;
 
-impl<Node, Pool> PayloadBuilderBuilder<Node, Pool, EthEvmConfig<ChainSpec, AlpenEvmFactory>>
-    for AlpenPayloadBuilderBuilder
+impl<Node, Pool> PayloadBuilderBuilder<Node, Pool, AlpenEvmConfig> for AlpenPayloadBuilderBuilder
 where
     Node: FullNodeTypes<
         Types: NodeTypes<
@@ -60,7 +57,7 @@ where
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-        evm_config: EthEvmConfig<ChainSpec, AlpenEvmFactory>,
+        evm_config: AlpenEvmConfig,
     ) -> eyre::Result<Self::PayloadBuilder> {
         let conf = ctx.payload_builder_config();
         let chain = ctx.chain_spec().chain();
@@ -83,8 +80,9 @@ pub struct AlpenPayloadBuilder<Pool, Client> {
     client: Client,
     /// Transaction pool.
     pool: Pool,
-    /// The type responsible for creating the evm.
-    evm_config: EthEvmConfig<ChainSpec, AlpenEvmFactory>,
+    /// The node's version-aware EVM config; payload jobs select the inner
+    /// per-version config by the version carried on their attributes.
+    evm_config: AlpenEvmConfig,
     /// Payload builder configuration.
     builder_config: EthereumBuilderConfig,
 }
@@ -94,7 +92,7 @@ impl<Pool, Client> AlpenPayloadBuilder<Pool, Client> {
     pub fn new(
         client: Client,
         pool: Pool,
-        evm_config: EthEvmConfig<ChainSpec, AlpenEvmFactory>,
+        evm_config: AlpenEvmConfig,
         builder_config: EthereumBuilderConfig,
     ) -> Self {
         Self {
@@ -163,7 +161,7 @@ type BestTransactionsIter<Pool> = Box<
 /// [default_ethereum_payload](reth_ethereum_payload_builder::default_ethereum_payload)
 #[inline]
 fn try_build_payload<Pool, Client, F>(
-    evm_config: EthEvmConfig<ChainSpec, AlpenEvmFactory>,
+    evm_config: AlpenEvmConfig,
     client: Client,
     _pool: Pool,
     builder_config: EthereumBuilderConfig,
@@ -188,6 +186,8 @@ where
         attributes,
     } = config;
 
+    let spec_version = attributes.spec_version();
+    let versioned_config = evm_config.config_for(spec_version);
     let attributes = attributes.inner;
 
     let state_provider = client.state_by_block_hash(parent_header.hash())?;
@@ -197,22 +197,23 @@ where
         .with_bundle_update()
         .build();
 
-    let mut builder = evm_config
-        .builder_for_next_block(
-            &mut db,
-            &parent_header,
-            NextBlockEnvAttributes {
-                timestamp: attributes.timestamp(),
-                suggested_fee_recipient: attributes.suggested_fee_recipient(),
-                prev_randao: attributes.prev_randao(),
-                gas_limit: builder_config.gas_limit(parent_header.gas_limit),
-                parent_beacon_block_root: attributes.parent_beacon_block_root(),
-                withdrawals: Some(attributes.withdrawals().clone()),
-            },
-        )
-        .map_err(PayloadBuilderError::other)?;
+    let mut builder = evm_config.builder_for_next_block_with_version(
+        &mut db,
+        &parent_header,
+        NextBlockEnvAttributes {
+            timestamp: attributes.timestamp(),
+            suggested_fee_recipient: attributes.suggested_fee_recipient(),
+            prev_randao: attributes.prev_randao(),
+            gas_limit: builder_config.gas_limit(parent_header.gas_limit),
+            parent_beacon_block_root: attributes.parent_beacon_block_root(),
+            withdrawals: Some(attributes.withdrawals().clone()),
+        },
+        spec_version,
+    );
 
-    let chain_spec = client.chain_spec();
+    // Fork queries must agree with the EVM env, so use the per-version spec
+    // the block builds under, not the node's boot chain spec.
+    let chain_spec = versioned_config.chain_spec().clone();
 
     debug!(target: "payload_builder", id=%attributes.id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
     let mut cumulative_gas_used = 0;
@@ -347,9 +348,12 @@ where
         .flat_map(|receipt| receipt.logs.iter())
         .filter(|log| log.address == BRIDGEOUT_PRECOMPILE_ADDRESS)
         .count();
-    let withdrawal_intents: Vec<WithdrawalIntent> =
-        extract_withdrawal_intents(&txns, &receipts, evm_config.evm_factory().bridge_params())
-            .map_err(PayloadBuilderError::other)?;
+    let withdrawal_intents: Vec<WithdrawalIntent> = extract_withdrawal_intents(
+        &txns,
+        &receipts,
+        versioned_config.evm_factory().bridge_params(),
+    )
+    .map_err(PayloadBuilderError::other)?;
     if bridgeout_log_count > 0 || !withdrawal_intents.is_empty() {
         info!(
             target: "payload_builder",

@@ -184,9 +184,12 @@ fn main() {
     let mut command = NodeCommand::<AlpenChainSpecParser, AdditionalConfig>::parse();
 
     // use the EVM chain spec embedded in the Alpen params artifact
-    // TODO(STR-3998): the node captures one spec at boot, so pin v0 until
-    // per-block version resolution (schedule handle + per-version table) is
-    // threaded through the fork-sensitive reth components.
+    // The boot spec pins v0; the executor and payload builder resolve the
+    // governing version per block from the header-stamped spec version
+    // instead.
+    // TODO(STR-3998): remaining version-blind consumers: consensus, the
+    // engine validator, pool tx validation (tip policy), and the p2p fork-id
+    // handshake.
     command.chain = command.ext.alpen_params.chain_spec(AlpenSpecId::V0).clone();
     // enable engine api v4
     command.engine.accept_execution_requests_hash = true;
@@ -421,6 +424,7 @@ fn main() {
             let node_args = AlpenNodeArgs {
                 sequencer_http: ext.sequencer_http.clone(),
                 evm_factory,
+                evm_spec: params.evm_spec().clone(),
             };
 
             let consensus_watcher = ol_tracker.consensus_watcher();
