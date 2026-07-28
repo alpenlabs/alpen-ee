@@ -1,3 +1,5 @@
+use std::sync::{atomic::AtomicU64, Arc};
+
 use alpen_reth_evm::evm::AlpenEvmFactory;
 use alpen_reth_rpc::{eth::AlpenEthApiBuilder, SequencerClient};
 use reth_chainspec::ChainSpec;
@@ -77,11 +79,24 @@ pub struct AlpenEthereumNode {
     /// executes one way on the node and another way in its proof.
     evm_factory: AlpenEvmFactory,
     mode: AlpenNodeMode,
+    /// Live DA rate (wei per byte) shared into the payload builder; sampled and
+    /// frozen per block into the header `extra_data` and the in-EVM DA fee
+    /// charge. Only the sequencer's build path reads it; full nodes recover the
+    /// per-block rate from each block's `extra_data`.
+    live_da_rate: Arc<AtomicU64>,
 }
 
 impl AlpenEthereumNode {
-    pub fn new(evm_factory: AlpenEvmFactory, mode: AlpenNodeMode) -> Self {
-        Self { evm_factory, mode }
+    pub fn new(
+        evm_factory: AlpenEvmFactory,
+        mode: AlpenNodeMode,
+        live_da_rate: Arc<AtomicU64>,
+    ) -> Self {
+        Self {
+            evm_factory,
+            mode,
+            live_da_rate,
+        }
     }
 }
 
@@ -123,7 +138,11 @@ where
             .node_types::<N>()
             .pool(AlpenEthereumPoolBuilder::default())
             .executor(AlpenExecutorBuilder::new(self.evm_factory.clone()))
-            .payload(BasicPayloadServiceBuilder::default())
+            .payload(BasicPayloadServiceBuilder::new(
+                AlpenPayloadBuilderBuilder {
+                    live_da_rate: self.live_da_rate.clone(),
+                },
+            ))
             .network(EthereumNetworkBuilder::default())
             .consensus(EthereumConsensusBuilder::default())
     }

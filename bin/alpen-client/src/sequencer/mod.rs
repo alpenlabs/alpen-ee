@@ -16,7 +16,10 @@ mod prover;
 mod provers;
 mod services;
 
-use std::sync::Arc;
+use std::{
+    env,
+    sync::{atomic::AtomicU64, Arc},
+};
 
 use alpen_ee_common::{require_latest_batch, BlockNumHash, SequencerOLClient};
 use alpen_ee_database::{EeDb, EeNodeStorage, SequencerDatabases};
@@ -236,7 +239,20 @@ pub(crate) async fn run(
     let initial_preconf_head = initial_preconf_head(common.storage.as_ref()).await?;
 
     let evm_factory = AlpenEvmFactory::from_bridge_params(common.params.bridge_params());
-    let node = AlpenEthereumNode::new(evm_factory, AlpenNodeMode::sequencer());
+    // Live DA rate (wei per byte) consumed by the payload builder, frozen per
+    // block into the header `extra_data` and the in-EVM DA fee charge.
+    //
+    // Seeded from `ALPEN_DA_RATE_WEI_PER_BYTE` (default 0 => DA charge dormant).
+    // TODO(fee-model): drive this dynamically from the sequencer's Bitcoin fee
+    // rate (`btcio::writer::fees::resolve_fee_rate`, gossiped from the OL via the
+    // fee config) instead of a static env seed, and decouple it from the
+    // publication rate.
+    let da_rate_seed = env::var("ALPEN_DA_RATE_WEI_PER_BYTE")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+    let live_da_rate = Arc::new(AtomicU64::new(da_rate_seed));
+    let node = AlpenEthereumNode::new(evm_factory, AlpenNodeMode::sequencer(), live_da_rate);
 
     let consensus_watcher = common.ol_tracker.consensus_watcher();
 
