@@ -190,6 +190,7 @@ pub(crate) async fn launch(
     let node_args = AlpenNodeArgs {
         sequencer_http: ext.sequencer.http_url.clone(),
         evm_factory,
+        evm_spec: params.evm_spec().clone(),
     };
 
     let consensus_watcher = ol_tracker.consensus_watcher();
