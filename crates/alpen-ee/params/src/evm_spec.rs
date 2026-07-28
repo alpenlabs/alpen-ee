@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use alloy_genesis::Genesis;
 use alpen_chainspec::{ee_genesis_block_info, AlpenEeGenesisBlockInfo};
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, EthereumHardfork, ForkCondition};
 use serde::{Deserialize, Serialize, Serializer};
 
 use crate::{spec_activations::known_versions, AlpenSpecId};
@@ -107,15 +107,24 @@ fn derive_chain_specs(base: Arc<ChainSpec>) -> Vec<Arc<ChainSpec>> {
 /// unconditional (active from genesis): version selection happens at the
 /// Alpen layer by activation coordinate, so within one version's spec there
 /// is no boundary.
-fn apply_evm_delta(version: AlpenSpecId, _chain_spec: &mut ChainSpec) {
+///
+/// When a delta first enables a fork with transition semantics (initial
+/// base fee, blob-field initialization), that boundary handling must live
+/// where the resolver switches specs — a version's own spec has the fork
+/// active from genesis and never sees the transition.
+fn apply_evm_delta(version: AlpenSpecId, chain_spec: &mut ChainSpec) {
     match version {
         AlpenSpecId::V0 => unreachable!("v0 is the fold's seed, not a delta"),
-        // Placeholder upgrade with no EVM changes defined yet. When a delta
-        // first enables a fork with transition semantics (initial base fee,
-        // blob-field initialization), that boundary handling must live where
-        // the resolver switches specs — a version's own spec has the fork
-        // active from genesis and never sees the transition.
-        AlpenSpecId::V1 => {}
+        // Osaka has no transition semantics to handle at the version
+        // boundary: it adds no header fields (blob fields exist since
+        // Cancun, requests_hash since Prague), and its blob params were
+        // already populated by v0's genesis derivation — resolution keys on
+        // the active fork, not the fork set the params were derived under.
+        AlpenSpecId::V1 => {
+            chain_spec
+                .hardforks
+                .insert(EthereumHardfork::Osaka, ForkCondition::Timestamp(0));
+        }
     }
 }
 
@@ -154,7 +163,7 @@ impl Eq for EvmSpec {}
 #[cfg(test)]
 mod tests {
     use alpen_chainspec::{ee_genesis_block_info_from_json, DEV_CHAIN_SPEC};
-    use reth_chainspec::{EthereumHardfork, ForkCondition};
+    use reth_chainspec::{EthereumHardfork, EthereumHardforks, ForkCondition};
 
     use super::EvmSpec;
     use crate::{spec_activations::known_versions, AlpenSpecId};
@@ -208,6 +217,20 @@ mod tests {
                 "{version:?}"
             );
         }
+    }
+
+    /// Pins v1's delta: Osaka governs v1's spec from genesis and is absent
+    /// from v0's.
+    #[test]
+    fn v1_activates_osaka_from_genesis() {
+        let spec: EvmSpec = serde_json::from_str(DEV_CHAIN_SPEC).expect("dev chain should parse");
+
+        assert!(!spec
+            .chain_spec(AlpenSpecId::V0)
+            .is_osaka_active_at_timestamp(0));
+        assert!(spec
+            .chain_spec(AlpenSpecId::V1)
+            .is_osaka_active_at_timestamp(0));
     }
 
     /// Pins the property the fold relies on: reth bakes the
