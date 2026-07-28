@@ -46,12 +46,12 @@ fn main() {
     let mut command = NodeCommand::<AlpenChainSpecParser, AdditionalConfig>::parse();
 
     // use the EVM chain spec embedded in the Alpen params artifact
-    // The boot spec pins v0; the executor, payload builder, and consensus
-    // resolve the governing version per block from the header-stamped spec
-    // version instead.
-    // TODO(STR-3998): remaining version-blind consumers: the engine
-    // validator, pool tx validation (tip policy), and the p2p fork-id
-    // handshake.
+    // The boot spec pins v0; the fork-sensitive components (executor,
+    // consensus, engine validator, payload builder) resolve the governing
+    // version per block from the header-stamped spec version instead.
+    // TODO(STR-3998): remaining version-blind consumers: pool tx validation
+    // (tip policy), the p2p fork-id handshake, and the Alpen-layer check
+    // that a block's claimed version matches the inbox-derived one.
     command.chain = command
         .ext
         .chain

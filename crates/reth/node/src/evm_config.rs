@@ -55,6 +55,8 @@ fn infallible<T>(result: Result<T, Infallible>) -> T {
 /// Version-aware [`ConfigureEvm`] over the per-version chain spec table.
 #[derive(Debug, Clone)]
 pub struct AlpenEvmConfig {
+    /// The embedded EVM chain spec the table was derived from.
+    evm_spec: EvmSpec,
     /// EVM config of each known [`AlpenSpecId`], indexed by discriminant.
     configs: Vec<VersionedEvmConfig>,
     executor_factory: AlpenBlockExecutorFactory,
@@ -84,10 +86,16 @@ impl AlpenEvmConfig {
         };
 
         Self {
+            evm_spec: evm_spec.clone(),
             configs,
             executor_factory,
             assembler,
         }
+    }
+
+    /// Returns the embedded EVM chain spec the table was derived from.
+    pub fn evm_spec(&self) -> &EvmSpec {
+        &self.evm_spec
     }
 
     /// Returns the inner EVM config governing `spec_version`.
