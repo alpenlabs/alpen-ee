@@ -13,6 +13,7 @@ mod pool;
 
 pub use alpen_reth_primitives::WithdrawalIntent;
 pub use block_witness::{build_block_witness_from_executed_state, BlockWitnessRecord};
+pub use consensus::{AlpenConsensus, AlpenConsensusBuilder};
 pub use engine::{AlpenEngineTypes, AlpenEngineValidator};
 pub use evm_config::{payload_spec_version, AlpenEvmConfig, VersionedEvmConfig};
 pub use gossip::{

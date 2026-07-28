@@ -1522,7 +1522,6 @@ dependencies = [
  "reth-ethereum-payload-builder",
  "reth-ethereum-primitives",
  "reth-evm",
- "reth-execution-types",
  "reth-network",
  "reth-network-api",
  "reth-node-api",

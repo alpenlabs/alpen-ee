@@ -154,7 +154,7 @@ where
                 },
             ))
             .network(EthereumNetworkBuilder::default())
-            .consensus(AlpenConsensusBuilder::default())
+            .consensus(AlpenConsensusBuilder::new(self.evm_spec.clone()))
     }
 
     fn add_ons(&self) -> Self::AddOns {
