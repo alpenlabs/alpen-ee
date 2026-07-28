@@ -88,5 +88,20 @@ class TestEstimateFees(AlpenClientTest):
             f"total_fee {total_fee} != gas_used*base_fee + da_fee"
         )
 
-        logger.info("alpen_estimateFees returned a consistent fee breakdown")
+        # Standard `eth_estimateGas` must return the SAME effective gas, so an unmodified
+        # EVM wallet automatically reserves enough gas to cover the DA fee.
+        est_gas = int(rpc.eth_estimateGas(request), 16)
+        logger.info(
+            f"eth_estimateGas (effective) = {est_gas}, alpen effectiveGas = {effective_gas}"
+        )
+        assert est_gas == effective_gas, (
+            f"eth_estimateGas {est_gas} != alpen effectiveGas {effective_gas}"
+        )
+        # And it must strictly exceed the raw execution gas whenever a DA fee applies.
+        if base_fee > 0 and da_fee > 0:
+            assert est_gas > gas_used, (
+                f"eth_estimateGas {est_gas} did not include DA headroom over raw gas {gas_used}"
+            )
+
+        logger.info("alpen_estimateFees and eth_estimateGas return consistent effective gas")
         return True
