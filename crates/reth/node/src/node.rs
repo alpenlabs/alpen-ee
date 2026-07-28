@@ -12,15 +12,16 @@ use reth_node_builder::{
     },
     Node, NodeAdapter, NodeComponentsBuilder,
 };
-use reth_node_ethereum::node::{EthereumConsensusBuilder, EthereumNetworkBuilder};
+use reth_node_ethereum::node::EthereumNetworkBuilder;
 use reth_primitives::EthPrimitives;
 use reth_provider::EthStorage;
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use revm::context::TxEnv;
 
 use crate::{
-    args::AlpenNodeArgs, engine::AlpenEngineValidatorBuilder, evm::AlpenExecutorBuilder,
-    payload_builder::AlpenPayloadBuilderBuilder, pool::AlpenEthereumPoolBuilder, AlpenEngineTypes,
+    args::AlpenNodeArgs, consensus::AlpenConsensusBuilder, engine::AlpenEngineValidatorBuilder,
+    evm::AlpenExecutorBuilder, payload_builder::AlpenPayloadBuilderBuilder,
+    pool::AlpenEthereumPoolBuilder, AlpenEngineTypes,
 };
 
 #[derive(Debug, Clone)]
@@ -61,7 +62,7 @@ where
         BasicPayloadServiceBuilder<AlpenPayloadBuilderBuilder>,
         EthereumNetworkBuilder,
         AlpenExecutorBuilder,
-        EthereumConsensusBuilder,
+        AlpenConsensusBuilder,
     >;
 
     type AddOns = AlpenRethNodeAddOns<
@@ -80,7 +81,7 @@ where
             ))
             .payload(BasicPayloadServiceBuilder::default())
             .network(EthereumNetworkBuilder::default())
-            .consensus(EthereumConsensusBuilder::default())
+            .consensus(AlpenConsensusBuilder::new(self.args.evm_spec.clone()))
     }
 
     fn add_ons(&self) -> Self::AddOns {
