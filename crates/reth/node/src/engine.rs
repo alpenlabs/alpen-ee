@@ -7,9 +7,10 @@ use alloy_rpc_types::engine::{
 use reth_chainspec::ChainSpec;
 use reth_ethereum_payload_builder::EthereumExecutionPayloadValidator;
 use reth_node_api::{
-    payload::PayloadTypes, validate_version_specific_fields, AddOnsContext, BuiltPayload,
-    EngineApiMessageVersion, EngineApiValidator, EngineObjectValidationError, EngineTypes,
-    FullNodeComponents, NewPayloadError, NodeTypes, PayloadOrAttributes, PayloadValidator,
+    payload::PayloadTypes, validate_execution_requests, validate_version_specific_fields,
+    AddOnsContext, BuiltPayload, EngineApiMessageVersion, EngineApiValidator,
+    EngineObjectValidationError, EngineTypes, FullNodeComponents, NewPayloadError, NodeTypes,
+    PayloadOrAttributes, PayloadValidator,
 };
 use reth_node_builder::rpc::PayloadValidatorBuilder;
 use reth_primitives::{Block, EthPrimitives, NodePrimitives, RecoveredBlock, SealedBlock};
@@ -91,6 +92,11 @@ impl EngineApiValidator<AlpenEngineTypes> for AlpenEngineValidator {
         version: EngineApiMessageVersion,
         payload_or_attrs: PayloadOrAttributes<'_, ExecutionData, AlpenPayloadAttributes>,
     ) -> Result<(), EngineObjectValidationError> {
+        payload_or_attrs
+            .execution_requests()
+            .map(|requests| validate_execution_requests(requests))
+            .transpose()?;
+
         validate_version_specific_fields(self.chain_spec(), version, payload_or_attrs)
     }
 
