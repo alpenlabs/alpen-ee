@@ -2,11 +2,12 @@ use core::marker::PhantomData;
 
 use revm::{
     context::{
-        result::{EVMError, HaltReason, InvalidTransaction},
+        result::{EVMError, ExecutionResult, HaltReason, InvalidTransaction},
         Block, ContextTr, JournalTr, Transaction,
     },
     handler::{
-        instructions::InstructionProvider, EvmTr, FrameResult, FrameTr, Handler, PrecompileProvider,
+        instructions::InstructionProvider, EvmTr, FrameResult, FrameTr, Handler, MainnetHandler,
+        PrecompileProvider,
     },
     inspector::{InspectorEvmTr, InspectorHandler},
     interpreter::{interpreter::EthInterpreter, interpreter_action::FrameInit, InterpreterResult},
@@ -75,16 +76,11 @@ where
         let block = context.block();
         let tx = context.tx();
         let beneficiary = block.beneficiary();
-        let caller = tx.caller();
         let basefee = block.basefee() as u128;
         let effective_gas_price = tx.effective_gas_price(basefee);
 
         let gas = exec_result.gas();
         let gas_used = (gas.spent() - gas.refunded() as u64) as u128;
-        // Value of the gas budget the caller authorized but did not consume — this was
-        // just refunded to the caller, so a DA fee bounded by it is always covered.
-        let remaining_gas = (gas.remaining() as u128) + (gas.refunded() as u128);
-        let remaining_value = U256::from(remaining_gas) * U256::from(effective_gas_price);
 
         // Credit all gas fees to the beneficiary (base fee + priority fee).
         context
@@ -92,29 +88,55 @@ where
             .load_account_mut(beneficiary)?
             .incr_balance(U256::from(effective_gas_price * gas_used));
 
-        // Charge the DA fee, drawn from the unused authorized gas budget. Skip
-        // system/zero-fee calls (effective_gas_price == 0) and no-op when no rate is set.
-        if effective_gas_price != 0 && self.da_rate != U256::ZERO {
-            let diff_size = calc_diff_size(context.evm_state());
-            let da_fee = bounded_da_fee(self.da_rate, diff_size, remaining_value);
-            if da_fee != U256::ZERO {
-                // Debit the caller and credit the vault through the journal so both
-                // accounts are loaded/journaled properly. Mutating the state map directly
-                // would leave the vault account unloaded and panic bundle assembly. The
-                // debit is covered because `da_fee` is bounded by the caller's just-
-                // refunded gas value.
-                context
-                    .journal_mut()
-                    .load_account_mut(caller)?
-                    .decr_balance(da_fee);
-                context
-                    .journal_mut()
-                    .load_account_mut(DA_FEE_VAULT_ADDRESS)?
-                    .incr_balance(da_fee);
+        Ok(())
+    }
+
+    /// Charges the per-transaction DA fee, then runs the default output handling.
+    ///
+    /// The DA fee is applied here — the final post-execution step, after the gas refund
+    /// (`reimburse_caller`) and the beneficiary reward — so it is drawn from the caller's
+    /// unused, already-refunded gas budget. This keeps the DA logic separate from the
+    /// gas-reward hook and mirrors the split Citrea uses (base fee vs L1 fee). The default
+    /// output handling (which commits the transaction) then runs via [`MainnetHandler`].
+    fn execution_result(
+        &mut self,
+        evm: &mut Self::Evm,
+        result: FrameResult,
+    ) -> Result<ExecutionResult<Self::HaltReason>, Self::Error> {
+        if self.da_rate != U256::ZERO {
+            let context = evm.ctx();
+            let caller = context.tx().caller();
+            let basefee = context.block().basefee() as u128;
+            let effective_gas_price = context.tx().effective_gas_price(basefee);
+
+            // Skip system/zero-fee calls (effective_gas_price == 0).
+            if effective_gas_price != 0 {
+                let gas = result.gas();
+                // Value of the gas budget the caller authorized but did not consume — it
+                // was just refunded to the caller, so a DA fee bounded by it is always
+                // covered and never over-charges what the signature authorized.
+                let remaining_gas = (gas.remaining() as u128) + (gas.refunded() as u128);
+                let remaining_value = U256::from(remaining_gas) * U256::from(effective_gas_price);
+                let diff_size = calc_diff_size(context.evm_state());
+                let da_fee = bounded_da_fee(self.da_rate, diff_size, remaining_value);
+                if da_fee != U256::ZERO {
+                    // Debit caller and credit the vault via the journal so both accounts
+                    // are loaded/journaled (a direct state-map insert panics bundle
+                    // assembly). Done before the default handler commits the transaction.
+                    context
+                        .journal_mut()
+                        .load_account_mut(caller)?
+                        .decr_balance(da_fee);
+                    context
+                        .journal_mut()
+                        .load_account_mut(DA_FEE_VAULT_ADDRESS)?
+                        .incr_balance(da_fee);
+                }
             }
         }
 
-        Ok(())
+        MainnetHandler::<EVM, Self::Error, <EVM as EvmTr>::Frame>::default()
+            .execution_result(evm, result)
     }
 
     fn validate_env(&self, evm: &mut Self::Evm) -> Result<(), Self::Error> {
