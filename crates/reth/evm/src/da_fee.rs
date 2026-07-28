@@ -19,6 +19,7 @@
 //! all the components (rpc, execution, guest) can access it without necessarily
 //! depending on heavy reth crates.
 
+use alpen_ee_params::{AlpenSpecId, HeaderExtra};
 use reth_evm::{eth::EthEvmContext, Database};
 use revm::state::EvmState;
 use revm_primitives::{Bytes, KECCAK_EMPTY, U256};
@@ -162,21 +163,23 @@ pub fn calc_diff_size(state: &EvmState) -> u64 {
 
 /// Decodes the per-block DA rate (wei per byte) from the EVM header `extra_data`.
 ///
-/// The rate is stored as a big-endian `u64` in the first 8 bytes of `extra_data`.
-/// Anything shorter (e.g. the genesis label, or an empty field) decodes to `0`, which
-/// disables the DA charge — so the charge is dormant until a rate is committed.
+/// The rate is a body field of the versioned [`HeaderExtra`] layout, so it is read through
+/// that codec rather than off a fixed offset. Anything that does not decode under the
+/// layout (the genesis label, an empty field, a corrupt stamp) yields `0`, which disables
+/// the DA charge — so the charge stays dormant until a rate is committed.
+///
+/// Header validation is what rejects malformed `extra_data`; by the time a block reaches
+/// execution its layout has already been checked, so falling back to `0` here is a
+/// belt-and-braces default rather than a policy decision.
 pub fn da_rate_from_extra_data(extra_data: &Bytes) -> u64 {
-    if extra_data.len() < 8 {
-        return 0;
-    }
-    let mut buf = [0u8; 8];
-    buf.copy_from_slice(&extra_data[..8]);
-    u64::from_be_bytes(buf)
+    HeaderExtra::decode(extra_data)
+        .map(|extra| extra.da_rate())
+        .unwrap_or(0)
 }
 
-/// Encodes a per-block DA rate (wei per byte) into big-endian `extra_data` bytes.
-pub fn da_rate_to_extra_data(da_rate: u64) -> Bytes {
-    Bytes::copy_from_slice(&da_rate.to_be_bytes())
+/// Encodes a block's spec version and DA rate into `extra_data` bytes.
+pub fn da_rate_to_extra_data(spec_version: AlpenSpecId, da_rate: u64) -> Bytes {
+    Bytes::from(HeaderExtra::new(spec_version, da_rate).encode())
 }
 
 /// SegWit witness discount: DA payload rides in witness data, weighted at 1/4 of a vByte.
@@ -434,14 +437,21 @@ mod tests {
     #[test]
     fn da_rate_extra_data_roundtrips() {
         let rate = 2_500_000_000_u64;
-        assert_eq!(da_rate_from_extra_data(&da_rate_to_extra_data(rate)), rate);
+        for version in [AlpenSpecId::V0, AlpenSpecId::V1] {
+            assert_eq!(
+                da_rate_from_extra_data(&da_rate_to_extra_data(version, rate)),
+                rate,
+                "{version:?}"
+            );
+        }
     }
 
     #[test]
-    fn short_extra_data_decodes_to_zero() {
-        // Genesis label / empty field => no rate => charge is dormant.
+    fn undecodable_extra_data_yields_no_rate() {
+        // Genesis label / empty field / truncated stamp => no rate => charge is dormant.
         assert_eq!(da_rate_from_extra_data(&Bytes::from_static(b"SC")), 0);
         assert_eq!(da_rate_from_extra_data(&Bytes::new()), 0);
+        assert_eq!(da_rate_from_extra_data(&Bytes::from_static(&[0x00, 0x00])), 0);
     }
 
     #[test]

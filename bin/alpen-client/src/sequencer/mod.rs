@@ -264,7 +264,12 @@ pub(crate) async fn run(
         }
     };
     let live_da_rate = Arc::new(AtomicU64::new(da_rate_seed));
-    let node = AlpenEthereumNode::new(evm_factory, AlpenNodeMode::sequencer(), live_da_rate);
+    let node = AlpenEthereumNode::new(
+        evm_factory,
+        common.params.evm_spec().clone(),
+        AlpenNodeMode::sequencer(),
+        live_da_rate,
+    );
 
     let consensus_watcher = common.ol_tracker.consensus_watcher();
 

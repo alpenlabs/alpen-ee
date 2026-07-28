@@ -91,6 +91,24 @@ pub struct AlpenBlockExecutionCtx<'a> {
     da_rate: U256,
 }
 
+impl<'a> AlpenBlockExecutionCtx<'a> {
+    /// Creates a context pairing a standard Ethereum context with the
+    /// block's DA rate.
+    pub const fn new(inner: EthBlockExecutionCtx<'a>, da_rate: U256) -> Self {
+        Self { inner, da_rate }
+    }
+}
+
+impl AlpenBlockExecutionCtx<'_> {
+    /// Returns the DA rate (wei per byte) this block executes under.
+    ///
+    /// The block assembler reads it back to commit the same rate into the
+    /// header, so what a block charges and what it claims cannot diverge.
+    pub const fn da_rate(&self) -> U256 {
+        self.da_rate
+    }
+}
+
 /// Block executor factory that stamps the per-block DA rate onto the EVM before execution.
 ///
 /// Wraps reth's `EthBlockExecutorFactory`: the

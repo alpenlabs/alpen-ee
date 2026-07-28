@@ -10,9 +10,8 @@ use std::{
 use alloy_consensus::{Header, Transaction};
 use alpen_reth_evm::{
     base_fee::apply_base_fee_floor,
-    config::AlpenEvmConfig,
     constants::BRIDGEOUT_PRECOMPILE_ADDRESS,
-    da_fee::{da_rate_to_extra_data, DA_COVERAGE_CAPPED, DA_COVERAGE_UNKNOWN},
+    da_fee::{DA_COVERAGE_CAPPED, DA_COVERAGE_UNKNOWN},
     extract_withdrawal_intents,
 };
 use alpen_reth_primitives::WithdrawalIntent;
@@ -43,6 +42,7 @@ use tracing::{debug, info, trace, warn};
 use crate::{
     block_witness::build_block_witness_from_executed_state,
     engine::AlpenEngineTypes,
+    evm_config::AlpenEvmConfig,
     payload::{AlpenBuiltPayload, AlpenPayloadBuilderAttributes},
 };
 
@@ -110,7 +110,8 @@ pub struct AlpenPayloadBuilder<Pool, Client> {
     client: Client,
     /// Transaction pool.
     pool: Pool,
-    /// The type responsible for creating the evm.
+    /// The node's version-aware EVM config; payload jobs select the inner
+    /// per-version config by the version carried on their attributes.
     evm_config: AlpenEvmConfig,
     /// Payload builder configuration.
     builder_config: EthereumBuilderConfig,
@@ -220,12 +221,6 @@ where
     // (`btcio::writer::fees::resolve_fee_rate`, gossiped from the OL). It should later be
     // decoupled from the publication rate and smoothed/cached for the fee model.
     let da_rate = live_da_rate.load(Ordering::Relaxed);
-    // Pin the per-block DA rate as the config's pending rate (the in-EVM charge reads it via
-    // `context_for_next_block` when the block builder's executor is created) and commit the
-    // same value into the block `extra_data`, so the block re-executes to the same state root.
-    let evm_config = evm_config
-        .with_extra_data(da_rate_to_extra_data(da_rate))
-        .with_pending_da_rate(U256::from(da_rate));
 
     let BuildArguments {
         mut cached_reads,
@@ -238,7 +233,16 @@ where
         attributes,
     } = config;
 
+    let spec_version = attributes.spec_version();
     let attributes = attributes.inner;
+
+    // Pin the per-block DA rate as the config's pending rate (the in-EVM charge reads it via
+    // `context_for_next_block` when the block builder's executor is created). The assembler
+    // stamps the committed `extra_data` itself, from the same spec version that selected the
+    // build rules, so the charge and the commitment cannot drift and the block re-executes
+    // to the same state root.
+    let evm_config = evm_config.with_pending_da_rate(U256::from(da_rate));
+    let versioned_config = evm_config.config_for(spec_version);
 
     let state_provider = client.state_by_block_hash(parent_header.hash())?;
     let state = StateProviderDatabase::new(&state_provider);
@@ -260,18 +264,21 @@ where
     // computes the pure EIP-1559 base fee; clamp it to `max(BASE_FEE_FLOOR, .)`. The sealed
     // header takes its base fee from this env, so flooring here keeps the header and the
     // executed base fee consistent, and matches the host consensus + guest, which recompute
-    // the same floored value from the parent. This inlines `builder_for_next_block` so the
-    // floor can be inserted between `next_evm_env` and block-builder construction, keeping the
-    // floor logic in the builder rather than inside `AlpenEvmConfig`.
-    let mut evm_env = evm_config
+    // the same floored value from the parent. This inlines `builder_for_next_block_with_version`
+    // so the floor can be inserted between `next_evm_env` and block-builder construction,
+    // keeping the floor logic in the builder rather than inside `AlpenEvmConfig`.
+    //
+    // The env comes from the version's inner config, but the builder is driven through the
+    // outer version-aware config: that is what carries `spec_version` into the executor and
+    // assembler, so the rules the block builds under are the rules its header claims.
+    let mut evm_env = versioned_config
         .next_evm_env(&parent_header, &next_block_attrs)
         .map_err(PayloadBuilderError::other)?;
     evm_env.block_env.basefee = apply_base_fee_floor(evm_env.block_env.basefee);
 
     let evm = evm_config.evm_with_env(&mut db, evm_env);
-    let block_ctx = evm_config
-        .context_for_next_block(&parent_header, next_block_attrs)
-        .map_err(PayloadBuilderError::other)?;
+    let block_ctx =
+        evm_config.context_for_next_block_with_version(&parent_header, next_block_attrs, spec_version);
     let mut builder = evm_config.create_block_builder(evm, &parent_header, block_ctx);
 
     // Shared handle to *this build EVM's* DA-coverage cell: the in-EVM charge writes it per
@@ -280,7 +287,9 @@ where
     // the sequencer-admission skip below). Owned by the EVM, not shared factory state.
     let da_report = builder.evm().da_report_handle();
 
-    let chain_spec = client.chain_spec();
+    // Fork queries must agree with the EVM env, so use the per-version spec
+    // the block builds under, not the node's boot chain spec.
+    let chain_spec = versioned_config.chain_spec().clone();
 
     debug!(target: "payload_builder", id=%attributes.id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
     let mut cumulative_gas_used = 0;
@@ -502,9 +511,12 @@ where
         .flat_map(|receipt| receipt.logs.iter())
         .filter(|log| log.address == BRIDGEOUT_PRECOMPILE_ADDRESS)
         .count();
-    let withdrawal_intents: Vec<WithdrawalIntent> =
-        extract_withdrawal_intents(&txns, &receipts, evm_config.evm_factory().bridge_params())
-            .map_err(PayloadBuilderError::other)?;
+    let withdrawal_intents: Vec<WithdrawalIntent> = extract_withdrawal_intents(
+        &txns,
+        &receipts,
+        versioned_config.evm_factory().bridge_params(),
+    )
+    .map_err(PayloadBuilderError::other)?;
     if bridgeout_log_count > 0 || !withdrawal_intents.is_empty() {
         info!(
             target: "payload_builder",

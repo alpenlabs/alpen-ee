@@ -7,6 +7,7 @@ version = "0.3.0-alpha.1"
 workspace = true
 
 [dependencies]
+alpen-ee-params.workspace = true
 alpen-reth-primitives.workspace = true
 strata-bridge-params.workspace = true
 strata-crypto.workspace = true
