@@ -146,11 +146,28 @@ pub fn btc_fee_rate_to_da_rate(sat_per_vbyte: u64) -> u64 {
 
 /// Computes the DA fee to charge, bounded by the caller's unused authorized gas value.
 ///
-/// The raw fee is `da_rate * diff_size`, but it is capped at `remaining_value` — the
-/// value of the gas the caller authorized (prepaid) but did not consume. Capping there
-/// guarantees the charge never exceeds what the signature authorized and never fails
-/// (the caller was just refunded `remaining_value`). If the raw fee exceeds the budget
-/// (rate/diff drift versus the quote), the protocol undercharges rather than overcharge.
+/// The raw fee is `da_rate * diff_size`, capped at `remaining_value` — the value of the
+/// gas the caller authorized (prepaid) but did not consume.
+///
+/// # Policy: cap, never fail
+///
+/// When the raw fee exceeds `remaining_value` (the committed DA rate rose, or the diff
+/// came out larger than the estimate the wallet quoted its `effective_gas` against), this
+/// **caps at `remaining_value` and the transaction still succeeds** — it never fails and
+/// never charges beyond what the signature authorized. The bound also guarantees the debit
+/// is always covered: the caller was just refunded `remaining_value`, so a charge `<=` it
+/// cannot fail. The cost of this choice is that the **protocol undercharges (subsidizes)**
+/// the shortfall in that case, rather than reverting the transaction.
+///
+/// This is acceptable for v1 because the quote-to-inclusion window is short (seconds) and
+/// the committed rate moves per block, so the shortfall is rare and small. It is *not*
+/// turned into an out-of-gas failure: DA is a byte-priced charge, not gas-metered, so a
+/// clean OOG would require reverting a fully-executed transaction post-execution (and the
+/// forfeited value would go to the coinbase, not the DA vault).
+///
+/// TODO(fee-model): reduce the subsidy without failing — quote `effective_gas` at
+/// `da_rate * (1 + margin)` in the fee RPC (safety margin), and/or add a per-block
+/// rate-change bound so the committed rate cannot rise faster than the quoted headroom.
 pub fn bounded_da_fee(da_rate: U256, diff_size: u64, remaining_value: U256) -> U256 {
     da_rate
         .saturating_mul(U256::from(diff_size))
