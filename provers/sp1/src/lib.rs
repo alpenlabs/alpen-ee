@@ -1,7 +1,10 @@
 //! Exposes the SP1 guest ELFs compiled by this crate's build script.
 //!
-//! The build script emits ELFs to `<crate>/elfs/`; accessing these static items after
-//! a build that skipped guest compilation (`SP1_SKIP_PROGRAM_BUILD=true`) panics.
+//! The build script emits ELFs to `<crate>/elfs/`. Accessing these static items panics
+//! if no ELF is present there yet, e.g. on a machine that has only ever built with
+//! `SP1_SKIP_PROGRAM_BUILD=true`. If an ELF from an earlier guest revision is already
+//! present, it is loaded as-is — `SP1_SKIP_PROGRAM_BUILD=true` does not verify that a
+//! previously built ELF still matches the current guest source.
 
 use std::{fs, sync::LazyLock};
 
