@@ -18,6 +18,7 @@ strata-ee-acct-types.workspace = true
 strata-ee-chain-types.workspace = true
 strata-identifiers.workspace = true
 strata-paas.workspace = true
+strata-predicate = { workspace = true, features = ["borsh"] }
 strata-storage.workspace = true
 strata-storage-common.workspace = true
 zkaleido.workspace = true

@@ -7,7 +7,10 @@ use strata_ee_acct_runtime::apply_input_messages;
 use strata_ee_acct_types::EeAccountState;
 use strata_ee_chain_types::ExecBlockPackage;
 
-use crate::{package::build_block_package, payload::build_exec_payload};
+use crate::{
+    package::build_block_package,
+    payload::{build_exec_payload, extract_consumed_inputs, ConsumedInputs},
+};
 
 /// All inputs that control the next built block.
 #[derive(Debug)]
@@ -61,18 +64,32 @@ pub async fn build_next_exec_block<E: PayloadBuilderEngine>(
     apply_input_messages(&mut account_state, inbox_messages)
         .context("build_next_exec_block: failed to apply input messages")?;
 
-    // 2. build exec block payload
+    // 2. work out what this block consumes
+    //
+    // This is the one place a consumed rotation is determined, so everything
+    // that depends on one reads it from here.
+    let ConsumedInputs {
+        deposits,
+        processed,
+        new_predicate,
+    } = extract_consumed_inputs(
+        account_state.pending_inputs(),
+        max_deposits_per_block,
+        next_deposit_idx,
+    );
+
+    // 3. build exec block payload
     let (payload, update_extra_data, next_deposit_idx) = build_exec_payload(
-        &mut account_state,
+        deposits,
+        processed,
         parent_exec_blkid,
         timestamp_ms,
-        max_deposits_per_block,
         next_deposit_idx,
         payload_builder,
     )
     .await?;
 
-    // 3. update account state based on built payload and consumed inputs
+    // 4. update account state based on built payload and consumed inputs
     account_state.set_last_exec_blkid(*update_extra_data.new_tip_blkid());
     account_state.set_last_exec_state_root(*update_extra_data.new_tip_state_root());
     // Drain pending input entries that got executed in the current block.
@@ -80,8 +97,13 @@ pub async fn build_next_exec_block<E: PayloadBuilderEngine>(
         account_state.remove_pending_inputs(*update_extra_data.processed_inputs() as usize);
     let _ = account_state.remove_pending_fincls(*update_extra_data.processed_fincls() as usize);
 
-    // 4. build exec package
-    let package = build_block_package(bridge_gateway_account_id, processed_inputs, &payload);
+    // 5. build exec package
+    let package = build_block_package(
+        bridge_gateway_account_id,
+        processed_inputs,
+        &payload,
+        new_predicate,
+    );
 
     Ok(BlockAssemblyOutputs {
         package,
