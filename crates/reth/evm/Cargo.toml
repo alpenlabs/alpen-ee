@@ -15,6 +15,7 @@ strata-ol-bridge-types.workspace = true
 strata-primitives.workspace = true
 
 alloy-consensus.workspace = true
+alloy-eips.workspace = true
 alloy-sol-types.workspace = true
 reth-evm.workspace = true
 reth-primitives.workspace = true

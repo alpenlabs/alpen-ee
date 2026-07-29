@@ -9,6 +9,7 @@ use std::{
 
 use alloy_consensus::{Header, Transaction};
 use alpen_reth_evm::{
+    base_fee::apply_base_fee_floor,
     constants::BRIDGEOUT_PRECOMPILE_ADDRESS,
     da_fee::{da_rate_to_extra_data, DA_COVERAGE_CAPPED, DA_COVERAGE_UNKNOWN},
     evm::AlpenEvmFactory,
@@ -242,20 +243,32 @@ where
         .with_bundle_update()
         .build();
 
-    let mut builder = evm_config
-        .builder_for_next_block(
-            &mut db,
-            &parent_header,
-            NextBlockEnvAttributes {
-                timestamp: attributes.timestamp(),
-                suggested_fee_recipient: attributes.suggested_fee_recipient(),
-                prev_randao: attributes.prev_randao(),
-                gas_limit: builder_config.gas_limit(parent_header.gas_limit),
-                parent_beacon_block_root: attributes.parent_beacon_block_root(),
-                withdrawals: Some(attributes.withdrawals().clone()),
-            },
-        )
+    let next_block_attrs = NextBlockEnvAttributes {
+        timestamp: attributes.timestamp(),
+        suggested_fee_recipient: attributes.suggested_fee_recipient(),
+        prev_randao: attributes.prev_randao(),
+        gas_limit: builder_config.gas_limit(parent_header.gas_limit),
+        parent_beacon_block_root: attributes.parent_beacon_block_root(),
+        withdrawals: Some(attributes.withdrawals().clone()),
+    };
+
+    // Build the next block's EVM env and apply the base-fee floor (D). `next_evm_env`
+    // computes the pure EIP-1559 base fee; clamp it to `max(BASE_FEE_FLOOR, .)`. The sealed
+    // header takes its base fee from this env, so flooring here keeps the header and the
+    // executed base fee consistent, and matches the host consensus + guest, which recompute
+    // the same floored value from the parent. This inlines `builder_for_next_block` so the
+    // floor can be inserted between `next_evm_env` and block-builder construction — no custom
+    // `ConfigureEvm` needed. (With the inert `BASE_FEE_FLOOR = 0`, this is pure EIP-1559.)
+    let mut evm_env = evm_config
+        .next_evm_env(&parent_header, &next_block_attrs)
         .map_err(PayloadBuilderError::other)?;
+    evm_env.block_env.basefee = apply_base_fee_floor(evm_env.block_env.basefee);
+
+    let evm = evm_config.evm_with_env(&mut db, evm_env);
+    let block_ctx = evm_config
+        .context_for_next_block(&parent_header, next_block_attrs)
+        .map_err(PayloadBuilderError::other)?;
+    let mut builder = evm_config.create_block_builder(evm, &parent_header, block_ctx);
 
     let chain_spec = client.chain_spec();
 
