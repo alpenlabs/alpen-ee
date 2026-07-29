@@ -6,7 +6,7 @@ use alpen_ee_common::{
     PayloadBuilderEngine, SystemClock,
 };
 use alpen_ee_exec_chain::ExecChainHandle;
-use alpen_ee_params::{AlpenSpecId, AlpenSpecSchedule};
+use alpen_ee_params::AlpenSpecId;
 use eyre::Context;
 use strata_acct_types::{Hash, MessageEntry};
 use strata_ee_acct_types::EeAccountState;
@@ -15,10 +15,7 @@ use strata_identifiers::{OLBlockCommitment, OLBlockId};
 use thiserror::Error;
 use tracing::{debug, error, warn};
 
-use crate::{
-    block_builder::{spec_tracker::SpecTracker, BlockBuilderConfig},
-    ol_chain_tracker::OLChainTrackerHandle,
-};
+use crate::{block_builder::BlockBuilderConfig, ol_chain_tracker::OLChainTrackerHandle};
 
 /// Error type for block builder that distinguishes retriable from real errors.
 #[derive(Debug, Error)]
@@ -135,6 +132,7 @@ fn create_next_exec_block_record(
     parent_blockhash: Hash,
     next_inbox_msg_idx: u64,
     next_deposit_idx: u64,
+    next_spec_version: AlpenSpecId,
     messages: Vec<MessageEntry>,
 ) -> ExecBlockRecord {
     ExecBlockRecord::new(
@@ -146,6 +144,7 @@ fn create_next_exec_block_record(
         parent_blockhash,
         next_inbox_msg_idx,
         next_deposit_idx,
+        next_spec_version,
         messages,
     )
 }
@@ -155,7 +154,6 @@ pub async fn block_builder_task<
     TStorage: ExecBlockStorage,
 >(
     config: BlockBuilderConfig,
-    spec_schedule: AlpenSpecSchedule,
     exec_chain_handle: ExecChainHandle,
     ol_chain_handle: OLChainTrackerHandle,
     payload_builder: Arc<TPayloadBuilder>,
@@ -171,16 +169,11 @@ pub async fn block_builder_task<
     let mut next_block_target = compute_next_block_target(&last_local_block, &config);
     debug!(?next_block_target, "next block target");
 
-    // Rotations behind the tip were consumed by earlier blocks; the tracker
-    // only scans forward from here (see the restart TODO on `SpecTracker`).
-    let mut spec_tracker = SpecTracker::new(spec_schedule, last_local_block.next_inbox_msg_idx());
-
     let clock = SystemClock;
     loop {
         match block_builder_task_inner(
             &next_block_target,
             &config,
-            &mut spec_tracker,
             &exec_chain_handle,
             &ol_chain_handle,
             payload_builder.as_ref(),
@@ -204,11 +197,9 @@ pub async fn block_builder_task<
     }
 }
 
-#[expect(clippy::too_many_arguments, reason = "too many args")]
 async fn block_builder_task_inner<TEngine: PayloadBuilderEngine>(
     next_block_target: &BlockTarget,
     config: &BlockBuilderConfig,
-    spec_tracker: &mut SpecTracker,
     exec_chain_handle: &ExecChainHandle,
     ol_chain_handle: &OLChainTrackerHandle,
     payload_builder: &TEngine,
@@ -222,7 +213,6 @@ async fn block_builder_task_inner<TEngine: PayloadBuilderEngine>(
     let (block, payload, blockhash) = build_next_block(
         next_block_target,
         config,
-        spec_tracker,
         exec_chain_handle,
         ol_chain_handle,
         payload_builder,
@@ -278,7 +268,6 @@ struct BlockTarget {
 async fn build_next_block(
     expected_block_target: &BlockTarget,
     config: &BlockBuilderConfig,
-    spec_tracker: &mut SpecTracker,
     exec_chain_handle: &ExecChainHandle,
     ol_chain_handle: &OLChainTrackerHandle,
     payload_builder: &impl PayloadBuilderEngine,
@@ -329,16 +318,11 @@ async fn build_next_block(
         None => (vec![], last_local_block.next_inbox_msg_idx()),
     };
 
-    // The block's start coordinate: the inbox index of the first message it
-    // consumes (or would consume). Admin predicate rotations in the fetched
-    // window advance the schedule first, but activate strictly past their own
-    // index, so the block consuming a rotation still resolves to the
-    // predecessor version.
-    let first_msg_idx = last_local_block.next_inbox_msg_idx();
-    spec_tracker
-        .observe_messages(first_msg_idx, &inbox_messages)
-        .context("build_next_block: cannot honor discovered spec activation")?;
-    let spec_version = spec_tracker.active_spec_at(first_msg_idx);
+    // The version governing this block: whatever the parent block's account
+    // state already settled on. A rotation consumed by *this* block only
+    // takes effect for the block built after it (see `next_spec_version` on
+    // `BlockAssemblyOutputs`).
+    let spec_version = last_local_block.next_spec_version();
 
     // build next block
     let block_assembly_inputs = create_block_assembly_inputs(
@@ -354,6 +338,7 @@ async fn build_next_block(
         payload,
         account_state,
         next_deposit_idx,
+        next_spec_version,
     } = build_next_exec_block(block_assembly_inputs, payload_builder)
         .await
         .context("build_next_block: failed to build exec block")?;
@@ -369,6 +354,7 @@ async fn build_next_block(
         parent_blockhash,
         next_inbox_msg_idx,
         next_deposit_idx,
+        next_spec_version,
         inbox_messages,
     );
 
@@ -414,6 +400,7 @@ mod tests {
             Hash::default(),
             0,
             0,
+            AlpenSpecId::V0,
             vec![],
         )
     }

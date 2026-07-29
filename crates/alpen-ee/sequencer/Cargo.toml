@@ -35,8 +35,5 @@ tracing.workspace = true
 alpen-ee-common = { workspace = true, features = ["test-utils"] }
 mockall.workspace = true
 bitcoin.workspace = true
-ssz.workspace = true
 strata-btc-types.workspace = true
-strata-msg-fmt.workspace = true
-strata-predicate.workspace = true
 tokio = { workspace = true }

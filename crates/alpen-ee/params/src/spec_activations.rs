@@ -61,6 +61,16 @@ pub enum AlpenSpecId {
     V1 = 1,
 }
 
+impl AlpenSpecId {
+    /// Returns the version that succeeds this one in discriminant order.
+    ///
+    /// Errs with the raw id (mirroring [`TryFrom<u16>`]) when this binary has
+    /// no variant for the successor — an upgrade this binary cannot execute.
+    pub fn successor(self) -> Result<Self, u16> {
+        Self::try_from(u16::from(self) + 1)
+    }
+}
+
 impl fmt::Display for AlpenSpecId {
     /// Matches this type's snake_case serde representation (e.g. `v0`).
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -305,6 +315,12 @@ mod tests {
         assert_eq!(AlpenSpecId::try_from(1u16).unwrap(), AlpenSpecId::V1);
         assert_eq!(AlpenSpecId::try_from(2u16), Err(2));
         assert_eq!(AlpenSpecId::try_from(0xFFFFu16), Err(0xFFFF));
+    }
+
+    #[test]
+    fn successor_chains_and_errs_past_known_versions() {
+        assert_eq!(AlpenSpecId::V0.successor(), Ok(AlpenSpecId::V1));
+        assert_eq!(AlpenSpecId::V1.successor(), Err(2));
     }
 
     #[test]
