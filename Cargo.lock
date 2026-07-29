@@ -14965,6 +14965,7 @@ dependencies = [
  "strata-codec",
  "strata-ee-acct-types",
  "strata-ee-chain-types",
+ "strata-predicate",
  "strata-simple-ee",
 ]
 
