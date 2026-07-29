@@ -1,4 +1,8 @@
 use core::marker::PhantomData;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 
 use revm::{
     context::{
@@ -19,7 +23,9 @@ use revm_primitives::U256;
 use crate::{
     apis::validation,
     constants::DA_FEE_VAULT_ADDRESS,
-    da_fee::{bounded_da_fee, calc_diff_size, DaStateAccess},
+    da_fee::{
+        calc_diff_size, DaStateAccess, DA_COVERAGE_CAPPED, DA_COVERAGE_OK, DA_COVERAGE_UNKNOWN,
+    },
 };
 
 #[expect(
@@ -29,14 +35,21 @@ use crate::{
 pub struct AlpenRevmHandler<EVM> {
     /// Per-block DA rate (wei per byte) used to charge the DA fee.
     da_rate: U256,
+    /// Shared cell into which the handler records whether the transaction's DA fee was
+    /// capped by its unused authorized gas (see [`AlpenEvmFactory::da_report`]). The
+    /// payload builder reads this to skip under-covered transactions; re-execution ignores
+    /// it. `[crate::evm::AlpenEvmFactory]`
+    da_report: Arc<AtomicU64>,
     pub _phantom: PhantomData<EVM>,
 }
 
 impl<EVM> AlpenRevmHandler<EVM> {
-    /// Creates a handler that charges the DA fee at the given per-block rate.
-    pub fn new(da_rate: U256) -> Self {
+    /// Creates a handler that charges the DA fee at the given per-block rate and records
+    /// per-transaction coverage into `da_report`.
+    pub fn new(da_rate: U256, da_report: Arc<AtomicU64>) -> Self {
         Self {
             da_rate,
+            da_report,
             _phantom: PhantomData,
         }
     }
@@ -46,6 +59,7 @@ impl<EVM> Default for AlpenRevmHandler<EVM> {
     fn default() -> Self {
         Self {
             da_rate: U256::ZERO,
+            da_report: Arc::new(AtomicU64::new(DA_COVERAGE_UNKNOWN)),
             _phantom: PhantomData,
         }
     }
@@ -118,7 +132,19 @@ where
                 let remaining_gas = (gas.remaining() as u128) + (gas.refunded() as u128);
                 let remaining_value = U256::from(remaining_gas) * U256::from(effective_gas_price);
                 let diff_size = calc_diff_size(context.evm_state());
-                let da_fee = bounded_da_fee(self.da_rate, diff_size, remaining_value);
+                let uncapped_da_fee = self.da_rate.saturating_mul(U256::from(diff_size));
+
+                // Cap the fee at the unused authorized gas (never fail, never over-charge).
+                // Record whether the cap bound so the sequencer's payload builder can skip
+                // under-covered (would-be-subsidized) transactions; re-execution ignores it.
+                let da_fee = uncapped_da_fee.min(remaining_value);
+                let coverage = if uncapped_da_fee > remaining_value {
+                    DA_COVERAGE_CAPPED
+                } else {
+                    DA_COVERAGE_OK
+                };
+                self.da_report.store(coverage, Ordering::Relaxed);
+
                 if da_fee != U256::ZERO {
                     // Debit caller and credit the vault via the journal so both accounts
                     // are loaded/journaled (a direct state-map insert panics bundle

@@ -30,7 +30,8 @@ where
     fn transact_one(&mut self, tx: Self::Tx) -> Result<Self::ExecutionResult, Self::Error> {
         self.inner.ctx.set_tx(tx);
         let da_rate = self.da_rate;
-        AlpenRevmHandler::new(da_rate).run(self)
+        let da_report = self.da_report.clone();
+        AlpenRevmHandler::new(da_rate, da_report).run(self)
     }
 
     fn finalize(&mut self) -> Self::State {
@@ -39,10 +40,13 @@ where
 
     fn replay(&mut self) -> Result<ResultAndState, Self::Error> {
         let da_rate = self.da_rate;
-        AlpenRevmHandler::new(da_rate).run(self).map(|result| {
-            let state = self.finalize();
-            ResultAndState::new(result, state)
-        })
+        let da_report = self.da_report.clone();
+        AlpenRevmHandler::new(da_rate, da_report)
+            .run(self)
+            .map(|result| {
+                let state = self.finalize();
+                ResultAndState::new(result, state)
+            })
     }
 }
 
@@ -69,7 +73,8 @@ where
     fn inspect_one_tx(&mut self, tx: Self::Tx) -> Result<Self::ExecutionResult, Self::Error> {
         self.inner.ctx.set_tx(tx);
         let da_rate = self.da_rate;
-        AlpenRevmHandler::new(da_rate).inspect_run(self)
+        let da_report = self.da_report.clone();
+        AlpenRevmHandler::new(da_rate, da_report).inspect_run(self)
     }
 }
 

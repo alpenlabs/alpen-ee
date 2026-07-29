@@ -66,6 +66,21 @@ const COMPRESSION_RATIO_BPS: u64 = 4_800;
 /// (block metadata and other state written to DA).
 const DA_FIXED_OVERHEAD: u64 = 2;
 
+/// DA-coverage report values written by the charge handler into the shared report cell
+/// and read by the sequencer's payload builder (F.1 admission).
+///
+/// The default / reset value is [`DA_COVERAGE_UNKNOWN`] (`0`) — deliberately *not* `OK` —
+/// so a cell that was never written for the current transaction (e.g. a zero-fee system
+/// call that skips the charge, or a stale value from a previous tx) is never mistaken for
+/// "covered". The payload builder skips a transaction only on an explicit
+/// [`DA_COVERAGE_CAPPED`]; `UNKNOWN` and `OK` both mean "include".
+pub const DA_COVERAGE_UNKNOWN: u64 = 0;
+/// The transaction's DA fee was fully covered by its unused authorized gas.
+pub const DA_COVERAGE_OK: u64 = 1;
+/// The transaction's DA fee was capped by its unused authorized gas — under-covered, so
+/// the protocol would subsidize it. The payload builder skips such transactions.
+pub const DA_COVERAGE_CAPPED: u64 = 2;
+
 /// Computes the DA `diff_size` (in bytes) for a single transaction's state change-set.
 ///
 /// `state` is the post-execution [`EvmState`] for the transaction. Every touched

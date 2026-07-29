@@ -33,6 +33,15 @@ use crate::{apis::AlpenAlloyEvm, precompiles::factory, utils::wei_to_sats};
 pub struct AlpenEvmFactory {
     bridge_params: BridgeParams,
     da_rate: Arc<AtomicU64>,
+    /// Per-transaction DA-coverage report written by the DA fee charge, one of
+    /// [`DA_COVERAGE_UNKNOWN`]/[`DA_COVERAGE_OK`]/[`DA_COVERAGE_CAPPED`]
+    /// (`crate::da_fee`). The default `0` is `UNKNOWN` (not `OK`), so an unwritten cell is
+    /// never read as covered; the payload builder resets it before each tx and skips only
+    /// on an explicit `CAPPED`. Interior-mutable and shared like
+    /// [`AlpenEvmFactory::da_rate`]; only the sequencer's payload builder reads it — full-
+    /// node/guest re-execution ignores it, keeping it purely observational and
+    /// determinism-neutral.
+    da_report: Arc<AtomicU64>,
 }
 
 impl AlpenEvmFactory {
@@ -45,6 +54,7 @@ impl AlpenEvmFactory {
             bridge_params: BridgeParams::new(denomination, max_withdrawal_amount)
                 .expect("withdrawal policy constructed from wei must be valid"),
             da_rate: Arc::new(AtomicU64::new(0)),
+            da_report: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -61,6 +71,7 @@ impl AlpenEvmFactory {
         Self {
             bridge_params: *bp,
             da_rate: Arc::new(AtomicU64::new(0)),
+            da_report: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -75,6 +86,14 @@ impl AlpenEvmFactory {
     /// Returns the currently configured per-block DA rate (wei per byte).
     pub fn da_rate(&self) -> u64 {
         self.da_rate.load(Ordering::Relaxed)
+    }
+
+    /// Returns a shared handle to the DA-coverage report cell (see [`Self::da_report`]).
+    ///
+    /// The payload builder holds this handle to read, after executing each transaction,
+    /// whether that transaction's DA fee was capped (under-covered) and should be skipped.
+    pub fn da_report_handle(&self) -> Arc<AtomicU64> {
+        self.da_report.clone()
     }
 }
 
@@ -108,7 +127,12 @@ impl EvmFactory for AlpenEvmFactory {
             .build_mainnet_with_inspector(NoOpInspector {})
             .with_precompiles(precompiles);
 
-        AlpenAlloyEvm::new(evm, false, U256::from(self.da_rate()))
+        AlpenAlloyEvm::new(
+            evm,
+            false,
+            U256::from(self.da_rate()),
+            self.da_report.clone(),
+        )
     }
 
     fn create_evm_with_inspector<DB: Database, I: Inspector<Self::Context<DB>, EthInterpreter>>(
@@ -124,6 +148,7 @@ impl EvmFactory for AlpenEvmFactory {
                 .with_inspector(inspector),
             true,
             da_rate,
+            self.da_report.clone(),
         )
     }
 }

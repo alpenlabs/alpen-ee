@@ -1,5 +1,8 @@
 use core::mem;
-use std::ops::{Deref, DerefMut};
+use std::{
+    ops::{Deref, DerefMut},
+    sync::{atomic::AtomicU64, Arc},
+};
 
 use reth_evm::{eth::EthEvmContext, precompiles::PrecompilesMap, Database, Evm, EvmEnv};
 use revm::{
@@ -37,6 +40,9 @@ pub struct AlpenAlloyEvm<DB: Database, I> {
     inspect: bool,
     /// Per-block DA rate (wei per byte) used by the in-EVM DA fee charge.
     da_rate: U256,
+    /// Shared DA-coverage report cell, written by the handler after each charge (see
+    /// [`AlpenEvmFactory::da_report`](crate::evm::AlpenEvmFactory)).
+    da_report: Arc<AtomicU64>,
 }
 
 impl<DB: Database, I> AlpenAlloyEvm<DB, I> {
@@ -54,11 +60,13 @@ impl<DB: Database, I> AlpenAlloyEvm<DB, I> {
         >,
         inspect: bool,
         da_rate: U256,
+        da_report: Arc<AtomicU64>,
     ) -> Self {
         Self {
             inner: evm,
             inspect,
             da_rate,
+            da_report,
         }
     }
 

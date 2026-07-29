@@ -8,7 +8,9 @@ use std::{
 
 use alloy_consensus::{Header, Transaction};
 use alpen_reth_evm::{
-    constants::BRIDGEOUT_PRECOMPILE_ADDRESS, da_fee::da_rate_to_extra_data, evm::AlpenEvmFactory,
+    constants::BRIDGEOUT_PRECOMPILE_ADDRESS,
+    da_fee::{da_rate_to_extra_data, DA_COVERAGE_CAPPED, DA_COVERAGE_UNKNOWN},
+    evm::AlpenEvmFactory,
     extract_withdrawal_intents,
 };
 use alpen_reth_primitives::WithdrawalIntent;
@@ -18,6 +20,7 @@ use reth_errors::{BlockExecutionError, BlockValidationError};
 use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::{
+    block::CommitChanges,
     execute::{BlockBuilder, BlockBuilderOutcome},
     Evm, NextBlockEnvAttributes,
 };
@@ -205,6 +208,10 @@ where
     // decoupled from the publication rate and smoothed/cached for the fee model.
     let da_rate = live_da_rate.load(Ordering::Relaxed);
     evm_config.evm_factory().set_da_rate(da_rate);
+    // Shared handle the in-EVM DA charge writes per transaction: non-zero means the DA fee
+    // was capped by the tx's unused authorized gas (under-covered / would be subsidized).
+    // The tx loop reads it to skip such txs (see F.1 sequencer admission).
+    let da_report = evm_config.evm_factory().da_report_handle();
     let evm_config = evm_config.with_extra_data(da_rate_to_extra_data(da_rate));
 
     let BuildArguments {
@@ -286,8 +293,32 @@ where
         // convert tx to a signed transaction
         let tx = pool_tx.to_consensus();
 
-        let gas_used = match builder.execute_transaction(tx.clone()) {
-            Ok(gas_used) => gas_used,
+        // Execute, but only commit if the transaction's DA fee is fully covered by its
+        // unused authorized gas. Reset the shared coverage cell to `UNKNOWN` first so a
+        // stale value from a prior tx (or a tx that skips the charge, e.g. zero-fee) can
+        // never be read as covered; the in-EVM charge overwrites it with `OK`/`CAPPED`
+        // during execution (before this closure runs). A `CAPPED` charge means the tx
+        // under-provisioned and the protocol would subsidize its DA cost, so we skip it.
+        // Coverage only matters when the DA charge is active (`da_rate != 0`).
+        da_report.store(DA_COVERAGE_UNKNOWN, Ordering::Relaxed);
+        let exec_outcome = builder.execute_transaction_with_commit_condition(tx.clone(), |_res| {
+            if da_rate != 0 && da_report.load(Ordering::Relaxed) == DA_COVERAGE_CAPPED {
+                CommitChanges::No
+            } else {
+                CommitChanges::Yes
+            }
+        });
+
+        let gas_used = match exec_outcome {
+            Ok(Some(gas_used)) => gas_used,
+            Ok(None) => {
+                // DA-undercovered: skip the tx (and its descendants) for this build. Its
+                // nonce is untouched, so the sender can resubmit with the effective gas
+                // that `eth_estimateGas` returns (which folds in the DA headroom).
+                trace!(target: "payload_builder", ?tx, "skipping DA-undercovered transaction");
+                best_txs.mark_invalid(&pool_tx, InvalidPoolTransactionError::Underpriced);
+                continue;
+            }
             Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
                 error, ..
             })) => {
