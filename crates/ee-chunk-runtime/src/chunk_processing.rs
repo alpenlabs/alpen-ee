@@ -29,8 +29,20 @@ pub fn process_block<E: ExecutionEnvironment>(
     let exec_outp = ee.execute_block_body(state, &epl, block.inputs())?;
     ee.verify_outputs_against_header(eb.get_header(), &exec_outp)?;
 
-    // Check that the outputs match the chunk block.
-    if exec_outp.outputs() != block.outputs() {
+    // Check that the EVM-derivable outputs match the chunk block.
+    //
+    // `new_predicate` is deliberately left out of this comparison: it's an
+    // account-level fact drawn from the pending-input queue, not something
+    // `execute_block_body` can derive from EVM execution alone (see `evm-ee`'s
+    // `execute_block_body`, which only ever sets output messages/transfers and
+    // always leaves `new_predicate` empty). It IS still verified -- just not here.
+    // `IoTracker` (below, in this same file) walks every block's declared
+    // `new_predicate` via `check_update`, accumulates it into
+    // `observed_new_predicate`, and `verify_all_consumed` asserts that equals the
+    // chunk's `expected_new_predicate`. That's the real check for this field.
+    if exec_outp.outputs().output_transfers() != block.outputs().output_transfers()
+        || exec_outp.outputs().output_messages() != block.outputs().output_messages()
+    {
         return Err(EnvError::InvalidBlock);
     }
 

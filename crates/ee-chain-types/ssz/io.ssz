@@ -63,4 +63,16 @@ class ExecOutputs(Container):
 
     ### New update predicate declared by this block, if it consumed a queued
     ### rotation.
+    ###
+    ### TODO: this is an account-level declaration, not an EVM-execution
+    ### artifact like output_transfers/output_messages -- execute_block_body
+    ### never sets it, so ee-chunk-runtime's process_block can't verify it
+    ### against real execution the way it does the other two fields (only
+    ### IoTracker's cross-check against the chunk's declared value actually
+    ### verifies it; see the comment in process_block). Consider carrying it
+    ### as a separate declaration on the block wrapper instead of inside
+    ### ExecOutputs, so this container only holds what execution can actually
+    ### produce. Moving it changes this container's SSZ layout/hash, so needs
+    ### coordinating with every other reader (block-assembly, spec_acct.rs,
+    ### update_builder.rs, IoTracker).
     new_predicate: ExecNewPredicate
