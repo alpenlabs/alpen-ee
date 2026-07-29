@@ -27,21 +27,21 @@ default:
 build:
     cargo build --workspace --all-features --lib --bins --examples --benches --locked
 
-# Run unit tests
+# Run unit tests (toolchain-free: skips the SP1 guest build, matching CI)
 [group('test')]
 test-unit: ensure-cargo-nextest
-    cargo nextest run {{unit_test_args}}
+    SP1_SKIP_PROGRAM_BUILD=true cargo nextest run {{unit_test_args}}
 
-# Run unit tests with coverage
+# Run unit tests with coverage (toolchain-free: skips the SP1 guest build, matching CI)
 [group('test')]
 cov-unit: ensure-cargo-llvm-cov ensure-cargo-nextest
     rm -f {{cov_file}}
-    cargo llvm-cov nextest --lcov --output-path {{cov_file}} {{unit_test_args}}
+    SP1_SKIP_PROGRAM_BUILD=true cargo llvm-cov nextest --lcov --output-path {{cov_file}} {{unit_test_args}}
 
-# Generate an HTML coverage report and open it in the browser
+# Generate an HTML coverage report and open it in the browser (toolchain-free, matching CI)
 [group('test')]
 cov-report-html: ensure-cargo-llvm-cov ensure-cargo-nextest
-    cargo llvm-cov --open --workspace --locked nextest
+    SP1_SKIP_PROGRAM_BUILD=true cargo llvm-cov --open --workspace --locked nextest
 
 # Run integration tests
 [group('test')]
@@ -297,7 +297,7 @@ lint: fmt-check-ws fmt-check-func-tests fmt-check-toml lint-check-ws lint-check-
 lint-fix: fmt-toml fmt-ws lint-fix-ws lint-fix-codespell
     @echo "\n\033[36m======== OK: Lints and Formatting Fixes ========\033[0m\n"
 
-# Runs `cargo docs` to generate the Rust documents in the `target/doc` directory
+# Runs `cargo docs` to generate the Rust documents in the `target/doc` directory (toolchain-free, matching CI)
 [group('code-quality')]
 rustdocs:
     RUSTDOCFLAGS="\
@@ -305,14 +305,15 @@ rustdocs:
     --enable-index-page -Z unstable-options \
     -A rustdoc::private-doc-tests \
     -D warnings" \
+    SP1_SKIP_PROGRAM_BUILD=true \
     cargo doc \
     --workspace \
     --no-deps
 
-# Runs doctests on the workspace
+# Runs doctests on the workspace (toolchain-free: skips the SP1 guest build, matching CI)
 [group('code-quality')]
 test-doc:
-    cargo test --doc --workspace
+    SP1_SKIP_PROGRAM_BUILD=true cargo test --doc --workspace
 
 # Runs all tests in the workspace including unit and docs tests
 [group('code-quality')]
