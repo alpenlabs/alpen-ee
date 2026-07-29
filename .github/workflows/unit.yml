@@ -91,6 +91,8 @@ jobs:
       - name: Run tests with coverage
         run: |
           cargo llvm-cov --workspace --locked nextest --profile ci --lcov --output-path lcov.unit.info --no-cfg-coverage --no-cfg-coverage-nightly
+        env:
+          SP1_SKIP_PROGRAM_BUILD: "true"
 
       - name: Test Summary
         uses: test-summary/action@37b508cfee6d4d080eedd00b5bb240a6a784a6a5 # v2
@@ -142,6 +144,8 @@ jobs:
 
       - name: Run doctests
         run: cargo test --doc --workspace --all-features
+        env:
+          SP1_SKIP_PROGRAM_BUILD: "true"
 
   unit-success:
     name: Check that unit tests pass

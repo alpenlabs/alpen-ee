@@ -397,7 +397,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-serde",
  "alloy-sol-types",
- "itertools 0.14.0",
+ "itertools 0.13.0",
  "serde",
  "serde_json",
  "serde_with",
@@ -4680,9 +4680,9 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
 name = "slop-algebra"
-version = "6.2.3"
+version = "6.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d7e25239ac2fe1cbc2ed5114844209d70361c8d55ef812cb935c90d6f771b5b"
+checksum = "8c112cafd4c5c374d267a48c8976d12fca3b0f2cc2e44e6fb1343808310b4fc6"
 dependencies = [
  "itertools 0.14.0",
  "p3-field",
@@ -4691,9 +4691,9 @@ dependencies = [
 
 [[package]]
 name = "slop-bn254"
-version = "6.2.3"
+version = "6.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1243ca619a3f4c07f536a060d1fd2c6f779d5b0e4cfeee3acee4d1f76ae35cb4"
+checksum = "ea991a652ea2e55f0523649f5c9efbfb32cf9fdcc2bf3b3580b4343a94379503"
 dependencies = [
  "ff",
  "p3-bn254-fr",
@@ -4706,9 +4706,9 @@ dependencies = [
 
 [[package]]
 name = "slop-challenger"
-version = "6.2.3"
+version = "6.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "594a3251b7fbbabf7e0ba1e5c2f563c2797fc2d51982c0208ce70b2f52b8fbe4"
+checksum = "33b33f1eaadcd4159157758b0edcf1c14f470915f85c648e660e4740ff83e921"
 dependencies = [
  "futures",
  "p3-challenger",
@@ -4719,9 +4719,9 @@ dependencies = [
 
 [[package]]
 name = "slop-koala-bear"
-version = "6.2.3"
+version = "6.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ccc675284794435dd053d5e7415089bbd08fccf92cd91e044ea3213821dfb5c"
+checksum = "8795ee9a92ecf0a604c0e3ed20e80bbc38772310c0622f94a2e1b66ca2455cb8"
 dependencies = [
  "lazy_static",
  "p3-koala-bear",
@@ -4734,27 +4734,27 @@ dependencies = [
 
 [[package]]
 name = "slop-poseidon2"
-version = "6.2.3"
+version = "6.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f77602b918f667f970d017293189f9e60ba056d1933c9f717634877838297bc"
+checksum = "25561d9ecf4bcf1aa2e800560ac557bff6dad943b9dc5cd0e8427fceca1e8c65"
 dependencies = [
  "p3-poseidon2",
 ]
 
 [[package]]
 name = "slop-primitives"
-version = "6.2.3"
+version = "6.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "592ded42eb74fd87d2ce13592906cf86f201128dd18e2aa5a35d298bc3534dcb"
+checksum = "f6b24ad70b49f40d6acfe7b1ccf042db25820abe305a4c2232f15204f63f0227"
 dependencies = [
  "slop-algebra",
 ]
 
 [[package]]
 name = "slop-symmetric"
-version = "6.2.3"
+version = "6.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "108bf1769132b782218e3606b8e2f310741fb89d1745234b59ff17d9e7ab8700"
+checksum = "94e580d03bb5383aca1c12579a8a24b838afb12eb356439e740cba34904b6864"
 dependencies = [
  "p3-symmetric",
 ]
@@ -4776,9 +4776,9 @@ checksum = "1b6b67fb9a61334225b5b790716f609cd58395f895b3fe8b328786812a40bc3b"
 
 [[package]]
 name = "sp1-lib"
-version = "6.2.3"
+version = "6.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20e8b776b02a868c482b70b5dca58204f27fc860dbbe5eda70437299367f494c"
+checksum = "629b673d6aa3c666b41e14d699323413fa90195c906365ba8c49d1b8e4531151"
 dependencies = [
  "bincode",
  "elliptic-curve",
@@ -4788,9 +4788,9 @@ dependencies = [
 
 [[package]]
 name = "sp1-primitives"
-version = "6.2.3"
+version = "6.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f20c3dd3131b1285420ca25a37f507915ab609887d6dda73973396a0faa719c1"
+checksum = "421b4590a89bf7c263f8a64844a4034ee8cb73c351498911ce0acd18da6b5ed2"
 dependencies = [
  "bincode",
  "blake3",
@@ -4812,9 +4812,9 @@ dependencies = [
 
 [[package]]
 name = "sp1-zkvm"
-version = "6.2.3"
+version = "6.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2dea6f1d7c79d27c9890c39786b68061c5a82b4c21669aafc98ae95337d792f"
+checksum = "6938ee71db40a5ae20eada69b94e0657efd2c4c9eb834b02f72a6708cc7c072c"
 dependencies = [
  "cfg-if",
  "critical-section",

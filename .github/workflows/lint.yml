@@ -140,6 +140,8 @@ jobs:
           version: "v0.10.0" # sccache version
 
       - run: cargo hack check --locked
+        env:
+          SP1_SKIP_PROGRAM_BUILD: "true"
 
       # Native-only build used by test setups (drops SP1 remote proving).
       # The bare no-default-features (fullnode-only) build is not maintained.
