@@ -40,6 +40,21 @@ pub fn apply_base_fee_floor(base_fee: u64) -> u64 {
     base_fee.max(BASE_FEE_FLOOR)
 }
 
+/// Returns whether `base_fee` satisfies the protocol floor (`base_fee >= BASE_FEE_FLOOR`).
+///
+/// Used by the proof guest as the minimal base-fee check. (See the guest TODO: the full
+/// check is the EIP-1559 recurrence capped at the floor, once the parent header is
+/// available there.)
+// Inert at the placeholder floor (`base_fee >= 0` is always true); intentional and
+// future-proof for a non-zero floor.
+#[expect(
+    clippy::absurd_extreme_comparisons,
+    reason = "BASE_FEE_FLOOR is a placeholder (0) pending calibration; the check is intentional"
+)]
+pub fn meets_base_fee_floor(base_fee: u64) -> bool {
+    base_fee >= BASE_FEE_FLOOR
+}
+
 /// Computes the floored next-block base fee from the parent block's fields:
 /// `max(BASE_FEE_FLOOR, eip1559_next(parent))`.
 ///

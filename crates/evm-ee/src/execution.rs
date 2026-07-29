@@ -7,7 +7,8 @@ use std::sync::Arc;
 
 use alloy_consensus::Block as AlloyBlock;
 use alpen_reth_evm::{
-    da_fee::da_rate_from_extra_data, evm::AlpenEvmFactory, extract_withdrawal_intents,
+    base_fee::meets_base_fee_floor, da_fee::da_rate_from_extra_data, evm::AlpenEvmFactory,
+    extract_withdrawal_intents,
 };
 use reth_chainspec::ChainSpec;
 use reth_consensus_common::validation::validate_body_against_header;
@@ -94,6 +95,21 @@ impl EvmExecutionEnvironment {
         .map_err(|_| EnvError::InvalidBlock)?;
         validate_body_against_header(block.body(), block.header())
             .map_err(|_| EnvError::InvalidBlock)?;
+
+        // Base-fee floor (D, guest): enforce the header base fee meets the protocol floor.
+        //
+        // TODO(fee-model, D): this is the MINIMAL, floor-only check. Full enforcement is the
+        // EVM/EIP-1559 base-fee recurrence capped at the floor —
+        // `header.base_fee == max(BASE_FEE_FLOOR, calc_next_block_base_fee(parent, params))` —
+        // which needs the parent header threaded through the chunk block loop (not available
+        // here; `ee-chunk-runtime::process_chunk_blocks` tracks only the parent block id). Add
+        // that once the EE gains parent-header context; until then we enforce only
+        // `base_fee >= BASE_FEE_FLOOR`.
+        let base_fee = block.header().base_fee_per_gas.unwrap_or_default();
+        if !meets_base_fee_floor(base_fee) {
+            return Err(EnvError::InvalidBlock);
+        }
+
         validate_deposits_against_block(block, inputs)
     }
 

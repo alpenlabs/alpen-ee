@@ -1,6 +1,7 @@
 //! Reth node implementation for the Alpen EE.
 
 mod block_witness;
+mod consensus;
 mod engine;
 mod evm;
 mod gossip;
