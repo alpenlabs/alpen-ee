@@ -198,6 +198,22 @@ impl<'i, E: ExecutionEnvironment> UpdateBuilder<'i, E> {
             }
         }
 
+        // A declared predicate rotation must be the next queued entry after
+        // this transition's deposits.
+        let mut inputs_consumed_by_transition = deposits.len();
+        if let Some(new_key) = transition.outputs().new_predicate() {
+            match remaining.get(deposits.len()) {
+                Some(PendingInputEntry::PredicateRotation(expected)) if new_key == expected => {
+                    inputs_consumed_by_transition += 1;
+                }
+                _ => {
+                    return Err(BuilderError::InputMismatch {
+                        position: self.inputs_consumed + deposits.len(),
+                    });
+                }
+            }
+        }
+
         // 3. Merge outputs.
         let outputs = transition.outputs();
 
@@ -221,10 +237,16 @@ impl<'i, E: ExecutionEnvironment> UpdateBuilder<'i, E> {
             )
             .map_err(|_| BuilderError::OutputOverflow)?;
 
+        if let Some(new_key) = outputs.new_predicate() {
+            self.inner
+                .outputs_mut()
+                .set_new_predicate(Some(new_key.clone()));
+        }
+
         // 4. Advance tip data and consumed count.
         self.cur_tip_blkid = transition.tip_exec_blkid();
         self.cur_tip_state_root = transition.tip_state_root();
-        self.inputs_consumed += deposits.len();
+        self.inputs_consumed += inputs_consumed_by_transition;
 
         Ok(())
     }
