@@ -4,6 +4,13 @@
 //! block processing and batch sealing without independently watching
 //! `preconf_rx`. This guarantees the chunk builder never runs ahead of
 //! the batch builder and inherits reorg handling for free.
+//!
+//! Each event carries exactly one fact (a block was admitted, or a batch
+//! was sealed), emitted at the moment that fact becomes true. A block can
+//! be preceded and/or followed by a batch seal (a threshold seal right
+//! before it, a predicate-rotation seal right after) — the mpsc channel's
+//! FIFO ordering conveys that relationship, so there's no need to bundle
+//! them into one struct with positional fields.
 
 use alpen_ee_common::{BatchId, BlockNumHash};
 
@@ -11,27 +18,40 @@ use alpen_ee_common::{BatchId, BlockNumHash};
 /// handling a reorg.
 ///
 /// Sent on a bounded [`tokio::sync::mpsc`] channel. The chunk builder
-/// is the sole consumer.
+/// is the sole consumer. `batch_builder_task` is a single producer, so
+/// emission order equals reception order.
 #[derive(Debug, Clone)]
 pub enum BatchBuilderEvent {
-    /// A block was processed and added to the batch accumulator.
-    BlockProcessed(BlockProcessedEventData),
+    /// A block was admitted to the open batch accumulator.
+    BlockAdmitted {
+        /// The block that was just accumulated.
+        block: BlockNumHash,
+        /// Index of the batch this block belongs to. The chunk builder
+        /// uses this to set `Chunk::batch_idx` and to validate that
+        /// events arrive in the expected order.
+        batch_idx: u64,
+    },
+    /// A batch was sealed. `batch_id` carries its own `last_block`, so
+    /// this is self-describing regardless of what comes before or after
+    /// it in the event stream. The chunk builder must force-seal its
+    /// current chunk at this boundary and call
+    /// [`ChunkStorage::set_batch_chunks`](alpen_ee_common::ChunkStorage::set_batch_chunks).
+    BatchSealed {
+        /// The batch that was just sealed.
+        batch_id: BatchId,
+    },
     /// A reorg was handled by the batch builder. The chunk builder
     /// must revert to match.
     Reorg(ReorgEventData),
 }
 
 impl BatchBuilderEvent {
-    pub fn block_processed(
-        block: BlockNumHash,
-        batch_idx: u64,
-        batch_sealed: Option<BatchId>,
-    ) -> Self {
-        Self::BlockProcessed(BlockProcessedEventData {
-            block,
-            batch_idx,
-            batch_sealed,
-        })
+    pub fn block_admitted(block: BlockNumHash, batch_idx: u64) -> Self {
+        Self::BlockAdmitted { block, batch_idx }
+    }
+
+    pub fn batch_sealed(batch_id: BatchId) -> Self {
+        Self::BatchSealed { batch_id }
     }
 
     pub fn reorg(revert_to: BlockNumHash, last_valid_batch_idx: u64) -> Self {
@@ -40,25 +60,6 @@ impl BatchBuilderEvent {
             last_valid_batch_idx,
         })
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct BlockProcessedEventData {
-    /// The block that was just accumulated. When `batch_sealed` is
-    /// `Some`, this block is the **first block of the next batch**
-    /// — it was added to the accumulator *after* the previous batch
-    /// was sealed.
-    pub block: BlockNumHash,
-    /// Index of the batch this block belongs to. The chunk builder
-    /// uses this to set `Chunk::batch_idx` and to validate that
-    /// events arrive in the expected order.
-    pub batch_idx: u64,
-    /// Set when a batch was sealed immediately before this block
-    /// was accumulated. The sealed batch contains the *previous*
-    /// accumulator's blocks (not this one). The chunk builder must
-    /// force-seal its current chunk at this boundary and call
-    /// [`ChunkStorage::set_batch_chunks`](alpen_ee_common::ChunkStorage::set_batch_chunks).
-    pub batch_sealed: Option<BatchId>,
 }
 
 #[derive(Debug, Clone)]
