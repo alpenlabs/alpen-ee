@@ -2,6 +2,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use strata_acct_types::{BitcoinAmount, Hash, SubjectId};
 use strata_ee_acct_types::{EeAccountState, PendingFinclEntry, PendingInputEntry};
 use strata_ee_chain_types::SubjectDepositData;
+use strata_predicate::PredicateKey;
 
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq)]
 pub(crate) struct DBAccountStateAtEpoch {
@@ -97,12 +98,14 @@ impl From<DBPendingFinclEntry> for PendingFinclEntry {
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq)]
 enum DBPendingInputEntry {
     Deposit(DBSubjectDepositData),
+    PredicateRotation(PredicateKey),
 }
 
 impl From<DBPendingInputEntry> for PendingInputEntry {
     fn from(value: DBPendingInputEntry) -> Self {
         match value {
             DBPendingInputEntry::Deposit(value) => Self::Deposit(value.into()),
+            DBPendingInputEntry::PredicateRotation(key) => Self::PredicateRotation(key),
         }
     }
 }
@@ -111,6 +114,7 @@ impl From<PendingInputEntry> for DBPendingInputEntry {
     fn from(value: PendingInputEntry) -> Self {
         match value {
             PendingInputEntry::Deposit(value) => Self::Deposit(value.into()),
+            PendingInputEntry::PredicateRotation(key) => Self::PredicateRotation(key),
         }
     }
 }

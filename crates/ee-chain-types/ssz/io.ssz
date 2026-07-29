@@ -1,4 +1,5 @@
 import strata_acct_types
+import strata_predicate
 
 ### Max entries per execution span.  These are generous upper bounds; see
 ### SPS-ol-da-structure for the canonical limits.
@@ -36,6 +37,21 @@ class OutputMessage(Container):
     #~# external_kind: container
     payload: strata_acct_types.MsgPayload
 
+### Optional rotation of the account's update predicate key.
+###
+### Empty for ordinary blocks. Set when the block consumes a queued
+### `PredicateRotation` pending input, committing to the key that verifies
+### the update containing this block.
+###
+### This is a StableContainer because Optional fields are only allowed in
+### StableContainers, not plain Containers, so we need this wrapper to make
+### the predicate optional. The spare capacity also lets future optional
+### fields slot in without changing the encoding of existing data.
+#~# derive: std::default::Default
+class ExecNewPredicate(StableContainer[4]):
+    #~# external_kind: container
+    predicate: Optional[strata_predicate.PredicateKey]
+
 ### Outputs from an EE to the OL produced in an execution span.
 class ExecOutputs(Container):
     ### Native asset transfers to OL accounts
@@ -44,3 +60,17 @@ class ExecOutputs(Container):
     ### Messages sent to OL accounts (with data payload)
     #~# external_kind: container
     output_messages: List[OutputMessage, MAX_OUTPUT_MESSAGES]
+
+    ### New update predicate declared by this block, if it consumed a queued
+    ### rotation.
+    ###
+    ### TODO: this is an account-level declaration, not an EVM-execution
+    ### artifact like output_transfers/output_messages -- execute_block_body
+    ### never sets it, so ee-chunk-runtime's process_block can't verify it
+    ### against real execution the way it does the other two fields. Consider
+    ### carrying it as a separate declaration on the block wrapper instead of
+    ### inside ExecOutputs, so this container only holds what execution can
+    ### actually produce. Moving it changes this container's SSZ layout/hash,
+    ### so needs coordinating with every other reader (block-assembly,
+    ### spec_acct.rs, update_builder.rs, chunk verification).
+    new_predicate: ExecNewPredicate

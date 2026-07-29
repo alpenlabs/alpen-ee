@@ -8,7 +8,7 @@ fn main() {
 
     let entry_points = ["io.ssz", "block.ssz", "chunk.ssz"];
     let base_dir = "ssz";
-    let crates = ["strata_acct_types"];
+    let crates = ["strata_acct_types", "strata_predicate"];
 
     build_ssz_files(
         &entry_points,
