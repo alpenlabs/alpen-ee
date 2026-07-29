@@ -304,6 +304,14 @@ impl ProofSpec for AcctSpec {
 
             let (package, _account_state, mut block_messages) = record.into_parts();
             processed_inputs += package.inputs().total_inputs() as u32;
+            // Mirrors `update_builder.rs`: a consumed predicate rotation
+            // isn't an `ExecInputs`-level input, but it's still a drained
+            // `pending_inputs` entry, and it's what declares this update's
+            // own predicate rotation.
+            if let Some(new_predicate) = package.outputs().new_predicate() {
+                processed_inputs += 1;
+                update_outputs.set_new_predicate(Some(new_predicate.clone()));
+            }
             messages.append(&mut block_messages);
             update_outputs
                 .try_extend_transfers(

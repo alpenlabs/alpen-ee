@@ -88,6 +88,15 @@ fn build_update_operation(
         let (package, _, mut block_messages) = block.into_parts();
 
         processed_inputs += package.inputs().total_inputs();
+        // A consumed predicate rotation isn't an `ExecInputs`-level input
+        // (no EVM effect), but it's still a `pending_inputs` entry that
+        // gets drained, so it must count here too — and it's the one
+        // that declares this update's own predicate rotation. Force-sealing
+        // guarantees at most one block per batch sets this.
+        if let Some(new_predicate) = package.outputs().new_predicate() {
+            processed_inputs += 1;
+            outputs.set_new_predicate(Some(new_predicate.clone()));
+        }
         messages.append(&mut block_messages);
         outputs.try_extend_messages(
             package
