@@ -256,6 +256,7 @@ fn test_builder_advances_tip() {
     // First chunk
     let d1 = match &builder.remaining_pending_inputs()[0] {
         PendingInputEntry::Deposit(d) => d.clone(),
+        other => panic!("expected a deposit, got {other:?}"),
     };
     let tip1 = Hash::new([0xAA; 32]);
     let chunk1 = simple_chunk(
@@ -275,6 +276,7 @@ fn test_builder_advances_tip() {
     // Second chunk — parent must be tip1
     let d2 = match &builder.remaining_pending_inputs()[0] {
         PendingInputEntry::Deposit(d) => d.clone(),
+        other => panic!("expected a deposit, got {other:?}"),
     };
     let tip2 = Hash::new([0xBB; 32]);
     let chunk2 = simple_chunk(

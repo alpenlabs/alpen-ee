@@ -1137,6 +1137,7 @@ dependencies = [
  "strata-msg-fmt",
  "strata-ol-bridge-types",
  "strata-ol-msg-types",
+ "strata-predicate",
  "tracing",
 ]
 
@@ -1263,6 +1264,7 @@ dependencies = [
  "strata-ee-chain-types",
  "strata-identifiers",
  "strata-paas",
+ "strata-predicate",
  "strata-storage",
  "strata-storage-common",
  "thiserror 2.0.18",
@@ -14931,6 +14933,7 @@ dependencies = [
  "ssz_types",
  "strata-acct-types",
  "strata-identifiers",
+ "strata-predicate",
  "strata-test-utils-ssz",
  "thiserror 2.0.18",
  "tree_hash 0.17.0",
@@ -15458,6 +15461,7 @@ name = "strata-predicate"
 version = "0.1.0"
 source = "git+https://github.com/alpenlabs/strata-common?tag=v0.3.0#60ae4f3b95d2f034b9ee0bfea698d8f5ca05234b"
 dependencies = [
+ "borsh",
  "hex",
  "k256",
  "serde",

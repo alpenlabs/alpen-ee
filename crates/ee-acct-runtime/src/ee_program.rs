@@ -6,12 +6,12 @@
 
 use std::marker::PhantomData;
 
+use strata_acct_types::ADMIN_MSG_ACCT_ID;
 use strata_ee_acct_types::{
     DecodedEeMessageData, EeAccountState, EnvError, ExecutionEnvironment, PendingInputEntry,
     UpdateExtraData,
 };
 use strata_ee_chain_types::SubjectDepositData;
-use strata_predicate::PredicateKey;
 use strata_snark_acct_runtime::*;
 
 use crate::verification_state::{EeVerificationInput, EeVerificationState};
@@ -168,7 +168,7 @@ pub(crate) fn process_input_message(
 ) -> ProgramResult<(), EnvError> {
     // If we recognize it, then we have to do something with it.
     if let Some(decoded_msg) = msg.message() {
-        apply_decoded_message(state, decoded_msg, msg.meta().value())?;
+        apply_decoded_message(state, decoded_msg, msg.meta().value(), msg.meta().source())?;
     }
 
     Ok(())
@@ -179,6 +179,7 @@ pub(crate) fn apply_decoded_message(
     state: &mut EeAccountState,
     msg: &DecodedEeMessageData,
     value: strata_acct_types::BitcoinAmount,
+    source: strata_acct_types::AccountId,
 ) -> ProgramResult<(), EnvError> {
     match msg {
         DecodedEeMessageData::Deposit(data) => {
@@ -196,16 +197,69 @@ pub(crate) fn apply_decoded_message(
             // TODO(STR-3685): support this
         }
 
-        DecodedEeMessageData::PredicateUpdate(_data) => {
-            // No account-state effect: the rotation drives spec-version
-            // discovery in the sequencer's block builder, which observes the
-            // message before assembly.
-            // TODO(STR-3997): accumulate the rotation into the update outputs
-            // (terminating the batch) so `check_obligations` accepts an
-            // update that declares the queued key; until then an update
-            // declaring a rotation fails verification.
+        DecodedEeMessageData::PredicateUpdate(data) => {
+            // A rotation is only authoritative when sourced from the
+            // reserved admin account (see `PredicateUpdateMsgData`'s own
+            // doc comment) — decoding says nothing about who sent it, so
+            // any account could otherwise forge a type-0x20 message and
+            // have its own key enqueued as a "rotation". Messages from any
+            // other source are silently ignored, same as an unrecognized
+            // message type.
+            if source == ADMIN_MSG_ACCT_ID {
+                // Queue the rotation in true FIFO order relative to deposits.
+                // Consuming it (draining it from the front of the queue) is
+                // what actually rotates the key and terminates the
+                // batch/chunk that consumed it — see `apply_decoded_message`'s
+                // callers in block-assembly and
+                // `EeVerificationState::merge_new_outputs`.
+                state.add_pending_input(PendingInputEntry::PredicateRotation(
+                    data.new_key().clone(),
+                ));
+            }
         }
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use strata_acct_types::{AccountId, BitcoinAmount, Hash};
+    use strata_ee_acct_types::PredicateUpdateMsgData;
+    use strata_predicate::PredicateKey;
+
+    use super::*;
+
+    fn empty_state() -> EeAccountState {
+        EeAccountState::new(Hash::zero(), Hash::zero(), Vec::new(), Vec::new())
+    }
+
+    #[test]
+    fn predicate_update_from_admin_is_queued() {
+        let mut state = empty_state();
+        let key = PredicateKey::always_accept();
+        let msg = DecodedEeMessageData::PredicateUpdate(PredicateUpdateMsgData::new(key.clone()));
+
+        apply_decoded_message(&mut state, &msg, BitcoinAmount::ZERO, ADMIN_MSG_ACCT_ID)
+            .expect("apply succeeds");
+
+        assert_eq!(state.pending_inputs().len(), 1);
+        assert!(matches!(
+            &state.pending_inputs()[0],
+            PendingInputEntry::PredicateRotation(k) if k == &key
+        ));
+    }
+
+    #[test]
+    fn predicate_update_from_non_admin_is_ignored() {
+        let mut state = empty_state();
+        let key = PredicateKey::always_accept();
+        let msg = DecodedEeMessageData::PredicateUpdate(PredicateUpdateMsgData::new(key));
+        let attacker = AccountId::new([0xAA; 32]);
+
+        apply_decoded_message(&mut state, &msg, BitcoinAmount::ZERO, attacker)
+            .expect("apply succeeds");
+
+        assert!(state.pending_inputs().is_empty());
+    }
 }

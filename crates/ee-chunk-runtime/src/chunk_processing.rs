@@ -28,8 +28,18 @@ pub fn process_block<E: ExecutionEnvironment>(
     let exec_outp = ee.execute_block_body(state, &epl, block.inputs())?;
     ee.verify_outputs_against_header(eb.get_header(), &exec_outp)?;
 
-    // Check that the outputs match the chunk block.
-    if exec_outp.outputs() != block.outputs() {
+    // Check that the EVM-derivable outputs match the chunk block.
+    //
+    // `new_predicate` is deliberately left out of this comparison: it's an
+    // account-level fact drawn from the pending-input queue, not something
+    // `execute_block_body` can derive from EVM execution alone (see `evm-ee`'s
+    // `execute_block_body`, which only ever sets output messages/transfers and
+    // always leaves `new_predicate` empty). Chunk-level verification of a
+    // declared rotation against real block execution belongs to a
+    // cross-check over the chunk's blocks, not this per-block comparison.
+    if exec_outp.outputs().output_transfers() != block.outputs().output_transfers()
+        || exec_outp.outputs().output_messages() != block.outputs().output_messages()
+    {
         return Err(EnvError::InvalidBlock);
     }
 
