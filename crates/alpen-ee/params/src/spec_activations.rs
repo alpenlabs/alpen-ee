@@ -6,7 +6,7 @@
 //! carries the activation schedule that gates them.
 
 use core::convert::identity;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt};
 
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Serialize};
@@ -28,8 +28,12 @@ use thiserror::Error;
 /// The primitive conversions are derived so they cannot go stale when a
 /// variant is added; [`TryFrom<u16>`] errs with the raw id it has no variant
 /// for.
-// TODO(STR-3997): define what each spec version resolves to per component
-// (e.g. revm spec id, program VKs).
+///
+/// What a version *means* for the EVM is the per-version chain spec derived
+/// in [`EvmSpec`](crate::EvmSpec); this type only names versions and orders
+/// them.
+// TODO(STR-3997): define what each spec version resolves to for the
+// remaining components (program VKs).
 #[derive(
     Debug,
     Clone,
@@ -55,6 +59,26 @@ pub enum AlpenSpecId {
     /// First protocol upgrade; placeholder name until that upgrade is
     /// defined.
     V1 = 1,
+}
+
+impl AlpenSpecId {
+    /// Returns the version that succeeds this one in discriminant order.
+    ///
+    /// Errs with the raw id (mirroring [`TryFrom<u16>`]) when this binary has
+    /// no variant for the successor — an upgrade this binary cannot execute.
+    pub fn successor(self) -> Result<Self, u16> {
+        Self::try_from(u16::from(self) + 1)
+    }
+}
+
+impl fmt::Display for AlpenSpecId {
+    /// Matches this type's snake_case serde representation (e.g. `v0`).
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::V0 => f.write_str("v0"),
+            Self::V1 => f.write_str("v1"),
+        }
+    }
 }
 
 /// The Alpen spec activation schedule: which versions are scheduled and from
@@ -156,6 +180,22 @@ impl AlpenSpecSchedule {
             .is_some_and(|activation| coord >= activation)
     }
 
+    /// Returns the newest version active at `coord` — the version whose
+    /// rules govern that coordinate.
+    ///
+    /// Total: [`AlpenSpecId::V0`] is active from coordinate 0 in every
+    /// schedule, so some version always governs.
+    pub fn active_spec_at(&self, coord: u64) -> AlpenSpecId {
+        // Activation coordinates are nondecreasing, so the versions active
+        // at `coord` are exactly a prefix of the scheduled run.
+        let active_upgrades = self
+            .upgrades
+            .partition_point(|&activation| activation <= coord);
+        AlpenSpecId::try_from(active_upgrades as u16).expect(
+            "AlpenSpecSchedule invariant: every scheduled version has an AlpenSpecId variant",
+        )
+    }
+
     /// Schedules the successor of the newest scheduled version at `coord`
     /// and returns which version that is.
     ///
@@ -196,7 +236,7 @@ impl Default for AlpenSpecSchedule {
 struct AlpenSpecScheduleRepr(BTreeMap<AlpenSpecId, u64>);
 
 /// Every known version, in discriminant order.
-fn known_versions() -> impl Iterator<Item = AlpenSpecId> {
+pub(crate) fn known_versions() -> impl Iterator<Item = AlpenSpecId> {
     (0u16..).map_while(|d| AlpenSpecId::try_from(d).ok())
 }
 
@@ -278,6 +318,12 @@ mod tests {
     }
 
     #[test]
+    fn successor_chains_and_errs_past_known_versions() {
+        assert_eq!(AlpenSpecId::V0.successor(), Ok(AlpenSpecId::V1));
+        assert_eq!(AlpenSpecId::V1.successor(), Err(2));
+    }
+
+    #[test]
     fn is_active_boundaries() {
         let schedule = v1_at(100);
         assert!(!schedule.is_active(AlpenSpecId::V1, 99));
@@ -299,6 +345,18 @@ mod tests {
         assert_eq!(schedule.activation_of(AlpenSpecId::V1), None);
         assert!(!schedule.is_active(AlpenSpecId::V1, 0));
         assert!(!schedule.is_active(AlpenSpecId::V1, u64::MAX));
+    }
+
+    #[test]
+    fn active_spec_at_resolves_the_governing_version() {
+        let genesis = AlpenSpecSchedule::genesis();
+        assert_eq!(genesis.active_spec_at(0), AlpenSpecId::V0);
+        assert_eq!(genesis.active_spec_at(u64::MAX), AlpenSpecId::V0);
+
+        let schedule = v1_at(100);
+        assert_eq!(schedule.active_spec_at(99), AlpenSpecId::V0);
+        assert_eq!(schedule.active_spec_at(100), AlpenSpecId::V1);
+        assert_eq!(schedule.active_spec_at(u64::MAX), AlpenSpecId::V1);
     }
 
     #[test]

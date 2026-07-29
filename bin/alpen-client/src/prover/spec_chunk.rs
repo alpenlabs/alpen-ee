@@ -309,6 +309,15 @@ fn extend_exec_outputs(dst: &mut ExecOutputs, src: &ExecOutputs) {
     for m in src.output_messages() {
         dst.add_message(OutputMessage::new(m.dest(), m.payload().clone()));
     }
+    // Only overwrite `dst` when this block actually declares a rotation, so a
+    // non-rotating block can never clear a rotation an earlier block already
+    // recorded. Chunk sealing force-seals immediately after the rotating
+    // block, so in practice it's always last and no later block exists to
+    // trigger this — but the merge should stay correct on its own without
+    // relying on that.
+    if let Some(new_predicate) = src.new_predicate() {
+        dst.set_new_predicate(Some(new_predicate.clone()));
+    }
 }
 
 /// Chunk-level aggregation of per-block [`ExecInputs`].

@@ -182,6 +182,15 @@ impl<'a, E: ExecutionEnvironment> EeVerificationState<'a, E> {
             )
             .map_err(|_| EnvError::OutputOverflow)?;
 
+        // Propagate a predicate rotation this block consumed. At most one
+        // chunk in the update can declare this (block assembly stops
+        // extracting past a rotation, and batch/chunk sealing terminates
+        // right after the block that consumes one).
+        if let Some(new_key) = outputs.new_predicate() {
+            self.accumulated_outputs
+                .set_new_predicate(Some(new_key.clone()));
+        }
+
         Ok(())
     }
 
@@ -210,6 +219,19 @@ impl<'a, E: ExecutionEnvironment> EeVerificationState<'a, E> {
                     matches!(
                         pending,
                         PendingInputEntry::Deposit(expected) if deposit == expected,
+                    )
+                })
+                .map_err(|_| EnvError::InconsistentChunkIo)?;
+        }
+
+        // A declared predicate rotation must be the next queued entry after
+        // this transition's deposits — consume it too.
+        if let Some(new_key) = transition.outputs().new_predicate() {
+            pending_inp_tracker
+                .consume_input_with(|pending| {
+                    matches!(
+                        pending,
+                        PendingInputEntry::PredicateRotation(queued) if queued == new_key,
                     )
                 })
                 .map_err(|_| EnvError::InconsistentChunkIo)?;
@@ -261,6 +283,12 @@ impl<'a, E: ExecutionEnvironment> EeVerificationState<'a, E> {
 
     /// Final checks to see if there's anything in the verification state that
     /// were supposed to have been dealt with but weren't.
+    ///
+    /// Predicate rotations: the OL applies whatever predicate an update
+    /// declares, without restriction — declaring only the queued key is this
+    /// EE's own policy, enforced here since `expected_outputs` (declared)
+    /// must equal `accumulated_outputs` (accumulated from processing the
+    /// admin message via `merge_new_outputs`).
     pub(crate) fn check_obligations(&self) -> EnvResult<()> {
         // Check that the expected outputs match the ones we accumulated.
         if self.expected_outputs != self.accumulated_outputs {

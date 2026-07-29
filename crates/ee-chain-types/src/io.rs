@@ -1,6 +1,40 @@
 use strata_acct_types::{AccountId, BitcoinAmount, MsgPayload, SubjectId};
+use strata_predicate::PredicateKey;
 
-use crate::{ExecInputs, ExecOutputs, OutputMessage, OutputTransfer, SubjectDepositData};
+use crate::{
+    ExecInputs, ExecNewPredicate, ExecOutputs, OutputMessage, OutputTransfer, SubjectDepositData,
+};
+
+impl ExecNewPredicate {
+    /// Creates an empty declaration (no predicate rotation).
+    pub fn new_empty() -> Self {
+        Self {
+            predicate: ssz_types::Optional::None,
+        }
+    }
+
+    /// Creates a declaration rotating to the given predicate key.
+    pub fn new_with_key(key: PredicateKey) -> Self {
+        Self {
+            predicate: ssz_types::Optional::Some(key),
+        }
+    }
+
+    pub fn predicate(&self) -> Option<&PredicateKey> {
+        match &self.predicate {
+            ssz_types::Optional::Some(key) => Some(key),
+            ssz_types::Optional::None => None,
+        }
+    }
+}
+
+impl From<Option<PredicateKey>> for ExecNewPredicate {
+    fn from(key: Option<PredicateKey>) -> Self {
+        Self {
+            predicate: key.into(),
+        }
+    }
+}
 
 impl ExecInputs {
     fn new(subject_deposits: Vec<SubjectDepositData>) -> Self {
@@ -56,6 +90,7 @@ impl ExecOutputs {
             output_messages: output_messages
                 .try_into()
                 .expect("output_messages should not exceed capacity"),
+            new_predicate: ExecNewPredicate::new_empty(),
         }
     }
 
@@ -86,6 +121,23 @@ impl ExecOutputs {
         self.output_messages
             .push(m)
             .expect("chain/io: output_messages list at capacity");
+    }
+
+    /// Sets the predicate rotation declared by this block, consuming and
+    /// returning self.
+    pub fn with_new_predicate(mut self, key: PredicateKey) -> Self {
+        self.new_predicate = ExecNewPredicate::new_with_key(key);
+        self
+    }
+
+    /// Sets the predicate rotation declared by this block.
+    pub fn set_new_predicate(&mut self, key: Option<PredicateKey>) {
+        self.new_predicate = key.into();
+    }
+
+    /// Returns the predicate rotation declared by this block, if any.
+    pub fn new_predicate(&self) -> Option<&PredicateKey> {
+        self.new_predicate.predicate()
     }
 }
 
@@ -237,7 +289,14 @@ mod tests {
     }
 
     mod block_outputs {
+        use strata_predicate::{PredicateKey, PredicateTypeId};
+
         use super::*;
+
+        fn predicate_key_strategy() -> impl Strategy<Value = PredicateKey> {
+            prop::collection::vec(any::<u8>(), 0..64)
+                .prop_map(|condition| PredicateKey::new(PredicateTypeId::AlwaysAccept, condition))
+        }
 
         ssz_proptest!(
             ExecOutputs,
@@ -268,9 +327,10 @@ mod tests {
                             )
                         }),
                     0..10
-                )
+                ),
+                prop::option::of(predicate_key_strategy())
             )
-                .prop_map(|(transfers, messages)| {
+                .prop_map(|(transfers, messages, new_predicate)| {
                     ExecOutputs {
                         output_transfers: transfers
                             .try_into()
@@ -278,6 +338,7 @@ mod tests {
                         output_messages: messages
                             .try_into()
                             .expect("output_messages should not exceed capacity"),
+                        new_predicate: new_predicate.into(),
                     }
                 })
         );
@@ -287,6 +348,14 @@ mod tests {
             let outputs = ExecOutputs::new_empty();
             assert_eq!(outputs.output_transfers().len(), 0);
             assert_eq!(outputs.output_messages().len(), 0);
+            assert_eq!(outputs.new_predicate(), None);
+        }
+
+        #[test]
+        fn test_with_new_predicate() {
+            let key = PredicateKey::always_accept();
+            let outputs = ExecOutputs::new_empty().with_new_predicate(key.clone());
+            assert_eq!(outputs.new_predicate(), Some(&key));
         }
     }
 }

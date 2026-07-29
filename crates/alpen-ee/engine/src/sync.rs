@@ -324,6 +324,7 @@ mod tests {
         EnginePayload, ExecBlockPayload, ExecBlockRecord, ExecutionEngineError,
         MockExecBlockStorage, StorageError,
     };
+    use alpen_ee_params::AlpenSpecId;
     use async_trait::async_trait;
     use strata_ee_acct_types::EeAccountState;
     use strata_ee_chain_types::{ExecBlockCommitment, ExecBlockPackage, ExecInputs, ExecOutputs};
@@ -509,6 +510,7 @@ mod tests {
             parent_hash,
             0,
             0,
+            AlpenSpecId::V0,
             vec![],
         )
     }

@@ -6,6 +6,7 @@ use strata_ee_chain_types::{
     ChunkTransition, ExecInputs, ExecOutputs, OutputMessage, OutputTransfer, SequenceTracker,
     SubjectDepositData,
 };
+use strata_predicate::PredicateKey;
 
 use crate::chunk::{Chunk, ChunkBlock};
 
@@ -28,8 +29,20 @@ pub fn process_block<E: ExecutionEnvironment>(
     let exec_outp = ee.execute_block_body(state, &epl, block.inputs())?;
     ee.verify_outputs_against_header(eb.get_header(), &exec_outp)?;
 
-    // Check that the outputs match the chunk block.
-    if exec_outp.outputs() != block.outputs() {
+    // Check that the EVM-derivable outputs match the chunk block.
+    //
+    // `new_predicate` is deliberately left out of this comparison: it's an
+    // account-level fact drawn from the pending-input queue, not something
+    // `execute_block_body` can derive from EVM execution alone (see `evm-ee`'s
+    // `execute_block_body`, which only ever sets output messages/transfers and
+    // always leaves `new_predicate` empty). It IS still verified -- just not here.
+    // `IoTracker` (below, in this same file) walks every block's declared
+    // `new_predicate` via `check_update`, accumulates it into
+    // `observed_new_predicate`, and `verify_all_consumed` asserts that equals the
+    // chunk's `expected_new_predicate`. That's the real check for this field.
+    if exec_outp.outputs().output_transfers() != block.outputs().output_transfers()
+        || exec_outp.outputs().output_messages() != block.outputs().output_messages()
+    {
         return Err(EnvError::InvalidBlock);
     }
 
@@ -48,6 +61,13 @@ struct IoTracker<'c> {
     deposits_tracker: SequenceTracker<'c, SubjectDepositData>,
     out_msg_tracker: SequenceTracker<'c, OutputMessage>,
     out_xfr_tracker: SequenceTracker<'c, OutputTransfer>,
+    /// Predicate rotation the chunk-level outputs claim, if any.
+    expected_new_predicate: Option<&'c PredicateKey>,
+    /// Predicate rotation actually observed among the chunk's per-block
+    /// outputs so far. At most one block can set this (block assembly
+    /// stops at a rotation, and sealing terminates right after it) — a
+    /// second one is a proof of inconsistent chunk construction.
+    observed_new_predicate: Option<PredicateKey>,
 }
 
 impl<'c> IoTracker<'c> {
@@ -56,6 +76,8 @@ impl<'c> IoTracker<'c> {
             deposits_tracker: SequenceTracker::new(expected_inputs.subject_deposits()),
             out_msg_tracker: SequenceTracker::new(expected_outputs.output_messages()),
             out_xfr_tracker: SequenceTracker::new(expected_outputs.output_transfers()),
+            expected_new_predicate: expected_outputs.new_predicate(),
+            observed_new_predicate: None,
         }
     }
 
@@ -80,6 +102,14 @@ impl<'c> IoTracker<'c> {
         self.out_xfr_tracker
             .advance_unchecked(outps.output_transfers().len());
 
+        // Track any predicate rotation this block declares.
+        if let Some(key) = outps.new_predicate() {
+            if self.observed_new_predicate.is_some() {
+                return Err(EnvError::InconsistentChunkIo);
+            }
+            self.observed_new_predicate = Some(key.clone());
+        }
+
         Ok(())
     }
 
@@ -90,11 +120,14 @@ impl<'c> IoTracker<'c> {
     }
 
     fn verify_all_consumed(&self) -> EnvResult<()> {
-        if self.is_all_consumed() {
-            Ok(())
-        } else {
-            Err(EnvError::InconsistentChunkIo)
+        if !self.is_all_consumed() {
+            return Err(EnvError::InconsistentChunkIo);
         }
+        // The chunk-level claim must equal exactly what its blocks produced.
+        if self.expected_new_predicate != self.observed_new_predicate.as_ref() {
+            return Err(EnvError::InconsistentChunkIo);
+        }
+        Ok(())
     }
 }
 

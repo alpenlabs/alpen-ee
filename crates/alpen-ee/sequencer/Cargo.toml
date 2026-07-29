@@ -12,6 +12,7 @@ default = []
 [dependencies]
 alpen-ee-block-assembly.workspace = true
 alpen-ee-common.workspace = true
+alpen-ee-params.workspace = true
 alpen-ee-exec-chain.workspace = true
 strata-acct-types.workspace = true
 strata-codec.workspace = true

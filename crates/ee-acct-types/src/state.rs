@@ -118,6 +118,7 @@ impl PendingInputEntry {
     pub fn ty(&self) -> PendingInputType {
         match self {
             PendingInputEntry::Deposit(_) => PendingInputType::Deposit,
+            PendingInputEntry::PredicateRotation(_) => PendingInputType::PredicateRotation,
         }
     }
 }
@@ -127,6 +128,7 @@ impl PendingInputEntry {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum PendingInputType {
     Deposit,
+    PredicateRotation,
 }
 
 impl PendingFinclEntry {
@@ -164,6 +166,7 @@ mod tests {
     use proptest::prelude::*;
     use strata_acct_types::{BitcoinAmount, SubjectId};
     use strata_ee_chain_types::SubjectDepositData;
+    use strata_predicate::{PredicateKey, PredicateTypeId};
     use strata_test_utils_ssz::ssz_proptest;
 
     use crate::ssz_generated::ssz::state::{EeAccountState, PendingFinclEntry, PendingInputEntry};
@@ -175,8 +178,16 @@ mod tests {
         })
     }
 
+    fn predicate_key_strategy() -> impl Strategy<Value = PredicateKey> {
+        prop::collection::vec(any::<u8>(), 0..64)
+            .prop_map(|condition| PredicateKey::new(PredicateTypeId::AlwaysAccept, condition))
+    }
+
     fn pending_input_entry_strategy() -> impl Strategy<Value = PendingInputEntry> {
-        subject_deposit_data_strategy().prop_map(PendingInputEntry::Deposit)
+        prop_oneof![
+            subject_deposit_data_strategy().prop_map(PendingInputEntry::Deposit),
+            predicate_key_strategy().prop_map(PendingInputEntry::PredicateRotation),
+        ]
     }
 
     mod pending_input_entry {

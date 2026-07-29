@@ -1,5 +1,5 @@
 use alpen_ee_common::{ExecBlockPayload, ExecBlockRecord};
-use alpen_ee_params::AlpenParams;
+use alpen_ee_params::{AlpenParams, AlpenSpecId};
 use strata_acct_types::Hash;
 use strata_ee_acct_types::EeAccountState;
 use strata_ee_chain_types::{ExecBlockCommitment, ExecBlockPackage, ExecInputs, ExecOutputs};
@@ -46,6 +46,7 @@ pub fn build_genesis_exec_block(
     let genesis_parent_blockhash = Buf32([0; 32]); // 0x0
     let genesis_next_inbox_msg_idx = 0;
     let genesis_next_deposit_idx = 0;
+    let genesis_next_spec_version = AlpenSpecId::V0;
     let genesis_messages = vec![];
 
     let block = ExecBlockRecord::new(
@@ -57,6 +58,7 @@ pub fn build_genesis_exec_block(
         genesis_parent_blockhash,
         genesis_next_inbox_msg_idx,
         genesis_next_deposit_idx,
+        genesis_next_spec_version,
         genesis_messages,
     );
     let payload = ExecBlockPayload::from_bytes(Vec::new());

@@ -134,16 +134,16 @@ where
         input: TickMsg<BatchBuilderEvent>,
     ) -> anyhow::Result<Response> {
         let result = match input {
-            TickMsg::Msg(BatchBuilderEvent::BlockProcessed(evt)) => {
-                if let Some(batch_id) = evt.batch_sealed {
-                    state
-                        .chunk_state
-                        .push_pending(PendingEntry::BatchBoundary(batch_id));
-                }
-                state.chunk_state.push_pending(PendingEntry::Block {
-                    block: evt.block,
-                    batch_idx: evt.batch_idx,
-                });
+            TickMsg::Msg(BatchBuilderEvent::BlockAdmitted { block, batch_idx }) => {
+                state
+                    .chunk_state
+                    .push_pending(PendingEntry::Block { block, batch_idx });
+                Ok(())
+            }
+            TickMsg::Msg(BatchBuilderEvent::BatchSealed { batch_id }) => {
+                state
+                    .chunk_state
+                    .push_pending(PendingEntry::BatchBoundary(batch_id));
                 Ok(())
             }
             TickMsg::Msg(BatchBuilderEvent::Reorg(evt)) => {
