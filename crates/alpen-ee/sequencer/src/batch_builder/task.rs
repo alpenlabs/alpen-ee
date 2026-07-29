@@ -70,8 +70,7 @@ async fn get_block_range(
 /// Returns the sealed batch ID, or `None` if accumulator was empty.
 ///
 /// Chunk creation is handled by the downstream chunk builder, which
-/// receives a [`BatchBuilderEvent::BlockProcessed`] with `batch_sealed`
-/// set.
+/// receives a [`BatchBuilderEvent::BatchSealed`] for the sealed batch.
 async fn seal_batch<P: AccumulationPolicy>(
     state: &mut BatchBuilderState<P>,
     storage: &impl BatchStorage,
@@ -273,7 +272,6 @@ where
         state.pop_pending_block();
 
         // Check if adding this block would exceed threshold
-        let mut batch_sealed = None;
         if !state.accumulator().is_empty()
             && state
                 .accumulator()
@@ -282,22 +280,36 @@ where
             if let Some(batch_id) = seal_batch(state, ctx.batch_storage.as_ref()).await? {
                 // Notify watchers of new batch
                 let _ = ctx.latest_batch_tx.send(batch_id);
-                batch_sealed = Some(batch_id);
+                emit_event(&ctx.event_tx, BatchBuilderEvent::batch_sealed(batch_id)).await;
             }
         }
 
         // Add block to accumulator
         state.accumulator_mut().add_block(block, &block_data);
-
-        // Notify downstream (chunk builder) of the processed block.
-        // `batch_sealed` is set when this block triggered a batch seal
-        // — the sealed batch contains the *previous* accumulator's
-        // blocks, and this block is the first of the next batch.
         emit_event(
             &ctx.event_tx,
-            BatchBuilderEvent::block_processed(block, state.next_batch_idx(), batch_sealed),
+            BatchBuilderEvent::block_admitted(block, state.next_batch_idx()),
         )
         .await;
+
+        // Force-seal immediately if this block consumed a predicate
+        // rotation: it's a protocol invariant, not a tunable sealing
+        // policy, so it bypasses the `would_exceed` cadence above and
+        // always fires unconditionally right after admission. This makes
+        // the rotation-consuming block the last one in its batch — see
+        // `handle_batch_boundary` in the chunk builder for the mirrored
+        // chunk-level force-seal this triggers downstream.
+        let record = ctx
+            .block_storage
+            .get_exec_block(block.hash())
+            .await?
+            .ok_or_else(|| eyre!("missing just-added block: {}", block.hash()))?;
+        if record.package().outputs().new_predicate().is_some() {
+            if let Some(batch_id) = seal_batch(state, ctx.batch_storage.as_ref()).await? {
+                let _ = ctx.latest_batch_tx.send(batch_id);
+                emit_event(&ctx.event_tx, BatchBuilderEvent::batch_sealed(batch_id)).await;
+            }
+        }
 
         debug!(hash = %block.hash(), "Processed block");
         processed += 1;
