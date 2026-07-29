@@ -9,7 +9,20 @@ use strata_ee_chain_types::{
 use strata_msg_fmt::{Msg as MsgTrait, OwnedMsg};
 use strata_ol_bridge_types::OperatorSelection;
 use strata_ol_msg_types::{WithdrawalMsgData, DEFAULT_OPERATOR_FEE, WITHDRAWAL_MSG_TYPE_ID};
+use strata_predicate::PredicateKey;
 use tracing::{info, warn};
+
+/// Returns the predicate key declared by a consumed `PredicateRotation` entry
+/// among `pending_inputs`, if any. Block assembly stops extracting deposits
+/// at a rotation entry (never past it), so at most one can appear here.
+pub(crate) fn consumed_predicate_rotation(
+    pending_inputs: &[PendingInputEntry],
+) -> Option<PredicateKey> {
+    pending_inputs.iter().find_map(|entry| match entry {
+        PendingInputEntry::PredicateRotation(key) => Some(key.clone()),
+        PendingInputEntry::Deposit(_) => None,
+    })
+}
 
 /// Builds [`ExecInputs`] from pending input entries that were executed in the current block.
 pub(crate) fn build_block_inputs(pending_inputs: Vec<PendingInputEntry>) -> ExecInputs {
@@ -24,17 +37,23 @@ pub(crate) fn build_block_inputs(pending_inputs: Vec<PendingInputEntry>) -> Exec
                 );
                 inputs.add_subject_deposit(subj_deposit_data);
             }
+            // Not an EVM input: consuming it is recorded on `ExecOutputs.new_predicate`
+            // instead (see `consumed_predicate_rotation`).
+            PendingInputEntry::PredicateRotation(_) => {}
         }
     }
     inputs
 }
 
-/// Builds [`ExecOutputs`] from withdrawal intents in the payload.
+/// Builds [`ExecOutputs`] from withdrawal intents in the payload and any
+/// predicate rotation consumed by this block.
 pub(crate) fn build_block_outputs<TPayload: EnginePayload>(
     bridge_gateway_account_id: AccountId,
     payload: &TPayload,
+    new_predicate: Option<PredicateKey>,
 ) -> ExecOutputs {
     let mut outputs = ExecOutputs::new_empty();
+    outputs.set_new_predicate(new_predicate);
     let withdrawal_intents = payload.withdrawal_intents();
     if !withdrawal_intents.is_empty() {
         info!(
@@ -82,11 +101,15 @@ pub(crate) fn build_block_package<TPayload: EnginePayload>(
     let raw_block_encoded_hash = Hash::new([0u8; 32]);
     let commitment = ExecBlockCommitment::new(exec_blkid, raw_block_encoded_hash);
 
-    // 2. build block inputs
+    // 2. determine whether this block consumed a predicate rotation, before `build_block_inputs`
+    //    consumes `pending_inputs`
+    let new_predicate = consumed_predicate_rotation(&pending_inputs);
+
+    // 3. build block inputs
     let inputs = build_block_inputs(pending_inputs);
 
-    // 3. build block outputs
-    let outputs = build_block_outputs(bridge_gateway_account_id, payload);
+    // 4. build block outputs
+    let outputs = build_block_outputs(bridge_gateway_account_id, payload, new_predicate);
 
     ExecBlockPackage::new(commitment, inputs, outputs)
 }
@@ -121,6 +144,35 @@ mod tests {
             SubjectId::new(dest_bytes),
             BitcoinAmount::from_sat(sats),
         ))
+    }
+
+    fn make_rotation() -> PendingInputEntry {
+        PendingInputEntry::PredicateRotation(PredicateKey::always_accept())
+    }
+
+    #[test]
+    fn consumed_predicate_rotation_finds_the_rotation() {
+        let entries = vec![make_deposit([0x01; 32], 1000), make_rotation()];
+        assert_eq!(
+            consumed_predicate_rotation(&entries),
+            Some(PredicateKey::always_accept())
+        );
+    }
+
+    #[test]
+    fn consumed_predicate_rotation_none_when_absent() {
+        let entries = vec![make_deposit([0x01; 32], 1000)];
+        assert_eq!(consumed_predicate_rotation(&entries), None);
+    }
+
+    #[test]
+    fn build_block_inputs_skips_predicate_rotation() {
+        let inputs = vec![make_deposit([0x01; 32], 1000), make_rotation()];
+
+        let block_inputs = build_block_inputs(inputs);
+
+        // Only the deposit becomes an EVM input; the rotation is not one.
+        assert_eq!(block_inputs.total_inputs(), 1);
     }
 
     #[test]
