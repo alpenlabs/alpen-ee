@@ -1,10 +1,19 @@
 """EE predicate transition functional test.
 
-Verifies that a sequence of admin `PredicateUpdate`s rotates the Alpen snark
-account's `update_vk` through each target predicate in OL state.
+Verifies the Alpen snark account's `update_vk` rotates via an admin
+`PredicateUpdate`, and exercises the boundary of the rotation <-> EE
+spec-version coupling (`AlpenSpecId` in
+`crates/alpen-ee/params/src/spec_activations.rs`): every consumed rotation
+unconditionally advances to the successor spec version
+(`build_next_exec_block` in `crates/alpen-ee/block-assembly/src/block.rs`),
+and this binary currently only defines `V0` and `V1` -- no `AlpenSpecId::V2`
+exists yet (TODO(STR-3997)). So the first rotation (V0 -> V1) must settle
+normally, and a second rotation (V1 -> V2) must be refused rather than
+silently misapplied.
 """
 
 import logging
+import re
 from pathlib import Path
 
 import flexitest
@@ -22,11 +31,7 @@ logger = logging.getLogger(__name__)
 INITIAL_BLOCKS = 5
 POST_ADMIN_UPDATE_L1_BLOCKS = 5
 PREDICATE_SETTLE_TIMEOUT_SECONDS = 120
-
-# Dummy condition bytes for predicates that require them. Admin updates do not
-# validate the condition format, so any bytes round-trip through OL state.
-SP1_CONDITION_HEX = "11" * 32
-BIP340_CONDITION_HEX = "22" * 32
+UNSUPPORTED_ROTATION_TIMEOUT_SECONDS = 120
 
 # Initial Alpen account predicate matches `EeAcctProgram::test_predicate_key()`
 # (deterministic test SK = [0x02; 32] in strata_proofimpl_alpen_acct).
@@ -34,12 +39,35 @@ INITIAL_ACCT_PREDICATE = (
     "Bip340Schnorr:4d4b6cd1361032ca9bd2aeb9d900aa4d45d9ead80ac9423374c451a7254d0766"
 )
 
-PREDICATE_TRANSITIONS = [
-    "NeverAccept",
-    "AlwaysAccept",
-    f"Sp1Groth16:{SP1_CONDITION_HEX}",
-    f"Bip340Schnorr:{BIP340_CONDITION_HEX}",
-]
+# The only rotation this binary can honor: V0 -> V1 (Osaka).
+SUPPORTED_ROTATION_TARGET = "AlwaysAccept"
+
+# A further rotation would need V2, which has no `AlpenSpecId` variant.
+UNSUPPORTED_ROTATION_TARGET = "NeverAccept"
+
+UNHONORABLE_ROTATION_LOG_PATTERN = r"consumed a rotation to unknown spec version"
+
+# Service logs include tracing ANSI colour codes even when written to file.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _ee_log_path(alpen_service: AlpenClientService) -> Path:
+    """Path to alpen-client's service log produced by the test harness."""
+    return Path(alpen_service.props["datadir"]) / "service.log"
+
+
+def _count_log_matches(log_path: Path, pattern: str, after_offset: int = 0) -> int:
+    """Return the number of `pattern` matches in `log_path` past `after_offset`.
+
+    Tolerates a not-yet-created log file (returns 0).
+    """
+    if not log_path.exists():
+        return 0
+    with log_path.open("rb") as fh:
+        fh.seek(after_offset)
+        body = fh.read().decode(errors="replace")
+    body = _ANSI_RE.sub("", body)
+    return sum(1 for _ in re.finditer(pattern, body))
 
 
 @flexitest.register
@@ -88,25 +116,68 @@ class TestEePredicateTransition(BaseTest):
                 f"expected initial update_vk to be {INITIAL_ACCT_PREDICATE!r}, got {initial_vk!r}"
             )
 
-        for seq_no, target in enumerate(PREDICATE_TRANSITIONS, start=1):
-            result = create_ee_predicate_update(
-                seq_no=seq_no,
-                predicate=target,
-                admin_xpriv=admin_xpriv,
-                btc_url=btc_url,
-                btc_user=btc_user,
-                btc_password=btc_password,
-            )
-            logger.info("Applied %s update (seq %d): %s", target, seq_no, result)
+        # --- V0 -> V1: the one rotation this binary can honor -----------------
+        result = create_ee_predicate_update(
+            seq_no=1,
+            predicate=SUPPORTED_ROTATION_TARGET,
+            admin_xpriv=admin_xpriv,
+            btc_url=btc_url,
+            btc_user=btc_user,
+            btc_password=btc_password,
+        )
+        logger.info("Applied %s update (seq 1): %s", SUPPORTED_ROTATION_TARGET, result)
+        btc_rpc.proxy.generatetoaddress(POST_ADMIN_UPDATE_L1_BLOCKS, mine_addr)
 
-            btc_rpc.proxy.generatetoaddress(POST_ADMIN_UPDATE_L1_BLOCKS, mine_addr)
+        wait_until_with_value(
+            fetch_update_vk_and_mine,
+            lambda vk: vk == SUPPORTED_ROTATION_TARGET,
+            error_with=f"update_vk did not transition to {SUPPORTED_ROTATION_TARGET} in OL state",
+            timeout=PREDICATE_SETTLE_TIMEOUT_SECONDS,
+        )
+        logger.info("update_vk transitioned to %s (V0 -> V1)", SUPPORTED_ROTATION_TARGET)
 
-            wait_until_with_value(
-                fetch_update_vk_and_mine,
-                lambda vk, target=target: vk == target,
-                error_with=f"update_vk did not transition to {target} in OL state",
-                timeout=PREDICATE_SETTLE_TIMEOUT_SECONDS,
+        # --- V1 -> V2: no `AlpenSpecId` variant exists for it ------------------
+        #
+        # The EE sequencer must refuse to consume this rotation rather than
+        # build a block under a spec version it doesn't know, so block
+        # building stalls with a specific logged error instead.
+        log_path = _ee_log_path(alpen_seq)
+        log_offset = log_path.stat().st_size if log_path.exists() else 0
+
+        result = create_ee_predicate_update(
+            seq_no=2,
+            predicate=UNSUPPORTED_ROTATION_TARGET,
+            admin_xpriv=admin_xpriv,
+            btc_url=btc_url,
+            btc_user=btc_user,
+            btc_password=btc_password,
+        )
+        logger.info("Applied %s update (seq 2): %s", UNSUPPORTED_ROTATION_TARGET, result)
+
+        def mine_and_count_refused_rotations() -> int:
+            btc_rpc.proxy.generatetoaddress(1, mine_addr)
+            return _count_log_matches(
+                log_path, UNHONORABLE_ROTATION_LOG_PATTERN, after_offset=log_offset
             )
-            logger.info("update_vk transitioned to %s", target)
+
+        wait_until_with_value(
+            mine_and_count_refused_rotations,
+            lambda count: count > 0,
+            error_with=(
+                f"EE sequencer did not refuse the unhonorable V1 -> V2 rotation (log: {log_path})"
+            ),
+            timeout=UNSUPPORTED_ROTATION_TIMEOUT_SECONDS,
+        )
+        logger.info("EE sequencer correctly refused the unhonorable V1 -> V2 rotation")
+
+        # The refused rotation was never consumed by a built block, so
+        # update_vk must still sit at the last rotation that did settle.
+        stalled_vk = strata_rpc.strata_getSnarkAccountStateByTag(ALPEN_ACCOUNT_ID, "latest")[
+            "update_vk"
+        ]
+        assert stalled_vk == SUPPORTED_ROTATION_TARGET, (
+            f"update_vk should remain at {SUPPORTED_ROTATION_TARGET!r} after the refused "
+            f"rotation, got {stalled_vk!r}"
+        )
 
         return True
