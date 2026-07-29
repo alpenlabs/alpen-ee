@@ -163,6 +163,17 @@ pub fn validate_tx_env<CTX: ContextTr, Error>(
     };
 
     // Check if gas_limit is more than block_gas_limit
+    //
+    // TODO(fee-model, F.2/D): this is consensus-critical and runs in the proof guest, so it
+    // must stay in lockstep host↔guest. Under the fee model a transaction's signed
+    // `gas_limit` is the DA-inflated `effective_gas` (execution gas + DA-fee headroom), which
+    // is a spend-authorization envelope, not execution work — DA is a separate balance debit,
+    // not metered gas. A storage-heavy tx with small execution can therefore have an
+    // `effective_gas` above the block gas limit yet fit the block's real execution budget.
+    // The block builder already accounts block space on actual `gas_used` (F.2, payload
+    // side); relaxing THIS check to allow `gas_limit > block_gas_limit` (bounding only the
+    // executed gas) is deferred and must land here and in the guest together, alongside the
+    // base-fee-floor guest validation (D).
     if !context.cfg().is_block_gas_limit_disabled() && tx.gas_limit() > context.block().gas_limit()
     {
         return Err(InvalidTransaction::CallerGasLimitMoreThanBlock);

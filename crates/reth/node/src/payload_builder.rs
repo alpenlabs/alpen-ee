@@ -1,4 +1,5 @@
 use std::{
+    cell::Cell,
     io,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -44,6 +45,13 @@ use crate::{
     engine::AlpenEngineTypes,
     payload::{AlpenBuiltPayload, AlpenPayloadBuilderAttributes},
 };
+
+/// Intrinsic gas floor of the cheapest possible transaction (a plain value transfer).
+///
+/// Used to stop filling a block once the remaining gas can't fit even a minimal tx.
+/// Block space is accounted on actual `gas_used` (F.2), so we do not pre-reject on the
+/// DA-inflated signed `gas_limit`; the precise per-tx fit is checked post-execution.
+const MIN_TX_GAS_LIMIT: u64 = 21_000;
 
 /// A custom payload service builder that supports the custom engine types
 #[derive(Debug, Default, Clone)]
@@ -273,16 +281,14 @@ where
     })?;
 
     while let Some(pool_tx) = best_txs.next() {
-        // ensure we still have capacity for this transaction
-        if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
-            // we can't fit this transaction into the block, so we need to mark it as invalid
-            // which also removes all dependent transaction from the iterator before we can
-            // continue
-            best_txs.mark_invalid(
-                &pool_tx,
-                InvalidPoolTransactionError::ExceedsGasLimit(pool_tx.gas_limit(), block_gas_limit),
-            );
-            continue;
+        // Block space is accounted on actual `gas_used`, not the DA-inflated signed
+        // `gas_limit` (F.2 decoupling): a tx's `effective_gas` folds in DA-fee headroom
+        // that is a spend-authorization envelope, not execution work (DA is a separate
+        // balance debit, not metered gas). So we do NOT pre-reject on `gas_limit`; instead
+        // we stop only once the remaining budget can't fit even a minimal tx, and check the
+        // precise fit post-execution below.
+        if cumulative_gas_used + MIN_TX_GAS_LIMIT > block_gas_limit {
+            break;
         }
 
         // check if the job was cancelled, if so we can exit early
@@ -293,24 +299,46 @@ where
         // convert tx to a signed transaction
         let tx = pool_tx.to_consensus();
 
-        // Execute, but only commit if the transaction's DA fee is fully covered by its
-        // unused authorized gas. Reset the shared coverage cell to `UNKNOWN` first so a
-        // stale value from a prior tx (or a tx that skips the charge, e.g. zero-fee) can
-        // never be read as covered; the in-EVM charge overwrites it with `OK`/`CAPPED`
-        // during execution (before this closure runs). A `CAPPED` charge means the tx
-        // under-provisioned and the protocol would subsidize its DA cost, so we skip it.
-        // Coverage only matters when the DA charge is active (`da_rate != 0`).
+        // Execute, but only commit if (a) the tx's actual execution gas fits the remaining
+        // block budget, and (b) its DA fee is fully covered by its unused authorized gas.
+        //
+        // Reset the shared coverage cell to `UNKNOWN` first so a stale value from a prior
+        // tx (or a tx that skips the charge, e.g. zero-fee) can never be read as covered;
+        // the in-EVM charge overwrites it with `OK`/`CAPPED` during execution (before this
+        // closure runs). A `CAPPED` charge means the tx under-provisioned and the protocol
+        // would subsidize its DA cost, so we skip it (coverage only matters when the DA
+        // charge is active, `da_rate != 0`). `does_not_fit` records a gas-fit rejection so
+        // the skip below can distinguish it from a DA-undercovered one.
         da_report.store(DA_COVERAGE_UNKNOWN, Ordering::Relaxed);
-        let exec_outcome = builder.execute_transaction_with_commit_condition(tx.clone(), |_res| {
-            if da_rate != 0 && da_report.load(Ordering::Relaxed) == DA_COVERAGE_CAPPED {
-                CommitChanges::No
-            } else {
-                CommitChanges::Yes
+        let does_not_fit = Cell::new(false);
+        let exec_outcome = builder.execute_transaction_with_commit_condition(tx.clone(), |res| {
+            // (a) Fit on actual executed gas, not the DA-inflated signed limit.
+            if cumulative_gas_used + res.gas_used() > block_gas_limit {
+                does_not_fit.set(true);
+                return CommitChanges::No;
             }
+            // (b) DA coverage: skip under-covered txs the protocol would subsidize.
+            if da_rate != 0 && da_report.load(Ordering::Relaxed) == DA_COVERAGE_CAPPED {
+                return CommitChanges::No;
+            }
+            CommitChanges::Yes
         });
 
         let gas_used = match exec_outcome {
             Ok(Some(gas_used)) => gas_used,
+            Ok(None) if does_not_fit.get() => {
+                // The tx's real execution gas doesn't fit the remaining block budget. Skip
+                // it (and its descendants) and keep trying smaller / lower-priority txs.
+                trace!(target: "payload_builder", ?tx, "skipping transaction that exceeds remaining block gas");
+                best_txs.mark_invalid(
+                    &pool_tx,
+                    InvalidPoolTransactionError::ExceedsGasLimit(
+                        pool_tx.gas_limit(),
+                        block_gas_limit,
+                    ),
+                );
+                continue;
+            }
             Ok(None) => {
                 // DA-undercovered: skip the tx (and its descendants) for this build. Its
                 // nonce is untouched, so the sender can resubmit with the effective gas
