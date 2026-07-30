@@ -78,10 +78,11 @@ services:
     environment:
       SEQUENCER_PRIVATE_KEY: ${SEQUENCER_PRIVATE_KEY}
       RUST_LOG: ${RUST_LOG:-info}
+      ALPEN_PARAMS_PATH: ${ALPEN_PARAMS_PATH:-/app/configs/generated/alpen-params.json}
     ports:
       - "8545:8545"
     volumes:
-      - ./configs/generated/alpen-params.json:/app/configs/generated/alpen-params.json:ro
+      - ./configs/generated/alpen-params.json:${ALPEN_PARAMS_PATH:-/app/configs/generated/alpen-params.json}:ro
       - ./configs/alpen-client/seq-p2p.hex:/app/keys/seq-p2p.hex:ro
     entrypoint: ["/usr/local/bin/entrypoint.sh"]
     networks:
