@@ -7,19 +7,17 @@
 //! env var) keeps its existing name; the grouping only affects code layout
 //! and `--help` section headings.
 
-use std::{path::PathBuf, sync::Arc};
+use std::{fs, path::Path, sync::Arc};
 
 #[cfg(feature = "sequencer")]
 use alloy_primitives::{address, Address};
-use alpen_chainspec::chain_value_parser;
+use alpen_ee_params::AlpenParams;
 use clap::ArgAction;
-use reth_chainspec::ChainSpec;
-use strata_bridge_params::{DEFAULT_DENOMINATION_SATS, DEFAULT_MAX_WITHDRAWAL_DESCRIPTOR_LEN};
+use eyre::Context;
 #[cfg(feature = "sequencer")]
 use strata_config::btcio::{
     fee_rate_from_sat_per_vb, FeePolicy, L1FeePolicyConfig, MempoolExplorerFeePolicy, WriterConfig,
 };
-use strata_l1_txfmt::MagicBytes;
 use strata_primitives::{buf::Buf32, L1Height};
 
 const DEFAULT_HEALTH_CHECK_HOST: &str = "0.0.0.0";
@@ -51,9 +49,6 @@ pub(crate) struct AdditionalConfig {
 
     #[command(flatten)]
     pub ol: OlArgs,
-
-    #[command(flatten)]
-    pub bridge: BridgeArgs,
 
     #[command(flatten)]
     pub sequencer: SequencerArgs,
@@ -123,22 +118,17 @@ impl DisplayArgs {
 #[derive(Debug, clap::Args)]
 #[command(next_help_heading = "Alpen Chain")]
 pub(crate) struct ChainArgs {
-    /// The chain this node is running.
+    /// Path to the JSON-serialized Alpen params artifact.
     ///
-    /// Possible values are either a built-in chain or the path to a chain specification file.
-    /// Cannot override existing `chain` arg, so this is a workaround.
+    /// Single source of truth for the chain: EE account id, bridge params,
+    /// DA stream identity, fork schedule, and the embedded EVM chain spec.
     #[arg(
         long,
-        value_name = "CHAIN_OR_PATH",
-        default_value = "testnet",
-        value_parser = chain_value_parser,
-        required = false,
+        value_name = "PATH",
+        required = true,
+        value_parser = alpen_params_value_parser,
     )]
-    pub custom_chain: Arc<ChainSpec>,
-
-    /// JSON-serialized Alpen EE chain params.
-    #[arg(long, value_name = "PATH", required = true)]
-    pub ee_params: PathBuf,
+    pub alpen_params: Arc<AlpenParams>,
 }
 
 /// Node-local service args.
@@ -193,40 +183,17 @@ pub(crate) struct OlArgs {
     pub dev_track_latest_epoch: bool,
 }
 
-/// Bridge params args.
-#[derive(Debug, clap::Args)]
-#[command(next_help_heading = "Bridge")]
-pub(crate) struct BridgeArgs {
-    /// Bridge denomination in satoshis (1 BTC default).
-    #[arg(long = "bridge-denomination", default_value_t = DEFAULT_DENOMINATION_SATS)]
-    pub denomination: u64,
-
-    /// Maximum withdrawal BOSD descriptor length in bytes, including the type tag.
-    #[arg(long, default_value_t = DEFAULT_MAX_WITHDRAWAL_DESCRIPTOR_LEN)]
-    pub max_withdrawal_descriptor_len: u32,
-
-    /// Maximum withdrawal amount in satoshis.
-    ///
-    /// When omitted, defaults to 1_000_000_000 (10 BTC) at runtime.
-    /// Pass 0 to disable the cap entirely. Kept as `Option` (no
-    /// `default_value`) so we can distinguish "not set" (→ safe default)
-    /// from an explicit value.
-    #[arg(long)]
-    pub max_withdrawal_amount: Option<u64>,
-}
-
 /// Sequencer mode, block building, and proving args.
 #[derive(Debug, clap::Args)]
 #[command(next_help_heading = "Sequencer")]
 pub(crate) struct SequencerArgs {
     /// Run the node as a sequencer. Requires the `sequencer` feature,
     /// a `SEQUENCER_PRIVATE_KEY` environment variable, and all DA-related
-    /// arguments (`--ee-da-magic-bytes`, `--btc-rpc-url`, `--btc-rpc-user`,
-    /// `--btc-rpc-password`).
+    /// arguments (`--btc-rpc-url`, `--btc-rpc-user`, `--btc-rpc-password`).
     #[arg(
         long = "sequencer",
         default_value_t = false,
-        requires_all = ["magic_bytes", "btc_rpc_url", "btc_rpc_user", "btc_rpc_password"],
+        requires_all = ["btc_rpc_url", "btc_rpc_user", "btc_rpc_password"],
     )]
     pub enabled: bool,
 
@@ -286,11 +253,6 @@ pub(crate) struct SequencerArgs {
 #[derive(Debug, clap::Args)]
 #[command(next_help_heading = "EE DA")]
 pub(crate) struct DaArgs {
-    /// Magic bytes (hex-encoded, 4 bytes) for tagging EE DA envelope transactions.
-    /// Example: `ALPN`.
-    #[arg(long = "ee-da-magic-bytes", required = false, value_parser = parse_magic_bytes)]
-    pub magic_bytes: Option<MagicBytes>,
-
     /// Bitcoin Core RPC URL. Required when `--sequencer` is set.
     #[arg(long, required = false)]
     pub btc_rpc_url: Option<String>,
@@ -428,10 +390,17 @@ fn parse_buf32(s: &str) -> eyre::Result<Buf32> {
         .map_err(|e| eyre::eyre!("Failed to parse hex string as Buf32: {e}"))
 }
 
-/// Parse a magic bytes string using the [`MagicBytes`] parser from `strata-l1-txfmt`.
-fn parse_magic_bytes(s: &str) -> eyre::Result<MagicBytes> {
-    s.parse::<MagicBytes>()
-        .map_err(|e| eyre::eyre!("Failed to parse magic bytes: {e}"))
+/// Loads the Alpen params artifact from a JSON file.
+///
+/// Runs at CLI parse time so the embedded chain spec is available before the
+/// node command is assembled.
+fn alpen_params_value_parser(path: &str) -> eyre::Result<Arc<AlpenParams>> {
+    let path = Path::new(path);
+    let json = fs::read_to_string(path)
+        .with_context(|| format!("failed to read Alpen params file {path:?}"))?;
+    let params: AlpenParams = serde_json::from_str(&json)
+        .with_context(|| format!("failed to parse Alpen params file {path:?}"))?;
+    Ok(Arc::new(params))
 }
 
 #[cfg(test)]
@@ -446,15 +415,28 @@ mod additional_config_tests {
         "0000000000000000000000000000000000000000000000000000000000000000";
 
     fn parse_additional_config(args: &[&str]) -> AdditionalConfig {
+        let params_fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/res/alpen-params.json");
         let mut argv = vec![
             "alpen-client",
-            "--ee-params",
-            "/tmp/ee-params.json",
+            "--alpen-params",
+            params_fixture,
             "--sequencer-pubkey",
             SEQUENCER_PUBKEY,
         ];
         argv.extend_from_slice(args);
         <AdditionalConfig as clap::Parser>::parse_from(argv)
+    }
+
+    /// The artifact loads at CLI parse time and the genesis facts are
+    /// derived from its embedded EVM spec.
+    #[test]
+    fn alpen_params_flag_loads_the_artifact() {
+        let config = parse_additional_config(&[]);
+
+        assert_eq!(
+            config.chain.alpen_params.genesis_block_info().blocknum(),
+            0
+        );
     }
 
     /// Catches arg id / flag collisions between the flattened Alpen arg
@@ -479,8 +461,6 @@ mod additional_config_tests {
             "http://localhost:4317",
             "--service-label",
             "test",
-            "--custom-chain",
-            "testnet",
             "--sequencer-http",
             "http://localhost:8545",
             "--ol-client-url",
@@ -497,8 +477,6 @@ mod additional_config_tests {
             "--db-retry-count",
             "3",
             "--sequencer",
-            "--ee-da-magic-bytes",
-            "ALPN",
             "--btc-rpc-url",
             "http://localhost:18443",
             "--btc-rpc-user",
@@ -517,12 +495,6 @@ mod additional_config_tests {
             "100000000",
             "--batch-event-channel-capacity",
             "64",
-            "--bridge-denomination",
-            "100000000",
-            "--max-withdrawal-descriptor-len",
-            "100",
-            "--max-withdrawal-amount",
-            "1000",
             "--dev-native-prover",
             "--dev-track-latest-epoch",
             "--sp1-proof-deadline-secs",
@@ -553,27 +525,8 @@ mod additional_config_tests {
         );
         assert_eq!(config.ol.client_url.as_deref(), Some("ws://localhost:8432"));
         assert!(config.ol.dummy_client);
-        assert_eq!(config.bridge.denomination, 100_000_000);
-        assert!(config.da.magic_bytes.is_some());
         assert_eq!(config.btcio.fee_policy, BtcioFeePolicyArg::Fixed);
         assert_eq!(config.btcio.fee_rate, Some(1.5));
-    }
-
-    #[test]
-    fn max_withdrawal_descriptor_len_defaults_to_policy_limit() {
-        let config = parse_additional_config(&[]);
-
-        assert_eq!(
-            config.bridge.max_withdrawal_descriptor_len,
-            DEFAULT_MAX_WITHDRAWAL_DESCRIPTOR_LEN
-        );
-    }
-
-    #[test]
-    fn max_withdrawal_descriptor_len_can_be_configured() {
-        let config = parse_additional_config(&["--max-withdrawal-descriptor-len", "100"]);
-
-        assert_eq!(config.bridge.max_withdrawal_descriptor_len, 100);
     }
 }
 
