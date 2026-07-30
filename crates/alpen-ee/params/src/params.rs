@@ -62,16 +62,6 @@ impl AlpenParams {
         }
     }
 
-    /// Parses chain params from a JSON string.
-    pub fn from_json_str(json: &str) -> serde_json::Result<Self> {
-        serde_json::from_str(json)
-    }
-
-    /// Serializes chain params to pretty-printed JSON.
-    pub fn to_json_string_pretty(&self) -> serde_json::Result<String> {
-        serde_json::to_string_pretty(self)
-    }
-
     /// Returns the EE account ID in the OL chain.
     pub fn strata_exec_account_id(&self) -> AccountId {
         self.strata_exec_account_id
@@ -139,10 +129,9 @@ mod tests {
     fn json_roundtrip_preserves_params() {
         let params = sample_params();
 
-        let json = params
-            .to_json_string_pretty()
-            .expect("params should serialize");
-        let decoded = AlpenParams::from_json_str(&json).expect("params should deserialize");
+        let json = serde_json::to_string_pretty(&params).expect("params should serialize");
+        let decoded: AlpenParams =
+            serde_json::from_str(&json).expect("params should deserialize");
 
         assert_eq!(decoded, params);
     }
