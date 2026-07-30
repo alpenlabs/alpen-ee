@@ -1,7 +1,5 @@
 //! Embedded EVM chain spec.
 
-use std::sync::Arc;
-
 use alloy_genesis::Genesis;
 use alpen_chainspec::{ee_genesis_block_info, AlpenEeGenesisBlockInfo};
 use reth_chainspec::ChainSpec;
@@ -26,13 +24,7 @@ pub struct EvmSpec {
     genesis: Genesis,
 
     /// Chain spec derived from `genesis`; never serialized.
-    ///
-    /// Stored as `Arc<ChainSpec>` — not because [`EvmSpec`] needs shared
-    /// ownership, but to match reth's boundary: the node's `command.chain`
-    /// field is `Arc<ChainSpec>`, so consumers hand it off with a cheap
-    /// refcount bump rather than deep-cloning the spec (or re-deriving it
-    /// from `genesis`) on every use.
-    chain_spec: Arc<ChainSpec>,
+    chain_spec: ChainSpec,
 }
 
 impl EvmSpec {
@@ -42,7 +34,7 @@ impl EvmSpec {
     }
 
     /// Returns the derived reth chain spec.
-    pub fn chain_spec(&self) -> &Arc<ChainSpec> {
+    pub fn chain_spec(&self) -> &ChainSpec {
         &self.chain_spec
     }
 
@@ -54,7 +46,7 @@ impl EvmSpec {
 
 impl From<Genesis> for EvmSpec {
     fn from(genesis: Genesis) -> Self {
-        let chain_spec: Arc<ChainSpec> = Arc::new(genesis.clone().into());
+        let chain_spec: ChainSpec = genesis.clone().into();
         Self {
             genesis,
             chain_spec,

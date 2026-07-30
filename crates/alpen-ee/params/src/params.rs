@@ -1,7 +1,5 @@
 //! Top-level Alpen params artifact.
 
-use std::sync::Arc;
-
 use alpen_chainspec::AlpenEeGenesisBlockInfo;
 use reth_chainspec::ChainSpec;
 use serde::{Deserialize, Serialize};
@@ -100,7 +98,7 @@ impl AlpenParams {
     }
 
     /// Returns the derived reth chain spec.
-    pub fn chain_spec(&self) -> &Arc<ChainSpec> {
+    pub fn chain_spec(&self) -> &ChainSpec {
         self.evm_spec.chain_spec()
     }
 
