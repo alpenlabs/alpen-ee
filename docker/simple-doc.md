@@ -56,7 +56,7 @@ alpen-client \
 
 | Flag | Description |
 |------|-------------|
-| `--alpen-params <path>` | Path to the Alpen params artifact (JSON). Carries the EE account id, bridge params, DA stream identity, and the embedded EVM chain spec. Generate with `strata-datatool gen-alpen-params`. Required. |
+| `--alpen-params <path>` | Path to the Alpen params artifact (JSON). Carries the EE account id, bridge params, DA stream identity, and the embedded EVM chain spec. The pinned `strata-datatool` doesn't have `gen-alpen-params` yet, so until it ships, compose the JSON by hand: see the `AlpenParams` schema in `crates/alpen-ee/params/src/params.rs`, or `functional-tests/common/alpen_params.py` for a working example that stitches it together from `gen-ee-params` output and an in-repo chain spec. Required. |
 | `--ol-client-url <url>` | WebSocket or HTTP URL of the OL (strata) node. Example: `ws://strata:8432`. Required unless `--dummy-ol-client` is used. |
 | `--dummy-ol-client` | Use a fake OL client. Only for isolated EE testing — not for production. |
 | `--datadir <path>` | Where chain data, keys, and databases are stored. |
