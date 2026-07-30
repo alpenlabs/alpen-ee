@@ -4,7 +4,14 @@ Drives a non-trivial *mix* of EVM activity through the EE — plain ETH
 transfers, storage-writing contract deployments, and large-runtime
 contract deployments — then verifies (a) every transaction's on-chain
 effect is correct and (b) the produced blocks roll through chunk-seal,
-chunk proof, acct proof, and OL submission in native dev-prover mode.
+chunk proof, acct proof, and OL submission.
+
+Runs against the zkaleido `NativeHost` (dev-prover mode) by default; set
+`EE_PROVER_BACKEND=sp1` (see `factories/alpen_client.py`) to run the same
+checks against the real SP1 Groth16 prover instead. The heavy tx mix and
+tight batch-sealing count below are tuned for the fast native default —
+under the real backend expect this test to take much longer, since it
+drives several full chunk+acct proof rounds.
 
 The mix matters: it exercises different code paths in the chunk witness
 extraction:
@@ -39,8 +46,6 @@ with proper accessors or state asserts (and not logs).
 """
 
 import logging
-import re
-from pathlib import Path
 
 import flexitest
 
@@ -53,9 +58,9 @@ from common.evm import (
     send_eth_transfer,
 )
 from common.evm_utils import wait_for_receipt
+from common.prover_log_signals import count_log_matches, ee_log_path, wait_for_log_signal
 from common.services.alpen_client import AlpenClientService
 from common.services.bitcoin import BitcoinService
-from common.wait import wait_until_with_value
 from envconfigs.el_ol import EeOLEnv
 
 logger = logging.getLogger(__name__)
@@ -77,70 +82,11 @@ TRANSFER_RECIPIENT = "0x000000000000000000000000000000000000dEaD"
 # deadline so failures pinpoint which stage of the pipeline stalled.
 SIGNAL_TIMEOUT_SECS = 180
 
-# Service logs include tracing ANSI colour codes even when written to file.
-_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
-
-
-def _ee_log_path(alpen_service: AlpenClientService) -> Path:
-    """Path to alpen-client's service log produced by the test harness."""
-    return Path(alpen_service.props["datadir"]) / "service.log"
-
-
-def _count_log_matches(log_path: Path, pattern: str, after_offset: int = 0) -> int:
-    """Return the number of `pattern` matches in `log_path` past `after_offset`.
-
-    Tolerates a not-yet-created log file (returns 0).
-    """
-    if not log_path.exists():
-        return 0
-    with log_path.open("rb") as fh:
-        fh.seek(after_offset)
-        body = fh.read().decode(errors="replace")
-    body = _ANSI_RE.sub("", body)
-    return sum(1 for _ in re.finditer(pattern, body))
-
-
-def _wait_for_log_signal(
-    log_path: Path,
-    pattern: str,
-    after_offset: int,
-    timeout: int,
-    description: str,
-    btc_rpc,
-    miner_addr: str,
-    btc_blocks_per_step: int = 4,
-    poll: float = 1.0,
-) -> int:
-    """Poll until at least one match for `pattern` appears past `after_offset`.
-
-    Mines bitcoin blocks between polls so the batch DA confirmations
-    advance, which is what eventually drives the batch lifecycle into
-    `ProofPending` and triggers the chunk + acct prover request.
-    """
-
-    def mine_and_count() -> int:
-        count = _count_log_matches(log_path, pattern, after_offset)
-        if count == 0:
-            btc_rpc.proxy.generatetoaddress(btc_blocks_per_step, miner_addr)
-        return count
-
-    count = wait_until_with_value(
-        mine_and_count,
-        lambda c: c > 0,
-        error_with=(
-            f"{description}: no log match for {pattern!r} within {timeout}s (log: {log_path})"
-        ),
-        timeout=timeout,
-        step=poll,
-    )
-    logger.info(f"{description}: observed {count} match(es)")
-    return count
-
 
 @flexitest.register
 class TestEeProverPipelineAlive(BaseTest):
     """Verify the EE chunk + acct prover pipeline runs end-to-end under
-    realistic, varied EVM transaction load, in native dev-prover mode."""
+    realistic, varied EVM transaction load."""
 
     # Tighter than the shared `el_ol` env's default (10): smaller batches
     # mean more chunk/acct proofs per unit of EVM activity, which keeps
@@ -167,7 +113,7 @@ class TestEeProverPipelineAlive(BaseTest):
         rpc = alpen_seq.create_rpc()
         btc_rpc = bitcoin.create_rpc()
         miner_addr = btc_rpc.proxy.getnewaddress()
-        log_path = _ee_log_path(alpen_seq)
+        log_path = ee_log_path(alpen_seq)
 
         # --- Stage 1: submit a mix of EVM activity ---
         #
@@ -300,7 +246,7 @@ class TestEeProverPipelineAlive(BaseTest):
         # Polling drives bitcoin block production so the batch DA window
         # advances, which is what eventually triggers proof requests.
 
-        _wait_for_log_signal(
+        wait_for_log_signal(
             log_path,
             r"persisted block witness",
             after_offset=log_offset,
@@ -310,7 +256,7 @@ class TestEeProverPipelineAlive(BaseTest):
             miner_addr=miner_addr,
         )
 
-        _wait_for_log_signal(
+        wait_for_log_signal(
             log_path,
             r"marking chunk as proof-ready",
             after_offset=log_offset,
@@ -320,7 +266,7 @@ class TestEeProverPipelineAlive(BaseTest):
             miner_addr=miner_addr,
         )
 
-        _wait_for_log_signal(
+        wait_for_log_signal(
             log_path,
             r"persisting batch acct proof",
             after_offset=log_offset,
@@ -330,7 +276,7 @@ class TestEeProverPipelineAlive(BaseTest):
             miner_addr=miner_addr,
         )
 
-        _wait_for_log_signal(
+        wait_for_log_signal(
             log_path,
             r"submitted snark update to OL",
             after_offset=log_offset,
@@ -341,7 +287,7 @@ class TestEeProverPipelineAlive(BaseTest):
         )
 
         # Negative check: no permanent failure in the post-baseline window.
-        perm_fail_count = _count_log_matches(
+        perm_fail_count = count_log_matches(
             log_path,
             r"retries exhausted|task died mid-Proving and retries exhausted",
             after_offset=log_offset,

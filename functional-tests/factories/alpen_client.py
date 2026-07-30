@@ -15,6 +15,26 @@ from common.config.constants import DEFAULT_EE_BLOCK_TIME_MS
 from common.datatool import generate_ee_params
 from common.services import AlpenClientProps, AlpenClientService
 
+# Absolute path to the repo root, so the SP1 ELF path resolves regardless of
+# the alpen-client process's working directory (its datadir, not the repo).
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_SP1_ELF_DIR = _REPO_ROOT / "provers" / "sp1" / "elfs"
+_SP1_GUEST_ELF_NAMES = ("guest-alpen-chunk.elf", "guest-alpen-acct.elf")
+
+
+def _ee_prover_backend() -> str:
+    """EE chunk/acct prover backend for the alpen-client sequencer.
+
+    Controlled by `EE_PROVER_BACKEND` (default `native`):
+      - `native` — zkaleido `NativeHost`; fast, no real cryptographic proofs.
+      - `sp1`    — real SP1 Groth16 proving. Requires the guest ELFs built
+        ahead of time via `cargo build --release -p strata-sp1-guest-builder`.
+    """
+    backend = os.environ.get("EE_PROVER_BACKEND", "native")
+    if backend not in ("native", "sp1"):
+        raise ValueError(f"Unknown EE_PROVER_BACKEND: {backend!r} (expected: native|sp1)")
+    return backend
+
 
 def generate_p2p_secret_key() -> str:
     """Generate a random 32-byte hex-encoded P2P secret key."""
@@ -137,9 +157,6 @@ class AlpenClientFactory(flexitest.Factory):
             "--custom-chain", custom_chain,
             "--batch-sealing-block-count", str(batch_sealing_block_count),
             "-vvvv",
-            # Functional tests don't ship the SP1 guest ELFs, so run the
-            # EE chunk + acct provers on the zkaleido NativeHost.
-            "--dev-native-prover",
         ]
         if dev_track_latest_epoch:
             # Advance the OL chain tracker on `latest` epoch (FCM)
@@ -148,6 +165,19 @@ class AlpenClientFactory(flexitest.Factory):
             # waiting on the L1 checkpoint round-trip.
             cmd.append("--dev-track-latest-epoch")
         # fmt: on
+
+        prover_backend = _ee_prover_backend()
+        if prover_backend == "native":
+            cmd.append("--dev-native-prover")
+        else:
+            for elf_name in _SP1_GUEST_ELF_NAMES:
+                elf_path = _SP1_ELF_DIR / elf_name
+                if not elf_path.exists():
+                    raise RuntimeError(
+                        f"EE_PROVER_BACKEND=sp1 requires the real SP1 guest ELFs; "
+                        f"missing {elf_path}. Build them with: "
+                        f"cargo build --release -p strata-sp1-guest-builder"
+                    )
 
         # Discovery mode configuration:
         # - enable_discovery=True: Use discv5 only (disable discv4)
@@ -204,6 +234,8 @@ class AlpenClientFactory(flexitest.Factory):
         env = os.environ.copy()
         env["SEQUENCER_PRIVATE_KEY"] = sequencer_privkey
         env["ALPEN_EE_BLOCK_TIME_MS"] = str(DEFAULT_EE_BLOCK_TIME_MS)
+        if prover_backend == "sp1":
+            env["ELF_BASE_PATH"] = str(_SP1_ELF_DIR)
         if ol_submit_token:
             env["STRATA_SUBMIT_RPC_TOKEN"] = ol_submit_token
 

@@ -22,6 +22,42 @@ built from the strata git revision pinned in the root `Cargo.toml` via
 The suite contains only the alpen-relevant tests (`alpen_client`, `evm`,
 `dbtool`); the strata-node tests live in the strata repo.
 
+## EE Prover Backend
+
+The alpen-client sequencer's EE chunk + acct provers run against one of two
+backends, selected by `EE_PROVER_BACKEND`:
+
+- `native` (default) — zkaleido `NativeHost`. Fast, no real cryptographic
+  proofs; this is what CI always uses.
+- `sp1` — real SP1 Groth16 proving. Requires the
+  [SP1 toolchain](https://docs.succinct.xyz/docs/sp1/getting-started/install)
+  and the guest ELFs built ahead of time:
+
+  ```bash
+  cargo build --release -p strata-sp1-guest-builder
+  ```
+
+  `run_tests.sh` builds these automatically (and forces a release build of
+  `alpen-client`, since real proving is unusably slow in debug) when
+  `EE_PROVER_BACKEND=sp1` is set:
+
+  ```bash
+  EE_PROVER_BACKEND=sp1 ./run_tests.sh -t test_ee_prover_real_proof
+  ```
+
+  Real local CPU proving can take several minutes per proof (a chunk
+  proof, then a recursive acct proof that verifies it in-circuit), so this
+  is a local/dev-only capability — it is never wired into CI.
+
+  **Known gap:** `test_ee_prover_real_proof` currently fails fast under
+  `sp1` against a real OL node. alpen-client validates the OL's
+  registered EE-account predicate key against the real SP1 predicate
+  *before* starting the sequencer at all, and the OL genesis registers a
+  fixed native/test predicate that doesn't match. Bridging this needs an
+  admin `PredicateUpdate` bootstrap (see `test_ee_predicate_transition.py`)
+  before the sequencer starts; see the TODO in
+  `tests/alpen_client/test_ee_prover_real_proof.py` for the plan.
+
 ## Quick Start
 
 ```bash
