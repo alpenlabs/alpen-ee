@@ -7,6 +7,7 @@
 
 use alpen_ee_da_types::DaBlob;
 use strata_codec::{encode_to_vec, CodecError};
+use strata_l1_envelope_fmt::builder::MAX_ENVELOPE_PAYLOAD_SIZE;
 
 /// Splits a blob into chunk payloads.
 ///
@@ -25,10 +26,19 @@ fn split_blob(blob: &[u8], max_chunk_payload: usize) -> Vec<Vec<u8>> {
 ///
 /// Each payload is at most `max_chunk_payload` bytes. Returns the chunks in
 /// order. Chunk index and total are implicit in commit tx output ordering.
+///
+/// # Panics
+///
+/// Panics if `max_chunk_payload` is zero or exceeds [`MAX_ENVELOPE_PAYLOAD_SIZE`]
+/// — either would produce chunks the envelope builder cannot accept.
 pub fn prepare_da_chunks(
     blob: &DaBlob,
     max_chunk_payload: usize,
 ) -> Result<Vec<Vec<u8>>, CodecError> {
+    assert!(
+        (1..=MAX_ENVELOPE_PAYLOAD_SIZE).contains(&max_chunk_payload),
+        "max_chunk_payload must be in 1..={MAX_ENVELOPE_PAYLOAD_SIZE}, got {max_chunk_payload}"
+    );
     let encoded = encode_to_vec(blob)?;
     // Each chunk maps to one reveal tx and one P2TR output in the commit tx.
     // Commit-tx standardness gives the practical chunk-count ceiling: a
