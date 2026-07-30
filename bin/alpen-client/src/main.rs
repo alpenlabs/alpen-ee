@@ -35,7 +35,7 @@ use alpen_ee_common::{
     chain_status_checked, BatchStorage, BlockNumHash, ChunkStorage, ExecBlockStorage, OLClient,
     SequencerOLClient, Storage,
 };
-use alpen_ee_config::{AlpenEeConfig, AlpenEeParams};
+use alpen_ee_config::AlpenEeConfig;
 use alpen_ee_database::init_db_storage;
 use alpen_ee_engine::{create_engine_control_task, sync_chainstate_to_engine, AlpenRethExecEngine};
 #[cfg(feature = "sequencer")]
@@ -231,17 +231,8 @@ fn main() {
             // OL client URL is not used when the dummy OL client is enabled
             let ol_client_url = ext.ol.client_url.clone().unwrap_or_default();
 
-            // Temporary adapter until `AlpenEeConfig` holds `AlpenParams`
-            // directly: the legacy type's genesis triple is now derived from
-            // the artifact's embedded EVM spec.
-            let legacy_params = AlpenEeParams::new(
-                params.strata_exec_account_id(),
-                genesis_info.blockhash(),
-                genesis_info.stateroot(),
-                genesis_info.blocknum(),
-            );
             let config = Arc::new(AlpenEeConfig::new(
-                legacy_params,
+                params.clone(),
                 PredicateKey::always_accept(),
                 ol_client_url,
                 ext.sequencer.http_url.clone(),
@@ -310,7 +301,7 @@ fn main() {
                 }
                 OLClientKind::Rpc(
                     RpcOLClient::try_new(
-                        config.params().account_id(),
+                        config.params().strata_exec_account_id(),
                         ol_url,
                         ext.ol.submit_url.as_deref(),
                         ext.ol.submit_bearer_token.as_deref(),
