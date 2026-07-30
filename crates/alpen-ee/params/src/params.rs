@@ -27,7 +27,10 @@ pub const DEFAULT_ALPEN_EE_ACCOUNT_ID: AccountId = AccountId::new([1u8; 32]);
 #[serde(deny_unknown_fields)]
 pub struct AlpenParams {
     /// Account id of the EE in OL. Fork-invariant.
-    account_id: AccountId,
+    ///
+    /// Named for the OL account system, not the EVM: do not confuse with an
+    /// EVM address.
+    strata_exec_account_id: AccountId,
 
     /// Bridge denomination and withdrawal policy.
     bridge_params: BridgeParams,
@@ -46,14 +49,14 @@ pub struct AlpenParams {
 impl AlpenParams {
     /// Creates new chain params.
     pub fn new(
-        account_id: AccountId,
+        strata_exec_account_id: AccountId,
         bridge_params: BridgeParams,
         blob_spec: BlobSpec,
         spec_schedule: AlpenSpecSchedule,
         evm_spec: EvmSpec,
     ) -> Self {
         Self {
-            account_id,
+            strata_exec_account_id,
             bridge_params,
             blob_spec,
             spec_schedule,
@@ -72,8 +75,8 @@ impl AlpenParams {
     }
 
     /// Returns the EE account ID in the OL chain.
-    pub fn account_id(&self) -> AccountId {
-        self.account_id
+    pub fn strata_exec_account_id(&self) -> AccountId {
+        self.strata_exec_account_id
     }
 
     /// Returns the bridge denomination and withdrawal policy.
@@ -184,7 +187,7 @@ mod tests {
         let mut json = sample_json();
         json.as_object_mut()
             .expect("params should be an object")
-            .insert("account_id".to_owned(), json!("01"));
+            .insert("strata_exec_account_id".to_owned(), json!("01"));
 
         assert!(serde_json::from_value::<AlpenParams>(json).is_err());
     }
