@@ -130,8 +130,7 @@ mod tests {
         let params = sample_params();
 
         let json = serde_json::to_string_pretty(&params).expect("params should serialize");
-        let decoded: AlpenParams =
-            serde_json::from_str(&json).expect("params should deserialize");
+        let decoded: AlpenParams = serde_json::from_str(&json).expect("params should deserialize");
 
         assert_eq!(decoded, params);
     }
