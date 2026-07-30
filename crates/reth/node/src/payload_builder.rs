@@ -258,7 +258,7 @@ where
     // executed base fee consistent, and matches the host consensus + guest, which recompute
     // the same floored value from the parent. This inlines `builder_for_next_block` so the
     // floor can be inserted between `next_evm_env` and block-builder construction — no custom
-    // `ConfigureEvm` needed. (With the inert `BASE_FEE_FLOOR = 0`, this is pure EIP-1559.)
+    // `ConfigureEvm` needed.
     let mut evm_env = evm_config
         .next_evm_env(&parent_header, &next_block_attrs)
         .map_err(PayloadBuilderError::other)?;

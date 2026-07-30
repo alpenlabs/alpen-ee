@@ -13,29 +13,19 @@
 
 use alloy_eips::eip1559::{calc_next_block_base_fee, BaseFeeParams};
 
-/// Minimum base fee per gas (wei) — the floor under the EIP-1559 base fee.
+/// Minimum base fee per gas (wei) — the floor under the EIP-1559 base fee. Set to 1 gwei.
 ///
-/// TODO(fee-model, calibration): set to a governance-calibrated value such that
-/// `BASE_FEE_FLOOR * expected_gas_per_block` recovers amortized execution + proving +
-/// operational cost per block at target utilization. It is currently `0`, which makes the
-/// floor **inert** (`max(0, eip1559) == eip1559`, i.e. pure EIP-1559): the flooring
-/// machinery is fully wired but has no effect until a non-zero value is set here. Changing
-/// it is a protocol upgrade (consensus-critical: build, host validation, and guest all read
-/// this constant and must agree).
-pub const BASE_FEE_FLOOR: u64 = 0;
+/// TODO(fee-model, calibration): 1 gwei is an initial value; it should be governance-
+/// calibrated so `BASE_FEE_FLOOR * expected_gas_per_block` recovers amortized execution +
+/// proving + operational cost per block at target utilization. Changing it is a protocol
+/// upgrade (consensus-critical: the block builder, host consensus validation, and proof
+/// guest all read this constant and must agree).
+pub const BASE_FEE_FLOOR: u64 = 1_000_000_000;
 
 /// Clamps an already-computed EIP-1559 base fee to [`BASE_FEE_FLOOR`].
 ///
-/// Kept as the single clamping primitive so the floor logic (and the placeholder-`0`
-/// allowance) lives in one place; both [`floored_next_base_fee`] and the block builder call
-/// it.
-// `BASE_FEE_FLOOR` is a calibration placeholder (currently 0), so the `.max` is a no-op
-// today; it is intentionally future-proof for when a non-zero floor is set. The `expect`
-// fires a reminder to remove this attribute once the floor becomes non-zero.
-#[expect(
-    clippy::unnecessary_min_or_max,
-    reason = "BASE_FEE_FLOOR is a placeholder (0) pending calibration; the clamp is intentional"
-)]
+/// Kept as the single clamping primitive so the floor logic lives in one place; both
+/// [`floored_next_base_fee`] and the block builder call it.
 pub fn apply_base_fee_floor(base_fee: u64) -> u64 {
     base_fee.max(BASE_FEE_FLOOR)
 }
@@ -45,12 +35,6 @@ pub fn apply_base_fee_floor(base_fee: u64) -> u64 {
 /// Used by the proof guest as the minimal base-fee check. (See the guest TODO: the full
 /// check is the EIP-1559 recurrence capped at the floor, once the parent header is
 /// available there.)
-// Inert at the placeholder floor (`base_fee >= 0` is always true); intentional and
-// future-proof for a non-zero floor.
-#[expect(
-    clippy::absurd_extreme_comparisons,
-    reason = "BASE_FEE_FLOOR is a placeholder (0) pending calibration; the check is intentional"
-)]
 pub fn meets_base_fee_floor(base_fee: u64) -> bool {
     base_fee >= BASE_FEE_FLOOR
 }
@@ -79,33 +63,49 @@ pub fn floored_next_base_fee(
 mod tests {
     use alloy_eips::eip1559::{calc_next_block_base_fee, BaseFeeParams};
 
-    use super::{apply_base_fee_floor, floored_next_base_fee};
+    use super::{
+        apply_base_fee_floor, floored_next_base_fee, meets_base_fee_floor, BASE_FEE_FLOOR,
+    };
 
-    // Parent at target utilization keeps the base fee unchanged; with the (0) floor inert,
-    // the floored result equals the pure EIP-1559 result.
+    // Above the floor the clamp is a no-op: a parent at target keeps its (already-high) base
+    // fee, and the floored result equals the pure EIP-1559 result.
     #[test]
-    fn floor_matches_eip1559_when_inert() {
+    fn floor_is_noop_above_floor() {
         let params = BaseFeeParams::ethereum();
         let parent_gas_limit = 30_000_000;
         let parent_gas_used = parent_gas_limit / params.elasticity_multiplier as u64; // target
-        let parent_base_fee = 1_000_000_000;
+        let parent_base_fee = 10 * BASE_FEE_FLOOR; // well above the floor
 
         let eip1559 =
             calc_next_block_base_fee(parent_gas_used, parent_gas_limit, parent_base_fee, params);
         let floored =
             floored_next_base_fee(parent_gas_used, parent_gas_limit, parent_base_fee, params);
 
-        // With the inert (0) floor, the floored value is identical to pure EIP-1559.
+        assert!(eip1559 >= BASE_FEE_FLOOR);
         assert_eq!(floored, eip1559);
     }
 
-    // An empty parent block decays the base fee under EIP-1559; the floored value equals the
-    // clamp applied to that decayed value (inert at the placeholder floor).
+    // When EIP-1559 would decay the base fee below the floor, the floor binds and holds it at
+    // `BASE_FEE_FLOOR`.
     #[test]
-    fn floor_clamps_decayed_base_fee() {
+    fn floor_binds_when_eip1559_decays_below_it() {
         let params = BaseFeeParams::ethereum();
-        let raw = calc_next_block_base_fee(0, 30_000_000, 1_000_000_000, params);
-        let floored = floored_next_base_fee(0, 30_000_000, 1_000_000_000, params);
+        // An empty parent starting exactly at the floor decays below it under EIP-1559.
+        let raw = calc_next_block_base_fee(0, 30_000_000, BASE_FEE_FLOOR, params);
+        let floored = floored_next_base_fee(0, 30_000_000, BASE_FEE_FLOOR, params);
+
+        assert!(
+            raw < BASE_FEE_FLOOR,
+            "expected EIP-1559 to decay below the floor"
+        );
+        assert_eq!(floored, BASE_FEE_FLOOR);
         assert_eq!(floored, apply_base_fee_floor(raw));
+    }
+
+    #[test]
+    fn meets_floor_boundary() {
+        assert!(!meets_base_fee_floor(BASE_FEE_FLOOR - 1));
+        assert!(meets_base_fee_floor(BASE_FEE_FLOOR));
+        assert!(meets_base_fee_floor(BASE_FEE_FLOOR + 1));
     }
 }

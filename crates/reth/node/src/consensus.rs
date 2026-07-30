@@ -6,8 +6,8 @@
 //! [`alpen_reth_evm::base_fee`]). Stock reth recomputes the pure EIP-1559 value and would
 //! reject a floored block. Every other check is delegated to the inner consensus.
 //!
-//! With the inert placeholder `BASE_FEE_FLOOR = 0` this is identical to stock consensus; it
-//! is required in place before a non-zero floor is activated.
+//! Above the floor this matches stock consensus (floored == pure EIP-1559); it diverges only
+//! when EIP-1559 would put the base fee below `BASE_FEE_FLOOR`.
 
 use std::{fmt::Debug, sync::Arc};
 
