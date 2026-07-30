@@ -433,10 +433,7 @@ mod additional_config_tests {
     fn alpen_params_flag_loads_the_artifact() {
         let config = parse_additional_config(&[]);
 
-        assert_eq!(
-            config.chain.alpen_params.genesis_block_info().blocknum(),
-            0
-        );
+        assert_eq!(config.chain.alpen_params.genesis_block_info().blocknum(), 0);
     }
 
     /// Catches arg id / flag collisions between the flattened Alpen arg
