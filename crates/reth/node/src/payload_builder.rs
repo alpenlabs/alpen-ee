@@ -10,9 +10,9 @@ use std::{
 use alloy_consensus::{Header, Transaction};
 use alpen_reth_evm::{
     base_fee::apply_base_fee_floor,
+    config::AlpenEvmConfig,
     constants::BRIDGEOUT_PRECOMPILE_ADDRESS,
     da_fee::{da_rate_to_extra_data, DA_COVERAGE_CAPPED, DA_COVERAGE_UNKNOWN},
-    evm::AlpenEvmFactory,
     extract_withdrawal_intents,
 };
 use alpen_reth_primitives::WithdrawalIntent;
@@ -26,7 +26,6 @@ use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     Evm, NextBlockEnvAttributes,
 };
-use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::{ConfigureEvm, FullNodeTypes, NodeTypes, PayloadBuilderAttributes};
 use reth_node_builder::{components::PayloadBuilderBuilder, BuilderContext, PayloadBuilderConfig};
 use reth_payload_builder::{BlobSidecars, EthBuiltPayload, PayloadBuilderError};
@@ -62,8 +61,7 @@ pub struct AlpenPayloadBuilderBuilder {
     pub live_da_rate: Arc<AtomicU64>,
 }
 
-impl<Node, Pool> PayloadBuilderBuilder<Node, Pool, EthEvmConfig<ChainSpec, AlpenEvmFactory>>
-    for AlpenPayloadBuilderBuilder
+impl<Node, Pool> PayloadBuilderBuilder<Node, Pool, AlpenEvmConfig> for AlpenPayloadBuilderBuilder
 where
     Node: FullNodeTypes<
         Types: NodeTypes<
@@ -82,7 +80,7 @@ where
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-        evm_config: EthEvmConfig<ChainSpec, AlpenEvmFactory>,
+        evm_config: AlpenEvmConfig,
     ) -> eyre::Result<Self::PayloadBuilder> {
         let conf = ctx.payload_builder_config();
         let chain = ctx.chain_spec().chain();
@@ -107,7 +105,7 @@ pub struct AlpenPayloadBuilder<Pool, Client> {
     /// Transaction pool.
     pool: Pool,
     /// The type responsible for creating the evm.
-    evm_config: EthEvmConfig<ChainSpec, AlpenEvmFactory>,
+    evm_config: AlpenEvmConfig,
     /// Payload builder configuration.
     builder_config: EthereumBuilderConfig,
     /// Live DA rate (wei per byte) sampled and frozen per block.
@@ -119,7 +117,7 @@ impl<Pool, Client> AlpenPayloadBuilder<Pool, Client> {
     pub fn new(
         client: Client,
         pool: Pool,
-        evm_config: EthEvmConfig<ChainSpec, AlpenEvmFactory>,
+        evm_config: AlpenEvmConfig,
         builder_config: EthereumBuilderConfig,
         live_da_rate: Arc<AtomicU64>,
     ) -> Self {
@@ -192,7 +190,7 @@ type BestTransactionsIter<Pool> = Box<
 /// [default_ethereum_payload](reth_ethereum_payload_builder::default_ethereum_payload)
 #[inline]
 fn try_build_payload<Pool, Client, F>(
-    evm_config: EthEvmConfig<ChainSpec, AlpenEvmFactory>,
+    evm_config: AlpenEvmConfig,
     live_da_rate: Arc<AtomicU64>,
     client: Client,
     _pool: Pool,
@@ -207,21 +205,21 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
 {
-    // Freeze the per-block DA rate: sample the live rate once, pin it on the factory (so
-    // the in-EVM DA charge uses exactly this value), and commit the same value into the
-    // block `extra_data`. Freezing per block keeps the charge and the committed rate
-    // identical, so the block re-executes to the same state root on full nodes/provers.
+    // Freeze the per-block DA rate: sample the live rate once and use it both as the
+    // in-EVM charge rate for this build and as the value committed into the block
+    // `extra_data`. Freezing per block keeps the charge and the committed rate identical, so
+    // the block re-executes to the same state root on full nodes/provers.
     //
     // NOTE: `live_da_rate` currently mirrors the sequencer's Bitcoin publication fee rate
     // (`btcio::writer::fees::resolve_fee_rate`, gossiped from the OL). It should later be
     // decoupled from the publication rate and smoothed/cached for the fee model.
     let da_rate = live_da_rate.load(Ordering::Relaxed);
-    evm_config.evm_factory().set_da_rate(da_rate);
-    // Shared handle the in-EVM DA charge writes per transaction: non-zero means the DA fee
-    // was capped by the tx's unused authorized gas (under-covered / would be subsidized).
-    // The tx loop reads it to skip such txs (see F.1 sequencer admission).
-    let da_report = evm_config.evm_factory().da_report_handle();
-    let evm_config = evm_config.with_extra_data(da_rate_to_extra_data(da_rate));
+    // Pin the per-block DA rate as the config's pending rate (the in-EVM charge reads it via
+    // `context_for_next_block` when the block builder's executor is created) and commit the
+    // same value into the block `extra_data`, so the block re-executes to the same state root.
+    let evm_config = evm_config
+        .with_extra_data(da_rate_to_extra_data(da_rate))
+        .with_pending_da_rate(U256::from(da_rate));
 
     let BuildArguments {
         mut cached_reads,
@@ -269,6 +267,12 @@ where
         .context_for_next_block(&parent_header, next_block_attrs)
         .map_err(PayloadBuilderError::other)?;
     let mut builder = evm_config.create_block_builder(evm, &parent_header, block_ctx);
+
+    // Shared handle to *this build EVM's* DA-coverage cell: the in-EVM charge writes it per
+    // transaction (`CAPPED` means the DA fee was capped by the tx's unused authorized gas —
+    // under-covered / would be subsidized), and the tx loop reads it to skip such txs (see
+    // F.1 sequencer admission). Owned by the EVM, not shared factory state.
+    let da_report = builder.evm().da_report_handle();
 
     let chain_spec = client.chain_spec();
 

@@ -1,8 +1,5 @@
 use core::error;
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
-};
+use std::sync::{atomic::AtomicU64, Arc};
 
 use reth_evm::{eth::EthEvmContext, precompiles::PrecompilesMap, Database, EvmEnv, EvmFactory};
 use revm::{
@@ -17,31 +14,26 @@ use revm::{
 use revm_primitives::{hardfork::SpecId, U256};
 use strata_bridge_params::BridgeParams;
 
-use crate::{apis::AlpenAlloyEvm, precompiles::factory, utils::wei_to_sats};
+use crate::{
+    apis::AlpenAlloyEvm, da_fee::DA_COVERAGE_UNKNOWN, precompiles::factory, utils::wei_to_sats,
+};
 
 /// Custom EVM configuration.
 ///
-/// Carries bridge withdrawal policy for precompile validation and the current per-block
-/// DA rate (wei per byte) used by the in-EVM DA fee charge.
+/// Carries only the bridge withdrawal policy used for precompile validation — it is a pure,
+/// shareable config object with no interior-mutable per-execution state.
 ///
-/// The DA rate is interior-mutable and shared across clones: reth's EVM-env plumbing
-/// cannot thread a per-block value into [`EvmFactory::create_evm`], so the caller (which
-/// holds the block header) sets it via [`AlpenEvmFactory::set_da_rate`] just before
-/// executing a block, and `create_evm` reads it into the EVM instance. Block execution is
-/// sequential (the proof processes blocks in order), so this is deterministic.
+/// Neither the per-block DA rate (an input) nor the per-transaction DA-coverage report (an
+/// output) is held here. reth's `EvmEnv` plumbing cannot thread a per-block value into
+/// [`EvmFactory::create_evm`], so [`crate::config::AlpenEvmConfig`] stamps the rate onto each
+/// freshly created EVM (via [`crate::apis::AlpenAlloyEvm::set_da_rate`]), and each EVM owns
+/// its own coverage cell (minted below, read via
+/// [`AlpenAlloyEvm::da_report_handle`](crate::apis::AlpenAlloyEvm::da_report_handle)). Both
+/// therefore ride the per-execution EVM rather than shared factory state, which keeps
+/// concurrent executions race-free.
 #[derive(Debug, Clone, Default)]
 pub struct AlpenEvmFactory {
     bridge_params: BridgeParams,
-    da_rate: Arc<AtomicU64>,
-    /// Per-transaction DA-coverage report written by the DA fee charge, one of
-    /// [`DA_COVERAGE_UNKNOWN`]/[`DA_COVERAGE_OK`]/[`DA_COVERAGE_CAPPED`]
-    /// (`crate::da_fee`). The default `0` is `UNKNOWN` (not `OK`), so an unwritten cell is
-    /// never read as covered; the payload builder resets it before each tx and skips only
-    /// on an explicit `CAPPED`. Interior-mutable and shared like
-    /// [`AlpenEvmFactory::da_rate`]; only the sequencer's payload builder reads it — full-
-    /// node/guest re-execution ignores it, keeping it purely observational and
-    /// determinism-neutral.
-    da_report: Arc<AtomicU64>,
 }
 
 impl AlpenEvmFactory {
@@ -53,8 +45,6 @@ impl AlpenEvmFactory {
         Self {
             bridge_params: BridgeParams::new(denomination, max_withdrawal_amount)
                 .expect("withdrawal policy constructed from wei must be valid"),
-            da_rate: Arc::new(AtomicU64::new(0)),
-            da_report: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -68,33 +58,14 @@ impl AlpenEvmFactory {
 
     /// Creates an [`AlpenEvmFactory`] from [`BridgeParams`].
     pub fn from_bridge_params(bp: &BridgeParams) -> Self {
-        Self {
-            bridge_params: *bp,
-            da_rate: Arc::new(AtomicU64::new(0)),
-            da_report: Arc::new(AtomicU64::new(0)),
-        }
+        Self { bridge_params: *bp }
     }
+}
 
-    /// Sets the per-block DA rate (wei per byte) used by the DA fee charge.
-    ///
-    /// The caller must set this from the block's committed DA rate before executing the
-    /// block's transactions.
-    pub fn set_da_rate(&self, da_rate: u64) {
-        self.da_rate.store(da_rate, Ordering::Relaxed);
-    }
-
-    /// Returns the currently configured per-block DA rate (wei per byte).
-    pub fn da_rate(&self) -> u64 {
-        self.da_rate.load(Ordering::Relaxed)
-    }
-
-    /// Returns a shared handle to the DA-coverage report cell (see [`Self::da_report`]).
-    ///
-    /// The payload builder holds this handle to read, after executing each transaction,
-    /// whether that transaction's DA fee was capped (under-covered) and should be skipped.
-    pub fn da_report_handle(&self) -> Arc<AtomicU64> {
-        self.da_report.clone()
-    }
+/// Mints a fresh per-EVM DA-coverage report cell, initialised to
+/// [`DA_COVERAGE_UNKNOWN`] so an unwritten cell is never read as covered.
+fn new_da_report_cell() -> Arc<AtomicU64> {
+    Arc::new(AtomicU64::new(DA_COVERAGE_UNKNOWN))
 }
 
 fn wei_to_sats_exact(wei: U256, field: &str) -> u64 {
@@ -127,12 +98,9 @@ impl EvmFactory for AlpenEvmFactory {
             .build_mainnet_with_inspector(NoOpInspector {})
             .with_precompiles(precompiles);
 
-        AlpenAlloyEvm::new(
-            evm,
-            false,
-            U256::from(self.da_rate()),
-            self.da_report.clone(),
-        )
+        // The DA rate is stamped per block by `AlpenEvmConfig`; a freshly built EVM starts
+        // dormant (rate 0) until then. Each EVM owns its own DA-coverage report cell.
+        AlpenAlloyEvm::new(evm, false, U256::ZERO, new_da_report_cell())
     }
 
     fn create_evm_with_inspector<DB: Database, I: Inspector<Self::Context<DB>, EthInterpreter>>(
@@ -141,14 +109,13 @@ impl EvmFactory for AlpenEvmFactory {
         input: EvmEnv,
         inspector: I,
     ) -> Self::Evm<DB, I> {
-        let da_rate = U256::from(self.da_rate());
         AlpenAlloyEvm::new(
             self.create_evm(db, input)
                 .into_inner()
                 .with_inspector(inspector),
             true,
-            da_rate,
-            self.da_report.clone(),
+            U256::ZERO,
+            new_da_report_cell(),
         )
     }
 }

@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use alloy_consensus::Block as AlloyBlock;
 use alpen_reth_evm::{
-    base_fee::meets_base_fee_floor, da_fee::da_rate_from_extra_data, evm::AlpenEvmFactory,
+    base_fee::meets_base_fee_floor, config::AlpenEvmConfig, evm::AlpenEvmFactory,
     extract_withdrawal_intents,
 };
 use reth_chainspec::ChainSpec;
@@ -16,7 +16,6 @@ use reth_evm::{
     ConfigureEvm,
     execute::{BasicBlockExecutor, BlockExecutionOutput, Executor},
 };
-use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives::{
     EthPrimitives, Receipt as EthereumReceipt, RecoveredBlock, TransactionSigned,
 };
@@ -43,7 +42,7 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct EvmExecutionEnvironment {
     /// EVM configuration with AlpenEvmFactory (contains chain spec)
-    evm_config: EthEvmConfig<ChainSpec, AlpenEvmFactory>,
+    evm_config: AlpenEvmConfig,
 }
 
 /// Converts withdrawal intents to messages sent to the bridge gateway account.
@@ -79,7 +78,7 @@ impl EvmExecutionEnvironment {
     /// Creates a new EvmExecutionEnvironment with the given chain specification
     /// and EVM factory.
     pub fn new(chain_spec: Arc<ChainSpec>, evm_factory: AlpenEvmFactory) -> Self {
-        let evm_config = EthEvmConfig::new_with_evm_factory(chain_spec, evm_factory);
+        let evm_config = AlpenEvmConfig::new(chain_spec, evm_factory);
         Self { evm_config }
     }
 
@@ -122,10 +121,9 @@ impl EvmExecutionEnvironment {
             let wit_db = pre_state.create_witness_db();
             WrapDatabaseRef(wit_db)
         };
-        // Set the per-block DA rate (committed in the header `extra_data`) on the factory
-        // before execution, so the DA fee charge inside the EVM reads the correct rate.
-        let da_rate = da_rate_from_extra_data(&block.header().extra_data);
-        self.evm_config.evm_factory().set_da_rate(da_rate);
+        // The per-block DA rate (committed in the header `extra_data`) is applied inside
+        // `AlpenEvmConfig`'s execution context, which `BasicBlockExecutor` builds per block,
+        // so the DA fee charge sees the block's committed rate with no plumbing here.
         let block_executor = BasicBlockExecutor::new(&self.evm_config, db);
         block_executor
             .execute(block)
