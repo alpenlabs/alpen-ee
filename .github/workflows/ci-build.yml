@@ -120,14 +120,20 @@ jobs:
           cargo prove --version
 
       - name: Build SP1 guest ELFs
+        env:
+          # Canonical dev-network params baked into the guest ELFs. Without this,
+          # the build script skips guest compilation entirely (see provers/sp1/build.rs).
+          # Must be absolute — build scripts run with CWD set to provers/sp1/, not
+          # the repo root, so a relative path here would resolve against the wrong base.
+          SP1_ALPEN_PARAMS_PATH: ${{ github.workspace }}/bin/alpen-client/tests/res/alpen-params.json
         run: |
           # The guest builder's build script compiles the guest programs and
-          # writes the ELFs to provers/sp1/elfs/.
+          # writes the ELFs to provers/sp1/generated/.
           cargo build --release -p strata-sp1-guest-builder
 
           mkdir -p artifacts/elfs/sp1
-          cp -v provers/sp1/elfs/guest-alpen-chunk.elf \
-               provers/sp1/elfs/guest-alpen-acct.elf \
+          cp -v provers/sp1/generated/guest-alpen-chunk.elf \
+               provers/sp1/generated/guest-alpen-acct.elf \
             artifacts/elfs/sp1/
 
           ls -la artifacts/ artifacts/elfs/sp1/

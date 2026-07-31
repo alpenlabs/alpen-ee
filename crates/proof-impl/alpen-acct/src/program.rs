@@ -1,9 +1,8 @@
 use alpen_ee_da_types::DaWitness;
+use alpen_ee_params::AlpenParams;
 use k256::schnorr::SigningKey;
 use rkyv::rancor::Error as RkyvError;
-use rsp_primitives::genesis::Genesis;
-use ssz::{Decode, Encode};
-use strata_bridge_params::BridgeParams;
+use ssz::Decode;
 use strata_ee_acct_runtime::EePrivateInput;
 use strata_predicate::{PredicateKey, PredicateTypeId};
 use strata_snark_acct_runtime::PrivateInput as UpdatePrivateInput;
@@ -21,38 +20,39 @@ fn test_signing_key() -> SigningKey {
 
 /// Host-side input for the EE account update proof.
 ///
-/// Note: the chunk predicate key (VK of the chunk SP1 program) is NOT
-/// part of this input. The acct guest receives it at compile time via
-/// `vks::GUEST_ALPEN_CHUNK_VK_CONDITION`, baked by `provers/sp1/build.rs`
-/// from the chunk program's Groth16 VK. This is intentional — a
-/// host-supplied key would let a malicious prover bypass chunk proof
-/// verification. See `provers/sp1/guest-alpen-acct/src/main.rs` for the
-/// guest-side construction path.
+/// Note: neither `AlpenParams` (genesis, bridge params) nor the chunk
+/// predicate key (VK of the chunk SP1 program) is part of this input. The
+/// acct guest receives both at compile time, baked into the ELF by
+/// `provers/sp1/build.rs`. This is intentional — a host-supplied genesis,
+/// bridge params, or predicate key would let a malicious prover bypass
+/// consensus-critical checks or chunk proof verification. See
+/// `provers/sp1/guest-alpen-acct/src/main.rs` for the guest-side
+/// construction path.
 ///
-/// For native testing, the key lives on [`EeAcctProgram::new`] and is
-/// passed into the `NativeHost` closure directly.
+/// For native testing, `params` and the predicate key live on
+/// [`EeAcctProgram::new`] and are passed into the `NativeHost` closure
+/// directly.
 #[derive(Debug)]
 pub struct EeAcctProofInput {
-    pub genesis: Genesis,
     pub ee_private_input: EePrivateInput,
     /// Snark-account update private input (`snark_acct_runtime::PrivateInput`):
     /// the update pub-params, partial pre-state, and per-message coinputs.
     pub snark_acct_private_input: UpdatePrivateInput,
     /// Alpen-EE-specific witness input for verifying the batch's DA.
     pub da_witness: DaWitness,
-    /// Bridge withdrawal denomination and cap, parameterizing the EVM.
-    pub bridge_params: BridgeParams,
 }
 
 #[derive(Debug)]
 pub struct EeAcctProgram {
     chunk_predicate_key: PredicateKey,
+    params: AlpenParams,
 }
 
 impl EeAcctProgram {
-    pub fn new(chunk_predicate_key: PredicateKey) -> Self {
+    pub fn new(chunk_predicate_key: PredicateKey, params: AlpenParams) -> Self {
         Self {
             chunk_predicate_key,
+            params,
         }
     }
 }
@@ -74,7 +74,6 @@ impl ZkVmProgram for EeAcctProgram {
         B: zkaleido::ZkVmInputBuilder<'a>,
     {
         let mut builder = B::new();
-        builder.write_serde(&input.genesis)?;
 
         let ee_rkyv_bytes = rkyv::to_bytes::<RkyvError>(&input.ee_private_input)
             .map_err(|e| ZkVmInputError::InputBuild(e.to_string()))?;
@@ -83,7 +82,6 @@ impl ZkVmProgram for EeAcctProgram {
         let upd_rkyv_bytes = rkyv::to_bytes::<RkyvError>(&input.snark_acct_private_input)
             .map_err(|e| ZkVmInputError::InputBuild(e.to_string()))?;
         builder.write_buf(&upd_rkyv_bytes)?;
-        builder.write_buf(&input.bridge_params.as_ssz_bytes())?;
 
         let da_rkyv_bytes = rkyv::to_bytes::<RkyvError>(&input.da_witness)
             .map_err(|e| ZkVmInputError::InputBuild(e.to_string()))?;
@@ -104,8 +102,9 @@ impl ZkVmProgram for EeAcctProgram {
 impl EeAcctProgram {
     pub fn native_host(&self) -> NativeHost {
         let key = self.chunk_predicate_key.clone();
+        let params = self.params.clone();
         NativeHost::new(test_signing_key(), move |zkvm| {
-            process_ee_acct_update(zkvm, &key)
+            process_ee_acct_update(zkvm, &params, &key)
         })
     }
 
@@ -130,12 +129,14 @@ impl EeAcctProgram {
 #[cfg(test)]
 mod tests {
     use alpen_ee_da_types::DaWitness;
-    use rsp_primitives::genesis::Genesis;
+    use alpen_ee_params::{AlpenSpecSchedule, BlobSpec, DEFAULT_ALPEN_EE_ACCOUNT_ID, EvmSpec};
     use ssz::Encode;
+    use strata_bridge_params::BridgeParams;
     use strata_codec::encode_to_vec;
     use strata_ee_acct_runtime::EePrivateInput;
     use strata_ee_acct_types::{EeAccountState, UpdateExtraData};
     use strata_identifiers::Hash;
+    use strata_l1_txfmt::MagicBytes;
     use strata_predicate::{PredicateKey, PredicateTypeId};
     use strata_snark_acct_runtime::{IInnerState, PrivateInput as UpdatePrivateInput};
     use strata_snark_acct_types::{
@@ -175,25 +176,32 @@ mod tests {
             UpdatePrivateInput::new(pub_params, initial_state.as_ssz_bytes(), vec![]);
         let ee_private_input = EePrivateInput::new(vec![], vec![], vec![]);
 
-        // Use Mainnet genesis (valid ChainSpec, not used with zero chunks).
-        let genesis = Genesis::Mainnet;
+        // Minimal-but-valid params (a bare `{}` genesis is enough — reth
+        // accepts it, see `EvmSpec`'s own `json_accepts_what_reth_accepts`
+        // test); not exercised with zero chunks.
+        let evm_spec: EvmSpec = serde_json::from_str("{}").expect("empty genesis is accepted");
+        let params = AlpenParams::new(
+            DEFAULT_ALPEN_EE_ACCOUNT_ID,
+            BridgeParams::default(),
+            BlobSpec::new(MagicBytes::new(*b"ALPN")),
+            AlpenSpecSchedule::genesis(),
+            evm_spec,
+        );
 
         let proof_input = EeAcctProofInput {
-            genesis,
             ee_private_input,
             snark_acct_private_input,
             da_witness: DaWitness::empty(),
-            bridge_params: BridgeParams::default(),
         };
 
         // Predicate is carried through but never evaluated in this
         // zero-chunks test; either `always_accept` or a real Schnorr
         // key would work. Using `Bip340Schnorr` to exercise the
         // non-trivial path.
-        let program = EeAcctProgram::new(PredicateKey::new(
-            PredicateTypeId::Bip340Schnorr,
-            vec![0u8; 32],
-        ));
+        let program = EeAcctProgram::new(
+            PredicateKey::new(PredicateTypeId::Bip340Schnorr, vec![0u8; 32]),
+            params,
+        );
         let result = program
             .execute(&proof_input)
             .expect("native execution should succeed");

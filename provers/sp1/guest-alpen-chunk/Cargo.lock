@@ -397,7 +397,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-serde",
  "alloy-sol-types",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "serde",
  "serde_json",
  "serde_with",
@@ -539,6 +539,21 @@ dependencies = [
  "strata-codec",
  "strata-crypto",
  "strata-l1-envelope-fmt",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "alpen-ee-params"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alloy-genesis",
+ "alloy-primitives",
+ "num_enum",
+ "reth-chainspec",
+ "serde",
+ "strata-acct-types",
+ "strata-bridge-params",
+ "strata-l1-txfmt",
  "thiserror 2.0.18",
 ]
 
@@ -2129,6 +2144,8 @@ dependencies = [
 name = "guest-sp1-alpen-chunk"
 version = "0.1.0"
 dependencies = [
+ "alpen-ee-params",
+ "serde_json",
  "strata-proofimpl-alpen-chunk",
  "zkaleido-sp1-guest-env",
 ]
@@ -5156,6 +5173,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "strata-l1-txfmt"
+version = "0.1.0"
+source = "git+https://github.com/alpenlabs/strata-common?tag=v0.3.0-rc.2#c3698c0f26d8d3d16e56a478eb375e077d813775"
+dependencies = [
+ "arbitrary",
+ "bitcoin",
+ "borsh",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "strata-merkle"
 version = "0.2.0"
 source = "git+https://github.com/alpenlabs/strata-common?tag=v0.3.0-rc.2#c3698c0f26d8d3d16e56a478eb375e077d813775"
@@ -5265,13 +5294,12 @@ dependencies = [
 name = "strata-proofimpl-alpen-chunk"
 version = "0.1.0"
 dependencies = [
+ "alpen-ee-params",
  "alpen-reth-evm",
  "k256",
  "reth-chainspec",
  "rkyv",
- "rsp-primitives",
  "ssz",
- "strata-bridge-params",
  "strata-ee-chain-types",
  "strata-ee-chunk-runtime",
  "strata-evm-ee",

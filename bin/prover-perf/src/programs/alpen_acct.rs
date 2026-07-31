@@ -6,9 +6,7 @@
 //! valid for an executed chunk.
 
 use alpen_ee_da_types::DaWitness;
-use rsp_primitives::genesis::Genesis;
 use ssz::Encode;
-use strata_bridge_params::BridgeParams;
 use strata_codec::encode_to_vec;
 use strata_ee_acct_runtime::EePrivateInput;
 use strata_ee_acct_types::{EeAccountState, UpdateExtraData};
@@ -46,11 +44,9 @@ fn prepare_input() -> EeAcctProofInput {
     let ee_private_input = EePrivateInput::new(Vec::new(), Vec::new(), Vec::new());
 
     EeAcctProofInput {
-        genesis: Genesis::Mainnet,
         ee_private_input,
         snark_acct_private_input,
         da_witness: DaWitness::empty(),
-        bridge_params: BridgeParams::default(),
     }
 }
 
@@ -64,9 +60,25 @@ pub(crate) fn gen_perf_report(host: &impl ZkVmHost) -> (String, ExecutionSummary
 
 #[cfg(test)]
 mod tests {
+    use alpen_ee_params::{AlpenParams, AlpenSpecSchedule, BlobSpec, EvmSpec};
+    use strata_bridge_params::BridgeParams;
+    use strata_l1_txfmt::MagicBytes;
     use strata_predicate::PredicateKey;
 
     use super::*;
+
+    /// Minimal-but-valid params (a bare `{}` genesis is enough — reth accepts
+    /// it); not exercised since this benchmark runs zero chunks.
+    fn perf_alpen_params() -> AlpenParams {
+        let evm_spec: EvmSpec = serde_json::from_str("{}").expect("empty genesis is accepted");
+        AlpenParams::new(
+            alpen_ee_params::DEFAULT_ALPEN_EE_ACCOUNT_ID,
+            BridgeParams::default(),
+            BlobSpec::new(MagicBytes::new(*b"ALPN")),
+            AlpenSpecSchedule::genesis(),
+            evm_spec,
+        )
+    }
 
     #[test]
     fn test_alpen_acct_native_execution() {
@@ -75,7 +87,7 @@ mod tests {
         // on each `ChunkInput` pass the recursive verifier. SP1 mock
         // perf substitutes the real predicate at host-init time, so
         // the cycle count there reflects an honest verify.
-        let program = EeAcctProgram::new(PredicateKey::always_accept());
+        let program = EeAcctProgram::new(PredicateKey::always_accept(), perf_alpen_params());
         let result = program.execute(&input).expect("native execution");
         assert_eq!(
             result.cur_state().inner_state(),

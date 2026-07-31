@@ -44,6 +44,7 @@ use alpen_ee_exec_chain::{init_exec_chain_state_from_storage, ExecChainState};
 use alpen_ee_genesis::ensure_finalized_exec_chain_genesis;
 use alpen_ee_genesis::{ensure_batch_genesis, ensure_genesis_ee_account_state};
 use alpen_ee_ol_tracker::init_ol_tracker_state;
+use alpen_ee_params::AlpenParams;
 use alpen_ee_rpc_server::{AlpenEeRpcServer, EeRpcServer};
 #[cfg(feature = "sequencer")]
 use alpen_ee_sequencer::{
@@ -737,21 +738,12 @@ fn main() {
                 let batch_storage_dyn: Arc<dyn BatchStorage> = storage.clone();
                 let chunk_storage_dyn: Arc<dyn ChunkStorage> = storage.clone();
 
-                let genesis = {
-                    use alpen_reth_exex::alloy2reth::IntoRspChainConfig as _;
-                    params.evm_spec().genesis().config.clone().into_rsp()
-                };
-
-                let chunk_builder = ProverBuilder::new(ChunkSpec::new(
-                    chunk_storage_dyn.clone(),
-                    storage.clone(),
-                    genesis.clone(),
-                    bridge_params,
-                ))
-                .task_store(task_store.clone())
-                .receipt_store(chunk_receipts.clone())
-                .receipt_hook(ChunkReceiptHook::new(chunk_storage_dyn.clone()))
-                .retry(RetryConfig::default());
+                let chunk_builder =
+                    ProverBuilder::new(ChunkSpec::new(chunk_storage_dyn.clone(), storage.clone()))
+                        .task_store(task_store.clone())
+                        .receipt_store(chunk_receipts.clone())
+                        .receipt_hook(ChunkReceiptHook::new(chunk_storage_dyn.clone()))
+                        .retry(RetryConfig::default());
 
                 // NOTE: the account prover still assembles its batch-range
                 // witness via `RangeWitnessExtractor`, which reads the
@@ -779,8 +771,6 @@ fn main() {
                     btc_client.clone(),
                     dbs.witness_db(),
                     acct_range_witness_fn,
-                    genesis,
-                    bridge_params,
                 ))
                 .task_store(task_store)
                 .receipt_hook(AcctReceiptHook::new(
@@ -802,6 +792,7 @@ fn main() {
                     },
                     ext.sequencer.dev_native_prover,
                     ext.sequencer.sp1_proof_deadline_secs,
+                    params.clone(),
                 )
                 .await?;
 
@@ -934,6 +925,7 @@ async fn launch_validated_ee_batch_prover(
     stores: EeProverStores,
     use_native_prover: bool,
     sp1_deadline_secs: Option<u64>,
+    params: Arc<AlpenParams>,
 ) -> eyre::Result<Arc<PaasBatchProver>> {
     let ol_account_update_vk = ol_client
         .get_latest_account_update_vk()
@@ -946,7 +938,7 @@ async fn launch_validated_ee_batch_prover(
             deadline_secs: sp1_deadline_secs,
         }
     };
-    let prover_config = build_ee_prover_config(builders, backend).await?;
+    let prover_config = build_ee_prover_config(builders, backend, params).await?;
 
     validate_ee_account_prover_predicate_key(
         &ol_account_update_vk,
@@ -998,6 +990,7 @@ enum EeProverBackend {
 async fn build_ee_prover_config(
     builders: EeProverBuilders,
     backend: EeProverBackend,
+    params: Arc<AlpenParams>,
 ) -> eyre::Result<EeProverConfig> {
     match backend {
         EeProverBackend::Native => {
@@ -1006,11 +999,12 @@ async fn build_ee_prover_config(
                 "EE chunk + acct provers: native host (dev/test only)"
             );
 
-            let chunk = builders.chunk.native(EeChunkProgram::native_host());
+            let chunk_program = EeChunkProgram::new((*params).clone());
+            let chunk = builders.chunk.native(chunk_program.native_host());
             let chunk_predicate_key = NativeAlpenChunkPredicateKey
                 .predicate_key()
                 .expect("native chunk predicate key must be available");
-            let acct_program = EeAcctProgram::new(chunk_predicate_key);
+            let acct_program = EeAcctProgram::new(chunk_predicate_key, (*params).clone());
             let account = builders.account.native(acct_program.native_host());
             let account_predicate_key = NativeAlpenAcctPredicateKey
                 .predicate_key()

@@ -17,9 +17,7 @@ use alpen_reth_node::BlockWitnessRecord;
 use async_trait::async_trait;
 use reth_primitives::Block;
 use reth_primitives_traits::Block as _;
-use rsp_primitives::genesis::Genesis;
 use strata_acct_types::Hash;
-use strata_bridge_params::BridgeParams;
 use strata_codec::encode_to_vec;
 use strata_ee_acct_types::{ExecBlock, ExecHeader};
 use strata_ee_chain_types::{
@@ -82,22 +80,13 @@ impl TryFrom<Vec<u8>> for ChunkTask {
 pub(crate) struct ChunkSpec {
     chunk_storage: Arc<dyn ChunkStorage>,
     storage: Arc<EeNodeStorage>,
-    genesis: Genesis,
-    bridge_params: BridgeParams,
 }
 
 impl ChunkSpec {
-    pub(crate) fn new(
-        chunk_storage: Arc<dyn ChunkStorage>,
-        storage: Arc<EeNodeStorage>,
-        genesis: Genesis,
-        bridge_params: BridgeParams,
-    ) -> Self {
+    pub(crate) fn new(chunk_storage: Arc<dyn ChunkStorage>, storage: Arc<EeNodeStorage>) -> Self {
         Self {
             chunk_storage,
             storage,
-            genesis,
-            bridge_params,
         }
     }
 }
@@ -290,11 +279,7 @@ impl ProofSpec for ChunkSpec {
             raw_chunk_pre_state,
         );
 
-        Ok(EeChunkProofInput {
-            genesis: self.genesis.clone(),
-            private_input,
-            bridge_params: self.bridge_params,
-        })
+        Ok(EeChunkProofInput { private_input })
     }
 }
 
