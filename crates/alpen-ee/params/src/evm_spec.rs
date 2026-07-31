@@ -1,9 +1,10 @@
 //! Embedded EVM chain spec.
 
 use alloy_genesis::Genesis;
-use alpen_chainspec::{ee_genesis_block_info, AlpenEeGenesisBlockInfo};
 use reth_chainspec::ChainSpec;
 use serde::{Deserialize, Serialize, Serializer};
+
+use crate::genesis_info::{ee_genesis_block_info, AlpenEeGenesisBlockInfo};
 
 /// The embedded EVM chain spec: genesis document plus derived reth chain spec.
 ///
@@ -77,9 +78,10 @@ impl Eq for EvmSpec {}
 
 #[cfg(test)]
 mod tests {
-    use alpen_chainspec::{ee_genesis_block_info_from_json, DEV_CHAIN_SPEC};
+    use alpen_chainspec::DEV_CHAIN_SPEC;
 
     use super::EvmSpec;
+    use crate::genesis_info::ee_genesis_block_info_from_json;
 
     #[test]
     fn json_roundtrip_preserves_evm_spec() {

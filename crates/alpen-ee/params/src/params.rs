@@ -1,12 +1,11 @@
 //! Top-level Alpen params artifact.
 
-use alpen_chainspec::AlpenEeGenesisBlockInfo;
 use reth_chainspec::ChainSpec;
 use serde::{Deserialize, Serialize};
 use strata_acct_types::AccountId;
 use strata_bridge_params::BridgeParams;
 
-use crate::{AlpenSpecSchedule, BlobSpec, EvmSpec};
+use crate::{genesis_info::AlpenEeGenesisBlockInfo, AlpenSpecSchedule, BlobSpec, EvmSpec};
 
 /// Default Alpen EE account id registered in generated OL params.
 pub const DEFAULT_ALPEN_EE_ACCOUNT_ID: AccountId = AccountId::new([1u8; 32]);
