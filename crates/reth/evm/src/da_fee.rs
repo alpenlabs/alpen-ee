@@ -35,7 +35,7 @@ const ACCOUNT_INFO_EOA_BYTES: u64 = 12;
 ///
 /// Adds the 33-byte code-hash register that a contract carries over an EOA. Deployed
 /// bytecode itself is deduplicated by hash at the batch level and is not attributed
-/// per transaction here (TODO: attribute deploy bytecode once per unique deployment).
+/// per transaction here (future: attribute deploy bytecode once per unique deployment).
 const ACCOUNT_INFO_CONTRACT_BYTES: u64 = 44;
 
 /// Byte cost attributed to the key of a changed storage slot (untrimmed 32-byte hash).
@@ -180,7 +180,7 @@ pub fn btc_fee_rate_to_da_rate(sat_per_vbyte: u64) -> u64 {
 /// clean OOG would require reverting a fully-executed transaction post-execution (and the
 /// forfeited value would go to the coinbase, not the DA vault).
 ///
-/// TODO(fee-model): reduce the subsidy without failing — quote `effective_gas` at
+/// NOTE(fee-model): reduce the subsidy without failing — quote `effective_gas` at
 /// `da_rate * (1 + margin)` in the fee RPC (safety margin), and/or add a per-block
 /// rate-change bound so the committed rate cannot rise faster than the quoted headroom.
 pub fn bounded_da_fee(da_rate: U256, diff_size: u64, remaining_value: U256) -> U256 {

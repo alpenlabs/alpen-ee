@@ -18,7 +18,7 @@ use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 
 /// Minimum base fee per gas (wei) — the floor under the EIP-1559 base fee. Set to 1 gwei.
 ///
-/// TODO(fee-model, calibration): 1 gwei is an initial value; it should be governance-
+/// NOTE(fee-model, calibration): 1 gwei is an initial value; it should be governance-
 /// calibrated so `BASE_FEE_FLOOR * expected_gas_per_block` recovers amortized execution +
 /// proving + operational cost per block at target utilization. Changing it is a protocol
 /// upgrade (consensus-critical: the block builder, host consensus validation, and proof

@@ -40,8 +40,8 @@ pub struct AlpenAlloyEvm<DB: Database, I> {
     inspect: bool,
     /// Per-block DA rate (wei per byte) used by the in-EVM DA fee charge.
     da_rate: U256,
-    /// Shared DA-coverage report cell, written by the handler after each charge (see
-    /// [`AlpenEvmFactory::da_report`](crate::evm::AlpenEvmFactory)).
+    /// Per-transaction DA-coverage report cell, written by the handler after each charge and
+    /// read by the sequencer's payload builder via [`Self::da_report_handle`].
     da_report: Arc<AtomicU64>,
 }
 

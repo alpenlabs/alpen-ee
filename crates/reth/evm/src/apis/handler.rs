@@ -36,9 +36,9 @@ pub struct AlpenRevmHandler<EVM> {
     /// Per-block DA rate (wei per byte) used to charge the DA fee.
     da_rate: U256,
     /// Shared cell into which the handler records whether the transaction's DA fee was
-    /// capped by its unused authorized gas (see [`AlpenEvmFactory::da_report`]). The
-    /// payload builder reads this to skip under-covered transactions; re-execution ignores
-    /// it. `[crate::evm::AlpenEvmFactory]`
+    /// capped by its unused authorized gas. The payload builder reads this to skip
+    /// under-covered transactions; re-execution ignores it. The cell is owned by the
+    /// per-block EVM (`AlpenAlloyEvm`).
     da_report: Arc<AtomicU64>,
     pub _phantom: PhantomData<EVM>,
 }

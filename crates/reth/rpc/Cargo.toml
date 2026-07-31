@@ -7,13 +7,13 @@ version = "0.3.0-alpha.1"
 workspace = true
 
 [dependencies]
-alpen-reth-evm.workspace = true
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-json-rpc.workspace = true
 alloy-network.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-eth.workspace = true
+alpen-reth-evm.workspace = true
 async-trait.workspace = true
 eyre.workspace = true
 jsonrpsee = { workspace = true, features = ["server", "macros"] }

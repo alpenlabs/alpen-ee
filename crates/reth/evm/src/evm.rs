@@ -29,7 +29,7 @@ use crate::{
 /// (whose real execution must still fit the block) while turning the otherwise balance-bounded
 /// per-tx work into a small constant factor of block work.
 ///
-/// TODO(fee-model, calibration): tune against the maximum realistic DA headroom
+/// NOTE(fee-model, calibration): tune against the maximum realistic DA headroom
 /// (`da_rate * diff_size / base_fee`) for a block-filling storage-heavy transaction.
 const TX_GAS_LIMIT_BLOCK_MULTIPLE: u64 = 4;
 

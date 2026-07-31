@@ -1,7 +1,7 @@
 //! Fee estimation for the Alpen fee model (execution gas + Bitcoin DA).
 //!
 //! Exposes `alpen_estimateFees` (the explicit breakdown) and the shared quote logic used
-//! by the `eth_estimateGas` override in [`super::call`], which folds the DA fee into the
+//! by the `eth_estimateGas` override in the `call` module, which folds the DA fee into the
 //! returned gas so standard wallets reserve enough to cover the separate DA charge.
 
 use alloy_consensus::BlockHeader;

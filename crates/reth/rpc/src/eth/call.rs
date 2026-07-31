@@ -35,7 +35,10 @@ where
     /// envelope, not extra gas spent.
     // Match the trait's `-> impl Future + Send` signature exactly (as reth's own default
     // does); `async fn` cannot restate the explicit `Send` bound the trait requires.
-    #[expect(clippy::manual_async_fn, reason = "must mirror the trait's impl-Future signature")]
+    #[expect(
+        clippy::manual_async_fn,
+        reason = "must mirror the trait's impl-Future signature"
+    )]
     fn estimate_gas_at(
         &self,
         request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,

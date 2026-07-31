@@ -33,7 +33,7 @@
 //!
 //! # Cost of the custom context
 //!
-//! reth's [`EthBlockAssembler`](reth_evm_ethereum::EthBlockAssembler) is bound to
+//! reth's `EthBlockAssembler` is bound to
 //! `ExecutionCtx = EthBlockExecutionCtx`, so a custom context obliges a custom
 //! [`BlockAssembler`]. [`AlpenBlockAssembler::assemble_block`] mirrors reth's header
 //! assembly (the DA rate does not affect assembly — it only affects execution — so the
@@ -93,7 +93,7 @@ pub struct AlpenBlockExecutionCtx<'a> {
 
 /// Block executor factory that stamps the per-block DA rate onto the EVM before execution.
 ///
-/// Wraps reth's [`EthBlockExecutorFactory`](reth_evm_ethereum::EthBlockExecutorFactory): the
+/// Wraps reth's `EthBlockExecutorFactory`: the
 /// DA rate travels in [`AlpenBlockExecutionCtx`] and is applied to the EVM in
 /// [`create_executor`](Self::create_executor); everything else delegates unchanged.
 #[derive(Debug, Clone)]
@@ -139,10 +139,10 @@ impl BlockExecutorFactory for AlpenBlockExecutorFactory {
 /// instead: the builder stops filling on real gas (payload side) and re-execution/consensus
 /// rejects any block whose `header.gas_used > header.gas_limit`. Only
 /// [`execute_transaction_without_commit`](BlockExecutor::execute_transaction_without_commit)
-/// changes (it mirrors [`EthBlockExecutor`](reth_evm_ethereum::EthBlockExecutor) minus the
+/// changes (it mirrors `EthBlockExecutor` minus the
 /// gas-availability check); all receipt/gas/commit logic is delegated untouched.
 ///
-/// HARDENING TODO: executed gas per tx is still bounded only by the tx's own signed
+/// HARDENING NOTE: executed gas per tx is still bounded only by the tx's own signed
 /// `gas_limit` (prepaid via balance), so a crafted invalid block could make a re-executor
 /// burn up to that limit before the block-level check rejects it. A follow-up should cap
 /// execution at the block gas limit while preserving the signed value for DA-headroom
@@ -206,7 +206,7 @@ where
     }
 }
 
-/// Block assembler mirroring reth's [`EthBlockAssembler`](reth_evm_ethereum::EthBlockAssembler).
+/// Block assembler mirroring reth's `EthBlockAssembler`.
 ///
 /// A custom [`BlockExecutorFactory::ExecutionCtx`] forces a custom assembler (reth's is bound
 /// to `EthBlockExecutionCtx`). Header assembly is DA-rate independent, so this is a faithful
