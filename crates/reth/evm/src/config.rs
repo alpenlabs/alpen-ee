@@ -45,20 +45,27 @@ use alloy_consensus::{
     proofs::{self, calculate_receipt_root},
     Block, BlockBody, BlockHeader, Header, TxReceipt, EMPTY_OMMER_ROOT_HASH,
 };
-use alloy_eips::{eip7840::BlobParams, merge::BEACON_NONCE};
+use alloy_eips::{eip7840::BlobParams, merge::BEACON_NONCE, Encodable2718};
 use alloy_rpc_types_engine::ExecutionData;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
-    block::{BlockExecutorFactory, BlockExecutorFor},
+    block::{
+        BlockExecutionResult, BlockExecutor, BlockExecutorFactory, BlockExecutorFor, ExecutableTx,
+        OnStateHook,
+    },
     eth::EthBlockExecutionCtx,
     execute::{BlockAssembler, BlockAssemblerInput, BlockExecutionError},
-    ConfigureEngineEvm, ConfigureEvm, Database, EvmEnvFor, EvmFactory, ExecutableTxIterator,
+    ConfigureEngineEvm, ConfigureEvm, Database, Evm, EvmEnvFor, EvmFactory, ExecutableTxIterator,
     ExecutionCtxFor, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::EthEvmConfig;
-use reth_primitives_traits::{logs_bloom, SealedBlock, SealedHeader};
-use revm::{context::Block as _, database::State, Inspector};
+use reth_primitives_traits::{logs_bloom, SealedBlock, SealedHeader, SignedTransaction};
+use revm::{
+    context::{result::ResultAndState, Block as _},
+    database::State,
+    Inspector,
+};
 use revm_primitives::{Bytes, U256};
 
 use crate::{da_fee::da_rate_from_extra_data, evm::AlpenEvmFactory};
@@ -116,7 +123,86 @@ impl BlockExecutorFactory for AlpenBlockExecutorFactory {
         // The one chokepoint: every block execution path reaches `create_executor`, so the
         // committed rate is applied here regardless of how the EVM was created.
         evm.set_da_rate(ctx.da_rate);
-        self.inner.create_executor(evm, ctx.inner)
+        AlpenBlockExecutor {
+            inner: self.inner.create_executor(evm, ctx.inner),
+        }
+    }
+}
+
+/// Block executor that drops reth's per-transaction `gas_limit <= available block gas` bound
+/// (fee-model F.2), delegating everything else to the wrapped Ethereum executor.
+///
+/// Under the fee model a transaction's signed `gas_limit` is the DA-inflated *authorized*
+/// envelope (execution gas + DA-fee headroom), not execution work — DA is a separate balance
+/// debit, not metered gas. A storage-heavy tx can therefore carry a `gas_limit` above the
+/// block gas limit while its real execution fits. Block space is bounded on ACTUAL `gas_used`
+/// instead: the builder stops filling on real gas (payload side) and re-execution/consensus
+/// rejects any block whose `header.gas_used > header.gas_limit`. Only
+/// [`execute_transaction_without_commit`](BlockExecutor::execute_transaction_without_commit)
+/// changes (it mirrors [`EthBlockExecutor`](reth_evm_ethereum::EthBlockExecutor) minus the
+/// gas-availability check); all receipt/gas/commit logic is delegated untouched.
+///
+/// HARDENING TODO: executed gas per tx is still bounded only by the tx's own signed
+/// `gas_limit` (prepaid via balance), so a crafted invalid block could make a re-executor
+/// burn up to that limit before the block-level check rejects it. A follow-up should cap
+/// execution at the block gas limit while preserving the signed value for DA-headroom
+/// accounting.
+#[expect(
+    missing_debug_implementations,
+    reason = "thin executor wrapper over a non-Debug inner executor"
+)]
+pub struct AlpenBlockExecutor<E> {
+    inner: E,
+}
+
+impl<E> BlockExecutor for AlpenBlockExecutor<E>
+where
+    E: BlockExecutor<Transaction: SignedTransaction>,
+{
+    type Transaction = E::Transaction;
+    type Receipt = E::Receipt;
+    type Evm = E::Evm;
+
+    fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
+        self.inner.apply_pre_execution_changes()
+    }
+
+    fn execute_transaction_without_commit(
+        &mut self,
+        tx: impl ExecutableTx<Self>,
+    ) -> Result<ResultAndState<<Self::Evm as Evm>::HaltReason>, BlockExecutionError> {
+        // fee-model F.2: mirror `EthBlockExecutor` minus the `gas_limit <= available` check.
+        let hash = tx.tx().trie_hash();
+        self.inner
+            .evm_mut()
+            .transact(&tx)
+            .map_err(|err| BlockExecutionError::evm(err, hash))
+    }
+
+    fn commit_transaction(
+        &mut self,
+        output: ResultAndState<<Self::Evm as Evm>::HaltReason>,
+        tx: impl ExecutableTx<Self>,
+    ) -> Result<u64, BlockExecutionError> {
+        self.inner.commit_transaction(output, tx)
+    }
+
+    fn finish(
+        self,
+    ) -> Result<(Self::Evm, BlockExecutionResult<Self::Receipt>), BlockExecutionError> {
+        self.inner.finish()
+    }
+
+    fn set_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {
+        self.inner.set_state_hook(hook);
+    }
+
+    fn evm_mut(&mut self) -> &mut Self::Evm {
+        self.inner.evm_mut()
+    }
+
+    fn evm(&self) -> &Self::Evm {
+        self.inner.evm()
     }
 }
 
