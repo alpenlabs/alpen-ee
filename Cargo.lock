@@ -15712,6 +15712,7 @@ dependencies = [
 name = "strata-sp1-guest-builder"
 version = "0.3.0-alpha.1"
 dependencies = [
+ "alloy-consensus",
  "alpen-ee-params",
  "serde_json",
  "sp1-build",
