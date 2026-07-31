@@ -162,7 +162,7 @@ pub fn validate_tx_env<CTX: ContextTr, Error>(
         }
     };
 
-    // Gas-limit / block-space decoupling (fee-model F.2). We do NOT reject on the signed
+    // Gas-limit / block-space decoupling. We do NOT reject on the signed
     // `gas_limit` here: under the fee model it is the DA-inflated *authorized* envelope
     // (execution gas + DA-fee headroom), not execution work — DA is a separate balance debit,
     // not metered gas — so a storage-heavy tx can carry a `gas_limit` above the block gas

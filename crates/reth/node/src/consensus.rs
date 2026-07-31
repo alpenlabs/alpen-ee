@@ -96,7 +96,7 @@ where
         parent: &SealedHeader<H>,
     ) -> Result<(), ConsensusError> {
         // Mirrors `EthBeaconConsensus::validate_header_against_parent`, but floors the
-        // base-fee-against-parent check (fee-model D).
+        // base-fee-against-parent check.
         validate_against_parent_hash_number(header.header(), parent)?;
         validate_against_parent_timestamp(header.header(), parent.header())?;
         validate_against_parent_gas_limit(header, parent, &self.chain_spec)?;

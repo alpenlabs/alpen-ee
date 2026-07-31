@@ -18,10 +18,9 @@ use crate::{
     apis::AlpenAlloyEvm, da_fee::DA_COVERAGE_UNKNOWN, precompiles::factory, utils::wei_to_sats,
 };
 
-/// Per-transaction gas-limit cap, as a multiple of the block gas limit (fee-model F.2
-/// hardening).
+/// Per-transaction gas-limit cap, as a multiple of the block gas limit.
 ///
-/// Under F.2 a transaction's signed `gas_limit` may exceed the block gas limit — it is the
+/// A transaction's signed `gas_limit` may exceed the block gas limit — it is the
 /// DA-inflated *authorized* envelope (execution gas + DA-fee headroom), not execution work —
 /// and execution is not otherwise capped. This bound (enforced by the EIP-7825 check in
 /// [`crate::apis::validation`], before execution) limits how much a single transaction, or a
@@ -105,8 +104,8 @@ impl EvmFactory for AlpenEvmFactory {
     type Precompiles = PrecompilesMap;
 
     fn create_evm<DB: Database>(&self, db: DB, mut input: EvmEnv) -> Self::Evm<DB, NoOpInspector> {
-        // fee-model F.2 hardening: cap the per-tx gas limit at a multiple of the block gas
-        // limit (never loosening any existing cap). Enforced before execution by the EIP-7825
+        // Cap the per-tx gas limit at a multiple of the block gas limit (never loosening any
+        // existing cap). Enforced before execution by the EIP-7825
         // check in `validation::validate_env`. Set on the cfg so host and guest agree — both
         // build the EVM here, and the bound is derived from the committed block gas limit.
         let tx_gas_cap = input

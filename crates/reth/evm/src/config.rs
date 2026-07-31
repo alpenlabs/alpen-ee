@@ -129,8 +129,8 @@ impl BlockExecutorFactory for AlpenBlockExecutorFactory {
     }
 }
 
-/// Block executor that drops reth's per-transaction `gas_limit <= available block gas` bound
-/// (fee-model F.2), delegating everything else to the wrapped Ethereum executor.
+/// Block executor that drops reth's per-transaction `gas_limit <= available block gas` bound,
+/// delegating everything else to the wrapped Ethereum executor.
 ///
 /// Under the fee model a transaction's signed `gas_limit` is the DA-inflated *authorized*
 /// envelope (execution gas + DA-fee headroom), not execution work — DA is a separate balance
@@ -171,7 +171,7 @@ where
         &mut self,
         tx: impl ExecutableTx<Self>,
     ) -> Result<ResultAndState<<Self::Evm as Evm>::HaltReason>, BlockExecutionError> {
-        // fee-model F.2: mirror `EthBlockExecutor` minus the `gas_limit <= available` check.
+        // Mirror `EthBlockExecutor` minus the `gas_limit <= available` check.
         let hash = tx.tx().trie_hash();
         self.inner
             .evm_mut()

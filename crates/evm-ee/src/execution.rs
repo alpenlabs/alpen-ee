@@ -96,7 +96,7 @@ impl EvmExecutionEnvironment {
         validate_body_against_header(block.body(), block.header())
             .map_err(|_| EnvError::InvalidBlock)?;
 
-        // Base-fee validation (fee-model D): the header base fee must equal the protocol's
+        // Base-fee validation: the header base fee must equal the protocol's
         // floored EIP-1559 expectation computed from the parent — the SAME rule the host
         // consensus (`AlpenConsensus`) enforces, via the shared `expected_floored_base_fee`.
         // This is the full recurrence, not just the floor: it prevents a sequencer from

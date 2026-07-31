@@ -49,7 +49,7 @@ use crate::{
 /// Intrinsic gas floor of the cheapest possible transaction (a plain value transfer).
 ///
 /// Used to stop filling a block once the remaining gas can't fit even a minimal tx.
-/// Block space is accounted on actual `gas_used` (F.2), so we do not pre-reject on the
+/// Block space is accounted on actual `gas_used`, so we do not pre-reject on the
 /// DA-inflated signed `gas_limit`; the precise per-tx fit is checked post-execution.
 const MIN_TX_GAS_LIMIT: u64 = 21_000;
 
@@ -250,13 +250,13 @@ where
         withdrawals: Some(attributes.withdrawals().clone()),
     };
 
-    // Build the next block's EVM env and apply the base-fee floor (D). `next_evm_env`
+    // Build the next block's EVM env and apply the base-fee floor. `next_evm_env`
     // computes the pure EIP-1559 base fee; clamp it to `max(BASE_FEE_FLOOR, .)`. The sealed
     // header takes its base fee from this env, so flooring here keeps the header and the
     // executed base fee consistent, and matches the host consensus + guest, which recompute
     // the same floored value from the parent. This inlines `builder_for_next_block` so the
-    // floor can be inserted between `next_evm_env` and block-builder construction — no custom
-    // `ConfigureEvm` needed.
+    // floor can be inserted between `next_evm_env` and block-builder construction, keeping the
+    // floor logic in the builder rather than inside `AlpenEvmConfig`.
     let mut evm_env = evm_config
         .next_evm_env(&parent_header, &next_block_attrs)
         .map_err(PayloadBuilderError::other)?;
@@ -271,7 +271,7 @@ where
     // Shared handle to *this build EVM's* DA-coverage cell: the in-EVM charge writes it per
     // transaction (`CAPPED` means the DA fee was capped by the tx's unused authorized gas —
     // under-covered / would be subsidized), and the tx loop reads it to skip such txs (see
-    // F.1 sequencer admission). Owned by the EVM, not shared factory state.
+    // the sequencer-admission skip below). Owned by the EVM, not shared factory state.
     let da_report = builder.evm().da_report_handle();
 
     let chain_spec = client.chain_spec();
@@ -299,7 +299,7 @@ where
 
     while let Some(pool_tx) = best_txs.next() {
         // Block space is accounted on actual `gas_used`, not the DA-inflated signed
-        // `gas_limit` (F.2 decoupling): a tx's `effective_gas` folds in DA-fee headroom
+        // `gas_limit`: a tx's `effective_gas` folds in DA-fee headroom
         // that is a spend-authorization envelope, not execution work (DA is a separate
         // balance debit, not metered gas). So we do NOT pre-reject on `gas_limit`; instead
         // we stop only once the remaining budget can't fit even a minimal tx, and check the

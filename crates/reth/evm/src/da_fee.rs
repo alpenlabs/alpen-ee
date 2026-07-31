@@ -67,7 +67,7 @@ const COMPRESSION_RATIO_BPS: u64 = 4_800;
 const DA_FIXED_OVERHEAD: u64 = 2;
 
 /// DA-coverage report values written by the charge handler into the shared report cell
-/// and read by the sequencer's payload builder (F.1 admission).
+/// and read by the sequencer's payload builder for tx admission.
 ///
 /// The default / reset value is [`DA_COVERAGE_UNKNOWN`] (`0`) — deliberately *not* `OK` —
 /// so a cell that was never written for the current transaction (e.g. a zero-fee system
