@@ -1027,6 +1027,12 @@ async fn build_ee_prover_config(
                 "sp1 EE prover deadline configured"
             );
 
+            // TODO(STR-4155): `alpen_chunk_host`/`alpen_acct_host` resolve their ELF either
+            // from a compile-time dependency on `strata-sp1-guest-builder` (one chainspec
+            // baked in) or an `ELF_BASE_PATH` env var (see `strata_zkvm_hosts::sp1`). Take
+            // the guest ELF paths as explicit CLI/config args to this binary instead, so one
+            // `alpen-client` build can run against different guest ELFs without relying on a
+            // rebuild.
             let sp1_config = SP1HostConfig::default().with_deadline(deadline);
             let chunk_host: SP1Host = (**alpen_chunk_host(sp1_config.clone()).await).clone();
             let acct_host: SP1Host = (**alpen_acct_host(sp1_config).await).clone();
