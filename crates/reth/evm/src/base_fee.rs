@@ -11,7 +11,9 @@
 //! builder (build side), the host consensus validation, and the proof guest, so all three
 //! stay in lockstep.
 
-use alloy_eips::eip1559::{calc_next_block_base_fee, BaseFeeParams};
+use alloy_consensus::BlockHeader;
+use alloy_eips::eip1559::{calc_next_block_base_fee, BaseFeeParams, INITIAL_BASE_FEE};
+use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 
 /// Minimum base fee per gas (wei) — the floor under the EIP-1559 base fee. Set to 1 gwei.
 ///
@@ -57,6 +59,44 @@ pub fn floored_next_base_fee(
         parent_base_fee,
         base_fee_params,
     ))
+}
+
+/// The protocol's expected base fee for `header`, given its `parent`: the floored EIP-1559
+/// recurrence `max(BASE_FEE_FLOOR, next_block_base_fee(parent))`.
+///
+/// Returns `None` for pre-London blocks (no base fee is defined). This is the **single source
+/// of truth** for the base-fee-against-parent rule: both the host consensus validator
+/// ([`AlpenConsensus::validate_header_against_parent`](../../../alpen_reth_node/consensus))
+/// and the proof guest (`evm-ee` block validation) call it, so host and guest can never
+/// diverge (a mismatch would be a consensus split).
+///
+/// Mirrors reth's `validate_against_parent_eip1559_base_fee` exactly, except for the
+/// [`apply_base_fee_floor`] clamp on the recurrence result. The chain-spec's
+/// [`next_block_base_fee`](EthChainSpec::next_block_base_fee) supplies the EIP-1559 params,
+/// so callers cannot desync on parameter selection.
+pub fn expected_floored_base_fee<ChainSpec>(
+    header: &ChainSpec::Header,
+    parent: &ChainSpec::Header,
+    chain_spec: &ChainSpec,
+) -> Option<u64>
+where
+    ChainSpec: EthChainSpec + EthereumHardforks,
+{
+    // Pre-London blocks have no base fee.
+    if !chain_spec.is_london_active_at_block(header.number()) {
+        return None;
+    }
+    // The London-activation block itself uses the fixed initial base fee (no parent recurrence).
+    if chain_spec
+        .ethereum_fork_activation(EthereumHardfork::London)
+        .transitions_at_block(header.number())
+    {
+        return Some(INITIAL_BASE_FEE);
+    }
+    // Otherwise: the floored EIP-1559 recurrence from the parent.
+    chain_spec
+        .next_block_base_fee(parent, header.timestamp())
+        .map(apply_base_fee_floor)
 }
 
 #[cfg(test)]

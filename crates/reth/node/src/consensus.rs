@@ -12,9 +12,8 @@
 use std::{fmt::Debug, sync::Arc};
 
 use alloy_consensus::BlockHeader as _;
-use alloy_eips::eip1559::INITIAL_BASE_FEE;
-use alpen_reth_evm::base_fee::apply_base_fee_floor;
-use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
+use alpen_reth_evm::base_fee::expected_floored_base_fee;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
 use reth_consensus_common::validation::{
     validate_against_parent_4844, validate_against_parent_gas_limit,
@@ -66,18 +65,10 @@ where
             .base_fee_per_gas()
             .ok_or(ConsensusError::BaseFeeMissing)?;
 
-        let expected_base_fee = if chain_spec
-            .ethereum_fork_activation(EthereumHardfork::London)
-            .transitions_at_block(header.number())
-        {
-            INITIAL_BASE_FEE
-        } else {
-            apply_base_fee_floor(
-                chain_spec
-                    .next_block_base_fee(parent, header.timestamp())
-                    .ok_or(ConsensusError::BaseFeeMissing)?,
-            )
-        };
+        // Single source of truth shared with the proof guest (`evm-ee`), so host and guest
+        // enforce byte-identical base fees.
+        let expected_base_fee = expected_floored_base_fee(header, parent, chain_spec)
+            .ok_or(ConsensusError::BaseFeeMissing)?;
 
         if expected_base_fee != base_fee {
             return Err(ConsensusError::BaseFeeDiff(GotExpected {
