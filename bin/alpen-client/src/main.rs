@@ -28,14 +28,14 @@ mod services;
 
 #[cfg(feature = "sequencer")]
 use std::time::Duration;
-use std::{env, fs, path::Path, process, sync::Arc};
+use std::{env, process, sync::Arc};
 
-use alpen_chainspec::{ee_genesis_block_info, AlpenChainSpecParser, AlpenEeGenesisBlockInfo};
+use alpen_chainspec::AlpenChainSpecParser;
 use alpen_ee_common::{
     chain_status_checked, BatchStorage, BlockNumHash, ChunkStorage, ExecBlockStorage, OLClient,
     SequencerOLClient, Storage,
 };
-use alpen_ee_config::{AlpenEeConfig, AlpenEeParams};
+use alpen_ee_config::AlpenEeConfig;
 use alpen_ee_database::init_db_storage;
 use alpen_ee_engine::{create_engine_control_task, sync_chainstate_to_engine, AlpenRethExecEngine};
 #[cfg(feature = "sequencer")]
@@ -75,7 +75,6 @@ use reth_cli_util::sigsegv_handler;
 use reth_network::{protocol::IntoRlpxSubProtocol, NetworkProtocols};
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_provider::CanonStateSubscriptions;
-use strata_bridge_params::{BridgeParams, DEFAULT_MAX_WITHDRAWAL_SATS};
 #[cfg(feature = "sequencer")]
 use strata_btcio::{
     broadcaster::BroadcasterBuilder, writer::chunked_envelope::create_chunked_envelope_task,
@@ -176,8 +175,8 @@ fn main() {
 
     let mut command = NodeCommand::<AlpenChainSpecParser, AdditionalConfig>::parse();
 
-    // use provided alpen chain spec
-    command.chain = command.ext.chain.custom_chain.clone();
+    // use the EVM chain spec embedded in the Alpen params artifact
+    command.chain = Arc::new(command.ext.chain.alpen_params.chain_spec().clone());
     // enable engine api v4
     command.engine.accept_execution_requests_hash = true;
     // allow chain fork blocks to be created
@@ -203,29 +202,21 @@ fn main() {
             info!(target: "alpen-client", component = "alpen", %health_check_addr, "health check server started");
 
             // --- CONFIGS ---
-
-            // Resolve withdrawal cap: 0 → no cap, omitted → default 10 BTC.
-            let resolved_max_withdrawal = match ext.bridge.max_withdrawal_amount {
-                Some(0) => None,
-                Some(v) => Some(v),
-                None => Some(DEFAULT_MAX_WITHDRAWAL_SATS),
-            };
-            let bridge_params = BridgeParams::new_with_descriptor_limit(
-                ext.bridge.denomination,
-                resolved_max_withdrawal,
-                ext.bridge.max_withdrawal_descriptor_len,
-            )
-            .expect("invalid withdrawal params");
-
             let datadir = builder.config().datadir().data_dir().to_path_buf();
 
-            // TODO(STR-2982): read config, params from file
-            let genesis_info = ee_genesis_block_info(&ext.chain.custom_chain);
+            // TODO(STR-2982): read config from file
+            let params = ext.chain.alpen_params.clone();
+            let genesis_info = params.genesis_block_info();
 
             info!(target: "alpen-client", component = "alpen", blockhash=%genesis_info.blockhash(), "EE genesis info");
-            let params = load_ee_params(&ext.chain.ee_params)?;
-            validate_ee_params_genesis(&params, &genesis_info)?;
-            info!(target: "alpen-client", component = "alpen", ?params, sequencer = ext.sequencer.enabled, "Starting EE Node");
+            let bridge_params = *params.bridge_params();
+            info!(
+                target: "alpen-client", component = "alpen",
+                account_id = ?params.strata_exec_account_id(),
+                ?bridge_params,
+                sequencer = ext.sequencer.enabled,
+                "Starting EE Node",
+            );
 
             // Resolve btcio writer config up front so flag misuse surfaces before I/O.
             #[cfg(feature = "sequencer")]
@@ -241,7 +232,7 @@ fn main() {
             let ol_client_url = ext.ol.client_url.clone().unwrap_or_default();
 
             let config = Arc::new(AlpenEeConfig::new(
-                params,
+                params.clone(),
                 PredicateKey::always_accept(),
                 ol_client_url,
                 ext.sequencer.http_url.clone(),
@@ -310,7 +301,7 @@ fn main() {
                 }
                 OLClientKind::Rpc(
                     RpcOLClient::try_new(
-                        config.params().account_id(),
+                        config.params().strata_exec_account_id(),
                         ol_url,
                         ext.ol.submit_url.as_deref(),
                         ext.ol.submit_bearer_token.as_deref(),
@@ -622,7 +613,7 @@ fn main() {
                 // --- DA pipeline ---
                 //
                 // clap `requires_all` on --sequencer guarantees all DA args are present.
-                let magic_bytes = ext.da.magic_bytes.expect("enforced by clap");
+                let magic_bytes = params.blob_spec().magic_bytes();
                 let btc_url = ext.da.btc_rpc_url.as_ref().expect("enforced by clap");
                 let btc_user = ext.da.btc_rpc_user.as_ref().expect("enforced by clap");
                 let btc_pass = ext.da.btc_rpc_password.as_ref().expect("enforced by clap");
@@ -748,7 +739,7 @@ fn main() {
 
                 let genesis = {
                     use alpen_reth_exex::alloy2reth::IntoRspChainConfig as _;
-                    ext.chain.custom_chain.genesis().config.clone().into_rsp()
+                    params.evm_spec().genesis().config.clone().into_rsp()
                 };
 
                 let chunk_builder = ProverBuilder::new(ChunkSpec::new(
@@ -877,15 +868,14 @@ fn main() {
                 // gas limit as a conservative floor to accommodate this drift
                 // while still catching obvious misconfigurations.
                 if let Some(configured) = ext.sequencer.chunk_sealing_gas_limit {
-                    let min_chunk_gas =
-                        ext.chain.custom_chain.genesis().gas_limit.saturating_mul(2);
+                    let genesis_gas_limit = params.evm_spec().genesis().gas_limit;
+                    let min_chunk_gas = genesis_gas_limit.saturating_mul(2);
                     eyre::ensure!(
                         configured >= min_chunk_gas,
                         "--chunk-sealing-gas-limit ({configured}) is below the minimum \
-                         ({min_chunk_gas}, 2× genesis block gas limit {}). A single block \
-                         can use up to the per-block gas limit, so the chunk budget must \
-                         be large enough to always fit at least one block.",
-                        ext.chain.custom_chain.genesis().gas_limit,
+                         ({min_chunk_gas}, 2× genesis block gas limit {genesis_gas_limit}). \
+                         A single block can use up to the per-block gas limit, so the chunk \
+                         budget must be large enough to always fit at least one block.",
                     );
                 }
 
@@ -934,46 +924,6 @@ fn main() {
         eprintln!("Error: {err:?}");
         process::exit(1);
     }
-}
-
-/// Loads Alpen EE chain params from a JSON file.
-fn load_ee_params(path: &Path) -> eyre::Result<AlpenEeParams> {
-    let json = fs::read_to_string(path)
-        .with_context(|| format!("failed to read EE params file {path:?}"))?;
-    AlpenEeParams::from_json_str(&json)
-        .with_context(|| format!("failed to parse EE params file {path:?}"))
-}
-
-/// Validates that EE params describe the selected execution genesis block.
-fn validate_ee_params_genesis(
-    params: &AlpenEeParams,
-    genesis_info: &AlpenEeGenesisBlockInfo,
-) -> eyre::Result<()> {
-    if params.genesis_blockhash() != genesis_info.blockhash() {
-        eyre::bail!(
-            "EE params genesis blockhash {} does not match chain genesis blockhash {}",
-            params.genesis_blockhash(),
-            genesis_info.blockhash()
-        );
-    }
-
-    if params.genesis_stateroot() != genesis_info.stateroot() {
-        eyre::bail!(
-            "EE params genesis stateroot {} does not match chain genesis stateroot {}",
-            params.genesis_stateroot(),
-            genesis_info.stateroot()
-        );
-    }
-
-    if params.genesis_blocknum() != genesis_info.blocknum() {
-        eyre::bail!(
-            "EE params genesis block number {} does not match chain genesis block number {}",
-            params.genesis_blocknum(),
-            genesis_info.blocknum()
-        );
-    }
-
-    Ok(())
 }
 
 #[cfg(feature = "sequencer")]

@@ -594,6 +594,7 @@ dependencies = [
 name = "alpen-reth-statediff"
 version = "0.3.0-alpha.1"
 dependencies = [
+ "alloy-genesis",
  "alloy-primitives",
  "revm",
  "revm-primitives",
@@ -601,6 +602,7 @@ dependencies = [
  "serde",
  "strata-codec",
  "strata-da-framework",
+ "strata-identifiers",
  "strata-mpt",
  "thiserror 2.0.18",
 ]

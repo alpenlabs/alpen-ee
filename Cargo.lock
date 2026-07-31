@@ -1054,6 +1054,7 @@ dependencies = [
  "alpen-ee-exec-chain",
  "alpen-ee-genesis",
  "alpen-ee-ol-tracker",
+ "alpen-ee-params",
  "alpen-ee-rpc-server",
  "alpen-ee-sequencer",
  "alpen-reth-db",
@@ -1083,6 +1084,7 @@ dependencies = [
  "reth-provider",
  "reth-tasks",
  "rsp-primitives",
+ "serde_json",
  "ssz",
  "strata-acct-types",
  "strata-bridge-params",
@@ -1097,7 +1099,6 @@ dependencies = [
  "strata-ee-chunk-runtime",
  "strata-evm-ee",
  "strata-identifiers",
- "strata-l1-txfmt",
  "strata-logging",
  "strata-ol-rpc-api",
  "strata-ol-rpc-types",
@@ -1176,11 +1177,13 @@ name = "alpen-ee-config"
 version = "0.3.0-alpha.1"
 dependencies = [
  "alloy-primitives",
+ "alpen-chainspec",
  "alpen-ee-common",
- "serde",
+ "alpen-ee-params",
  "serde_json",
- "strata-acct-types",
+ "strata-bridge-params",
  "strata-config",
+ "strata-l1-txfmt",
  "strata-predicate",
 ]
 
@@ -1329,6 +1332,7 @@ version = "0.3.0-alpha.1"
 dependencies = [
  "alpen-ee-common",
  "alpen-ee-config",
+ "alpen-ee-params",
  "eyre",
  "strata-acct-types",
  "strata-ee-acct-types",
