@@ -23,12 +23,8 @@ zkaleido.workspace = true
 zkaleido-native-adapter.workspace = true
 
 [dev-dependencies]
-strata-bridge-params.workspace = true
 strata-codec.workspace = true
 strata-identifiers.workspace = true
-strata-l1-txfmt.workspace = true
-
-serde_json.workspace = true
 
 [lints]
 workspace = true

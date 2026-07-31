@@ -55,6 +55,18 @@ impl From<Genesis> for EvmSpec {
     }
 }
 
+// Manual instead of derived: `ChainSpec` has no `Default`, so `chain_spec`
+// must be derived from `genesis` the same way `From<Genesis>` does.
+impl Default for EvmSpec {
+    /// An empty genesis document (chain id 0, no allocation), i.e. what
+    /// reth's `Genesis -> ChainSpec` conversion derives from `{}`: every
+    /// hardfork active from genesis. Not a valid spec for any real network;
+    /// intended for tests and benchmarks that don't exercise EVM execution.
+    fn default() -> Self {
+        Genesis::default().into()
+    }
+}
+
 impl Serialize for EvmSpec {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -111,5 +123,11 @@ mod tests {
         // policing individual fields (or panicking on an absent block number).
         let spec: EvmSpec = serde_json::from_str("{}").expect("empty genesis is accepted");
         let _ = spec.genesis_info();
+    }
+
+    #[test]
+    fn default_matches_empty_genesis_json() {
+        let from_json: EvmSpec = serde_json::from_str("{}").expect("empty genesis is accepted");
+        assert_eq!(EvmSpec::default(), from_json);
     }
 }

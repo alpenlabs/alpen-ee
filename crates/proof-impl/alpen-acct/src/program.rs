@@ -129,14 +129,11 @@ impl EeAcctProgram {
 #[cfg(test)]
 mod tests {
     use alpen_ee_da_types::DaWitness;
-    use alpen_ee_params::{AlpenSpecSchedule, BlobSpec, DEFAULT_ALPEN_EE_ACCOUNT_ID, EvmSpec};
     use ssz::Encode;
-    use strata_bridge_params::BridgeParams;
     use strata_codec::encode_to_vec;
     use strata_ee_acct_runtime::EePrivateInput;
     use strata_ee_acct_types::{EeAccountState, UpdateExtraData};
     use strata_identifiers::Hash;
-    use strata_l1_txfmt::MagicBytes;
     use strata_predicate::{PredicateKey, PredicateTypeId};
     use strata_snark_acct_runtime::{IInnerState, PrivateInput as UpdatePrivateInput};
     use strata_snark_acct_types::{
@@ -176,17 +173,9 @@ mod tests {
             UpdatePrivateInput::new(pub_params, initial_state.as_ssz_bytes(), vec![]);
         let ee_private_input = EePrivateInput::new(vec![], vec![], vec![]);
 
-        // Minimal-but-valid params (a bare `{}` genesis is enough — reth
-        // accepts it, see `EvmSpec`'s own `json_accepts_what_reth_accepts`
-        // test); not exercised with zero chunks.
-        let evm_spec: EvmSpec = serde_json::from_str("{}").expect("empty genesis is accepted");
-        let params = AlpenParams::new(
-            DEFAULT_ALPEN_EE_ACCOUNT_ID,
-            BridgeParams::default(),
-            BlobSpec::new(MagicBytes::new(*b"ALPN")),
-            AlpenSpecSchedule::genesis(),
-            evm_spec,
-        );
+        // Not exercised with zero chunks, so the default (empty EVM genesis)
+        // params are fine here.
+        let params = AlpenParams::default();
 
         let proof_input = EeAcctProofInput {
             ee_private_input,

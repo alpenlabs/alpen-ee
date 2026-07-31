@@ -4,6 +4,7 @@ use reth_chainspec::ChainSpec;
 use serde::{Deserialize, Serialize};
 use strata_acct_types::AccountId;
 use strata_bridge_params::BridgeParams;
+use strata_l1_txfmt::MagicBytes;
 
 use crate::{genesis_info::AlpenEeGenesisBlockInfo, AlpenSpecSchedule, BlobSpec, EvmSpec};
 
@@ -20,6 +21,10 @@ pub const DEFAULT_ALPEN_EE_ACCOUNT_ID: AccountId = AccountId::new([1u8; 32]);
 /// Unknown fields are rejected so that a params file written for a newer
 /// node version (e.g. one carrying spec activations this binary does not
 /// understand) fails loudly instead of being silently misread.
+///
+/// [`Default`] gives placeholder params (empty EVM genesis included) for
+/// tests and benchmarks that need an `AlpenParams` but don't exercise EVM
+/// execution — see the impl for what it contains.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AlpenParams {
@@ -97,6 +102,27 @@ impl AlpenParams {
     }
 }
 
+// Manual instead of derived: every field but `evm_spec` has an obvious
+// default, but `evm_spec` needs to go through `EvmSpec::default()` (an
+// empty genesis document, i.e. what reth derives from `{}`) rather than a
+// derived `Default` bound on `EvmSpec` itself.
+impl Default for AlpenParams {
+    /// Placeholder params for tests and benchmarks that construct an
+    /// `AlpenParams` but don't exercise EVM execution: the default EE
+    /// account id and bridge params, the canonical `ALPN` DA magic, the
+    /// genesis spec schedule, and an empty EVM genesis. Not valid params for
+    /// any real network.
+    fn default() -> Self {
+        Self {
+            strata_exec_account_id: DEFAULT_ALPEN_EE_ACCOUNT_ID,
+            bridge_params: BridgeParams::default(),
+            blob_spec: BlobSpec::new(MagicBytes::new(*b"ALPN")),
+            spec_schedule: AlpenSpecSchedule::genesis(),
+            evm_spec: EvmSpec::default(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use alpen_chainspec::DEV_CHAIN_SPEC;
@@ -129,6 +155,16 @@ mod tests {
         let params = sample_params();
 
         let json = serde_json::to_string_pretty(&params).expect("params should serialize");
+        let decoded: AlpenParams = serde_json::from_str(&json).expect("params should deserialize");
+
+        assert_eq!(decoded, params);
+    }
+
+    #[test]
+    fn default_round_trips_through_json() {
+        let params = AlpenParams::default();
+
+        let json = serde_json::to_string(&params).expect("params should serialize");
         let decoded: AlpenParams = serde_json::from_str(&json).expect("params should deserialize");
 
         assert_eq!(decoded, params);

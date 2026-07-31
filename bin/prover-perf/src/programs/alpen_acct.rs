@@ -60,25 +60,10 @@ pub(crate) fn gen_perf_report(host: &impl ZkVmHost) -> (String, ExecutionSummary
 
 #[cfg(test)]
 mod tests {
-    use alpen_ee_params::{AlpenParams, AlpenSpecSchedule, BlobSpec, EvmSpec};
-    use strata_bridge_params::BridgeParams;
-    use strata_l1_txfmt::MagicBytes;
+    use alpen_ee_params::AlpenParams;
     use strata_predicate::PredicateKey;
 
     use super::*;
-
-    /// Minimal-but-valid params (a bare `{}` genesis is enough — reth accepts
-    /// it); not exercised since this benchmark runs zero chunks.
-    fn perf_alpen_params() -> AlpenParams {
-        let evm_spec: EvmSpec = serde_json::from_str("{}").expect("empty genesis is accepted");
-        AlpenParams::new(
-            alpen_ee_params::DEFAULT_ALPEN_EE_ACCOUNT_ID,
-            BridgeParams::default(),
-            BlobSpec::new(MagicBytes::new(*b"ALPN")),
-            AlpenSpecSchedule::genesis(),
-            evm_spec,
-        )
-    }
 
     #[test]
     fn test_alpen_acct_native_execution() {
@@ -86,8 +71,10 @@ mod tests {
         // Native execution uses `always_accept` so empty proof bytes
         // on each `ChunkInput` pass the recursive verifier. SP1 mock
         // perf substitutes the real predicate at host-init time, so
-        // the cycle count there reflects an honest verify.
-        let program = EeAcctProgram::new(PredicateKey::always_accept(), perf_alpen_params());
+        // the cycle count there reflects an honest verify. Not exercised
+        // since this benchmark runs zero chunks, so the default (empty EVM
+        // genesis) params are fine here.
+        let program = EeAcctProgram::new(PredicateKey::always_accept(), AlpenParams::default());
         let result = program.execute(&input).expect("native execution");
         assert_eq!(
             result.cur_state().inner_state(),
