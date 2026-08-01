@@ -81,7 +81,7 @@ where
     }
 
     if command.ext.sequencer.enabled
-        && !command.ext.sequencer.dev_native_prover
+        && !command.ext.sequencer.prover.dev_native_prover
         && !cfg!(feature = "sp1")
     {
         error!(

@@ -235,6 +235,28 @@ pub(crate) struct SequencerArgs {
     #[arg(long, required = false)]
     pub batch_event_channel_capacity: Option<usize>,
 
+    #[command(flatten)]
+    pub prover: ProverArgs,
+
+    #[cfg(feature = "sequencer")]
+    #[arg(long, default_value_t = DEFAULT_BENEFICIARY_ADDRESS)]
+    pub beneficiary_address: Address,
+
+    /// EE block time override, in milliseconds. Must be greater than zero.
+    #[cfg(feature = "sequencer")]
+    #[arg(
+        long = "ee-block-time-ms",
+        env = "ALPEN_EE_BLOCK_TIME_MS",
+        default_value_t = DEFAULT_BLOCKTIME_MS,
+        value_parser = clap::value_parser!(u64).range(1..),
+    )]
+    pub blocktime_ms: u64,
+}
+
+/// EE chunk/acct prover backend selection and configuration.
+#[derive(Debug, clap::Args)]
+#[command(next_help_heading = "Prover")]
+pub(crate) struct ProverArgs {
     /// Use the zkaleido `NativeHost` for the EE chunk + acct provers
     /// instead of the SP1 remote host.
     ///
@@ -263,20 +285,6 @@ pub(crate) struct SequencerArgs {
     /// requirements as `--chunk-elf-path`.
     #[arg(long, required = false)]
     pub acct_elf_path: Option<PathBuf>,
-
-    #[cfg(feature = "sequencer")]
-    #[arg(long, default_value_t = DEFAULT_BENEFICIARY_ADDRESS)]
-    pub beneficiary_address: Address,
-
-    /// EE block time override, in milliseconds. Must be greater than zero.
-    #[cfg(feature = "sequencer")]
-    #[arg(
-        long = "ee-block-time-ms",
-        env = "ALPEN_EE_BLOCK_TIME_MS",
-        default_value_t = DEFAULT_BLOCKTIME_MS,
-        value_parser = clap::value_parser!(u64).range(1..),
-    )]
-    pub blocktime_ms: u64,
 }
 
 /// EE DA and Bitcoin RPC args.
@@ -630,11 +638,11 @@ mod additional_config_tests {
         assert_eq!(config.btcio.fee_policy, BtcioFeePolicyArg::Fixed);
         assert_eq!(config.btcio.fee_rate, Some(1.5));
         assert_eq!(
-            config.sequencer.chunk_elf_path,
+            config.sequencer.prover.chunk_elf_path,
             Some(PathBuf::from("/tmp/guest-alpen-chunk.elf"))
         );
         assert_eq!(
-            config.sequencer.acct_elf_path,
+            config.sequencer.prover.acct_elf_path,
             Some(PathBuf::from("/tmp/guest-alpen-acct.elf"))
         );
     }
