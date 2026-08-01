@@ -690,7 +690,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-serde",
  "alloy-sol-types",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "serde",
  "serde_json",
  "serde_with",
@@ -1083,7 +1083,7 @@ dependencies = [
  "reth-provider",
  "reth-tasks",
  "serde_json",
- "ssz",
+ "ssz 0.16.0",
  "strata-acct-types",
  "strata-btcio",
  "strata-codec",
@@ -1227,7 +1227,7 @@ dependencies = [
  "rkyv",
  "rsp-mpt",
  "sha2",
- "ssz",
+ "ssz 0.16.0",
  "strata-acct-types",
  "strata-codec",
  "strata-ee-acct-runtime",
@@ -1265,7 +1265,7 @@ dependencies = [
  "borsh",
  "eyre",
  "sled",
- "ssz",
+ "ssz 0.16.0",
  "strata-acct-types",
  "strata-db-macros",
  "strata-db-store-sled",
@@ -2830,7 +2830,7 @@ dependencies = [
  "bitflags 2.10.0",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "lazy_static",
  "lazycell",
  "log",
@@ -2853,7 +2853,7 @@ dependencies = [
  "bitflags 2.10.0",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "regex",
@@ -2871,7 +2871,7 @@ dependencies = [
  "bitflags 2.10.0",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "regex",
@@ -2961,8 +2961,8 @@ dependencies = [
  "hex-conservative",
  "secp256k1 0.29.1",
  "serde",
- "ssz",
- "ssz_types",
+ "ssz 0.16.0",
+ "ssz_types 0.16.0",
 ]
 
 [[package]]
@@ -3595,7 +3595,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -4924,7 +4924,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6388,6 +6388,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b4baf93f58d4425749ca49a51c50ebab072c5df6994d08fed93541c331481dc"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7598,7 +7607,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 3.4.0",
+ "proc-macro-crate 1.3.1",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -8804,7 +8813,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
 dependencies = [
  "heck",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "log",
  "multimap",
  "once_cell",
@@ -8824,7 +8833,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -8837,7 +8846,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27c6023962132f4b30eb4c172c91ce92d933da334c59c23cddee82358ddafb0b"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -12397,7 +12406,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -13174,6 +13183,14 @@ checksum = "56199f7ddabf13fe5074ce809e7d3f42b42ae711800501b5b16ea82ad029c39d"
 name = "sizzle-parser"
 version = "0.16.0"
 source = "git+https://github.com/alpenlabs/ssz-gen?tag=v0.16.0#a43cb62e88b22a4626dddc158bcd09b298c103e7"
+dependencies = [
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "sizzle-parser"
+version = "0.17.0"
+source = "git+https://github.com/alpenlabs/ssz-gen?tag=v0.17.0#9e33fe8a5cafea88058c0e28dd7ef8b6716352bf"
 dependencies = [
  "thiserror 2.0.18",
 ]
@@ -14350,7 +14367,18 @@ dependencies = [
  "itertools 0.14.0",
  "serde",
  "smallvec",
- "ssz_primitives",
+ "ssz_primitives 0.16.0",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "ssz"
+version = "0.17.0"
+source = "git+https://github.com/alpenlabs/ssz-gen?tag=v0.17.0#9e33fe8a5cafea88058c0e28dd7ef8b6716352bf"
+dependencies = [
+ "itertools 0.15.0",
+ "smallvec",
+ "ssz_primitives 0.17.0",
  "thiserror 2.0.18",
 ]
 
@@ -14363,11 +14391,11 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde",
- "sizzle-parser",
- "ssz",
- "ssz_derive",
- "ssz_primitives",
- "ssz_types",
+ "sizzle-parser 0.16.0",
+ "ssz 0.16.0",
+ "ssz_derive 0.16.0",
+ "ssz_primitives 0.16.0",
+ "ssz_types 0.16.0",
  "syn 2.0.117",
  "toml 1.1.2+spec-1.1.0",
  "tree_hash 0.16.0",
@@ -14375,9 +14403,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "ssz_codegen"
+version = "0.17.0"
+source = "git+https://github.com/alpenlabs/ssz-gen?tag=v0.17.0#9e33fe8a5cafea88058c0e28dd7ef8b6716352bf"
+dependencies = [
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "sizzle-parser 0.17.0",
+ "ssz 0.17.0",
+ "ssz_derive 0.17.0",
+ "ssz_primitives 0.17.0",
+ "ssz_types 0.17.0",
+ "syn 2.0.117",
+ "toml 1.1.2+spec-1.1.0",
+ "tree_hash 0.17.0",
+ "tree_hash_derive 0.17.0",
+]
+
+[[package]]
 name = "ssz_derive"
 version = "0.16.0"
 source = "git+https://github.com/alpenlabs/ssz-gen?tag=v0.16.0#a43cb62e88b22a4626dddc158bcd09b298c103e7"
+dependencies = [
+ "darling 0.23.0",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "ssz_derive"
+version = "0.17.0"
+source = "git+https://github.com/alpenlabs/ssz-gen?tag=v0.17.0#9e33fe8a5cafea88058c0e28dd7ef8b6716352bf"
 dependencies = [
  "darling 0.23.0",
  "quote",
@@ -14395,6 +14453,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ssz_primitives"
+version = "0.17.0"
+source = "git+https://github.com/alpenlabs/ssz-gen?tag=v0.17.0#9e33fe8a5cafea88058c0e28dd7ef8b6716352bf"
+dependencies = [
+ "hex",
+ "rand 0.8.5",
+ "ruint",
+]
+
+[[package]]
 name = "ssz_types"
 version = "0.16.0"
 source = "git+https://github.com/alpenlabs/ssz-gen?tag=v0.16.0#a43cb62e88b22a4626dddc158bcd09b298c103e7"
@@ -14402,10 +14470,21 @@ dependencies = [
  "itertools 0.14.0",
  "serde",
  "serde_derive",
- "ssz",
- "ssz_primitives",
+ "ssz 0.16.0",
+ "ssz_primitives 0.16.0",
  "thiserror 2.0.18",
  "tree_hash 0.16.0",
+]
+
+[[package]]
+name = "ssz_types"
+version = "0.17.0"
+source = "git+https://github.com/alpenlabs/ssz-gen?tag=v0.17.0#9e33fe8a5cafea88058c0e28dd7ef8b6716352bf"
+dependencies = [
+ "ssz 0.17.0",
+ "ssz_primitives 0.17.0",
+ "thiserror 2.0.18",
+ "tree_hash 0.17.0",
 ]
 
 [[package]]
@@ -14427,11 +14506,11 @@ source = "git+https://github.com/alpenlabs/alpen.git?rev=3a44a2e4b1f9ec8a2e8fd1a
 dependencies = [
  "digest 0.10.7",
  "sha2",
- "ssz",
- "ssz_codegen",
- "ssz_derive",
- "ssz_primitives",
- "ssz_types",
+ "ssz 0.16.0",
+ "ssz_codegen 0.16.0",
+ "ssz_derive 0.16.0",
+ "ssz_primitives 0.16.0",
+ "ssz_types 0.16.0",
  "strata-btc-types",
  "strata-codec",
  "strata-identifiers",
@@ -14449,11 +14528,11 @@ dependencies = [
  "bitcoin",
  "borsh",
  "serde",
- "ssz",
- "ssz_codegen",
- "ssz_derive",
- "ssz_primitives",
- "ssz_types",
+ "ssz 0.16.0",
+ "ssz_codegen 0.16.0",
+ "ssz_derive 0.16.0",
+ "ssz_primitives 0.16.0",
+ "ssz_types 0.16.0",
  "strata-asm-manifest-types",
  "strata-btc-types",
  "strata-btc-verification",
@@ -14489,11 +14568,11 @@ source = "git+https://github.com/alpenlabs/asm?tag=v0.3.0-rc.2#45a1fa2f52289b483
 dependencies = [
  "borsh",
  "serde",
- "ssz",
- "ssz_codegen",
- "ssz_derive",
- "ssz_primitives",
- "ssz_types",
+ "ssz 0.16.0",
+ "ssz_codegen 0.16.0",
+ "ssz_derive 0.16.0",
+ "ssz_primitives 0.16.0",
+ "ssz_types 0.16.0",
  "strata-codec",
  "strata-crypto",
  "strata-identifiers",
@@ -14530,8 +14609,8 @@ dependencies = [
  "bitvec",
  "borsh",
  "serde",
- "ssz",
- "ssz_derive",
+ "ssz 0.16.0",
+ "ssz_derive 0.16.0",
  "strata-btc-types",
  "strata-identifiers",
  "thiserror 2.0.18",
@@ -14559,11 +14638,11 @@ source = "git+https://github.com/alpenlabs/asm?tag=v0.3.0-rc.2#45a1fa2f52289b483
 dependencies = [
  "borsh",
  "serde",
- "ssz",
- "ssz_codegen",
- "ssz_derive",
- "ssz_primitives",
- "ssz_types",
+ "ssz 0.16.0",
+ "ssz_codegen 0.16.0",
+ "ssz_derive 0.16.0",
+ "ssz_primitives 0.16.0",
+ "ssz_types 0.16.0",
  "strata-asm-manifest-types",
  "strata-identifiers",
  "strata-ol-logs",
@@ -14578,7 +14657,7 @@ version = "0.1.0"
 source = "git+https://github.com/alpenlabs/asm?tag=v0.3.0-rc.2#45a1fa2f52289b483dd9767b4ec9c80545d5789b"
 dependencies = [
  "bitcoin",
- "ssz_types",
+ "ssz_types 0.16.0",
  "strata-asm-common",
  "strata-btc-verification",
  "strata-identifiers",
@@ -14591,8 +14670,8 @@ version = "0.1.0"
 source = "git+https://github.com/alpenlabs/alpen.git?rev=3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257#3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257"
 dependencies = [
  "serde",
- "ssz",
- "ssz_derive",
+ "ssz 0.16.0",
+ "ssz_derive 0.16.0",
  "thiserror 2.0.18",
 ]
 
@@ -14606,11 +14685,11 @@ dependencies = [
  "bitcoin-bosd 0.9.0",
  "borsh",
  "serde",
- "ssz",
- "ssz_codegen",
- "ssz_derive",
- "ssz_primitives",
- "ssz_types",
+ "ssz 0.16.0",
+ "ssz_codegen 0.16.0",
+ "ssz_derive 0.16.0",
+ "ssz_primitives 0.16.0",
+ "ssz_types 0.16.0",
  "strata-codec",
  "strata-identifiers",
  "thiserror 2.0.18",
@@ -14627,8 +14706,8 @@ dependencies = [
  "bitcoin",
  "borsh",
  "serde",
- "ssz",
- "ssz_derive",
+ "ssz 0.16.0",
+ "ssz_derive 0.16.0",
  "strata-btc-types",
  "strata-crypto",
  "strata-identifiers",
@@ -14673,8 +14752,8 @@ dependencies = [
  "arbitrary",
  "borsh",
  "serde",
- "ssz",
- "ssz_derive",
+ "ssz 0.16.0",
+ "ssz_derive 0.16.0",
  "strata-crypto",
  "strata-identifiers",
  "zkaleido",
@@ -14709,8 +14788,8 @@ version = "0.1.0"
 source = "git+https://github.com/alpenlabs/strata-common?tag=v0.3.0-rc.2#c3698c0f26d8d3d16e56a478eb375e077d813775"
 dependencies = [
  "borsh",
- "ssz",
- "ssz_derive",
+ "ssz 0.16.0",
+ "ssz_derive 0.16.0",
  "strata-codec",
 ]
 
@@ -14720,8 +14799,8 @@ version = "0.1.0"
 source = "git+https://github.com/alpenlabs/alpen.git?rev=3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257#3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257"
 dependencies = [
  "borsh",
- "ssz",
- "ssz_derive",
+ "ssz 0.16.0",
+ "ssz_derive 0.16.0",
  "strata-codec",
 ]
 
@@ -14764,11 +14843,11 @@ dependencies = [
  "secp256k1 0.29.1",
  "serde",
  "sha2",
- "ssz",
- "ssz_codegen",
- "ssz_derive",
- "ssz_primitives",
- "ssz_types",
+ "ssz 0.16.0",
+ "ssz_codegen 0.16.0",
+ "ssz_derive 0.16.0",
+ "ssz_primitives 0.16.0",
+ "ssz_types 0.16.0",
  "strata-identifiers",
  "thiserror 2.0.18",
  "tree_hash 0.16.0",
@@ -14824,8 +14903,8 @@ dependencies = [
  "ciborium",
  "rkyv",
  "sled",
- "ssz",
- "ssz_derive",
+ "ssz 0.16.0",
+ "ssz_derive 0.16.0",
  "strata-asm-common",
  "strata-asm-proto-checkpoint-types",
  "strata-checkpoint-types",
@@ -14882,8 +14961,8 @@ version = "0.1.0"
 dependencies = [
  "rkyv",
  "rkyv_impl",
- "ssz",
- "ssz_derive",
+ "ssz 0.16.0",
+ "ssz_derive 0.16.0",
  "strata-acct-types",
  "strata-codec",
  "strata-ee-acct-types",
@@ -14901,11 +14980,11 @@ name = "strata-ee-acct-types"
 version = "0.1.0"
 dependencies = [
  "proptest",
- "ssz",
- "ssz_codegen",
- "ssz_derive",
- "ssz_primitives",
- "ssz_types",
+ "ssz 0.16.0",
+ "ssz_codegen 0.17.0",
+ "ssz_derive 0.16.0",
+ "ssz_primitives 0.16.0",
+ "ssz_types 0.16.0",
  "strata-acct-types",
  "strata-codec",
  "strata-ee-chain-types",
@@ -14923,11 +15002,11 @@ name = "strata-ee-chain-types"
 version = "0.1.0"
 dependencies = [
  "proptest",
- "ssz",
- "ssz_codegen",
- "ssz_derive",
- "ssz_primitives",
- "ssz_types",
+ "ssz 0.16.0",
+ "ssz_codegen 0.17.0",
+ "ssz_derive 0.16.0",
+ "ssz_primitives 0.16.0",
+ "ssz_types 0.16.0",
  "strata-acct-types",
  "strata-identifiers",
  "strata-test-utils-ssz",
@@ -14942,7 +15021,7 @@ version = "0.1.0"
 dependencies = [
  "rkyv",
  "rkyv_impl",
- "ssz",
+ "ssz 0.16.0",
  "strata-acct-types",
  "strata-codec",
  "strata-ee-acct-types",
@@ -15001,10 +15080,10 @@ dependencies = [
  "proptest",
  "schemars 1.2.1",
  "serde",
- "ssz",
- "ssz_derive",
- "ssz_primitives",
- "ssz_types",
+ "ssz 0.16.0",
+ "ssz_derive 0.16.0",
+ "ssz_primitives 0.16.0",
+ "ssz_types 0.16.0",
  "strata-codec",
  "tree_hash 0.16.0",
  "zeroize",
@@ -15068,11 +15147,11 @@ dependencies = [
  "digest 0.10.7",
  "serde",
  "sha2",
- "ssz",
- "ssz_codegen",
- "ssz_derive",
- "ssz_primitives",
- "ssz_types",
+ "ssz 0.16.0",
+ "ssz_codegen 0.16.0",
+ "ssz_derive 0.16.0",
+ "ssz_primitives 0.16.0",
+ "ssz_types 0.16.0",
  "strata-codec",
  "thiserror 2.0.18",
  "tree_hash 0.16.0",
@@ -15154,8 +15233,8 @@ dependencies = [
  "arbitrary",
  "borsh",
  "serde",
- "ssz",
- "ssz_derive",
+ "ssz 0.16.0",
+ "ssz_derive 0.16.0",
  "strata-asm-proto-bridge-v1-types",
  "strata-codec",
  "strata-identifiers",
@@ -15172,11 +15251,11 @@ dependencies = [
  "proptest",
  "rand 0.8.5",
  "secp256k1 0.29.1",
- "ssz",
- "ssz_codegen",
- "ssz_derive",
- "ssz_primitives",
- "ssz_types",
+ "ssz 0.16.0",
+ "ssz_codegen 0.16.0",
+ "ssz_derive 0.16.0",
+ "ssz_primitives 0.16.0",
+ "ssz_types 0.16.0",
  "strata-acct-types",
  "strata-asm-common",
  "strata-crypto",
@@ -15213,11 +15292,11 @@ name = "strata-ol-logs"
 version = "0.1.0"
 source = "git+https://github.com/alpenlabs/strata-common?tag=v0.3.0-rc.2#c3698c0f26d8d3d16e56a478eb375e077d813775"
 dependencies = [
- "ssz",
- "ssz_codegen",
- "ssz_derive",
- "ssz_primitives",
- "ssz_types",
+ "ssz 0.16.0",
+ "ssz_codegen 0.16.0",
+ "ssz_derive 0.16.0",
+ "ssz_primitives 0.16.0",
+ "ssz_types 0.16.0",
  "strata-codec",
  "strata-identifiers",
  "strata-msg-fmt",
@@ -15234,7 +15313,7 @@ dependencies = [
  "anyhow",
  "metrics",
  "serde",
- "ssz",
+ "ssz 0.16.0",
  "strata-acct-types",
  "strata-db-types",
  "strata-identifiers",
@@ -15297,7 +15376,7 @@ dependencies = [
  "async-trait",
  "schemars 1.2.1",
  "serde",
- "ssz",
+ "ssz 0.16.0",
  "strata-acct-types",
  "strata-asm-common",
  "strata-asm-proto-checkpoint-types",
@@ -15327,7 +15406,7 @@ dependencies = [
  "async-trait",
  "metrics",
  "serde",
- "ssz",
+ "ssz 0.16.0",
  "strata-asm-manifest-types",
  "strata-asm-proto-checkpoint-txs",
  "strata-asm-proto-checkpoint-types",
@@ -15387,11 +15466,11 @@ name = "strata-ol-state-types"
 version = "0.1.0"
 source = "git+https://github.com/alpenlabs/alpen.git?rev=3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257#3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257"
 dependencies = [
- "ssz",
- "ssz_codegen",
- "ssz_derive",
- "ssz_primitives",
- "ssz_types",
+ "ssz 0.16.0",
+ "ssz_codegen 0.16.0",
+ "ssz_derive 0.16.0",
+ "ssz_primitives 0.16.0",
+ "ssz_types 0.16.0",
  "strata-acct-types",
  "strata-asm-manifest-types",
  "strata-codec",
@@ -15477,11 +15556,11 @@ dependencies = [
  "k256",
  "serde",
  "signature",
- "ssz",
- "ssz_codegen",
- "ssz_derive",
- "ssz_primitives",
- "ssz_types",
+ "ssz 0.16.0",
+ "ssz_codegen 0.16.0",
+ "ssz_derive 0.16.0",
+ "ssz_primitives 0.16.0",
+ "ssz_types 0.16.0",
  "thiserror 2.0.18",
  "tree_hash 0.16.0",
  "tree_hash_derive 0.16.0",
@@ -15516,7 +15595,7 @@ dependencies = [
  "k256",
  "reth-chainspec",
  "rkyv",
- "ssz",
+ "ssz 0.16.0",
  "strata-codec",
  "strata-ee-acct-runtime",
  "strata-ee-acct-types",
@@ -15543,7 +15622,7 @@ dependencies = [
  "rsp-client-executor",
  "serde",
  "serde_json",
- "ssz",
+ "ssz 0.16.0",
  "strata-acct-types",
  "strata-bridge-params",
  "strata-codec",
@@ -15603,7 +15682,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sp1-sdk",
- "ssz",
+ "ssz 0.16.0",
  "strata-acct-types",
  "strata-bridge-params",
  "strata-codec",
@@ -15672,7 +15751,7 @@ source = "git+https://github.com/alpenlabs/alpen.git?rev=3a44a2e4b1f9ec8a2e8fd1a
 dependencies = [
  "rkyv",
  "rkyv_impl",
- "ssz",
+ "ssz 0.16.0",
  "strata-acct-types",
  "strata-codec",
  "strata-snark-acct-types",
@@ -15684,7 +15763,7 @@ name = "strata-snark-acct-sys"
 version = "0.1.0"
 source = "git+https://github.com/alpenlabs/alpen.git?rev=3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257#3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257"
 dependencies = [
- "ssz",
+ "ssz 0.16.0",
  "strata-acct-types",
  "strata-ledger-types",
  "strata-snark-acct-types",
@@ -15696,11 +15775,11 @@ name = "strata-snark-acct-types"
 version = "0.1.0"
 source = "git+https://github.com/alpenlabs/alpen.git?rev=3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257#3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257"
 dependencies = [
- "ssz",
- "ssz_codegen",
- "ssz_derive",
- "ssz_primitives",
- "ssz_types",
+ "ssz 0.16.0",
+ "ssz_codegen 0.16.0",
+ "ssz_derive 0.16.0",
+ "ssz_primitives 0.16.0",
+ "ssz_types 0.16.0",
  "strata-acct-types",
  "strata-identifiers",
  "thiserror 2.0.18",
@@ -15822,7 +15901,7 @@ version = "0.1.0"
 source = "git+https://github.com/alpenlabs/alpen.git?rev=3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257#3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257"
 dependencies = [
  "proptest",
- "ssz",
+ "ssz 0.16.0",
  "tree_hash 0.16.0",
 ]
 
@@ -16105,7 +16184,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -16844,8 +16923,21 @@ dependencies = [
  "digest 0.10.7",
  "sha2",
  "smallvec",
- "ssz",
- "ssz_primitives",
+ "ssz 0.16.0",
+ "ssz_primitives 0.16.0",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "tree_hash"
+version = "0.17.0"
+source = "git+https://github.com/alpenlabs/ssz-gen?tag=v0.17.0#9e33fe8a5cafea88058c0e28dd7ef8b6716352bf"
+dependencies = [
+ "digest 0.10.7",
+ "sha2",
+ "smallvec",
+ "ssz 0.17.0",
+ "ssz_primitives 0.17.0",
  "thiserror 2.0.18",
 ]
 
@@ -16865,6 +16957,16 @@ dependencies = [
 name = "tree_hash_derive"
 version = "0.16.0"
 source = "git+https://github.com/alpenlabs/ssz-gen?tag=v0.16.0#a43cb62e88b22a4626dddc158bcd09b298c103e7"
+dependencies = [
+ "darling 0.23.0",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "tree_hash_derive"
+version = "0.17.0"
+source = "git+https://github.com/alpenlabs/ssz-gen?tag=v0.17.0#9e33fe8a5cafea88058c0e28dd7ef8b6716352bf"
 dependencies = [
  "darling 0.23.0",
  "quote",
@@ -17496,7 +17598,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -18292,7 +18394,7 @@ dependencies = [
  "bincode",
  "borsh",
  "serde",
- "ssz",
+ "ssz 0.16.0",
  "thiserror 2.0.18",
 ]
 
