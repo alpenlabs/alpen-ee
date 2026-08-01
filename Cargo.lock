@@ -1108,7 +1108,6 @@ dependencies = [
  "strata-service",
  "strata-snark-acct-runtime",
  "strata-snark-acct-types",
- "strata-zkvm-hosts",
  "thiserror 2.0.18",
  "tokio",
  "toml 0.5.11",
@@ -15580,7 +15579,6 @@ dependencies = [
  "strata-snark-acct-runtime",
  "strata-snark-acct-types",
  "strata-sp1-guest-builder",
- "strata-zkvm-hosts",
  "tokio",
  "tracing",
  "zkaleido",
@@ -15784,15 +15782,6 @@ dependencies = [
  "proptest",
  "ssz",
  "tree_hash 0.16.0",
-]
-
-[[package]]
-name = "strata-zkvm-hosts"
-version = "0.3.0-alpha.1"
-dependencies = [
- "strata-sp1-guest-builder",
- "tokio",
- "zkaleido-sp1-host",
 ]
 
 [[package]]

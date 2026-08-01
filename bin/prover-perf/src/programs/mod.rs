@@ -29,15 +29,23 @@ impl FromStr for GuestProgram {
 /// [`ExecutionSummary`] (cycles, gas, public values).
 #[cfg(feature = "sp1")]
 pub async fn run_sp1_programs(programs: &[GuestProgram]) -> Vec<(String, ExecutionSummary)> {
-    use strata_zkvm_hosts::sp1::{alpen_acct_host, alpen_chunk_host};
-    use zkaleido_sp1_host::SP1HostConfig;
+    use strata_sp1_guest_builder::{GUEST_ALPEN_ACCT_ELF, GUEST_ALPEN_CHUNK_ELF};
+    use zkaleido_sp1_host::{SP1Host, SP1HostConfig};
+
     let mut reports = Vec::with_capacity(programs.len());
     for program in programs {
-        let cfg = SP1HostConfig::default();
         let report = match program {
-            GuestProgram::AlpenAcct => alpen_acct::gen_perf_report(&**alpen_acct_host(cfg).await),
+            GuestProgram::AlpenAcct => {
+                let host =
+                    SP1Host::init_with_config(&GUEST_ALPEN_ACCT_ELF, SP1HostConfig::default())
+                        .await;
+                alpen_acct::gen_perf_report(&host)
+            }
             GuestProgram::AlpenChunk => {
-                alpen_chunk::gen_perf_report(&**alpen_chunk_host(cfg).await)
+                let host =
+                    SP1Host::init_with_config(&GUEST_ALPEN_CHUNK_ELF, SP1HostConfig::default())
+                        .await;
+                alpen_chunk::gen_perf_report(&host)
             }
         };
         reports.push(report);

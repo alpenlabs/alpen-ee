@@ -7,7 +7,10 @@
 //! entry point between the two; [`AlpenClientConfigFile`] never leaves this
 //! module.
 
-use std::num::{NonZeroU64, NonZeroUsize};
+use std::{
+    num::{NonZeroU64, NonZeroUsize},
+    path::PathBuf,
+};
 
 use alloy_primitives::{address, Address};
 use alpen_ee_ol_tracker::EpochTrackingMode;
@@ -281,6 +284,16 @@ pub(crate) struct SequencerConfig {
     /// runs on the remote SP1 backend. `None` leaves the prover to apply its
     /// own deadline, so nothing is resolved here.
     pub(crate) sp1_proof_deadline_secs: Option<u64>,
+    /// Path to the compiled SP1 guest ELF for the chunk prover.
+    ///
+    /// Required unless `dev_native_prover` is true. Lets one `alpen-client`
+    /// build run against different guest ELFs without a rebuild. The
+    /// requirement spans both fields, so it is checked where the backend is
+    /// built rather than here.
+    pub(crate) chunk_elf_path: Option<PathBuf>,
+    /// Path to the compiled SP1 guest ELF for the account prover. Same
+    /// requirements as `chunk_elf_path`.
+    pub(crate) acct_elf_path: Option<PathBuf>,
     /// URL of the authenticated OL transaction submission RPC.
     ///
     /// Required, and checked by [`AlpenClientConfig`]. The [`Option`] covers

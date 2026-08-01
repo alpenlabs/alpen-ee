@@ -45,11 +45,9 @@ sequencer = [
 # sequencer-only prover), so it pulls that feature in too.
 sp1 = [
   "sequencer",
-  "dep:strata-zkvm-hosts",
   "dep:zkaleido-sp1-host",
   "strata-paas/remote",
   "strata-proofimpl-predicate-keys/sp1",
-  "strata-zkvm-hosts?/sp1",
 ]
 
 [[bin]]
@@ -105,7 +103,6 @@ strata-proofimpl-predicate-keys.workspace = true
 strata-service.workspace = true
 strata-snark-acct-runtime = { workspace = true, optional = true }
 strata-snark-acct-types.workspace = true
-strata-zkvm-hosts = { workspace = true, optional = true }
 zkaleido = { workspace = true, optional = true }
 zkaleido-sp1-host = { workspace = true, optional = true }
 
