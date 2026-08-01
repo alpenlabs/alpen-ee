@@ -1,7 +1,7 @@
 # SP1 guest builder
 
 Builds the SP1 guest programs (`guest-alpen-chunk`, `guest-alpen-acct`) and exposes
-the compiled ELFs to host crates via `strata_sp1_guest_builder::GUEST_*_ELF`.
+the compiled ELF paths to host crates via `strata_sp1_guest_builder::GUEST_*_ELF_PATH`.
 
 ## Building
 
@@ -16,8 +16,8 @@ To build without the SP1 toolchain (e.g. when running workspace-wide tests or
 docs), skip guest compilation with `SP1_SKIP_PROGRAM_BUILD=true`. Clippy skips
 it automatically.
 
-ELFs are written to `provers/sp1/elfs/` (gitignored), a stable location that
-survives `cargo clean`.
+ELFs are written to `provers/sp1/generated/` (gitignored), a stable location
+that survives `cargo clean`.
 
 ## Guest dependencies
 
