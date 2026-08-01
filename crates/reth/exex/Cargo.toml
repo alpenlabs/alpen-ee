@@ -14,7 +14,6 @@ alpen-reth-witness.workspace = true
 strata-acct-types.workspace = true
 
 alloy-eips.workspace = true
-alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types.workspace = true
 eyre.workspace = true
@@ -26,7 +25,6 @@ reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true
 reth-revm.workspace = true
-rsp-primitives.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 

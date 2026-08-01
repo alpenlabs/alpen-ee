@@ -4,12 +4,10 @@ use std::sync::Arc;
 
 use alpen_ee_da_runtime::verification::verify_da_witness;
 use alpen_ee_da_types::ArchivedDaWitness;
+use alpen_ee_params::AlpenParams;
 use alpen_reth_evm::evm::AlpenEvmFactory;
 use reth_chainspec::ChainSpec;
 use rkyv::rancor::Error as RkyvError;
-use rsp_primitives::genesis::Genesis;
-use ssz::Decode;
-use strata_bridge_params::BridgeParams;
 use strata_ee_acct_runtime::ArchivedEePrivateInput;
 use strata_ee_acct_types::EeAccountState;
 use strata_evm_ee::EvmExecutionEnvironment;
@@ -23,16 +21,24 @@ pub use program::{EeAcctProgram, EeAcctProofInput};
 
 /// Guest entry point for EE account update proof generation.
 ///
-/// Reads a genesis config and three rkyv-serialized private inputs (EE, update,
-/// and DA witness) from the zkVM, verifies the account update using the EVM execution
-/// environment, and commits the pre-encoded `UpdateProofPubParams` SSZ bytes
-/// as public output.
+/// Verifies the account update against `params`'s genesis and bridge params
+/// using the EVM execution environment, reading three rkyv-serialized
+/// private inputs (EE, update, and DA witness) from the zkVM, and commits
+/// the pre-encoded `UpdateProofPubParams` SSZ bytes as public output.
 ///
-/// The `chunk_predicate_key` is a compile-time constant provided by the
-/// guest binary, identifying the predicate used to verify chunk proofs.
-pub fn process_ee_acct_update(zkvm: &impl ZkVmEnvSerde, chunk_predicate_key: &PredicateKey) {
-    let genesis: Genesis = zkvm.read_serde();
-    let chain_spec: Arc<ChainSpec> = Arc::new((&genesis).try_into().unwrap());
+/// `params` and `chunk_predicate_key` are trusted, out-of-band arguments,
+/// not zkVM input: genesis and bridge params are consensus-critical, and a
+/// host-supplied predicate key would let a malicious prover bypass chunk
+/// proof verification, so both are bound into this guest's verifying key
+/// rather than trusted as prover-supplied private input. See
+/// `provers/sp1/guest-alpen-acct/src/main.rs` for the guest-side
+/// construction path.
+pub fn process_ee_acct_update(
+    zkvm: &impl ZkVmEnvSerde,
+    params: &AlpenParams,
+    chunk_predicate_key: &PredicateKey,
+) {
+    let chain_spec: Arc<ChainSpec> = Arc::new(params.evm_spec().chain_spec().clone());
 
     let ee_buf = zkvm.read_buf();
     let ee_input: &ArchivedEePrivateInput =
@@ -44,10 +50,7 @@ pub fn process_ee_acct_update(zkvm: &impl ZkVmEnvSerde, chunk_predicate_key: &Pr
         rkyv::access::<ArchivedUpdatePrivateInput, RkyvError>(&upd_buf)
             .expect("failed to access rkyv update archive");
 
-    let withdrawal_ssz = zkvm.read_buf();
-    let bridge_params = BridgeParams::from_ssz_bytes(&withdrawal_ssz)
-        .expect("failed to deserialize withdrawal params");
-    let evm_factory = AlpenEvmFactory::from_bridge_params(&bridge_params);
+    let evm_factory = AlpenEvmFactory::from_bridge_params(params.bridge_params());
 
     let da_buf = zkvm.read_buf();
     let da_witness: &ArchivedDaWitness = rkyv::access::<ArchivedDaWitness, RkyvError>(&da_buf)

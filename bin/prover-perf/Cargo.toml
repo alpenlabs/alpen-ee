@@ -7,7 +7,9 @@ version = "0.3.0-alpha.1"
 workspace = true
 
 [dependencies]
+alpen-chainspec.workspace = true
 alpen-ee-da-types.workspace = true
+alpen-ee-params.workspace = true
 alpen-reth-evm.workspace = true
 ssz.workspace = true
 zkaleido.workspace = true
@@ -25,6 +27,7 @@ strata-ee-chain-types.workspace = true
 strata-ee-chunk-runtime.workspace = true
 strata-evm-ee.workspace = true
 strata-identifiers.workspace = true
+strata-l1-txfmt.workspace = true
 strata-snark-acct-runtime.workspace = true
 strata-snark-acct-types.workspace = true
 strata-zkvm-hosts.workspace = true
@@ -32,7 +35,6 @@ strata-zkvm-hosts.workspace = true
 reth-chainspec.workspace = true
 reth-primitives-traits.workspace = true
 rsp-client-executor.workspace = true
-rsp-primitives.workspace = true
 serde = { workspace = true, features = ["derive"] }
 
 # sp1

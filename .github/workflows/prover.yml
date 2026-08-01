@@ -98,3 +98,7 @@ jobs:
         working-directory: bin/prover-perf
         env:
           RUSTFLAGS: "-C target-cpu=native -C link-arg=-fuse-ld=lld"
+          # Canonical dev-network params baked into the guest ELFs. Without this,
+          # the build script skips guest compilation entirely (see provers/sp1/build.rs),
+          # and the perf binary then has no ELF to read.
+          SP1_ALPEN_PARAMS_PATH: ${{ github.workspace }}/bin/alpen-client/tests/res/alpen-params.json

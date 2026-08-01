@@ -1,9 +1,10 @@
 //! Embedded EVM chain spec.
 
 use alloy_genesis::Genesis;
-use alpen_chainspec::{ee_genesis_block_info, AlpenEeGenesisBlockInfo};
 use reth_chainspec::ChainSpec;
 use serde::{Deserialize, Serialize, Serializer};
+
+use crate::genesis_info::{ee_genesis_block_info, AlpenEeGenesisBlockInfo};
 
 /// The embedded EVM chain spec: genesis document plus derived reth chain spec.
 ///
@@ -54,6 +55,18 @@ impl From<Genesis> for EvmSpec {
     }
 }
 
+// Manual instead of derived: `ChainSpec` has no `Default`, so `chain_spec`
+// must be derived from `genesis` the same way `From<Genesis>` does.
+impl Default for EvmSpec {
+    /// An empty genesis document (chain id 0, no allocation), i.e. what
+    /// reth's `Genesis -> ChainSpec` conversion derives from `{}`: every
+    /// hardfork active from genesis. Not a valid spec for any real network;
+    /// intended for tests and benchmarks that don't exercise EVM execution.
+    fn default() -> Self {
+        Genesis::default().into()
+    }
+}
+
 impl Serialize for EvmSpec {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -77,9 +90,10 @@ impl Eq for EvmSpec {}
 
 #[cfg(test)]
 mod tests {
-    use alpen_chainspec::{ee_genesis_block_info_from_json, DEV_CHAIN_SPEC};
+    use alpen_chainspec::DEV_CHAIN_SPEC;
 
     use super::EvmSpec;
+    use crate::genesis_info::ee_genesis_block_info_from_json;
 
     #[test]
     fn json_roundtrip_preserves_evm_spec() {
@@ -109,5 +123,11 @@ mod tests {
         // policing individual fields (or panicking on an absent block number).
         let spec: EvmSpec = serde_json::from_str("{}").expect("empty genesis is accepted");
         let _ = spec.genesis_info();
+    }
+
+    #[test]
+    fn default_matches_empty_genesis_json() {
+        let from_json: EvmSpec = serde_json::from_str("{}").expect("empty genesis is accepted");
+        assert_eq!(EvmSpec::default(), from_json);
     }
 }

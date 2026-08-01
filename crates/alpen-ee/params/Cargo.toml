@@ -8,16 +8,17 @@ version = "0.3.0-alpha.1"
 workspace = true
 
 [dependencies]
-alpen-chainspec.workspace = true
 strata-acct-types.workspace = true
 strata-bridge-params.workspace = true
 strata-l1-txfmt.workspace = true
 
 alloy-genesis.workspace = true
+alloy-primitives.workspace = true
 num_enum.workspace = true
 reth-chainspec.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+alpen-chainspec.workspace = true
 serde_json.workspace = true

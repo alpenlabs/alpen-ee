@@ -6,6 +6,9 @@
 
 use std::{fs, path::PathBuf, sync::Arc};
 
+use alpen_ee_params::{
+    AlpenParams, AlpenSpecSchedule, BlobSpec, EvmSpec, DEFAULT_ALPEN_EE_ACCOUNT_ID,
+};
 use alpen_reth_evm::evm::AlpenEvmFactory;
 use reth_primitives_traits::Block as _;
 use rsp_client_executor::io::EthClientExecutorInput;
@@ -17,6 +20,7 @@ use strata_ee_acct_types::{ExecBlock, ExecHeader, ExecPayload, ExecutionEnvironm
 use strata_ee_chain_types::ExecInputs;
 use strata_ee_chunk_runtime::{PrivateInput, RawBlockData, RawChunkData};
 use strata_evm_ee::{EvmBlock, EvmBlockBody, EvmExecutionEnvironment, EvmHeader, EvmPartialState};
+use strata_l1_txfmt::MagicBytes;
 use strata_proofimpl_alpen_chunk::{EeChunkProgram, EeChunkProofInput};
 use tracing::info;
 use zkaleido::{ExecutionSummary, ZkVmHost, ZkVmProgram};
@@ -35,6 +39,21 @@ fn load_witness() -> EthClientExecutorInput {
     let json = fs::read_to_string(path).expect("read witness JSON");
     let data: WitnessData = serde_json::from_str(&json).expect("parse witness JSON");
     data.witness
+}
+
+/// The dev-network `AlpenParams` this benchmark exercises `process_ee_chunk`
+/// against — chosen because `witness_params.json`'s embedded genesis
+/// (chain id 2892, all hardforks active from genesis) matches it.
+pub(super) fn perf_alpen_params() -> AlpenParams {
+    let evm_spec: EvmSpec =
+        serde_json::from_str(alpen_chainspec::DEV_CHAIN_SPEC).expect("dev chain should parse");
+    AlpenParams::new(
+        DEFAULT_ALPEN_EE_ACCOUNT_ID,
+        BridgeParams::default(),
+        BlobSpec::new(MagicBytes::new(*b"ALPN")),
+        AlpenSpecSchedule::genesis(),
+        evm_spec,
+    )
 }
 
 /// Builds an EeChunkProofInput from the canonical EVM witness fixture.
@@ -75,8 +94,9 @@ pub(super) fn prepare_input() -> EeChunkProofInput {
     let tip_state_root = block.get_header().get_state_root();
     let tip_exec_header_summary = block.get_header().get_exec_header_summary();
 
+    let params = perf_alpen_params();
     let chain_spec: Arc<reth_chainspec::ChainSpec> =
-        Arc::new((&witness.genesis).try_into().unwrap());
+        Arc::new(params.evm_spec().chain_spec().clone());
     let ee = EvmExecutionEnvironment::new(chain_spec, AlpenEvmFactory::default());
     let header_intrinsics = block.get_header().get_intrinsics();
     let exec_payload = ExecPayload::new(&header_intrinsics, block.get_body());
@@ -111,11 +131,7 @@ pub(super) fn prepare_input() -> EeChunkProofInput {
         raw_chunk_pre_state,
     );
 
-    EeChunkProofInput {
-        genesis: witness.genesis,
-        private_input,
-        bridge_params: BridgeParams::default(),
-    }
+    EeChunkProofInput { private_input }
 }
 
 pub(crate) fn gen_perf_report(host: &impl ZkVmHost) -> (String, ExecutionSummary) {
@@ -133,7 +149,9 @@ mod tests {
     #[test]
     fn test_alpen_chunk_native_execution() {
         let input = prepare_input();
-        let output = EeChunkProgram::execute(&input).unwrap();
+        let output = EeChunkProgram::new(perf_alpen_params())
+            .execute(&input)
+            .unwrap();
         // The chunk transition's parent/tip blkids must match the block
         // hashes computed during input prep — sanity that the perf
         // fixture produces a self-consistent transition.

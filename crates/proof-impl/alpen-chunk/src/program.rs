@@ -1,8 +1,7 @@
+use alpen_ee_params::AlpenParams;
 use k256::schnorr::SigningKey;
 use rkyv::rancor::Error as RkyvError;
-use rsp_primitives::genesis::Genesis;
-use ssz::{Decode, Encode};
-use strata_bridge_params::BridgeParams;
+use ssz::Decode;
 use strata_ee_chain_types::ChunkTransition;
 use strata_ee_chunk_runtime::PrivateInput;
 use strata_predicate::{PredicateKey, PredicateTypeId};
@@ -20,13 +19,25 @@ fn test_signing_key() -> SigningKey {
 /// Host-side input for the EE chunk proof.
 #[derive(Debug)]
 pub struct EeChunkProofInput {
-    pub genesis: Genesis,
     pub private_input: PrivateInput,
-    pub bridge_params: BridgeParams,
 }
 
+/// Note: `AlpenParams` (genesis, bridge params) is NOT part of this input.
+/// The chunk guest receives it at compile time, baked into the ELF by
+/// `provers/sp1/build.rs`. This is intentional — see [`crate::process_ee_chunk`].
+///
+/// For native testing, `params` lives on [`EeChunkProgram::new`] and is
+/// passed into the `NativeHost` closure directly.
 #[derive(Debug)]
-pub struct EeChunkProgram;
+pub struct EeChunkProgram {
+    params: AlpenParams,
+}
+
+impl EeChunkProgram {
+    pub fn new(params: AlpenParams) -> Self {
+        Self { params }
+    }
+}
 
 impl ZkVmProgram for EeChunkProgram {
     type Input = EeChunkProofInput;
@@ -45,11 +56,9 @@ impl ZkVmProgram for EeChunkProgram {
         B: zkaleido::ZkVmInputBuilder<'a>,
     {
         let mut builder = B::new();
-        builder.write_serde(&input.genesis)?;
         let rkyv_bytes = rkyv::to_bytes::<RkyvError>(&input.private_input)
             .map_err(|e| ZkVmInputError::InputBuild(e.to_string()))?;
         builder.write_buf(&rkyv_bytes)?;
-        builder.write_buf(&input.bridge_params.as_ssz_bytes())?;
         builder.build()
     }
 
@@ -63,8 +72,11 @@ impl ZkVmProgram for EeChunkProgram {
 }
 
 impl EeChunkProgram {
-    pub fn native_host() -> NativeHost {
-        NativeHost::new(test_signing_key(), process_ee_chunk)
+    pub fn native_host(&self) -> NativeHost {
+        let params = self.params.clone();
+        NativeHost::new(test_signing_key(), move |zkvm| {
+            process_ee_chunk(zkvm, &params)
+        })
     }
 
     /// Predicate key matching the signing key the native host uses, for wiring into
@@ -76,9 +88,10 @@ impl EeChunkProgram {
 
     /// Executes the chunk proof program using the native host for testing.
     pub fn execute(
+        &self,
         input: &<Self as ZkVmProgram>::Input,
     ) -> ZkVmResult<<Self as ZkVmProgram>::Output> {
-        let host = Self::native_host();
+        let host = self.native_host();
         let summary = <Self as ZkVmProgram>::execute(input, &host)?;
         <Self as ZkVmProgram>::process_output::<NativeHost>(summary.public_values())
     }
@@ -88,11 +101,13 @@ impl EeChunkProgram {
 mod tests {
     use std::{fs, path::PathBuf, sync::Arc};
 
+    use alpen_ee_params::{AlpenSpecSchedule, BlobSpec, DEFAULT_ALPEN_EE_ACCOUNT_ID, EvmSpec};
     use alpen_reth_evm::evm::AlpenEvmFactory;
     use reth_primitives_traits::Block as _;
     use rsp_client_executor::io::EthClientExecutorInput;
     use serde::Deserialize;
     use strata_acct_types::Hash;
+    use strata_bridge_params::BridgeParams;
     use strata_codec::encode_to_vec;
     use strata_ee_acct_types::{ExecBlock, ExecHeader, ExecPayload, ExecutionEnvironment};
     use strata_ee_chain_types::{ChunkTransition, ExecInputs};
@@ -100,6 +115,7 @@ mod tests {
     use strata_evm_ee::{
         EvmBlock, EvmBlockBody, EvmExecutionEnvironment, EvmHeader, EvmPartialState,
     };
+    use strata_l1_txfmt::MagicBytes;
 
     use super::*;
 
@@ -116,9 +132,25 @@ mod tests {
         data.witness
     }
 
+    /// The dev-network `AlpenParams` this test exercises `process_ee_chunk`
+    /// against — chosen because `witness_params.json`'s embedded genesis
+    /// (chain id 2892, all hardforks active from genesis) matches it.
+    fn dev_alpen_params() -> AlpenParams {
+        let evm_spec: EvmSpec =
+            serde_json::from_str(alpen_chainspec::DEV_CHAIN_SPEC).expect("dev chain should parse");
+        AlpenParams::new(
+            DEFAULT_ALPEN_EE_ACCOUNT_ID,
+            BridgeParams::default(),
+            BlobSpec::new(MagicBytes::new(*b"ALPN")),
+            AlpenSpecSchedule::genesis(),
+            evm_spec,
+        )
+    }
+
     #[test]
     fn test_native_chunk_execution() {
         let witness = load_witness();
+        let params = dev_alpen_params();
 
         // Extract parent header (last ancestor = direct parent of current block).
         let parent_header = witness
@@ -152,9 +184,10 @@ mod tests {
         let tip_state_root = block.get_header().get_state_root();
         let tip_exec_header_summary = block.get_header().get_exec_header_summary();
 
-        // Execute the block to get outputs.
+        // Execute the block to get outputs, against the same params `params`
+        // will hand to `process_ee_chunk` below.
         let chain_spec: Arc<reth_chainspec::ChainSpec> =
-            Arc::new((&witness.genesis).try_into().unwrap());
+            Arc::new(params.evm_spec().chain_spec().clone());
         let ee = EvmExecutionEnvironment::new(chain_spec, AlpenEvmFactory::default());
         let header_intrinsics = block.get_header().get_intrinsics();
         let exec_payload = ExecPayload::new(&header_intrinsics, block.get_body());
@@ -190,15 +223,12 @@ mod tests {
             raw_chunk_pre_state,
         );
 
-        let proof_input = EeChunkProofInput {
-            genesis: witness.genesis,
-            private_input,
-            bridge_params: BridgeParams::default(),
-        };
+        let proof_input = EeChunkProofInput { private_input };
 
         // Run the full native execution pipeline.
-        let result =
-            EeChunkProgram::execute(&proof_input).expect("native execution should succeed");
+        let result = EeChunkProgram::new(params)
+            .execute(&proof_input)
+            .expect("native execution should succeed");
 
         assert_eq!(result.parent_exec_blkid(), parent_blkid);
         assert_eq!(result.tip_exec_blkid(), tip_blkid);

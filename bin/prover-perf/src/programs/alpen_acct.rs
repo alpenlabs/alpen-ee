@@ -6,9 +6,7 @@
 //! valid for an executed chunk.
 
 use alpen_ee_da_types::DaWitness;
-use rsp_primitives::genesis::Genesis;
 use ssz::Encode;
-use strata_bridge_params::BridgeParams;
 use strata_codec::encode_to_vec;
 use strata_ee_acct_runtime::EePrivateInput;
 use strata_ee_acct_types::{EeAccountState, UpdateExtraData};
@@ -46,11 +44,9 @@ fn prepare_input() -> EeAcctProofInput {
     let ee_private_input = EePrivateInput::new(Vec::new(), Vec::new(), Vec::new());
 
     EeAcctProofInput {
-        genesis: Genesis::Mainnet,
         ee_private_input,
         snark_acct_private_input,
         da_witness: DaWitness::empty(),
-        bridge_params: BridgeParams::default(),
     }
 }
 
@@ -64,6 +60,7 @@ pub(crate) fn gen_perf_report(host: &impl ZkVmHost) -> (String, ExecutionSummary
 
 #[cfg(test)]
 mod tests {
+    use alpen_ee_params::AlpenParams;
     use strata_predicate::PredicateKey;
 
     use super::*;
@@ -74,8 +71,10 @@ mod tests {
         // Native execution uses `always_accept` so empty proof bytes
         // on each `ChunkInput` pass the recursive verifier. SP1 mock
         // perf substitutes the real predicate at host-init time, so
-        // the cycle count there reflects an honest verify.
-        let program = EeAcctProgram::new(PredicateKey::always_accept());
+        // the cycle count there reflects an honest verify. Not exercised
+        // since this benchmark runs zero chunks, so the default (empty EVM
+        // genesis) params are fine here.
+        let program = EeAcctProgram::new(PredicateKey::always_accept(), AlpenParams::default());
         let result = program.execute(&input).expect("native execution");
         assert_eq!(
             result.cur_state().inner_state(),

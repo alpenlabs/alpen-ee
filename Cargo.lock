@@ -983,7 +983,6 @@ name = "alpen-chainspec"
 version = "0.3.0-alpha.1"
 dependencies = [
  "alloy-genesis",
- "alloy-primitives",
  "eyre",
  "reth-chainspec",
  "reth-cli",
@@ -1083,11 +1082,9 @@ dependencies = [
  "reth-primitives-traits",
  "reth-provider",
  "reth-tasks",
- "rsp-primitives",
  "serde_json",
  "ssz",
  "strata-acct-types",
- "strata-bridge-params",
  "strata-btcio",
  "strata-codec",
  "strata-common",
@@ -1367,6 +1364,7 @@ name = "alpen-ee-params"
 version = "0.3.0-alpha.1"
 dependencies = [
  "alloy-genesis",
+ "alloy-primitives",
  "alpen-chainspec",
  "num_enum 0.7.6",
  "reth-chainspec",
@@ -1481,7 +1479,6 @@ name = "alpen-reth-exex"
 version = "0.3.0-alpha.1"
 dependencies = [
  "alloy-eips",
- "alloy-genesis",
  "alloy-primitives",
  "alloy-rpc-types",
  "alpen-ee-common",
@@ -1497,7 +1494,6 @@ dependencies = [
  "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
- "rsp-primitives",
  "strata-acct-types",
  "tokio",
  "tracing",
@@ -15515,13 +15511,12 @@ version = "0.1.0"
 dependencies = [
  "alpen-ee-da-runtime",
  "alpen-ee-da-types",
+ "alpen-ee-params",
  "alpen-reth-evm",
  "k256",
  "reth-chainspec",
  "rkyv",
- "rsp-primitives",
  "ssz",
- "strata-bridge-params",
  "strata-codec",
  "strata-ee-acct-runtime",
  "strata-ee-acct-types",
@@ -15538,13 +15533,14 @@ dependencies = [
 name = "strata-proofimpl-alpen-chunk"
 version = "0.1.0"
 dependencies = [
+ "alpen-chainspec",
+ "alpen-ee-params",
  "alpen-reth-evm",
  "k256",
  "reth-chainspec",
  "reth-primitives-traits",
  "rkyv",
  "rsp-client-executor",
- "rsp-primitives",
  "serde",
  "serde_json",
  "ssz",
@@ -15555,6 +15551,7 @@ dependencies = [
  "strata-ee-chain-types",
  "strata-ee-chunk-runtime",
  "strata-evm-ee",
+ "strata-l1-txfmt",
  "strata-predicate",
  "zkaleido",
  "zkaleido-native-adapter",
@@ -15592,7 +15589,9 @@ dependencies = [
 name = "strata-provers-perf"
 version = "0.3.0-alpha.1"
 dependencies = [
+ "alpen-chainspec",
  "alpen-ee-da-types",
+ "alpen-ee-params",
  "alpen-reth-evm",
  "anyhow",
  "argh",
@@ -15601,7 +15600,6 @@ dependencies = [
  "reth-chainspec",
  "reth-primitives-traits",
  "rsp-client-executor",
- "rsp-primitives",
  "serde",
  "serde_json",
  "sp1-sdk",
@@ -15615,6 +15613,7 @@ dependencies = [
  "strata-ee-chunk-runtime",
  "strata-evm-ee",
  "strata-identifiers",
+ "strata-l1-txfmt",
  "strata-predicate",
  "strata-proofimpl-alpen-acct",
  "strata-proofimpl-alpen-chunk",
@@ -15713,6 +15712,9 @@ dependencies = [
 name = "strata-sp1-guest-builder"
 version = "0.3.0-alpha.1"
 dependencies = [
+ "alloy-consensus",
+ "alpen-ee-params",
+ "serde_json",
  "sp1-build",
  "sp1-sdk",
  "sp1-verifier",
