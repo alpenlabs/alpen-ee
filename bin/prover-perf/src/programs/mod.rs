@@ -29,22 +29,26 @@ impl FromStr for GuestProgram {
 /// [`ExecutionSummary`] (cycles, gas, public values).
 #[cfg(feature = "sp1")]
 pub async fn run_sp1_programs(programs: &[GuestProgram]) -> Vec<(String, ExecutionSummary)> {
-    use strata_sp1_guest_builder::{GUEST_ALPEN_ACCT_ELF, GUEST_ALPEN_CHUNK_ELF};
+    use std::fs;
+
+    use strata_sp1_guest_builder::{GUEST_ALPEN_ACCT_ELF_PATH, GUEST_ALPEN_CHUNK_ELF_PATH};
     use zkaleido_sp1_host::{SP1Host, SP1HostConfig};
 
     let mut reports = Vec::with_capacity(programs.len());
     for program in programs {
         let report = match program {
             GuestProgram::AlpenAcct => {
-                let host =
-                    SP1Host::init_with_config(&GUEST_ALPEN_ACCT_ELF, SP1HostConfig::default())
-                        .await;
+                let elf = fs::read(GUEST_ALPEN_ACCT_ELF_PATH).unwrap_or_else(|e| {
+                    panic!("failed to read guest elf at {GUEST_ALPEN_ACCT_ELF_PATH}: {e}")
+                });
+                let host = SP1Host::init_with_config(&elf, SP1HostConfig::default()).await;
                 alpen_acct::gen_perf_report(&host)
             }
             GuestProgram::AlpenChunk => {
-                let host =
-                    SP1Host::init_with_config(&GUEST_ALPEN_CHUNK_ELF, SP1HostConfig::default())
-                        .await;
+                let elf = fs::read(GUEST_ALPEN_CHUNK_ELF_PATH).unwrap_or_else(|e| {
+                    panic!("failed to read guest elf at {GUEST_ALPEN_CHUNK_ELF_PATH}: {e}")
+                });
+                let host = SP1Host::init_with_config(&elf, SP1HostConfig::default()).await;
                 alpen_chunk::gen_perf_report(&host)
             }
         };
