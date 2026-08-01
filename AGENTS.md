@@ -236,7 +236,7 @@ Bitcoin primitive types, header verification, and related helpers are provided t
 | `snark-acct-sys` | Snark account system logic |
 | `csm-types` | Client state machine type definitions |
 
-### Proof Domain (`crates/proof-impl/`, `crates/zkvm/`)
+### Proof Domain (`crates/proof-impl/`)
 
 Zero-knowledge proof generation.
 
@@ -247,7 +247,6 @@ Zero-knowledge proof generation.
 | `proof-impl/alpen-chunk` | Alpen chunk proof implementation |
 | `proof-impl/alpen-acct` | Alpen account proof implementation |
 | `prover-core` | Shared prover coordination primitives |
-| `zkvm/hosts` | ZKVM host implementations (SP1, RISC0, Native) |
 | `provers/sp1` | SP1 guest builder support |
 | `provers/sp1/guest-checkpoint` | SP1 checkpoint proof guest |
 | `provers/sp1/guest-alpen-chunk` | SP1 Alpen chunk proof guest |

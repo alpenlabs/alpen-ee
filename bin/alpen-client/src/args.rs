@@ -7,7 +7,11 @@
 //! env var) keeps its existing name; the grouping only affects code layout
 //! and `--help` section headings.
 
-use std::{env, fs, path::Path, sync::Arc};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 #[cfg(feature = "sequencer")]
 use alloy_primitives::{address, Address};
@@ -246,6 +250,19 @@ pub(crate) struct SequencerArgs {
     /// `DEFAULT_SP1_DEADLINE_SECS`).
     #[arg(long, required = false)]
     pub sp1_proof_deadline_secs: Option<u64>,
+
+    /// Path to the compiled SP1 guest ELF for the chunk prover.
+    ///
+    /// Required with the remote SP1 backend (i.e. without
+    /// `--dev-native-prover`). Lets one `alpen-client` build run against
+    /// different guest ELFs without a rebuild.
+    #[arg(long, required = false)]
+    pub chunk_elf_path: Option<PathBuf>,
+
+    /// Path to the compiled SP1 guest ELF for the account prover. Same
+    /// requirements as `--chunk-elf-path`.
+    #[arg(long, required = false)]
+    pub acct_elf_path: Option<PathBuf>,
 
     #[cfg(feature = "sequencer")]
     #[arg(long, default_value_t = DEFAULT_BENEFICIARY_ADDRESS)]
@@ -580,6 +597,10 @@ mod additional_config_tests {
             "--dev-track-latest-epoch",
             "--sp1-proof-deadline-secs",
             "60",
+            "--chunk-elf-path",
+            "/tmp/guest-alpen-chunk.elf",
+            "--acct-elf-path",
+            "/tmp/guest-alpen-acct.elf",
             "--btcio-fee-policy",
             "fixed",
             "--btcio-conf-target",
@@ -608,6 +629,14 @@ mod additional_config_tests {
         assert!(config.ol.dummy_client);
         assert_eq!(config.btcio.fee_policy, BtcioFeePolicyArg::Fixed);
         assert_eq!(config.btcio.fee_rate, Some(1.5));
+        assert_eq!(
+            config.sequencer.chunk_elf_path,
+            Some(PathBuf::from("/tmp/guest-alpen-chunk.elf"))
+        );
+        assert_eq!(
+            config.sequencer.acct_elf_path,
+            Some(PathBuf::from("/tmp/guest-alpen-acct.elf"))
+        );
     }
 }
 

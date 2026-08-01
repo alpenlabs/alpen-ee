@@ -14,7 +14,7 @@
 //! All backed by `EeProverDbSled`; see `alpen_ee_database::sleddb::prover_db`
 //! for schemas.
 
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use alpen_ee_common::{BatchStorage, ChunkStorage, SequencerOLClient};
 use alpen_ee_database::{EeDatabases, EeNodeStorage};
@@ -27,8 +27,8 @@ use tracing::info;
 
 use super::prover::{
     launch_validated_ee_batch_prover, AcctRangeWitnessFn, AcctReceiptHook, AcctSpec,
-    ChunkReceiptHook, ChunkSpec, EeBatchProofDbManager, EeChunkReceiptStore, EeProverBuilders,
-    EeProverStores, EeProverTaskDbManager, PaasBatchProver,
+    ChunkReceiptHook, ChunkSpec, EeBatchProofDbManager, EeChunkReceiptStore, EeProverBackendArgs,
+    EeProverBuilders, EeProverStores, EeProverTaskDbManager, PaasBatchProver,
 };
 use crate::service_executor::ServiceExecutor;
 
@@ -40,6 +40,8 @@ pub(crate) struct EeProverInputs<P> {
     pub(crate) btc_client: Arc<BtcClient>,
     pub(crate) dev_native_prover: bool,
     pub(crate) sp1_deadline_secs: Option<u64>,
+    pub(crate) chunk_elf_path: Option<PathBuf>,
+    pub(crate) acct_elf_path: Option<PathBuf>,
     pub(crate) params: Arc<AlpenParams>,
 }
 
@@ -61,6 +63,8 @@ where
         btc_client,
         dev_native_prover,
         sp1_deadline_secs,
+        chunk_elf_path,
+        acct_elf_path,
         params,
     } = inputs;
 
@@ -122,8 +126,12 @@ where
             chunk_storage: chunk_storage_dyn,
             batch_proofs,
         },
-        dev_native_prover,
-        sp1_deadline_secs,
+        EeProverBackendArgs {
+            use_native_prover: dev_native_prover,
+            sp1_deadline_secs,
+            chunk_elf_path,
+            acct_elf_path,
+        },
         params,
     )
     .await?;

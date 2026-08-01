@@ -6,7 +6,9 @@
 //! against the OL's expected `update_vk`, and launches both prover
 //! services.
 
-use std::{sync::Arc, time::Duration};
+#[cfg(feature = "sp1")]
+use std::fs;
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use alpen_ee_common::{ChunkStorage, SequencerOLClient};
 use alpen_ee_params::AlpenParams;
@@ -19,8 +21,6 @@ use strata_proofimpl_predicate_keys::{
     validate_expected_predicate_key, NativeAlpenAcctPredicateKey, NativeAlpenChunkPredicateKey,
     PredicateKeyProvider, Sp1Groth16PredicateKey,
 };
-#[cfg(feature = "sp1")]
-use strata_zkvm_hosts::sp1::{alpen_acct_host, alpen_chunk_host};
 use tracing::info;
 #[cfg(feature = "sp1")]
 use zkaleido_sp1_host::{SP1Host, SP1HostConfig};
@@ -57,7 +57,38 @@ struct EeProvers {
 
 enum EeProverBackend {
     Native,
-    Sp1 { deadline_secs: Option<u64> },
+    Sp1 {
+        deadline_secs: Option<u64>,
+        chunk_elf_path: PathBuf,
+        acct_elf_path: PathBuf,
+    },
+}
+
+/// CLI-derived knobs that select and configure the EE batch prover backend.
+pub(crate) struct EeProverBackendArgs {
+    pub(crate) use_native_prover: bool,
+    pub(crate) sp1_deadline_secs: Option<u64>,
+    pub(crate) chunk_elf_path: Option<PathBuf>,
+    pub(crate) acct_elf_path: Option<PathBuf>,
+}
+
+impl EeProverBackendArgs {
+    fn into_backend(self) -> eyre::Result<EeProverBackend> {
+        if self.use_native_prover {
+            return Ok(EeProverBackend::Native);
+        }
+        let chunk_elf_path = self.chunk_elf_path.ok_or_else(|| {
+            eyre::eyre!("--chunk-elf-path is required unless --dev-native-prover is set")
+        })?;
+        let acct_elf_path = self.acct_elf_path.ok_or_else(|| {
+            eyre::eyre!("--acct-elf-path is required unless --dev-native-prover is set")
+        })?;
+        Ok(EeProverBackend::Sp1 {
+            deadline_secs: self.sp1_deadline_secs,
+            chunk_elf_path,
+            acct_elf_path,
+        })
+    }
 }
 
 /// Picks a prover backend, builds the paas provers, validates the resulting
@@ -68,21 +99,14 @@ pub(crate) async fn launch_validated_ee_batch_prover(
     service_executor: &ServiceExecutor,
     builders: EeProverBuilders,
     stores: EeProverStores,
-    use_native_prover: bool,
-    sp1_deadline_secs: Option<u64>,
+    backend_args: EeProverBackendArgs,
     params: Arc<AlpenParams>,
 ) -> eyre::Result<Arc<PaasBatchProver>> {
     let ol_account_update_vk = ol_client
         .get_latest_account_update_vk()
         .await
         .context("failed to fetch OL account update_vk for prover validation")?;
-    let backend = if use_native_prover {
-        EeProverBackend::Native
-    } else {
-        EeProverBackend::Sp1 {
-            deadline_secs: sp1_deadline_secs,
-        }
-    };
+    let backend = backend_args.into_backend()?;
     let prover_config = build_ee_prover_config(builders, backend, params).await?;
 
     validate_ee_account_prover_predicate_key(
@@ -130,7 +154,11 @@ async fn build_ee_prover_config(
             })
         }
         #[cfg(feature = "sp1")]
-        EeProverBackend::Sp1 { deadline_secs } => {
+        EeProverBackend::Sp1 {
+            deadline_secs,
+            chunk_elf_path,
+            acct_elf_path,
+        } => {
             use zkaleido::ZkVmExecutor;
 
             let deadline_secs = deadline_secs.unwrap_or(DEFAULT_SP1_DEADLINE_SECS);
@@ -138,18 +166,26 @@ async fn build_ee_prover_config(
             info!(
                 target: "alpen-client",
                 deadline_secs,
+                ?chunk_elf_path,
+                ?acct_elf_path,
                 "sp1 EE prover deadline configured"
             );
 
-            // TODO(STR-4155): `alpen_chunk_host`/`alpen_acct_host` resolve their ELF either
-            // from a compile-time dependency on `strata-sp1-guest-builder` (one chainspec
-            // baked in) or an `ELF_BASE_PATH` env var (see `strata_zkvm_hosts::sp1`). Take
-            // the guest ELF paths as explicit CLI/config args to this binary instead, so one
-            // `alpen-client` build can run against different guest ELFs without relying on a
-            // rebuild.
             let sp1_config = SP1HostConfig::default().with_deadline(deadline);
-            let chunk_host: SP1Host = (**alpen_chunk_host(sp1_config.clone()).await).clone();
-            let acct_host: SP1Host = (**alpen_acct_host(sp1_config).await).clone();
+            let chunk_elf = fs::read(&chunk_elf_path).with_context(|| {
+                format!(
+                    "failed to read chunk guest ELF at {}",
+                    chunk_elf_path.display()
+                )
+            })?;
+            let acct_elf = fs::read(&acct_elf_path).with_context(|| {
+                format!(
+                    "failed to read account guest ELF at {}",
+                    acct_elf_path.display()
+                )
+            })?;
+            let chunk_host = SP1Host::init_with_config(&chunk_elf, sp1_config.clone()).await;
+            let acct_host = SP1Host::init_with_config(&acct_elf, sp1_config).await;
             let account_predicate_key = Sp1Groth16PredicateKey::new(acct_host.program_id().0)
                 .predicate_key()
                 .map_err(|e| {

@@ -32,6 +32,8 @@ if [ "${SEQUENCER_MODE}" = "true" ]; then
     BITCOIND_RPC_PASSWORD="${BITCOIND_RPC_PASSWORD:?BITCOIND_RPC_PASSWORD must be set}"
     STRATA_SUBMIT_RPC_TOKEN="${STRATA_SUBMIT_RPC_TOKEN:?STRATA_SUBMIT_RPC_TOKEN must be set}"
     BTCIO_FEE_POLICY="${BTCIO_FEE_POLICY:-bitcoind}"
+    CHUNK_ELF_PATH="${CHUNK_ELF_PATH:-/app/elfs/sp1/guest-alpen-chunk.elf}"
+    ACCT_ELF_PATH="${ACCT_ELF_PATH:-/app/elfs/sp1/guest-alpen-acct.elf}"
 
     set -- \
         --sequencer \
@@ -40,6 +42,8 @@ if [ "${SEQUENCER_MODE}" = "true" ]; then
         --btc-rpc-user "${BITCOIND_RPC_USER}" \
         --btc-rpc-password "${BITCOIND_RPC_PASSWORD}" \
         --btcio-fee-policy "${BTCIO_FEE_POLICY}" \
+        --chunk-elf-path "${CHUNK_ELF_PATH}" \
+        --acct-elf-path "${ACCT_ELF_PATH}" \
         "$@"
 
     if [ -n "${BTCIO_CONF_TARGET:-}" ]; then

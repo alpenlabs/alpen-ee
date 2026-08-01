@@ -340,6 +340,8 @@ where
             btc_client: da_pipeline.btc_client,
             dev_native_prover: sequencer_args.dev_native_prover,
             sp1_deadline_secs: sequencer_args.sp1_proof_deadline_secs,
+            chunk_elf_path: sequencer_args.chunk_elf_path.clone(),
+            acct_elf_path: sequencer_args.acct_elf_path.clone(),
             params: params.clone(),
         },
     )
