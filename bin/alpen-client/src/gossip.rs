@@ -3,9 +3,9 @@
 use std::collections::HashMap;
 
 use alpen_ee_common::BlockNumHash;
-#[cfg(feature = "sequencer")]
-use alpen_reth_node::AlpenGossipMessage;
-use alpen_reth_node::{AlpenGossipCommand, AlpenGossipEvent, AlpenGossipPackage};
+use alpen_reth_node::{
+    AlpenGossipCommand, AlpenGossipEvent, AlpenGossipMessage, AlpenGossipPackage,
+};
 use reth_network_api::PeerId;
 use reth_primitives::Header;
 use reth_provider::CanonStateNotification;
@@ -27,7 +27,6 @@ pub(crate) struct GossipConfig {
     pub sequencer_enabled: bool,
 
     /// Sequencer's private key for signing (only in sequencer mode).
-    #[cfg(feature = "sequencer")]
     pub sequencer_privkey: Option<Buf32>,
 }
 
@@ -214,36 +213,33 @@ fn broadcast_new_block(
         "Broadcasting new block to peers"
     );
 
-    #[cfg(feature = "sequencer")]
-    {
-        let Some(sequencer_privkey) = config.sequencer_privkey else {
-            error!(
-                target: "alpen-gossip",
-                "Sequencer mode enabled but no private key configured; skipping broadcast"
-            );
-            return;
-        };
-
-        let msg = AlpenGossipMessage::new(
-            tip.clone(),
-            // NOTE: we use the block number as the sequence number
-            //       because it's the block number from the header, which naturally
-            //       provides monotonic, unique sequence numbers for gossip messages.
-            tip.number,
+    let Some(sequencer_privkey) = config.sequencer_privkey else {
+        error!(
+            target: "alpen-gossip",
+            "Sequencer mode enabled but no private key configured; skipping broadcast"
         );
-        let pkg = msg.into_package(config.sequencer_pubkey, sequencer_privkey);
+        return;
+    };
 
-        for (peer_id, sender) in connections {
-            if sender
-                .send(AlpenGossipCommand::SendPackage(pkg.clone()))
-                .is_err()
-            {
-                warn!(
-                    target: "alpen-gossip",
-                    %peer_id,
-                    "Failed to send message to peer"
-                );
-            }
+    let msg = AlpenGossipMessage::new(
+        tip.clone(),
+        // NOTE: we use the block number as the sequence number
+        //       because it's the block number from the header, which naturally
+        //       provides monotonic, unique sequence numbers for gossip messages.
+        tip.number,
+    );
+    let pkg = msg.into_package(config.sequencer_pubkey, sequencer_privkey);
+
+    for (peer_id, sender) in connections {
+        if sender
+            .send(AlpenGossipCommand::SendPackage(pkg.clone()))
+            .is_err()
+        {
+            warn!(
+                target: "alpen-gossip",
+                %peer_id,
+                "Failed to send message to peer"
+            );
         }
     }
 }

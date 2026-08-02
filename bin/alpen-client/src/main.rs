@@ -29,9 +29,9 @@ use alpen_ee_common::{
 use alpen_ee_config::AlpenEeConfig;
 use alpen_ee_database::init_db_storage;
 use alpen_ee_engine::{create_engine_control_task, sync_chainstate_to_engine, AlpenRethExecEngine};
-#[cfg(feature = "sequencer")]
-use alpen_ee_genesis::ensure_finalized_exec_chain_genesis;
-use alpen_ee_genesis::{ensure_batch_genesis, ensure_genesis_ee_account_state};
+use alpen_ee_genesis::{
+    ensure_batch_genesis, ensure_finalized_exec_chain_genesis, ensure_genesis_ee_account_state,
+};
 use alpen_ee_ol_tracker::init_ol_tracker_state;
 use alpen_ee_rpc_server::{AlpenEeRpcServer, EeRpcServer};
 use alpen_reth_evm::evm::AlpenEvmFactory;
@@ -60,7 +60,7 @@ use tokio::{
 use tracing::{error, info, info_span, Instrument};
 
 use crate::{
-    args::AdditionalConfig,
+    args::{sequencer_privkey_from_env, AdditionalConfig},
     dummy_ol_client::DummyOLClient,
     gossip::{create_gossip_task, GossipConfig},
     ol_client::OLClientKind,
@@ -122,10 +122,6 @@ fn main() {
                 "Starting EE Node",
             );
 
-            #[cfg(feature = "sequencer")]
-            let writer_config =
-                sequencer::resolve_writer_config(ext.sequencer.enabled, &ext.btcio)?;
-
             // OL client URL is not used when the dummy OL client is enabled
             let ol_client_url = ext.ol.client_url.clone().unwrap_or_default();
 
@@ -137,41 +133,17 @@ fn main() {
                 ext.node.db_retry_count,
             ));
 
-            #[cfg(feature = "sequencer")]
-            let block_builder_config =
-                sequencer::block_builder_config_from_env(ext.sequencer.enabled)?;
-
-            #[cfg(feature = "sequencer")]
-            let sequencer_privkey = sequencer::sequencer_privkey_from_env(ext.sequencer.enabled)?;
-
-            #[cfg(feature = "sequencer")]
             // NOTE: ATM we reuse `SEQUENCER_PRIVATE_KEY` for both gossip
             // package signing and EE DA reveal tapscript signing. That is
             // operationally convenient for now, but it couples network
             // identity with Bitcoin DA spend authority. Should we split this
             // into a dedicated DA reveal signing key/config?
-            let sequencer_keypair = match sequencer_privkey.as_ref() {
-                Some(privkey) => Some(sequencer::sequencer_bitcoin_keypair(privkey)?),
-                None => None,
-            };
+            let sequencer_privkey = sequencer_privkey_from_env(ext.sequencer.enabled)?;
 
-            let gossip_config = {
-                #[cfg(feature = "sequencer")]
-                {
-                    GossipConfig {
-                        sequencer_pubkey: ext.sequencer.pubkey,
-                        sequencer_enabled: ext.sequencer.enabled,
-                        sequencer_privkey,
-                    }
-                }
-
-                #[cfg(not(feature = "sequencer"))]
-                {
-                    GossipConfig {
-                        sequencer_pubkey: ext.sequencer.pubkey,
-                        sequencer_enabled: false,
-                    }
-                }
+            let gossip_config = GossipConfig {
+                sequencer_pubkey: ext.sequencer.pubkey,
+                sequencer_enabled: ext.sequencer.enabled,
+                sequencer_privkey,
             };
 
             // --- INITIALIZE STATE ---
@@ -237,35 +209,25 @@ fn main() {
                 .await
                 .context("ol tracker state initialization should not fail")?;
 
-            // Sequencer-only startup state. Gated on the runtime `--sequencer` flag.
-            #[cfg(feature = "sequencer")]
-            let sequencer_boot_state = sequencer::init_boot_state(
-                ext.sequencer.enabled,
-                storage.as_ref(),
-                ol_client.as_ref(),
-            )
-            .await?;
-
-            let initial_preconf_head = {
+            // The sequencer's real exec-chain tip, when running as a sequencer. Needed
+            // before the reth node is built so the preconf watch channel (seeding the
+            // engine-control task below) never starts from the wrong fork-choice head.
+            let sequencer_head = {
                 #[cfg(feature = "sequencer")]
                 {
-                    if let Some(boot) = sequencer_boot_state.as_ref() {
-                        boot.tip_blocknumhash()
-                    } else {
-                        // In non-sequencer mode, we only have the hash from OL tracker.
-                        // Use block number 0 as initial value; it will be updated by gossip.
-                        let hash = ol_tracker_state.best_ee_state().last_exec_blkid();
-                        BlockNumHash::new(hash, 0)
-                    }
+                    sequencer::initial_preconf_head(ext.sequencer.enabled, storage.as_ref()).await?
                 }
                 #[cfg(not(feature = "sequencer"))]
                 {
-                    // In non-sequencer mode, we only have the hash from OL tracker.
-                    // Use block number 0 as initial value; it will be updated by gossip.
-                    let hash = ol_tracker_state.best_ee_state().last_exec_blkid();
-                    BlockNumHash::new(hash, 0)
+                    None
                 }
             };
+            let initial_preconf_head = sequencer_head.unwrap_or_else(|| {
+                // In non-sequencer mode, we only have the hash from OL tracker.
+                // Use block number 0 as initial value; it will be updated by gossip.
+                let hash = ol_tracker_state.best_ee_state().last_exec_blkid();
+                BlockNumHash::new(hash, 0)
+            });
             // --- INITIALIZE SERVICES ---
 
             // Create gossip channel before building the node so we can register it early
@@ -361,7 +323,6 @@ fn main() {
             let node = &handle.node;
 
             // Sync chainstate to engine for sequencer nodes before starting other tasks
-            #[cfg(feature = "sequencer")]
             if ext.sequencer.enabled {
                 let engine = AlpenRethExecEngine::new(node.beacon_engine_handle.clone());
                 let storage_clone = storage.clone();
@@ -406,18 +367,15 @@ fn main() {
             );
 
             #[cfg(feature = "sequencer")]
-            if let Some(boot_state) = sequencer_boot_state {
-                sequencer::launch_sequencer_services(
+            if ext.sequencer.enabled {
+                sequencer::launch(
                     &service_executor,
                     sequencer::SequencerLaunchCtx {
                         node_provider: node.provider.clone(),
                         task_executor: node.task_executor.clone(),
                         payload_builder_handle: node.payload_builder_handle.clone(),
                         beacon_engine_handle: node.beacon_engine_handle.clone(),
-                        block_builder_config,
-                        sequencer_args: &ext.sequencer,
-                        da_args: &ext.da,
-                        btcio_args: &ext.btcio,
+                        ext: &ext,
                         storage: storage.clone(),
                         dbs: &dbs,
                         db_handle: db_handle.clone(),
@@ -428,9 +386,10 @@ fn main() {
                         ol_client,
                         genesis_info,
                         params: params.clone(),
-                        writer_config,
-                        sequencer_keypair,
-                        boot_state,
+                        sequencer_privkey: sequencer_privkey.expect(
+                            "sequencer_privkey_from_env already validated SEQUENCER_PRIVATE_KEY \
+                             is set when --sequencer is set",
+                        ),
                     },
                 )
                 .await?;
@@ -519,14 +478,11 @@ async fn ensure_genesis<TStorage: Storage + ExecBlockStorage + BatchStorage>(
 ) -> eyre::Result<()> {
     ensure_genesis_ee_account_state(config, genesis_epoch, storage).await?;
 
-    #[cfg(feature = "sequencer")]
     if is_sequencer {
         ensure_finalized_exec_chain_genesis(config, genesis_epoch.to_block_commitment(), storage)
             .await?;
         ensure_batch_genesis(config, storage).await?;
     }
-    #[cfg(not(feature = "sequencer"))]
-    let _ = is_sequencer;
 
     Ok(())
 }

@@ -1,5 +1,12 @@
 //! Sequencer-only startup: boot-state init, the DA/btcio pipeline, and the
 //! batch/chunk builder services that only run with `--sequencer`.
+//!
+//! [`launch`] is the sole entry point once the reth node exists: it resolves
+//! its own writer config, block-builder config, boot state, and DA reveal
+//! signing keypair, so callers only need to know a node exists and the
+//! `--sequencer` flag is set. [`initial_preconf_head`] is the one other
+//! entry point, needed earlier — before the node is built — to seed the p2p
+//! preconf head watch with the sequencer's real exec-chain tip.
 
 mod da_pipeline;
 mod gas_data_provider;
@@ -51,11 +58,7 @@ use tokio::{
 use tracing::{info, info_span, Instrument};
 
 use self::{gas_data_provider::RethGasDataProvider, payload_builder::AlpenRethPayloadEngine};
-use crate::{
-    args::{BtcioArgs, DaArgs, SequencerArgs},
-    ol_client::OLClientKind,
-    service_executor::ServiceExecutor,
-};
+use crate::{args::AdditionalConfig, ol_client::OLClientKind, service_executor::ServiceExecutor};
 
 /// Environment variable for overriding the default EE block time.
 const ALPEN_EE_BLOCK_TIME_MS_ENV_VAR: &str = "ALPEN_EE_BLOCK_TIME_MS";
@@ -63,36 +66,40 @@ const ALPEN_EE_BLOCK_TIME_MS_ENV_VAR: &str = "ALPEN_EE_BLOCK_TIME_MS";
 /// Default capacity for the batch builder → chunk builder event channel.
 const DEFAULT_BATCH_EVENT_CHANNEL_CAPACITY: usize = 64;
 
-/// Startup state that only the EE sequencer needs.
-///
-/// Bundled into one value so it can be gated behind a single runtime
-/// `--sequencer` check and carried as a single `Option`.
-pub(crate) struct SequencerBootState {
+/// Startup state that only the EE sequencer needs: the OL chain tracker,
+/// exec chain, batch builder, and batch lifecycle states loaded from
+/// storage once the node is up.
+struct SequencerBootState {
     ol_chain_tracker: OLChainTrackerState,
     exec_chain: ExecChainState,
     batch_builder: BatchBuilderState<BlockCountPolicy>,
     batch_lifecycle: BatchLifecycleState,
 }
 
-impl SequencerBootState {
-    /// The exec chain tip, used to seed the p2p preconf head watch.
-    pub(crate) fn tip_blocknumhash(&self) -> BlockNumHash {
-        self.exec_chain.tip_blocknumhash()
-    }
-}
-
-/// Resolves the btcio writer config up front so flag misuse surfaces before
-/// I/O, when running as a sequencer.
-pub(crate) fn resolve_writer_config(
-    sequencer_enabled: bool,
-    btcio_args: &BtcioArgs,
-) -> eyre::Result<Option<Arc<WriterConfig>>> {
-    if !sequencer_enabled {
+/// The sequencer's exec-chain tip, used to seed the p2p preconf head watch
+/// before the reth node (and therefore the engine-control task) is built.
+///
+/// Only loads the exec-chain piece of boot state; [`launch`] loads the full
+/// [`SequencerBootState`] again once the node is up. Both reads are cheap,
+/// local, read-only sled reads with nothing else touching storage in
+/// between, so re-reading is simpler than threading a boot-state value
+/// across the generic parts of node startup.
+pub(crate) async fn initial_preconf_head(
+    enabled: bool,
+    storage: &EeNodeStorage,
+) -> eyre::Result<Option<BlockNumHash>> {
+    if !enabled {
         return Ok(None);
     }
-    let cfg = Arc::new(btcio_args.writer_config()?);
-    log_writer_config(&cfg);
-    Ok(Some(cfg))
+
+    let exec_chain = init_exec_chain_state_from_storage(storage)
+        .instrument(info_span!(
+            "init_exec_chain_head_probe",
+            component = "alpen"
+        ))
+        .await
+        .context("exec chain state initialization should not fail")?;
+    Ok(Some(exec_chain.tip_blocknumhash()))
 }
 
 fn log_writer_config(cfg: &WriterConfig) {
@@ -130,39 +137,15 @@ fn log_writer_config(cfg: &WriterConfig) {
     }
 }
 
-/// Reads `SEQUENCER_PRIVATE_KEY`, required when running with `--sequencer`.
-pub(crate) fn sequencer_privkey_from_env(sequencer_enabled: bool) -> eyre::Result<Option<Buf32>> {
-    if !sequencer_enabled {
-        return Ok(None);
-    }
-
-    let privkey_str = env::var("SEQUENCER_PRIVATE_KEY").map_err(|_| {
-        eyre::eyre!(
-            "SEQUENCER_PRIVATE_KEY environment variable is required when running with --sequencer"
-        )
-    })?;
-
-    let privkey = privkey_str
-        .parse::<Buf32>()
-        .map_err(|e| eyre::eyre!("Failed to parse SEQUENCER_PRIVATE_KEY as hex: {e}"))?;
-
-    Ok(Some(privkey))
-}
-
-pub(crate) fn sequencer_bitcoin_keypair(privkey: &Buf32) -> eyre::Result<Keypair> {
+fn sequencer_bitcoin_keypair(privkey: &Buf32) -> eyre::Result<Keypair> {
     let sk = SecretKey::from_slice(privkey.as_ref()).context("invalid sequencer private key")?;
     let secp = Secp256k1::signing_only();
     Ok(Keypair::from_secret_key(&secp, &sk))
 }
 
-/// Parses the EE block time override, when running as a sequencer.
-pub(crate) fn block_builder_config_from_env(
-    sequencer_enabled: bool,
-) -> eyre::Result<BlockBuilderConfig> {
+/// Parses the EE block time override.
+fn block_builder_config_from_env() -> eyre::Result<BlockBuilderConfig> {
     let default_config = BlockBuilderConfig::default();
-    if !sequencer_enabled {
-        return Ok(default_config);
-    }
 
     let blocktime_ms = match env::var(ALPEN_EE_BLOCK_TIME_MS_ENV_VAR) {
         Ok(raw_value) => {
@@ -201,17 +184,12 @@ pub(crate) fn block_builder_config_from_env(
     Ok(default_config.with_blocktime_ms(blocktime_ms))
 }
 
-/// Loads sequencer boot state (OL chain tracker, exec chain, batch builder,
-/// batch lifecycle), when running as a sequencer.
-pub(crate) async fn init_boot_state(
-    sequencer_enabled: bool,
+/// Loads sequencer boot state: OL chain tracker, exec chain, batch builder,
+/// and batch lifecycle.
+async fn init_boot_state(
     storage: &EeNodeStorage,
     ol_client: &(impl SequencerOLClient + Send + Sync),
-) -> eyre::Result<Option<SequencerBootState>> {
-    if !sequencer_enabled {
-        return Ok(None);
-    }
-
+) -> eyre::Result<SequencerBootState> {
     let ol_chain_tracker = init_ol_chain_tracker_state(storage, ol_client)
         .instrument(info_span!("init_ol_chain_tracker", component = "alpen"))
         .await
@@ -229,16 +207,15 @@ pub(crate) async fn init_boot_state(
         .await
         .context("batch lifecycle state initialization should not fail")?;
 
-    Ok(Some(SequencerBootState {
+    Ok(SequencerBootState {
         ol_chain_tracker,
         exec_chain,
         batch_builder,
         batch_lifecycle,
-    }))
+    })
 }
 
-/// Everything [`launch_sequencer_services`] needs, assembled in `main` after
-/// the reth node has launched and sequencer boot state has been loaded.
+/// Everything [`launch`] needs, assembled once the reth node has launched.
 ///
 /// `P` is the reth node's state/block/header provider type; kept generic
 /// (rather than naming the concrete `FullNode<...>` type) since only three
@@ -248,10 +225,7 @@ pub(crate) struct SequencerLaunchCtx<'a, P> {
     pub(crate) task_executor: TaskExecutor,
     pub(crate) payload_builder_handle: PayloadBuilderHandle<AlpenEngineTypes>,
     pub(crate) beacon_engine_handle: ConsensusEngineHandle<AlpenEngineTypes>,
-    pub(crate) block_builder_config: BlockBuilderConfig,
-    pub(crate) sequencer_args: &'a SequencerArgs,
-    pub(crate) da_args: &'a DaArgs,
-    pub(crate) btcio_args: &'a BtcioArgs,
+    pub(crate) ext: &'a AdditionalConfig,
     pub(crate) storage: Arc<EeNodeStorage>,
     pub(crate) dbs: &'a EeDatabases,
     pub(crate) db_handle: Handle,
@@ -262,15 +236,20 @@ pub(crate) struct SequencerLaunchCtx<'a, P> {
     pub(crate) ol_client: Arc<OLClientKind>,
     pub(crate) genesis_info: AlpenEeGenesisBlockInfo,
     pub(crate) params: Arc<AlpenParams>,
-    pub(crate) writer_config: Option<Arc<WriterConfig>>,
-    pub(crate) sequencer_keypair: Option<Keypair>,
-    pub(crate) boot_state: SequencerBootState,
+    /// Parsed `SEQUENCER_PRIVATE_KEY`, resolved unconditionally at startup
+    /// (gossip signing needs it too), and guaranteed `Some` whenever
+    /// `--sequencer` is set.
+    pub(crate) sequencer_privkey: Buf32,
 }
 
 /// Launches every service that only runs when `--sequencer` is set: the
 /// exec chain / OL chain tracker, the DA (btcio) pipeline, the EE chunk +
 /// acct provers, and the batch/chunk builder services.
-pub(crate) async fn launch_sequencer_services<P>(
+///
+/// Resolves the writer config, block-builder config, boot state, and the DA
+/// reveal signing keypair itself, so callers only need to know that a node
+/// exists and the sequencer flag is set.
+pub(crate) async fn launch<P>(
     service_executor: &ServiceExecutor,
     ctx: SequencerLaunchCtx<'_, P>,
 ) -> eyre::Result<()>
@@ -288,10 +267,7 @@ where
         task_executor,
         payload_builder_handle,
         beacon_engine_handle,
-        block_builder_config,
-        sequencer_args,
-        da_args,
-        btcio_args,
+        ext,
         storage,
         dbs,
         db_handle,
@@ -302,16 +278,22 @@ where
         ol_client,
         genesis_info,
         params,
-        writer_config,
-        sequencer_keypair,
-        boot_state:
-            SequencerBootState {
-                ol_chain_tracker: ol_chain_tracker_state,
-                exec_chain: exec_chain_state,
-                batch_builder: batch_builder_state,
-                batch_lifecycle: batch_lifecycle_state,
-            },
+        sequencer_privkey,
     } = ctx;
+
+    let writer_config = Arc::new(ext.btcio.writer_config()?);
+    log_writer_config(&writer_config);
+    let block_builder_config = block_builder_config_from_env()?;
+    let sequencer_keypair = sequencer_bitcoin_keypair(&sequencer_privkey)?;
+
+    let SequencerBootState {
+        ol_chain_tracker: ol_chain_tracker_state,
+        exec_chain: exec_chain_state,
+        batch_builder: batch_builder_state,
+        batch_lifecycle: batch_lifecycle_state,
+    } = init_boot_state(storage.as_ref(), ol_client.as_ref()).await?;
+
+    let sequencer_args = &ext.sequencer;
 
     let payload_engine = Arc::new(AlpenRethPayloadEngine::new(
         payload_builder_handle,
@@ -376,18 +358,15 @@ where
         service_executor,
         &task_executor,
         da_pipeline::DaPipelineInputs {
-            da_args,
-            btcio_args,
+            da_args: &ext.da,
+            btcio_args: &ext.btcio,
             dbs,
             db_handle,
             storage: storage.clone(),
             node_provider: node_provider.clone(),
             params: params.clone(),
-            writer_config: writer_config
-                .expect("writer_config resolved at startup when --sequencer is set"),
-            sequencer_keypair: sequencer_keypair.ok_or_else(|| {
-                eyre::eyre!("EE sequencer DA reveal signing needs sequencer Keypair")
-            })?,
+            writer_config,
+            sequencer_keypair,
         },
     )
     .await?;
