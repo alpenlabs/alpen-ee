@@ -11,11 +11,9 @@
 //! (`tracing/release_max_level_*`) disables the spans and silently drops the tag.
 
 mod args;
-mod dummy_ol_client;
 mod gossip;
 mod node;
-mod ol_client;
-mod rpc_client;
+mod ol;
 #[cfg(feature = "sequencer")]
 mod sequencer;
 mod service_executor;

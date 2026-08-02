@@ -41,10 +41,8 @@ use tracing::{error, info, info_span, Instrument};
 use crate::sequencer;
 use crate::{
     args::{sequencer_privkey_from_env, AdditionalConfig, NodeArgs},
-    dummy_ol_client::DummyOLClient,
     gossip::{create_gossip_task, GossipConfig},
-    ol_client::OLClientKind,
-    rpc_client::RpcOLClient,
+    ol::{DummyOLClient, OLClientKind, RpcOLClient},
     service_executor::ServiceExecutor,
     services,
 };

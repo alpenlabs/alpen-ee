@@ -58,7 +58,7 @@ use tokio::{
 use tracing::{info, info_span, Instrument};
 
 use self::{gas_data_provider::RethGasDataProvider, payload_builder::AlpenRethPayloadEngine};
-use crate::{args::AdditionalConfig, ol_client::OLClientKind, service_executor::ServiceExecutor};
+use crate::{args::AdditionalConfig, ol::OLClientKind, service_executor::ServiceExecutor};
 
 /// Environment variable for overriding the default EE block time.
 const ALPEN_EE_BLOCK_TIME_MS_ENV_VAR: &str = "ALPEN_EE_BLOCK_TIME_MS";
