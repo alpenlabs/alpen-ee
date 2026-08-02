@@ -1,6 +1,6 @@
 //! Reth node bootstrap: health check, config/storage/genesis setup, OL
 //! client resolution, node building and launch, and full-node task
-//! spawning. Hands off to [`sequencer`](crate::sequencer) once the node
+//! spawning. Hands off to [`sequencer`] once the node
 //! exists, when `--sequencer` is set.
 
 use std::sync::Arc;
