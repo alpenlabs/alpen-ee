@@ -7,7 +7,7 @@
 //! env var) keeps its existing name; the grouping only affects code layout
 //! and `--help` section headings.
 
-use std::{fs, path::Path, sync::Arc};
+use std::{env, fs, path::Path, sync::Arc};
 
 #[cfg(feature = "sequencer")]
 use alloy_primitives::{address, Address};
@@ -224,7 +224,6 @@ pub(crate) struct SequencerArgs {
 
     /// Capacity of the batch builder → chunk builder event channel.
     /// Defaults to 64 if not set.
-    #[cfg(feature = "sequencer")]
     #[arg(long, required = false)]
     pub batch_event_channel_capacity: Option<usize>,
 
@@ -388,6 +387,30 @@ impl From<BtcioMempoolTierArg> for MempoolExplorerFeePolicy {
 fn parse_buf32(s: &str) -> eyre::Result<Buf32> {
     s.parse::<Buf32>()
         .map_err(|e| eyre::eyre!("Failed to parse hex string as Buf32: {e}"))
+}
+
+/// Reads `SEQUENCER_PRIVATE_KEY`, required when running with `--sequencer`.
+///
+/// Called unconditionally at startup regardless of whether the `sequencer`
+/// feature is compiled in: gossip block signing needs the raw key too, not
+/// just the sequencer-only DA reveal path, so this can't live behind the
+/// `sequencer` module boundary.
+pub(crate) fn sequencer_privkey_from_env(sequencer_enabled: bool) -> eyre::Result<Option<Buf32>> {
+    if !sequencer_enabled {
+        return Ok(None);
+    }
+
+    let privkey_str = env::var("SEQUENCER_PRIVATE_KEY").map_err(|_| {
+        eyre::eyre!(
+            "SEQUENCER_PRIVATE_KEY environment variable is required when running with --sequencer"
+        )
+    })?;
+
+    let privkey = privkey_str
+        .parse::<Buf32>()
+        .map_err(|e| eyre::eyre!("Failed to parse SEQUENCER_PRIVATE_KEY as hex: {e}"))?;
+
+    Ok(Some(privkey))
 }
 
 /// Loads the Alpen params artifact from a JSON file.
