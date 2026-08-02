@@ -14911,6 +14911,7 @@ dependencies = [
  "strata-ee-chain-types",
  "strata-identifiers",
  "strata-msg-fmt",
+ "strata-predicate",
  "strata-snark-acct-runtime",
  "strata-test-utils-ssz",
  "thiserror 2.0.18",
