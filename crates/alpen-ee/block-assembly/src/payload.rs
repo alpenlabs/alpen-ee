@@ -2,6 +2,7 @@ use std::num::NonZero;
 
 use alloy_primitives::B256;
 use alpen_ee_common::{DepositInfo, EnginePayload, PayloadBuildAttributes, PayloadBuilderEngine};
+use alpen_ee_params::AlpenSpecId;
 use alpen_reth_evm::subject_to_address_unchecked;
 use strata_acct_types::Hash;
 use strata_ee_acct_types::{EeAccountState, PendingInputEntry, UpdateExtraData};
@@ -55,6 +56,7 @@ pub(crate) async fn build_exec_payload<E: PayloadBuilderEngine>(
     timestamp_ms: u64,
     max_deposits_per_block: NonZero<u8>,
     deposit_counter: u64,
+    spec_version: AlpenSpecId,
     payload_builder: &E,
 ) -> eyre::Result<(E::TEnginePayload, UpdateExtraData, u64)> {
     let parent = B256::from_slice(parent_exec_blkid.as_slice());
@@ -82,7 +84,12 @@ pub(crate) async fn build_exec_payload<E: PayloadBuilderEngine>(
 
     debug!(%parent, timestamp = %timestamp_sec, deposits = %processed_inputs, "starting payload build");
     let payload = payload_builder
-        .build_payload(PayloadBuildAttributes::new(parent, timestamp_sec, deposits))
+        .build_payload(PayloadBuildAttributes::new(
+            parent,
+            timestamp_sec,
+            deposits,
+            spec_version,
+        ))
         .await?;
 
     let new_tip_blkid = payload.blockhash();

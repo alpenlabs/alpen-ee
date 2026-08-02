@@ -12,6 +12,7 @@ test-utils = ["dep:mockall"]
 
 [dependencies]
 alpen-ee-da-types.workspace = true
+alpen-ee-params.workspace = true
 alpen-reth-node.workspace = true
 strata-acct-types.workspace = true
 strata-codec.workspace = true

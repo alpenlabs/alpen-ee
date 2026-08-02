@@ -205,6 +205,7 @@ pub async fn init_exec_chain_state_from_storage<TStorage: ExecBlockStorage>(
 
 #[cfg(test)]
 mod tests {
+    use alpen_ee_params::AlpenSpecId;
     use strata_ee_acct_types::EeAccountState;
     use strata_ee_chain_types::{ExecBlockCommitment, ExecBlockPackage, ExecInputs, ExecOutputs};
     use strata_identifiers::{Buf32, OLBlockCommitment};
@@ -236,6 +237,7 @@ mod tests {
             parent_blockhash,
             0,
             0,
+            AlpenSpecId::V0,
             vec![],
         )
     }

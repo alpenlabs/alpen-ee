@@ -1,10 +1,11 @@
 use std::num::NonZero;
 
 use alpen_ee_common::{EnginePayload, ExecBlockPayload, PayloadBuilderEngine};
+use alpen_ee_params::AlpenSpecId;
 use eyre::Context;
 use strata_acct_types::{AccountId, Hash, MessageEntry};
 use strata_ee_acct_runtime::apply_input_messages;
-use strata_ee_acct_types::EeAccountState;
+use strata_ee_acct_types::{EeAccountState, PendingInputEntry};
 use strata_ee_chain_types::ExecBlockPackage;
 
 use crate::{package::build_block_package, payload::build_exec_payload};
@@ -27,6 +28,8 @@ pub struct BlockAssemblyInputs<'a> {
     pub bridge_gateway_account_id: AccountId,
     /// Monotonically incrementing index for next deposit to use.
     pub next_deposit_idx: u64,
+    /// Alpen spec version governing this block.
+    pub spec_version: AlpenSpecId,
 }
 
 /// Outputs from block assembly
@@ -40,6 +43,11 @@ pub struct BlockAssemblyOutputs {
     pub account_state: EeAccountState,
     /// Monotonically incrementing index for next deposit to use.
     pub next_deposit_idx: u64,
+    /// Alpen spec version governing the *next* block. Equal to this block's
+    /// own `spec_version` unless this block consumed a queued predicate
+    /// rotation, in which case it's that rotation's successor — this block
+    /// itself was still built under the predecessor version.
+    pub next_spec_version: AlpenSpecId,
 }
 
 /// Builds the next block using `inputs` and `payload_builder`.
@@ -55,6 +63,7 @@ pub async fn build_next_exec_block<E: PayloadBuilderEngine>(
         max_deposits_per_block,
         bridge_gateway_account_id,
         next_deposit_idx,
+        spec_version,
     } = inputs;
 
     // 1. apply new inbox messages to account state
@@ -68,6 +77,7 @@ pub async fn build_next_exec_block<E: PayloadBuilderEngine>(
         timestamp_ms,
         max_deposits_per_block,
         next_deposit_idx,
+        spec_version,
         payload_builder,
     )
     .await?;
@@ -79,6 +89,20 @@ pub async fn build_next_exec_block<E: PayloadBuilderEngine>(
     let processed_inputs =
         account_state.remove_pending_inputs(*update_extra_data.processed_inputs() as usize);
     let _ = account_state.remove_pending_fincls(*update_extra_data.processed_fincls() as usize);
+
+    // A consumed rotation governs the version for the *next* block, not this
+    // one — this block was already built above under `spec_version`.
+    let next_spec_version = if processed_inputs
+        .iter()
+        .any(|entry| matches!(entry, PendingInputEntry::PredicateRotation(_)))
+    {
+        spec_version
+            .successor()
+            .map_err(|id| eyre::eyre!("consumed a rotation to unknown spec version {id}"))
+            .context("build_next_exec_block: cannot honor discovered spec activation")?
+    } else {
+        spec_version
+    };
 
     // 4. build exec package
     let package = build_block_package(bridge_gateway_account_id, processed_inputs, &payload);
@@ -92,5 +116,6 @@ pub async fn build_next_exec_block<E: PayloadBuilderEngine>(
         ),
         account_state,
         next_deposit_idx,
+        next_spec_version,
     })
 }
