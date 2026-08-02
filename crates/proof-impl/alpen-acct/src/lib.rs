@@ -38,7 +38,7 @@ pub fn process_ee_acct_update(
     params: &AlpenParams,
     chunk_predicate_key: &PredicateKey,
 ) {
-    // TODO(STR-3998): pin to v0 until per-block version resolution is
+    // TODO(STR-4002): pin to v0 until per-block version resolution is
     // threaded through the proof guests.
     let chain_spec: Arc<ChainSpec> = params.evm_spec().chain_spec(AlpenSpecId::V0).clone();
 

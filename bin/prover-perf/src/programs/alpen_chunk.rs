@@ -95,7 +95,7 @@ pub(super) fn prepare_input() -> EeChunkProofInput {
     let tip_exec_header_summary = block.get_header().get_exec_header_summary();
 
     let params = perf_alpen_params();
-    // TODO(STR-3998): pin to v0 until per-chunk version resolution is
+    // TODO(STR-4002): pin to v0 until per-chunk version resolution is
     // threaded through the proof guests.
     let chain_spec: Arc<reth_chainspec::ChainSpec> =
         params.evm_spec().chain_spec(AlpenSpecId::V0).clone();
