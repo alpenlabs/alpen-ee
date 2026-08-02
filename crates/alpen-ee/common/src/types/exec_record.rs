@@ -1,3 +1,4 @@
+use alpen_ee_params::AlpenSpecId;
 use strata_acct_types::{Hash, MessageEntry};
 use strata_ee_acct_types::EeAccountState;
 use strata_ee_chain_types::ExecBlockPackage;
@@ -27,6 +28,14 @@ struct ExecPackageMetadata {
     next_inbox_msg_idx: u64,
     /// Monotonically incrementing index for next deposit to use.
     next_deposit_idx: u64,
+    /// Alpen spec version governing the block built from this record.
+    ///
+    /// The block that *consumes* a queued predicate rotation ends with this
+    /// already bumped to the successor, even though that same block was
+    /// itself still built under the predecessor version — this field
+    /// describes what governs whatever comes next, not what governed the
+    /// block that produced it. Same role as `next_inbox_msg_idx`.
+    next_spec_version: AlpenSpecId,
 }
 
 /// `ExecBlockPackage` with additional block metadata
@@ -53,6 +62,7 @@ impl ExecBlockRecord {
         parent_blockhash: Hash,
         next_inbox_msg_idx: u64,
         next_deposit_idx: u64,
+        next_spec_version: AlpenSpecId,
         messages: Vec<MessageEntry>,
     ) -> Self {
         Self {
@@ -66,6 +76,7 @@ impl ExecBlockRecord {
                 parent_blockhash,
                 next_inbox_msg_idx,
                 next_deposit_idx,
+                next_spec_version,
             },
         }
     }
@@ -108,6 +119,10 @@ impl ExecBlockRecord {
 
     pub fn next_deposit_idx(&self) -> u64 {
         self.metadata.next_deposit_idx
+    }
+
+    pub fn next_spec_version(&self) -> AlpenSpecId {
+        self.metadata.next_spec_version
     }
 
     pub fn messages(&self) -> &[MessageEntry] {

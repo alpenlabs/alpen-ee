@@ -6,6 +6,7 @@ use alpen_ee_common::{
     PayloadBuilderEngine, SystemClock,
 };
 use alpen_ee_exec_chain::ExecChainHandle;
+use alpen_ee_params::AlpenSpecId;
 use eyre::Context;
 use strata_acct_types::{Hash, MessageEntry};
 use strata_ee_acct_types::EeAccountState;
@@ -106,6 +107,7 @@ fn create_block_assembly_inputs<'a>(
     inbox_messages: &'a [MessageEntry],
     timestamp_ms: u64,
     config: &BlockBuilderConfig,
+    spec_version: AlpenSpecId,
 ) -> BlockAssemblyInputs<'a> {
     BlockAssemblyInputs {
         account_state: last_local_block.account_state().clone(),
@@ -115,6 +117,7 @@ fn create_block_assembly_inputs<'a>(
         max_deposits_per_block: config.max_deposits_per_block(),
         bridge_gateway_account_id: config.bridge_gateway_account_id(),
         next_deposit_idx: last_local_block.next_deposit_idx(),
+        spec_version,
     }
 }
 
@@ -129,6 +132,7 @@ fn create_next_exec_block_record(
     parent_blockhash: Hash,
     next_inbox_msg_idx: u64,
     next_deposit_idx: u64,
+    next_spec_version: AlpenSpecId,
     messages: Vec<MessageEntry>,
 ) -> ExecBlockRecord {
     ExecBlockRecord::new(
@@ -140,6 +144,7 @@ fn create_next_exec_block_record(
         parent_blockhash,
         next_inbox_msg_idx,
         next_deposit_idx,
+        next_spec_version,
         messages,
     )
 }
@@ -313,15 +318,27 @@ async fn build_next_block(
         None => (vec![], last_local_block.next_inbox_msg_idx()),
     };
 
+    // The version governing this block: whatever the parent block's account
+    // state already settled on. A rotation consumed by *this* block only
+    // takes effect for the block built after it (see `next_spec_version` on
+    // `BlockAssemblyOutputs`).
+    let spec_version = last_local_block.next_spec_version();
+
     // build next block
-    let block_assembly_inputs =
-        create_block_assembly_inputs(&last_local_block, &inbox_messages, timestamp_ms, config);
+    let block_assembly_inputs = create_block_assembly_inputs(
+        &last_local_block,
+        &inbox_messages,
+        timestamp_ms,
+        config,
+        spec_version,
+    );
 
     let BlockAssemblyOutputs {
         package,
         payload,
         account_state,
         next_deposit_idx,
+        next_spec_version,
     } = build_next_exec_block(block_assembly_inputs, payload_builder)
         .await
         .context("build_next_block: failed to build exec block")?;
@@ -337,6 +354,7 @@ async fn build_next_block(
         parent_blockhash,
         next_inbox_msg_idx,
         next_deposit_idx,
+        next_spec_version,
         inbox_messages,
     );
 
@@ -382,6 +400,7 @@ mod tests {
             Hash::default(),
             0,
             0,
+            AlpenSpecId::V0,
             vec![],
         )
     }
@@ -435,7 +454,13 @@ mod tests {
             );
             let messages = vec![msg1.clone(), msg2.clone()];
 
-            let inputs = create_block_assembly_inputs(&exec_record, &messages, 6000, &config);
+            let inputs = create_block_assembly_inputs(
+                &exec_record,
+                &messages,
+                6000,
+                &config,
+                AlpenSpecId::V0,
+            );
 
             assert_eq!(inputs.inbox_messages.len(), 2);
             assert_eq!(inputs.inbox_messages[0].source(), msg1.source());
