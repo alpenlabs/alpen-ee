@@ -34,9 +34,7 @@ mod spec_acct;
 mod spec_chunk;
 mod storage;
 
-pub(crate) use backend::{
-    launch_validated_ee_batch_prover, EeProverBackendArgs, EeProverBuilders, EeProverStores,
-};
+pub(crate) use backend::{launch_validated_ee_batch_prover, EeProverBuilders, EeProverStores};
 pub(crate) use batch_prover::PaasBatchProver;
 pub(crate) use hooks::{AcctReceiptHook, ChunkReceiptHook};
 pub(crate) use spec_acct::{AcctRangeWitnessFn, AcctSpec, BatchTask};

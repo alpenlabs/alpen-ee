@@ -37,7 +37,7 @@ use tracing::info;
 
 use crate::args::AdditionalConfig;
 #[cfg(feature = "sequencer")]
-use crate::config::NodeMode;
+use crate::config::{NodeMode, ProverBackendConfig};
 
 fn main() {
     sigsegv_handler::install();
@@ -91,11 +91,11 @@ where
         seq.config
             .validate_chunk_sealing_gas_limit(&command.ext.alpen_params)?;
 
-        if !seq.config.dev_native_prover && !cfg!(feature = "sp1") {
+        if matches!(seq.config.prover, ProverBackendConfig::Sp1 { .. }) && !cfg!(feature = "sp1") {
             error!(
                 target: "alpen-client",
                 component = "alpen",
-                "Remote SP1 prover requested but binary built without `sp1` feature. Set sequencer.dev_native_prover = true or rebuild with the `sp1` feature."
+                "Remote SP1 prover requested but binary built without `sp1` feature. Set sequencer.prover.backend = \"native\" to use the native backend instead, or rebuild with the `sp1` feature."
             );
             eyre::bail!("sp1 feature not enabled at compile time");
         }

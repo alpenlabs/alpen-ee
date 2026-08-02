@@ -491,10 +491,7 @@ where
             storage: storage.clone(),
             node_provider: node_provider.clone(),
             btc_client: da_pipeline.btc_client,
-            dev_native_prover: sequencer_config.dev_native_prover,
-            sp1_deadline_secs: sequencer_config.sp1_proof_deadline_secs,
-            chunk_elf_path: sequencer_config.chunk_elf_path.clone(),
-            acct_elf_path: sequencer_config.acct_elf_path.clone(),
+            backend: sequencer_config.prover.clone(),
             params: params.clone(),
         },
     )

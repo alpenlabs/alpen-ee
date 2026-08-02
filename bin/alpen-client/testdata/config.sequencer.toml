@@ -15,7 +15,9 @@ ol_submit_url = "ws://strata:8435"
 batch_sealing_block_count = 100
 beneficiary_address = "0x5400000000000000000000000000000000000010"
 blocktime_ms = 5000
-dev_native_prover = false
+
+[sequencer.prover]
+backend = "sp1"
 chunk_elf_path = "/app/elfs/sp1/guest-alpen-chunk.elf"
 acct_elf_path = "/app/elfs/sp1/guest-alpen-acct.elf"
 

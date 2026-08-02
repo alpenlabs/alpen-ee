@@ -14,8 +14,13 @@ source = "dummy"
 
 [sequencer]
 batch_sealing_block_count = 5
-# Skips real Groth16 proving, so no compiled SP1 guest ELFs are needed.
-dev_native_prover = true
+
+# Skips real Groth16 proving, so no compiled SP1 guest ELFs are needed. The
+# key files are mounted by the compose file, next to the p2p key.
+[sequencer.prover]
+backend = "native"
+chunk_signing_key_path = "/app/keys/native-chunk-signing-key.hex"
+acct_signing_key_path = "/app/keys/native-acct-signing-key.hex"
 
 [sequencer.bitcoind]
 # Throwaway regtest credentials, matching the bitcoind service in the compose

@@ -14,7 +14,7 @@
 //! All backed by `EeProverDbSled`; see `alpen_ee_database::sleddb::prover_db`
 //! for schemas.
 
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 use alpen_ee_common::{BatchStorage, ChunkStorage, SequencerOLClient};
 use alpen_ee_database::{EeNodeStorage, SequencerDatabases};
@@ -27,10 +27,10 @@ use tracing::info;
 
 use super::prover::{
     launch_validated_ee_batch_prover, AcctRangeWitnessFn, AcctReceiptHook, AcctSpec,
-    ChunkReceiptHook, ChunkSpec, EeBatchProofDbManager, EeChunkReceiptStore, EeProverBackendArgs,
-    EeProverBuilders, EeProverStores, EeProverTaskDbManager, PaasBatchProver,
+    ChunkReceiptHook, ChunkSpec, EeBatchProofDbManager, EeChunkReceiptStore, EeProverBuilders,
+    EeProverStores, EeProverTaskDbManager, PaasBatchProver,
 };
-use crate::service_executor::ServiceExecutor;
+use crate::{config::ProverBackendConfig, service_executor::ServiceExecutor};
 
 /// Everything [`launch`] needs to build and launch the EE chunk + acct
 /// provers.
@@ -38,10 +38,7 @@ pub(crate) struct EeProverInputs<P> {
     pub(crate) storage: Arc<EeNodeStorage>,
     pub(crate) node_provider: P,
     pub(crate) btc_client: Arc<BtcClient>,
-    pub(crate) dev_native_prover: bool,
-    pub(crate) sp1_deadline_secs: Option<u64>,
-    pub(crate) chunk_elf_path: Option<PathBuf>,
-    pub(crate) acct_elf_path: Option<PathBuf>,
+    pub(crate) backend: ProverBackendConfig,
     pub(crate) params: Arc<AlpenParams>,
 }
 
@@ -61,10 +58,7 @@ where
         storage,
         node_provider,
         btc_client,
-        dev_native_prover,
-        sp1_deadline_secs,
-        chunk_elf_path,
-        acct_elf_path,
+        backend,
         params,
     } = inputs;
 
@@ -124,12 +118,7 @@ where
             chunk_storage: chunk_storage_dyn,
             batch_proofs,
         },
-        EeProverBackendArgs {
-            use_native_prover: dev_native_prover,
-            sp1_deadline_secs,
-            chunk_elf_path,
-            acct_elf_path,
-        },
+        backend,
         params,
     )
     .await?;
