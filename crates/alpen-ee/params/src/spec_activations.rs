@@ -28,8 +28,12 @@ use thiserror::Error;
 /// The primitive conversions are derived so they cannot go stale when a
 /// variant is added; [`TryFrom<u16>`] errs with the raw id it has no variant
 /// for.
-// TODO(STR-3997): define what each spec version resolves to per component
-// (e.g. revm spec id, program VKs).
+///
+/// What a version *means* for the EVM is the per-version chain spec derived
+/// in [`EvmSpec`](crate::EvmSpec); this type only names versions and orders
+/// them.
+// TODO(STR-3997): define what each spec version resolves to for the
+// remaining components (program VKs).
 #[derive(
     Debug,
     Clone,
@@ -196,7 +200,7 @@ impl Default for AlpenSpecSchedule {
 struct AlpenSpecScheduleRepr(BTreeMap<AlpenSpecId, u64>);
 
 /// Every known version, in discriminant order.
-fn known_versions() -> impl Iterator<Item = AlpenSpecId> {
+pub(crate) fn known_versions() -> impl Iterator<Item = AlpenSpecId> {
     (0u16..).map_while(|d| AlpenSpecId::try_from(d).ok())
 }
 

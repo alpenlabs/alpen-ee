@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use alpen_ee_da_runtime::verification::verify_da_witness;
 use alpen_ee_da_types::ArchivedDaWitness;
-use alpen_ee_params::AlpenParams;
+use alpen_ee_params::{AlpenParams, AlpenSpecId};
 use alpen_reth_evm::evm::AlpenEvmFactory;
 use reth_chainspec::ChainSpec;
 use rkyv::rancor::Error as RkyvError;
@@ -38,7 +38,9 @@ pub fn process_ee_acct_update(
     params: &AlpenParams,
     chunk_predicate_key: &PredicateKey,
 ) {
-    let chain_spec: Arc<ChainSpec> = Arc::new(params.evm_spec().chain_spec().clone());
+    // TODO(STR-3998): pin to v0 until per-block version resolution is
+    // threaded through the proof guests.
+    let chain_spec: Arc<ChainSpec> = params.evm_spec().chain_spec(AlpenSpecId::V0).clone();
 
     let ee_buf = zkvm.read_buf();
     let ee_input: &ArchivedEePrivateInput =
