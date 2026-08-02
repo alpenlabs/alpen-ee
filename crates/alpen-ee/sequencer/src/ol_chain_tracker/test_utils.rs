@@ -1,6 +1,7 @@
 //! Shared test utilities for ol_chain_tracker tests.
 
 use alpen_ee_common::{ExecBlockRecord, OLBlockData, OLChainStatus};
+use alpen_ee_params::AlpenSpecId;
 use strata_acct_types::{AccountId, BitcoinAmount, Hash, MessageEntry, MsgPayload};
 use strata_ee_acct_types::EeAccountState;
 use strata_ee_chain_types::{ExecBlockCommitment, ExecBlockPackage, ExecInputs, ExecOutputs};
@@ -112,6 +113,7 @@ pub(crate) fn create_mock_exec_record(ol_block: OLBlockCommitment) -> ExecBlockR
         Hash::default(),
         0,
         0,
+        AlpenSpecId::V0,
         vec![],
     )
 }

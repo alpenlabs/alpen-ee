@@ -23,3 +23,4 @@ strata-identifiers.workspace = true
 strata-ee-acct-types.workspace = true
 strata-ee-chain-types.workspace = true
 alpen-ee-common = { workspace = true, features = ["test-utils"] }
+alpen-ee-params.workspace = true

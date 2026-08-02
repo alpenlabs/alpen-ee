@@ -1124,6 +1124,7 @@ version = "0.3.0-alpha.1"
 dependencies = [
  "alloy-primitives",
  "alpen-ee-common",
+ "alpen-ee-params",
  "alpen-reth-evm",
  "bitcoin-bosd",
  "eyre",
@@ -1148,6 +1149,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-engine",
  "alpen-ee-da-types",
+ "alpen-ee-params",
  "alpen-reth-node",
  "async-trait",
  "bincode",
@@ -1262,6 +1264,7 @@ name = "alpen-ee-database"
 version = "0.3.0-alpha.1"
 dependencies = [
  "alpen-ee-common",
+ "alpen-ee-params",
  "alpen-reth-db",
  "async-trait",
  "bitcoin",
@@ -1294,6 +1297,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "alpen-ee-common",
+ "alpen-ee-params",
  "alpen-reth-node",
  "async-trait",
  "mockall",
@@ -1314,6 +1318,7 @@ name = "alpen-ee-exec-chain"
 version = "0.3.0-alpha.1"
 dependencies = [
  "alpen-ee-common",
+ "alpen-ee-params",
  "anyhow",
  "eyre",
  "serde",
@@ -1424,6 +1429,7 @@ dependencies = [
  "alpen-ee-block-assembly",
  "alpen-ee-common",
  "alpen-ee-exec-chain",
+ "alpen-ee-params",
  "anyhow",
  "async-trait",
  "bitcoin",
