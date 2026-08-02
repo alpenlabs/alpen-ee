@@ -36,7 +36,6 @@ sequencer = [
   "dep:strata-ee-chunk-runtime",
   "dep:strata-evm-ee",
   "dep:strata-paas",
-  "dep:strata-proofimpl-alpen-acct",
   "dep:strata-proofimpl-alpen-chunk",
   "dep:strata-snark-acct-runtime",
   "dep:thiserror",
@@ -49,9 +48,10 @@ sequencer = [
 # sequencer-only prover), so it pulls that feature in too.
 sp1 = [
   "sequencer",
+  "dep:sp1-verifier",
+  "dep:zkaleido-sp1-groth16-verifier",
   "dep:zkaleido-sp1-host",
   "strata-paas/remote",
-  "strata-proofimpl-predicate-keys/sp1",
 ]
 
 [[bin]]
@@ -103,9 +103,8 @@ strata-ol-rpc-types.workspace = true
 strata-paas = { workspace = true, optional = true }
 strata-predicate.workspace = true
 strata-primitives.workspace = true
-strata-proofimpl-alpen-acct = { workspace = true, optional = true }
+strata-proofimpl-alpen-acct.workspace = true
 strata-proofimpl-alpen-chunk = { workspace = true, optional = true }
-strata-proofimpl-predicate-keys.workspace = true
 strata-service.workspace = true
 strata-snark-acct-runtime = { workspace = true, optional = true }
 strata-snark-acct-types.workspace = true
@@ -137,9 +136,11 @@ reth-primitives-traits = { workspace = true, optional = true }
 reth-provider.workspace = true
 reth-tasks.workspace = true
 serde_json.workspace = true
+sp1-verifier = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 tokio.workspace = true
 tracing.workspace = true
+zkaleido-sp1-groth16-verifier = { workspace = true, optional = true }
 
 [dev-dependencies]
 proptest.workspace = true
