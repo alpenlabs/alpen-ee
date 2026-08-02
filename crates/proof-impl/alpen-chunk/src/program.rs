@@ -145,7 +145,8 @@ mod tests {
             serde_json::from_str(alpen_chainspec::DEV_CHAIN_SPEC).expect("dev chain should parse");
         AlpenParams::new(
             DEFAULT_ALPEN_EE_ACCOUNT_ID,
-            BridgeParams::default(),
+            BridgeParams::new_with_descriptor_limit(100_000_000, Some(1_000_000_000), 81)
+                .expect("valid bridge params"),
             BlobSpec::new(MagicBytes::new(*b"ALPN")),
             AlpenSpecSchedule::genesis(),
             evm_spec,

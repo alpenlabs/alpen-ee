@@ -106,9 +106,9 @@ impl AlpenParams {
     }
 }
 
-// Manual instead of derived: every field but `evm_spec` has an obvious
-// default, but `evm_spec` needs to go through `EvmSpec::default()` (an
-// empty genesis document, i.e. what reth derives from `{}`) rather than a
+// Manual instead of derived: `BridgeParams` has no `Default` (denomination
+// zero is invalid), and `evm_spec` needs to go through `EvmSpec::default()`
+// (an empty genesis document, i.e. what reth derives from `{}`) rather than a
 // derived `Default` bound on `EvmSpec` itself.
 impl Default for AlpenParams {
     /// Placeholder params for tests and benchmarks that construct an
@@ -119,7 +119,12 @@ impl Default for AlpenParams {
     fn default() -> Self {
         Self {
             strata_exec_account_id: DEFAULT_ALPEN_EE_ACCOUNT_ID,
-            bridge_params: BridgeParams::default(),
+            bridge_params: BridgeParams::new_with_descriptor_limit(
+                100_000_000,
+                Some(1_000_000_000),
+                81,
+            )
+            .expect("valid bridge params"),
             blob_spec: BlobSpec::new(MagicBytes::new(*b"ALPN")),
             spec_schedule: AlpenSpecSchedule::genesis(),
             evm_spec: EvmSpec::default(),

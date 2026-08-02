@@ -11,16 +11,34 @@ use revm::{
     Context, Inspector, MainBuilder, MainContext,
 };
 use revm_primitives::{hardfork::SpecId, U256};
-use strata_bridge_params::BridgeParams;
+use strata_bridge_params::{BridgeParams, DEFAULT_MAX_WITHDRAWAL_DESCRIPTOR_LEN};
 
 use crate::{apis::AlpenAlloyEvm, precompiles::factory, utils::wei_to_sats};
 
 /// Custom EVM configuration.
 ///
 /// Carries bridge withdrawal policy for precompile validation.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct AlpenEvmFactory {
     bridge_params: BridgeParams,
+}
+
+// Manual instead of derived: `BridgeParams` has no `Default` (denomination
+// zero is invalid).
+impl Default for AlpenEvmFactory {
+    /// Placeholder withdrawal policy for tests and benchmarks that construct
+    /// an `AlpenEvmFactory` but don't exercise bridge-out validation. Not
+    /// valid params for any real network.
+    fn default() -> Self {
+        Self {
+            bridge_params: BridgeParams::new_with_descriptor_limit(
+                100_000_000,
+                Some(1_000_000_000),
+                81,
+            )
+            .expect("valid bridge params"),
+        }
+    }
 }
 
 impl AlpenEvmFactory {
@@ -30,8 +48,12 @@ impl AlpenEvmFactory {
             max_withdrawal_wei.map(|max| wei_to_sats_exact(max, "max_withdrawal_wei"));
 
         Self {
-            bridge_params: BridgeParams::new(denomination, max_withdrawal_amount)
-                .expect("withdrawal policy constructed from wei must be valid"),
+            bridge_params: BridgeParams::new_with_descriptor_limit(
+                denomination,
+                max_withdrawal_amount,
+                DEFAULT_MAX_WITHDRAWAL_DESCRIPTOR_LEN,
+            )
+            .expect("withdrawal policy constructed from wei must be valid"),
         }
     }
 

@@ -173,6 +173,15 @@ mod tests {
 
     use super::*;
 
+    fn test_bridge_params() -> BridgeParams {
+        BridgeParams::new_with_descriptor_limit(
+            100_000_000,
+            Some(1_000_000_000),
+            DEFAULT_MAX_WITHDRAWAL_DESCRIPTOR_LEN,
+        )
+        .expect("valid bridge params")
+    }
+
     proptest! {
         #[test]
         fn test_address_subject_roundtrip(addr_bytes in prop::array::uniform20(any::<u8>())) {
@@ -231,10 +240,9 @@ mod tests {
         bosd[0] = 0x00;
         let log = bridgeout_log(bosd);
 
-        let intent =
-            extract_withdrawal_intent_from_log(test_txid(), &log, &BridgeParams::default())
-                .unwrap()
-                .expect("bridgeout log should produce intent");
+        let intent = extract_withdrawal_intent_from_log(test_txid(), &log, &test_bridge_params())
+            .unwrap()
+            .expect("bridgeout log should produce intent");
 
         assert_eq!(intent.amt, 100);
         assert_eq!(intent.selected_operator, OperatorSelection::any());
@@ -246,7 +254,7 @@ mod tests {
         log.address = Address::ZERO;
 
         assert!(
-            extract_withdrawal_intent_from_log(test_txid(), &log, &BridgeParams::default())
+            extract_withdrawal_intent_from_log(test_txid(), &log, &test_bridge_params())
                 .unwrap()
                 .is_none()
         );
@@ -259,7 +267,7 @@ mod tests {
             data: LogData::empty(),
         };
 
-        let err = extract_withdrawal_intent_from_log(test_txid(), &log, &BridgeParams::default())
+        let err = extract_withdrawal_intent_from_log(test_txid(), &log, &test_bridge_params())
             .unwrap_err();
 
         assert!(matches!(
@@ -274,7 +282,7 @@ mod tests {
         bosd[0] = 0x00;
         let log = bridgeout_log(bosd);
 
-        let err = extract_withdrawal_intent_from_log(test_txid(), &log, &BridgeParams::default())
+        let err = extract_withdrawal_intent_from_log(test_txid(), &log, &test_bridge_params())
             .unwrap_err();
 
         assert!(matches!(
@@ -287,7 +295,7 @@ mod tests {
     fn test_extract_withdrawal_intent_fails_on_malformed_descriptor() {
         let log = bridgeout_log(vec![0x03, 0x01, 0x02, 0x03]);
 
-        let err = extract_withdrawal_intent_from_log(test_txid(), &log, &BridgeParams::default())
+        let err = extract_withdrawal_intent_from_log(test_txid(), &log, &test_bridge_params())
             .unwrap_err();
 
         assert!(matches!(

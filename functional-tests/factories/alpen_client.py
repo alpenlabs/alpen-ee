@@ -140,7 +140,11 @@ class AlpenClientFactory(flexitest.Factory):
             ol_client_args = ["--dummy-ol-client"]
 
         if ee_params_path is None:
-            ee_params_path = generate_ee_params(datadir)
+            ee_params_path = generate_ee_params(
+                datadir,
+                bridge_denomination_sats=bridge_denomination,
+                max_withdrawal_amount_sats=max_withdrawal_amount,
+            )
         alpen_params_path = compose_alpen_params(
             datadir,
             ee_params_path,
@@ -313,7 +317,11 @@ class AlpenClientFactory(flexitest.Factory):
 
         ol_client_args = ["--ol-client-url", ol_endpoint] if ol_endpoint else ["--dummy-ol-client"]
         if ee_params_path is None:
-            ee_params_path = generate_ee_params(datadir)
+            ee_params_path = generate_ee_params(
+                datadir,
+                bridge_denomination_sats=bridge_denomination,
+                max_withdrawal_amount_sats=max_withdrawal_amount,
+            )
         alpen_params_path = compose_alpen_params(
             datadir,
             ee_params_path,
