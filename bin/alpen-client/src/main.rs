@@ -55,9 +55,8 @@ fn main() {
     // The boot spec pins v0; the fork-sensitive components (executor,
     // consensus, engine validator, payload builder) resolve the governing
     // version per block from the header-stamped spec version instead.
-    // TODO(STR-3998): remaining version-blind consumers: pool tx validation
-    // (tip policy), the p2p fork-id handshake, and the Alpen-layer check
-    // that a block's claimed version matches the inbox-derived one.
+    // TODO(STR-4158): pool tx validation (tip policy) is still
+    // version-blind, resolving against the pinned v0 spec.
     command.chain = command.ext.alpen_params.chain_spec(AlpenSpecId::V0).clone();
     // enable engine api v4
     command.engine.accept_execution_requests_hash = true;
