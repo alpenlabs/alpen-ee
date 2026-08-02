@@ -32,6 +32,10 @@ const DEFAULT_BTCIO_RETRY_INTERVAL_MS: u64 = 1_000;
 #[cfg(feature = "sequencer")]
 const DEFAULT_BENEFICIARY_ADDRESS: Address = address!("5400000000000000000000000000000000000010");
 
+// Mirrors `alpen_ee_sequencer::BlockBuilderConfig`'s default target blocktime.
+#[cfg(feature = "sequencer")]
+const DEFAULT_BLOCKTIME_MS: u64 = 5_000;
+
 /// Alpen-specific CLI args extending the reth default CLI.
 ///
 /// Composed of domain-grouped [`clap::Args`] structs; all flags share one
@@ -153,7 +157,7 @@ pub(crate) struct NodeArgs {
 pub(crate) struct OlArgs {
     /// URL of OL node RPC (can be either `http[s]://` or `ws[s]://`).
     /// Required unless `--dummy-ol-client` is specified.
-    #[arg(long = "ol-client-url")]
+    #[arg(long = "ol-client-url", required_unless_present = "dummy_client")]
     pub client_url: Option<String>,
 
     /// URL of the authenticated OL transaction submission RPC.
@@ -246,6 +250,16 @@ pub(crate) struct SequencerArgs {
     #[cfg(feature = "sequencer")]
     #[arg(long, default_value_t = DEFAULT_BENEFICIARY_ADDRESS)]
     pub beneficiary_address: Address,
+
+    /// EE block time override, in milliseconds. Must be greater than zero.
+    #[cfg(feature = "sequencer")]
+    #[arg(
+        long = "ee-block-time-ms",
+        env = "ALPEN_EE_BLOCK_TIME_MS",
+        default_value_t = DEFAULT_BLOCKTIME_MS,
+        value_parser = clap::value_parser!(u64).range(1..),
+    )]
+    pub blocktime_ms: u64,
 }
 
 /// EE DA and Bitcoin RPC args.
@@ -287,7 +301,7 @@ pub(crate) struct BtcioArgs {
     pub conf_target: u16,
 
     /// Fixed fee rate in sat/vB. Required when policy is `fixed`.
-    #[arg(long = "btcio-fee-rate")]
+    #[arg(long = "btcio-fee-rate", required_if_eq("fee_policy", "fixed"))]
     pub fee_rate: Option<f64>,
 
     /// mempool.space-compatible base URL. Required when policy is `mempool`.
@@ -437,8 +451,9 @@ mod additional_config_tests {
     const SEQUENCER_PUBKEY: &str =
         "0000000000000000000000000000000000000000000000000000000000000000";
 
-    fn parse_additional_config(args: &[&str]) -> AdditionalConfig {
-        let params_fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/res/alpen-params.json");
+    fn base_argv<'a>(args: &[&'a str]) -> Vec<&'a str> {
+        let params_fixture: &'static str =
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/res/alpen-params.json");
         let mut argv = vec![
             "alpen-client",
             "--alpen-params",
@@ -447,16 +462,62 @@ mod additional_config_tests {
             SEQUENCER_PUBKEY,
         ];
         argv.extend_from_slice(args);
-        <AdditionalConfig as clap::Parser>::parse_from(argv)
+        argv
+    }
+
+    fn parse_additional_config(args: &[&str]) -> AdditionalConfig {
+        <AdditionalConfig as clap::Parser>::parse_from(base_argv(args))
+    }
+
+    /// Like [`parse_additional_config`], but surfaces parse errors instead of
+    /// exiting the process, for asserting on clap-level rejections.
+    fn try_parse_additional_config(args: &[&str]) -> Result<AdditionalConfig, clap::Error> {
+        <AdditionalConfig as clap::Parser>::try_parse_from(base_argv(args))
     }
 
     /// The artifact loads at CLI parse time and the genesis facts are
     /// derived from its embedded EVM spec.
     #[test]
     fn alpen_params_flag_loads_the_artifact() {
-        let config = parse_additional_config(&[]);
+        let config = parse_additional_config(&["--dummy-ol-client"]);
 
         assert_eq!(config.chain.alpen_params.genesis_block_info().blocknum(), 0);
+    }
+
+    /// `--ol-client-url` is required unless `--dummy-ol-client` is set; this
+    /// must be rejected at parse time, not deep inside `node::launch` after
+    /// the database has already been opened.
+    #[test]
+    fn ol_client_url_required_unless_dummy_client() {
+        let err = try_parse_additional_config(&[]).unwrap_err();
+        assert!(err.to_string().contains("--ol-client-url"));
+    }
+
+    #[test]
+    fn ol_client_url_not_required_with_dummy_client() {
+        let config = try_parse_additional_config(&["--dummy-ol-client"]).unwrap();
+        assert!(config.ol.client_url.is_none());
+    }
+
+    /// `--btcio-fee-rate` is required when `--btcio-fee-policy=fixed`; this
+    /// must be rejected at parse time rather than inside `writer_config()`.
+    #[cfg(feature = "sequencer")]
+    #[test]
+    fn btcio_fee_rate_required_when_policy_fixed() {
+        let err =
+            try_parse_additional_config(&["--dummy-ol-client", "--btcio-fee-policy", "fixed"])
+                .unwrap_err();
+        assert!(err.to_string().contains("--btcio-fee-rate"));
+    }
+
+    /// `--ee-block-time-ms` (aliasing `ALPEN_EE_BLOCK_TIME_MS`) must be
+    /// greater than zero, enforced by clap's own range check.
+    #[cfg(feature = "sequencer")]
+    #[test]
+    fn ee_block_time_ms_rejects_zero() {
+        let err = try_parse_additional_config(&["--dummy-ol-client", "--ee-block-time-ms", "0"])
+            .unwrap_err();
+        assert!(err.to_string().contains("ee-block-time-ms"));
     }
 
     /// Catches arg id / flag collisions between the flattened Alpen arg

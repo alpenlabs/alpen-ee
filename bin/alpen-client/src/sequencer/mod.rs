@@ -18,10 +18,7 @@ mod prover;
 mod provers;
 mod services;
 
-use std::{
-    env::{self, VarError},
-    sync::Arc,
-};
+use std::sync::Arc;
 
 use alpen_ee_common::{
     require_latest_batch, BlockNumHash, ConsensusHeads, OLFinalizedStatus, SequencerOLClient,
@@ -61,9 +58,6 @@ use tracing::{info, info_span, Instrument};
 
 use self::{gas_data_provider::RethGasDataProvider, payload_builder::AlpenRethPayloadEngine};
 use crate::{args::AdditionalConfig, ol::OLClientKind, service_executor::ServiceExecutor};
-
-/// Environment variable for overriding the default EE block time.
-const ALPEN_EE_BLOCK_TIME_MS_ENV_VAR: &str = "ALPEN_EE_BLOCK_TIME_MS";
 
 /// Default capacity for the batch builder → chunk builder event channel.
 const DEFAULT_BATCH_EVENT_CHANNEL_CAPACITY: usize = 64;
@@ -143,47 +137,6 @@ fn sequencer_bitcoin_keypair(privkey: &Buf32) -> eyre::Result<Keypair> {
     let sk = SecretKey::from_slice(privkey.as_ref()).context("invalid sequencer private key")?;
     let secp = Secp256k1::signing_only();
     Ok(Keypair::from_secret_key(&secp, &sk))
-}
-
-/// Parses the EE block time override.
-fn block_builder_config_from_env() -> eyre::Result<BlockBuilderConfig> {
-    let default_config = BlockBuilderConfig::default();
-
-    let blocktime_ms = match env::var(ALPEN_EE_BLOCK_TIME_MS_ENV_VAR) {
-        Ok(raw_value) => {
-            let blocktime_ms = raw_value.parse::<u64>().wrap_err_with(|| {
-                format!(
-                    "Failed to parse {ALPEN_EE_BLOCK_TIME_MS_ENV_VAR} as a positive integer milliseconds value: {raw_value}"
-                )
-            })?;
-            if blocktime_ms == 0 {
-                eyre::bail!("{ALPEN_EE_BLOCK_TIME_MS_ENV_VAR} must be greater than zero");
-            }
-            info!(
-                target: "alpen-client",
-                component = "alpen",
-                blocktime_ms,
-                env_var = ALPEN_EE_BLOCK_TIME_MS_ENV_VAR,
-                "Using EE block time override from environment"
-            );
-            blocktime_ms
-        }
-        Err(VarError::NotPresent) => {
-            let default_blocktime_ms = default_config.blocktime_ms();
-            info!(
-                target: "alpen-client",
-                component = "alpen",
-                blocktime_ms = default_blocktime_ms,
-                "Using default EE block time"
-            );
-            return Ok(default_config);
-        }
-        Err(VarError::NotUnicode(_)) => {
-            eyre::bail!("{ALPEN_EE_BLOCK_TIME_MS_ENV_VAR} must contain valid unicode");
-        }
-    };
-
-    Ok(default_config.with_blocktime_ms(blocktime_ms))
 }
 
 /// Loads sequencer boot state: OL chain tracker, exec chain, batch builder,
@@ -289,7 +242,9 @@ where
     } = ctx;
 
     log_writer_config(&writer_config);
-    let block_builder_config = block_builder_config_from_env()?;
+    let sequencer_args = &ext.sequencer;
+    let block_builder_config =
+        BlockBuilderConfig::default().with_blocktime_ms(sequencer_args.blocktime_ms);
     let sequencer_keypair = sequencer_bitcoin_keypair(&sequencer_privkey)?;
 
     let SequencerBootState {
@@ -298,8 +253,6 @@ where
         batch_builder: batch_builder_state,
         batch_lifecycle: batch_lifecycle_state,
     } = init_boot_state(storage.as_ref(), ol_client.as_ref()).await?;
-
-    let sequencer_args = &ext.sequencer;
 
     let payload_engine = Arc::new(AlpenRethPayloadEngine::new(
         payload_builder_handle,
