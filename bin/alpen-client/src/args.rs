@@ -256,18 +256,21 @@ pub(crate) struct SequencerArgs {
 /// EE chunk/acct prover backend selection and configuration.
 ///
 /// The raw flags below are cross-validated and resolved into a single
-/// [`ProverBackendConfig`] by [`ProverArgs::backend`].
+/// [`ProverBackendConfig`] by [`ProverArgs::backend`]. They're only
+/// meaningful with `--sequencer`; a fullnode never touches the prover, so
+/// nothing here is required at the clap level — `--prover-backend` and the
+/// paths/keys it needs are validated together in [`ProverArgs::backend`]
+/// instead, which only runs behind the `--sequencer` gate.
 #[derive(Debug, clap::Args)]
 #[command(next_help_heading = "Prover")]
 pub(crate) struct ProverArgs {
-    /// Use the zkaleido `NativeHost` for the EE chunk + acct provers
-    /// instead of the SP1 remote host.
+    /// EE chunk/acct prover backend.
     ///
-    /// Dev/test only: skips real Groth16 proving and the compiled guest
-    /// ELFs. Functional tests enable this so the sequencer can start
-    /// without the SP1 prover ELFs present on disk.
-    #[arg(long, default_value_t = false)]
-    pub dev_native_prover: bool,
+    /// `native` (the default) needs `--native-chunk-signing-key` and
+    /// `--native-acct-signing-key`; `sp1` needs `--chunk-elf-path` and
+    /// `--acct-elf-path`.
+    #[arg(long = "prover-backend", value_enum, default_value_t = ProverBackendArg::Native)]
+    pub backend: ProverBackendArg,
 
     /// End-to-end deadline (seconds) passed to the SP1 prover network on
     /// every chunk/acct proof request. Only used with the remote SP1
@@ -276,11 +279,8 @@ pub(crate) struct ProverArgs {
     #[arg(long, required = false)]
     pub sp1_proof_deadline_secs: Option<u64>,
 
-    /// Path to the compiled SP1 guest ELF for the chunk prover.
-    ///
-    /// Required with the remote SP1 backend (i.e. without
-    /// `--dev-native-prover`). Lets one `alpen-client` build run against
-    /// different guest ELFs without a rebuild.
+    /// Path to the compiled SP1 guest ELF for the chunk prover. Required
+    /// with `--sequencer --prover-backend sp1`.
     #[arg(long, required = false)]
     pub chunk_elf_path: Option<PathBuf>,
 
@@ -288,44 +288,93 @@ pub(crate) struct ProverArgs {
     /// requirements as `--chunk-elf-path`.
     #[arg(long, required = false)]
     pub acct_elf_path: Option<PathBuf>,
+
+    /// Path to a file holding the hex-encoded BIP-340 Schnorr signing key
+    /// the native EE chunk prover signs proofs with. Required with
+    /// `--prover-backend native`.
+    #[arg(long, required = false)]
+    pub native_chunk_signing_key: Option<PathBuf>,
+
+    /// Path to a file holding the hex-encoded BIP-340 Schnorr signing key
+    /// the native EE account prover signs proofs with. Required with
+    /// `--prover-backend native`.
+    #[arg(long, required = false)]
+    pub native_acct_signing_key: Option<PathBuf>,
 }
 
 impl ProverArgs {
-    /// Resolves the raw CLI flags into the EE chunk/acct prover backend.
+    /// Resolves the CLI flags into the EE chunk/acct prover backend.
     ///
-    /// Fails if the SP1 backend is selected (`--dev-native-prover` unset)
-    /// but `--chunk-elf-path` or `--acct-elf-path` is missing. Called both
-    /// as an early fail-fast check in `main.rs` and again where the backend
-    /// is actually built, so a bad flag combination is rejected before any
+    /// Fails if the selected backend is missing the fields it needs (the
+    /// native signing key paths, or both SP1 elf paths). Called both as an
+    /// early fail-fast check in `main.rs` and again where the backend is
+    /// actually built, so a bad flag combination is rejected before any
     /// node/DA/prover startup work begins rather than deep inside it.
+    ///
+    /// Only checks that the paths are present, not that the files exist or
+    /// parse — same as `--chunk-elf-path`/`--acct-elf-path`, reading them is
+    /// left to the caller that actually builds the backend.
     pub(crate) fn backend(&self) -> eyre::Result<ProverBackendConfig> {
-        if self.dev_native_prover {
-            return Ok(ProverBackendConfig::Native);
+        match self.backend {
+            ProverBackendArg::Native => {
+                let chunk_signing_key_path =
+                    self.native_chunk_signing_key.clone().ok_or_else(|| {
+                        eyre::eyre!(
+                            "--native-chunk-signing-key is required with --prover-backend native"
+                        )
+                    })?;
+                let acct_signing_key_path =
+                    self.native_acct_signing_key.clone().ok_or_else(|| {
+                        eyre::eyre!(
+                            "--native-acct-signing-key is required with --prover-backend native"
+                        )
+                    })?;
+                Ok(ProverBackendConfig::Native {
+                    chunk_signing_key_path,
+                    acct_signing_key_path,
+                })
+            }
+            ProverBackendArg::Sp1 => {
+                let chunk_elf_path = self.chunk_elf_path.clone().ok_or_else(|| {
+                    eyre::eyre!("--chunk-elf-path is required with --prover-backend sp1")
+                })?;
+                let acct_elf_path = self.acct_elf_path.clone().ok_or_else(|| {
+                    eyre::eyre!("--acct-elf-path is required with --prover-backend sp1")
+                })?;
+                Ok(ProverBackendConfig::Sp1 {
+                    deadline_secs: self.sp1_proof_deadline_secs,
+                    chunk_elf_path,
+                    acct_elf_path,
+                })
+            }
         }
-        let chunk_elf_path = self.chunk_elf_path.clone().ok_or_else(|| {
-            eyre::eyre!("--chunk-elf-path is required unless --dev-native-prover is set")
-        })?;
-        let acct_elf_path = self.acct_elf_path.clone().ok_or_else(|| {
-            eyre::eyre!("--acct-elf-path is required unless --dev-native-prover is set")
-        })?;
-        Ok(ProverBackendConfig::Sp1 {
-            deadline_secs: self.sp1_proof_deadline_secs,
-            chunk_elf_path,
-            acct_elf_path,
-        })
     }
+}
+
+/// CLI selector for [`ProverBackendConfig`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum ProverBackendArg {
+    #[value(name = "native")]
+    Native,
+    #[value(name = "sp1")]
+    Sp1,
 }
 
 /// EE chunk/acct prover backend, resolved from [`ProverArgs`].
 ///
-/// A single tagged value instead of a bool plus separately-validated paths,
-/// so the rest of the sequencer startup path threads one already-validated
-/// value instead of re-deriving the same cross-field requirement at every
-/// layer.
+/// A single tagged value instead of separately-validated paths, so the rest
+/// of the sequencer startup path threads one already-validated value
+/// instead of re-deriving the same cross-field requirement at every layer.
+/// Holds paths rather than read file contents, same as the SP1 variant's
+/// elf paths: reading is left to whoever actually builds the backend.
 #[derive(Debug, Clone)]
 pub(crate) enum ProverBackendConfig {
-    /// zkaleido `NativeHost`. Dev/test only, see `ProverArgs::dev_native_prover`.
-    Native,
+    /// zkaleido `NativeHost`, signing chunk/acct proofs with the keys read
+    /// from the given files.
+    Native {
+        chunk_signing_key_path: PathBuf,
+        acct_signing_key_path: PathBuf,
+    },
     /// SP1 remote host.
     Sp1 {
         /// Falls back to `DEFAULT_SP1_DEADLINE_SECS` when unset.
@@ -649,8 +698,9 @@ mod additional_config_tests {
             "100000000",
             "--batch-event-channel-capacity",
             "64",
-            "--dev-native-prover",
             "--dev-track-latest-epoch",
+            "--prover-backend",
+            "sp1",
             "--sp1-proof-deadline-secs",
             "60",
             "--chunk-elf-path",
@@ -694,53 +744,112 @@ mod additional_config_tests {
             Some(PathBuf::from("/tmp/guest-alpen-acct.elf"))
         );
     }
+
+    /// `--native-chunk-signing-key`/`--native-acct-signing-key` are plain
+    /// `Option` fields at the clap level (a fullnode never needs them), so
+    /// `--prover-backend` defaulting to `native` with no key files parses
+    /// fine; `ProverArgs::backend()` is what rejects the missing keys, once
+    /// it's known `--sequencer` is actually in play (see
+    /// `prover_backend_tests::native_backend_requires_chunk_signing_key`).
+    #[test]
+    fn sequencer_parses_without_native_signing_keys() {
+        let config = try_parse_additional_config(&[
+            "--dummy-ol-client",
+            "--sequencer",
+            "--btc-rpc-url",
+            "http://localhost:18443",
+            "--btc-rpc-user",
+            "user",
+            "--btc-rpc-password",
+            "pass",
+        ])
+        .unwrap();
+        assert!(config.sequencer.prover.backend().is_err());
+    }
+
+    /// A fullnode (no `--sequencer`) never touches the prover, so none of
+    /// the backend-specific flags are required even though
+    /// `--prover-backend` defaults to `native`.
+    #[test]
+    fn fullnode_does_not_require_prover_backend_flags() {
+        let config = try_parse_additional_config(&["--dummy-ol-client"]).unwrap();
+        assert!(!config.sequencer.enabled);
+    }
+
+    /// Passing both native signing key paths with `--sequencer` (default
+    /// `--prover-backend native`) parses; like `--chunk-elf-path`, the path
+    /// doesn't need to exist yet at parse time, only when the backend is
+    /// actually built (see `sequencer::prover::backend`).
+    #[test]
+    fn native_signing_key_paths_do_not_need_to_exist_at_parse_time() {
+        let config = try_parse_additional_config(&[
+            "--dummy-ol-client",
+            "--sequencer",
+            "--btc-rpc-url",
+            "http://localhost:18443",
+            "--btc-rpc-user",
+            "user",
+            "--btc-rpc-password",
+            "pass",
+            "--native-chunk-signing-key",
+            "/tmp/native-chunk-signing-key.hex",
+            "--native-acct-signing-key",
+            "/tmp/native-acct-signing-key.hex",
+        ])
+        .unwrap();
+        assert!(config.sequencer.prover.backend().is_ok());
+    }
 }
 
 #[cfg(test)]
 mod prover_backend_tests {
     use super::*;
 
-    fn args(
-        dev_native_prover: bool,
-        chunk_elf_path: Option<&str>,
-        acct_elf_path: Option<&str>,
-    ) -> ProverArgs {
+    fn native_args() -> ProverArgs {
         ProverArgs {
-            dev_native_prover,
+            backend: ProverBackendArg::Native,
             sp1_proof_deadline_secs: None,
-            chunk_elf_path: chunk_elf_path.map(PathBuf::from),
-            acct_elf_path: acct_elf_path.map(PathBuf::from),
+            chunk_elf_path: None,
+            acct_elf_path: None,
+            native_chunk_signing_key: Some(PathBuf::from("/tmp/chunk-signing-key.hex")),
+            native_acct_signing_key: Some(PathBuf::from("/tmp/acct-signing-key.hex")),
+        }
+    }
+
+    fn sp1_args() -> ProverArgs {
+        ProverArgs {
+            backend: ProverBackendArg::Sp1,
+            sp1_proof_deadline_secs: None,
+            chunk_elf_path: Some(PathBuf::from("/tmp/chunk.elf")),
+            acct_elf_path: Some(PathBuf::from("/tmp/acct.elf")),
+            native_chunk_signing_key: None,
+            native_acct_signing_key: None,
         }
     }
 
     #[test]
-    fn native_ignores_missing_elf_paths() {
-        let backend = args(true, None, None).backend().unwrap();
-        assert!(matches!(backend, ProverBackendConfig::Native));
+    fn native_backend_resolves_to_native_config() {
+        match native_args().backend().unwrap() {
+            ProverBackendConfig::Native {
+                chunk_signing_key_path,
+                acct_signing_key_path,
+            } => {
+                assert_eq!(
+                    chunk_signing_key_path,
+                    PathBuf::from("/tmp/chunk-signing-key.hex")
+                );
+                assert_eq!(
+                    acct_signing_key_path,
+                    PathBuf::from("/tmp/acct-signing-key.hex")
+                );
+            }
+            other => panic!("expected Native, got {other:?}"),
+        }
     }
 
     #[test]
-    fn sp1_requires_chunk_elf_path() {
-        let err = args(false, None, Some("/tmp/acct.elf"))
-            .backend()
-            .unwrap_err();
-        assert!(err.to_string().contains("--chunk-elf-path"));
-    }
-
-    #[test]
-    fn sp1_requires_acct_elf_path() {
-        let err = args(false, Some("/tmp/chunk.elf"), None)
-            .backend()
-            .unwrap_err();
-        assert!(err.to_string().contains("--acct-elf-path"));
-    }
-
-    #[test]
-    fn sp1_with_both_paths_succeeds() {
-        let backend = args(false, Some("/tmp/chunk.elf"), Some("/tmp/acct.elf"))
-            .backend()
-            .unwrap();
-        match backend {
+    fn sp1_backend_resolves_to_sp1_config() {
+        match sp1_args().backend().unwrap() {
             ProverBackendConfig::Sp1 {
                 chunk_elf_path,
                 acct_elf_path,
@@ -751,6 +860,38 @@ mod prover_backend_tests {
             }
             other => panic!("expected Sp1, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn native_backend_requires_chunk_signing_key() {
+        let mut args = native_args();
+        args.native_chunk_signing_key = None;
+        let err = args.backend().unwrap_err();
+        assert!(err.to_string().contains("--native-chunk-signing-key"));
+    }
+
+    #[test]
+    fn native_backend_requires_acct_signing_key() {
+        let mut args = native_args();
+        args.native_acct_signing_key = None;
+        let err = args.backend().unwrap_err();
+        assert!(err.to_string().contains("--native-acct-signing-key"));
+    }
+
+    #[test]
+    fn sp1_backend_requires_chunk_elf_path() {
+        let mut args = sp1_args();
+        args.chunk_elf_path = None;
+        let err = args.backend().unwrap_err();
+        assert!(err.to_string().contains("--chunk-elf-path"));
+    }
+
+    #[test]
+    fn sp1_backend_requires_acct_elf_path() {
+        let mut args = sp1_args();
+        args.acct_elf_path = None;
+        let err = args.backend().unwrap_err();
+        assert!(err.to_string().contains("--acct-elf-path"));
     }
 }
 

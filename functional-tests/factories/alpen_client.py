@@ -22,6 +22,29 @@ def generate_p2p_secret_key() -> str:
     return secrets.token_hex(32)
 
 
+# The native EE chunk/acct provers sign proofs with a Schnorr key instead of
+# doing real ZK proving. OL genesis (`strata-datatool gen-ol-params
+# --alpen-predicate bip340-schnorr-test`, see common/datatool.py) is
+# initialized to expect the acct proof signed by exactly this key -- see
+# `EeAcctProgram::test_signing_key` / `EeChunkProgram::test_signing_key` in
+# crates/proof-impl/alpen-{acct,chunk}. Signing with a different key still
+# produces a validly-signed proof, but OL checks it against that fixed
+# genesis value and will reject it. These are not secrets (unlike
+# SEQUENCER_PRIVATE_KEY): they're a fixed, publicly-known value both sides
+# agree on ahead of time.
+NATIVE_CHUNK_SIGNING_KEY_HEX = "03" * 32
+NATIVE_ACCT_SIGNING_KEY_HEX = "02" * 32
+
+
+def _write_native_signing_key_files(datadir: Path) -> tuple[Path, Path]:
+    """Writes the fixed native-prover signing keys OL genesis expects."""
+    chunk_key_path = datadir / "native-chunk-signing-key.hex"
+    acct_key_path = datadir / "native-acct-signing-key.hex"
+    chunk_key_path.write_text(NATIVE_CHUNK_SIGNING_KEY_HEX)
+    acct_key_path.write_text(NATIVE_ACCT_SIGNING_KEY_HEX)
+    return chunk_key_path, acct_key_path
+
+
 def generate_sequencer_keypair() -> tuple[str, str]:
     """
     Generate a sequencer keypair (private key, X-only public key).
@@ -107,6 +130,8 @@ class AlpenClientFactory(flexitest.Factory):
         key_hex = p2p_secret_key.removeprefix("0x")
         p2p_secret_key_file.write_text(key_hex)
 
+        chunk_signing_key_path, acct_signing_key_path = _write_native_signing_key_files(datadir)
+
         if ol_endpoint:
             ol_client_args = ["--ol-client-url", ol_endpoint]
             if ol_submit_endpoint:
@@ -147,9 +172,12 @@ class AlpenClientFactory(flexitest.Factory):
             "--p2p-secret-key", str(p2p_secret_key_file),
             "--batch-sealing-block-count", str(batch_sealing_block_count),
             "-vvvv",
-            # Functional tests don't ship the SP1 guest ELFs, so run the
-            # EE chunk + acct provers on the zkaleido NativeHost.
-            "--dev-native-prover",
+            # Functional tests don't ship the SP1 guest ELFs, so run the EE
+            # chunk + acct provers on the zkaleido NativeHost instead
+            # (--prover-backend native is also the default).
+            "--prover-backend", "native",
+            "--native-chunk-signing-key", str(chunk_signing_key_path),
+            "--native-acct-signing-key", str(acct_signing_key_path),
         ]
         if dev_track_latest_epoch:
             # Advance the OL chain tracker on `latest` epoch (FCM)

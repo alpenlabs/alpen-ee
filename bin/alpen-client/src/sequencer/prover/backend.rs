@@ -1,27 +1,27 @@
 //! EE chunk + acct prover backend selection and launch.
 //!
 //! [`launch_validated_ee_batch_prover`] is the entry point: it picks a
-//! backend (native for dev/test, SP1 remote otherwise), builds the
+//! backend (`--prover-backend native`, the default, or `sp1`), builds the
 //! underlying paas provers, checks the resulting account predicate key
 //! against the OL's expected `update_vk`, and launches both prover
 //! services.
 
-#[cfg(feature = "sp1")]
-use std::fs;
-use std::{sync::Arc, time::Duration};
+use std::{fs, path::Path, sync::Arc, time::Duration};
 
 use alpen_ee_common::{ChunkStorage, SequencerOLClient};
 use alpen_ee_params::AlpenParams;
 use eyre::Context;
+use k256::schnorr::SigningKey;
 use strata_paas::{Prover, ProverBuilder, ProverHandle, ProverServiceBuilder};
-use strata_predicate::PredicateKey;
-use strata_proofimpl_alpen_acct::EeAcctProgram;
-use strata_proofimpl_alpen_chunk::EeChunkProgram;
-use strata_proofimpl_predicate_keys::{
-    validate_expected_predicate_key, NativeAlpenAcctPredicateKey, NativeAlpenChunkPredicateKey,
-    PredicateKeyProvider, Sp1Groth16PredicateKey,
-};
+use strata_predicate::{PredicateKey, PredicateTypeId};
+use strata_primitives::buf::Buf32;
+use strata_proofimpl_alpen_acct::process_ee_acct_update;
+use strata_proofimpl_alpen_chunk::process_ee_chunk;
+use strata_proofimpl_predicate_keys::validate_expected_predicate_key;
+#[cfg(feature = "sp1")]
+use strata_proofimpl_predicate_keys::{PredicateKeyProvider, Sp1Groth16PredicateKey};
 use tracing::info;
+use zkaleido_native_adapter::NativeHost;
 #[cfg(feature = "sp1")]
 use zkaleido_sp1_host::{SP1Host, SP1HostConfig};
 
@@ -94,22 +94,32 @@ async fn build_ee_prover_config(
     params: Arc<AlpenParams>,
 ) -> eyre::Result<EeProverConfig> {
     match backend {
-        ProverBackendConfig::Native => {
-            info!(
-                target: "alpen-client",
-                "EE chunk + acct provers: native host (dev/test only)"
-            );
+        ProverBackendConfig::Native {
+            chunk_signing_key_path,
+            acct_signing_key_path,
+        } => {
+            info!(target: "alpen-client", "EE chunk + acct provers: native host");
 
-            let chunk_program = EeChunkProgram::new((*params).clone());
-            let chunk = builders.chunk.native(chunk_program.native_host());
-            let chunk_predicate_key = NativeAlpenChunkPredicateKey
-                .predicate_key()
-                .expect("native chunk predicate key must be available");
-            let acct_program = EeAcctProgram::new(chunk_predicate_key, (*params).clone());
-            let account = builders.account.native(acct_program.native_host());
-            let account_predicate_key = NativeAlpenAcctPredicateKey
-                .predicate_key()
-                .expect("native account predicate key must be available");
+            let chunk_signing_key = native_schnorr_signing_key_from_file(&chunk_signing_key_path)?;
+            let acct_signing_key = native_schnorr_signing_key_from_file(&acct_signing_key_path)?;
+
+            let chunk_predicate_key = schnorr_predicate_key(&chunk_signing_key);
+            let chunk_host = {
+                let chunk_params = (*params).clone();
+                NativeHost::new(chunk_signing_key, move |zkvm| {
+                    process_ee_chunk(zkvm, &chunk_params)
+                })
+            };
+            let chunk = builders.chunk.native(chunk_host);
+
+            let account_predicate_key = schnorr_predicate_key(&acct_signing_key);
+            let acct_host = {
+                let acct_params = (*params).clone();
+                NativeHost::new(acct_signing_key, move |zkvm| {
+                    process_ee_acct_update(zkvm, &acct_params, &chunk_predicate_key)
+                })
+            };
+            let account = builders.account.native(acct_host);
 
             Ok(EeProverConfig {
                 provers: EeProvers { chunk, account },
@@ -165,10 +175,38 @@ async fn build_ee_prover_config(
         }
         #[cfg(not(feature = "sp1"))]
         ProverBackendConfig::Sp1 { .. } => Err(eyre::eyre!(
-            "remote SP1 prover is not compiled in; pass --dev-native-prover \
-             or build with the `sp1` feature"
+            "remote SP1 prover is not compiled in; pass --prover-backend native \
+             to use the native backend instead, or build with the `sp1` feature"
         )),
     }
+}
+
+/// Reads a native-prover Schnorr signing key from a hex-encoded key file.
+///
+/// Mirrors reth's own `--p2p-secret-key` file convention: a bare hex
+/// string, no `0x` prefix, optional surrounding whitespace.
+fn native_schnorr_signing_key_from_file(path: &Path) -> eyre::Result<SigningKey> {
+    let hex = fs::read_to_string(path)
+        .with_context(|| format!("failed to read native signing key file {path:?}"))?;
+    parse_native_schnorr_signing_key(hex.trim())
+        .with_context(|| format!("invalid native signing key file {path:?}"))
+}
+
+/// Parses a hex-encoded native-prover Schnorr signing key.
+fn parse_native_schnorr_signing_key(hex: &str) -> eyre::Result<SigningKey> {
+    let bytes: Buf32 = hex
+        .parse()
+        .map_err(|e| eyre::eyre!("failed to parse as 32-byte hex: {e}"))?;
+    SigningKey::from_bytes(bytes.as_ref())
+        .map_err(|e| eyre::eyre!("invalid Schnorr signing key: {e}"))
+}
+
+/// Derives the `Bip340Schnorr` predicate key that verifies proofs signed by `signing_key`.
+fn schnorr_predicate_key(signing_key: &SigningKey) -> PredicateKey {
+    PredicateKey::new(
+        PredicateTypeId::Bip340Schnorr,
+        signing_key.verifying_key().to_bytes().to_vec(),
+    )
 }
 
 async fn launch_ee_prover_services(
@@ -203,9 +241,28 @@ fn validate_ee_account_prover_predicate_key(
 
 #[cfg(test)]
 mod tests {
-    use strata_predicate::PredicateTypeId;
-
     use super::*;
+
+    #[test]
+    fn parse_native_schnorr_signing_key_accepts_valid_hex() {
+        let hex = "11".repeat(32);
+        parse_native_schnorr_signing_key(&hex).unwrap();
+    }
+
+    #[test]
+    fn parse_native_schnorr_signing_key_rejects_wrong_length() {
+        // `SigningKey` doesn't implement `Debug`, so `Result::unwrap_err` isn't usable here.
+        let Err(err) = parse_native_schnorr_signing_key("1122") else {
+            panic!("expected an error for a too-short key");
+        };
+        assert!(err.to_string().contains("32-byte"));
+    }
+
+    #[test]
+    fn parse_native_schnorr_signing_key_rejects_invalid_hex() {
+        let hex = "zz".repeat(32);
+        assert!(parse_native_schnorr_signing_key(&hex).is_err());
+    }
 
     #[test]
     fn ee_account_prover_predicate_key_validation_accepts_match() {

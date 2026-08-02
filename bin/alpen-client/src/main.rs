@@ -86,7 +86,7 @@ where
             error!(
                 target: "alpen-client",
                 component = "alpen",
-                "Remote SP1 prover requested but binary built without `sp1` feature. Pass --dev-native-prover or rebuild with the `sp1` feature."
+                "Remote SP1 prover requested but binary built without `sp1` feature. Pass --prover-backend native to use the native backend instead, or rebuild with the `sp1` feature."
             );
             eyre::bail!("sp1 feature not enabled at compile time");
         }

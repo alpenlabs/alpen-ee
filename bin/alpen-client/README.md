@@ -433,9 +433,9 @@ DA and proof failures are non-fatal; the task retries on each poll.
 - **Chunk proof** — proves a chunk's block execution; receipts are written to a shared store.
 - **Account (batch) proof** — consumes the batch's chunk receipts plus the prior batch's end state and a DA witness, producing the outer proof submitted to OL.
 
-**Backends**:
-- **SP1 remote** — production (`sp1` feature; deadline via `--sp1-proof-deadline-secs`)
-- **Native** — dev/test only (`--dev-native-prover`), skips real Groth16 proving and compiled guest ELFs
+**Backends**, selected via `--prover-backend`:
+- **`sp1`** — production (`sp1` feature); needs `--chunk-elf-path` and `--acct-elf-path`; deadline via `--sp1-proof-deadline-secs`
+- **`native`** (the default) — skips real Groth16 proving, signing proofs with a Schnorr key instead. Needs `--native-chunk-signing-key` / `--native-acct-signing-key` (paths to hex-encoded key files). The acct key must match whatever the OL genesis `update_vk` expects, or the account prover predicate validation at startup fails — see `crates/proof-impl/alpen-acct`'s `test_signing_key`
 
 Proofs and prover tasks live in a dedicated SledDB instance, separate from OL storage.
 
@@ -746,8 +746,10 @@ The client extends the standard Reth CLI. Selected Alpen-specific flags (see [ma
 |------|---------|
 | `--batch-sealing-block-count` | Blocks per batch before sealing |
 | `--chunk-sealing-block-count` / `--chunk-sealing-gas-limit` | Chunk sealing thresholds |
+| `--prover-backend` | `native` (default) or `sp1` |
+| `--chunk-elf-path` / `--acct-elf-path` | Compiled SP1 guest ELFs; required with `--prover-backend sp1` |
 | `--sp1-proof-deadline-secs` | Deadline for remote SP1 proof requests |
-| `--dev-native-prover` | Use the native prover (dev/test only) |
+| `--native-chunk-signing-key` / `--native-acct-signing-key` | Paths to hex-encoded Schnorr key files; required with `--prover-backend native` |
 | `SEQUENCER_PRIVATE_KEY` (env) | Sequencer key for gossip signing and DA reveal signing |
 
 ### Observability
