@@ -80,6 +80,18 @@ where
         eyre::bail!("sequencer feature not enabled at compile time");
     }
 
+    if command.ext.sequencer.enabled
+        && !command.ext.sequencer.dev_native_prover
+        && !cfg!(feature = "sp1")
+    {
+        error!(
+            target: "alpen-client",
+            component = "alpen",
+            "Remote SP1 prover requested but binary built without `sp1` feature. Pass --dev-native-prover or rebuild with the `sp1` feature."
+        );
+        eyre::bail!("sp1 feature not enabled at compile time");
+    }
+
     // Build the tokio runtime ourselves so logging init can run inside its
     // context, then hand it to CliRunner. The OTLP tracing exporter requires
     // an active tokio handle when it is built.
