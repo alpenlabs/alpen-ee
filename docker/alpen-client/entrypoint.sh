@@ -42,6 +42,7 @@ if [ "${SEQUENCER_MODE}" = "true" ]; then
         --btc-rpc-user "${BITCOIND_RPC_USER}" \
         --btc-rpc-password "${BITCOIND_RPC_PASSWORD}" \
         --btcio-fee-policy "${BTCIO_FEE_POLICY}" \
+        --prover-backend sp1 \
         --chunk-elf-path "${CHUNK_ELF_PATH}" \
         --acct-elf-path "${ACCT_ELF_PATH}" \
         "$@"
