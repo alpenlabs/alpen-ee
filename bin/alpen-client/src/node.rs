@@ -227,9 +227,9 @@ pub(crate) async fn launch(
         // now produced inline during payload build (see the EE node's
         // `try_build_payload` / `AlpenRethPayloadEngine`); this exex
         // remains only to feed the ACCOUNT proof's batch-range witness
-        // (`RangeWitnessExtractor` reads `AccessedStateStore`). Retiring
-        // it is a separate acct-proof migration tracked as follow-up
-        // work to STR-3649.
+        // (`RangeWitnessExtractor` reads `AccessedStateStore`).
+        // TODO(STR-4157): retire this exex once the account proof's
+        // witness is assembled from inline per-block witnesses too.
         node_builder = node_builder.install_exex("accessed_state", {
             let accessed_state_store = storage.clone();
             |ctx| async { Ok(AccessedStateGenerator::new(ctx, accessed_state_store).start()) }
