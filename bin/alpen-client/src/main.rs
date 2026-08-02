@@ -31,7 +31,7 @@ use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use strata_logging::{init_logging_from_config, LoggingInitConfig};
 use tracing::{error, info};
 
-use crate::args::AdditionalConfig;
+use crate::args::{AdditionalConfig, ProverBackendConfig};
 
 fn main() {
     sigsegv_handler::install();
@@ -80,16 +80,16 @@ where
         eyre::bail!("sequencer feature not enabled at compile time");
     }
 
-    if command.ext.sequencer.enabled
-        && !command.ext.sequencer.prover.dev_native_prover
-        && !cfg!(feature = "sp1")
-    {
-        error!(
-            target: "alpen-client",
-            component = "alpen",
-            "Remote SP1 prover requested but binary built without `sp1` feature. Pass --dev-native-prover or rebuild with the `sp1` feature."
-        );
-        eyre::bail!("sp1 feature not enabled at compile time");
+    if command.ext.sequencer.enabled {
+        let prover_backend = command.ext.sequencer.prover.backend()?;
+        if matches!(prover_backend, ProverBackendConfig::Sp1 { .. }) && !cfg!(feature = "sp1") {
+            error!(
+                target: "alpen-client",
+                component = "alpen",
+                "Remote SP1 prover requested but binary built without `sp1` feature. Pass --dev-native-prover or rebuild with the `sp1` feature."
+            );
+            eyre::bail!("sp1 feature not enabled at compile time");
+        }
     }
 
     // Build the tokio runtime ourselves so logging init can run inside its

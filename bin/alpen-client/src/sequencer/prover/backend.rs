@@ -8,7 +8,7 @@
 
 #[cfg(feature = "sp1")]
 use std::fs;
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use alpen_ee_common::{ChunkStorage, SequencerOLClient};
 use alpen_ee_params::AlpenParams;
@@ -26,7 +26,7 @@ use tracing::info;
 use zkaleido_sp1_host::{SP1Host, SP1HostConfig};
 
 use super::{AcctSpec, ChunkSpec, EeBatchProofDbManager, PaasBatchProver};
-use crate::service_executor::ServiceExecutor;
+use crate::{args::ProverBackendConfig, service_executor::ServiceExecutor};
 
 /// Default end-to-end deadline applied to the SP1 prover network for the EE
 /// chunk + acct provers when `--sp1-proof-deadline-secs` is not set. Chosen
@@ -55,42 +55,6 @@ struct EeProvers {
     account: Prover<AcctSpec>,
 }
 
-enum EeProverBackend {
-    Native,
-    Sp1 {
-        deadline_secs: Option<u64>,
-        chunk_elf_path: PathBuf,
-        acct_elf_path: PathBuf,
-    },
-}
-
-/// CLI-derived knobs that select and configure the EE batch prover backend.
-pub(crate) struct EeProverBackendArgs {
-    pub(crate) use_native_prover: bool,
-    pub(crate) sp1_deadline_secs: Option<u64>,
-    pub(crate) chunk_elf_path: Option<PathBuf>,
-    pub(crate) acct_elf_path: Option<PathBuf>,
-}
-
-impl EeProverBackendArgs {
-    fn into_backend(self) -> eyre::Result<EeProverBackend> {
-        if self.use_native_prover {
-            return Ok(EeProverBackend::Native);
-        }
-        let chunk_elf_path = self.chunk_elf_path.ok_or_else(|| {
-            eyre::eyre!("--chunk-elf-path is required unless --dev-native-prover is set")
-        })?;
-        let acct_elf_path = self.acct_elf_path.ok_or_else(|| {
-            eyre::eyre!("--acct-elf-path is required unless --dev-native-prover is set")
-        })?;
-        Ok(EeProverBackend::Sp1 {
-            deadline_secs: self.sp1_deadline_secs,
-            chunk_elf_path,
-            acct_elf_path,
-        })
-    }
-}
-
 /// Picks a prover backend, builds the paas provers, validates the resulting
 /// account predicate key against the OL's expected `update_vk`, and
 /// launches both prover services.
@@ -99,14 +63,13 @@ pub(crate) async fn launch_validated_ee_batch_prover(
     service_executor: &ServiceExecutor,
     builders: EeProverBuilders,
     stores: EeProverStores,
-    backend_args: EeProverBackendArgs,
+    backend: ProverBackendConfig,
     params: Arc<AlpenParams>,
 ) -> eyre::Result<Arc<PaasBatchProver>> {
     let ol_account_update_vk = ol_client
         .get_latest_account_update_vk()
         .await
         .context("failed to fetch OL account update_vk for prover validation")?;
-    let backend = backend_args.into_backend()?;
     let prover_config = build_ee_prover_config(builders, backend, params).await?;
 
     validate_ee_account_prover_predicate_key(
@@ -127,11 +90,11 @@ pub(crate) async fn launch_validated_ee_batch_prover(
 
 async fn build_ee_prover_config(
     builders: EeProverBuilders,
-    backend: EeProverBackend,
+    backend: ProverBackendConfig,
     params: Arc<AlpenParams>,
 ) -> eyre::Result<EeProverConfig> {
     match backend {
-        EeProverBackend::Native => {
+        ProverBackendConfig::Native => {
             info!(
                 target: "alpen-client",
                 "EE chunk + acct provers: native host (dev/test only)"
@@ -154,7 +117,7 @@ async fn build_ee_prover_config(
             })
         }
         #[cfg(feature = "sp1")]
-        EeProverBackend::Sp1 {
+        ProverBackendConfig::Sp1 {
             deadline_secs,
             chunk_elf_path,
             acct_elf_path,
@@ -201,7 +164,7 @@ async fn build_ee_prover_config(
             })
         }
         #[cfg(not(feature = "sp1"))]
-        EeProverBackend::Sp1 { .. } => Err(eyre::eyre!(
+        ProverBackendConfig::Sp1 { .. } => Err(eyre::eyre!(
             "remote SP1 prover is not compiled in; pass --dev-native-prover \
              or build with the `sp1` feature"
         )),

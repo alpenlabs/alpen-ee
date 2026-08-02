@@ -254,6 +254,9 @@ pub(crate) struct SequencerArgs {
 }
 
 /// EE chunk/acct prover backend selection and configuration.
+///
+/// The raw flags below are cross-validated and resolved into a single
+/// [`ProverBackendConfig`] by [`ProverArgs::backend`].
 #[derive(Debug, clap::Args)]
 #[command(next_help_heading = "Prover")]
 pub(crate) struct ProverArgs {
@@ -285,6 +288,51 @@ pub(crate) struct ProverArgs {
     /// requirements as `--chunk-elf-path`.
     #[arg(long, required = false)]
     pub acct_elf_path: Option<PathBuf>,
+}
+
+impl ProverArgs {
+    /// Resolves the raw CLI flags into the EE chunk/acct prover backend.
+    ///
+    /// Fails if the SP1 backend is selected (`--dev-native-prover` unset)
+    /// but `--chunk-elf-path` or `--acct-elf-path` is missing. Called both
+    /// as an early fail-fast check in `main.rs` and again where the backend
+    /// is actually built, so a bad flag combination is rejected before any
+    /// node/DA/prover startup work begins rather than deep inside it.
+    pub(crate) fn backend(&self) -> eyre::Result<ProverBackendConfig> {
+        if self.dev_native_prover {
+            return Ok(ProverBackendConfig::Native);
+        }
+        let chunk_elf_path = self.chunk_elf_path.clone().ok_or_else(|| {
+            eyre::eyre!("--chunk-elf-path is required unless --dev-native-prover is set")
+        })?;
+        let acct_elf_path = self.acct_elf_path.clone().ok_or_else(|| {
+            eyre::eyre!("--acct-elf-path is required unless --dev-native-prover is set")
+        })?;
+        Ok(ProverBackendConfig::Sp1 {
+            deadline_secs: self.sp1_proof_deadline_secs,
+            chunk_elf_path,
+            acct_elf_path,
+        })
+    }
+}
+
+/// EE chunk/acct prover backend, resolved from [`ProverArgs`].
+///
+/// A single tagged value instead of a bool plus separately-validated paths,
+/// so the rest of the sequencer startup path threads one already-validated
+/// value instead of re-deriving the same cross-field requirement at every
+/// layer.
+#[derive(Debug, Clone)]
+pub(crate) enum ProverBackendConfig {
+    /// zkaleido `NativeHost`. Dev/test only, see `ProverArgs::dev_native_prover`.
+    Native,
+    /// SP1 remote host.
+    Sp1 {
+        /// Falls back to `DEFAULT_SP1_DEADLINE_SECS` when unset.
+        deadline_secs: Option<u64>,
+        chunk_elf_path: PathBuf,
+        acct_elf_path: PathBuf,
+    },
 }
 
 /// EE DA and Bitcoin RPC args.
@@ -645,6 +693,64 @@ mod additional_config_tests {
             config.sequencer.prover.acct_elf_path,
             Some(PathBuf::from("/tmp/guest-alpen-acct.elf"))
         );
+    }
+}
+
+#[cfg(test)]
+mod prover_backend_tests {
+    use super::*;
+
+    fn args(
+        dev_native_prover: bool,
+        chunk_elf_path: Option<&str>,
+        acct_elf_path: Option<&str>,
+    ) -> ProverArgs {
+        ProverArgs {
+            dev_native_prover,
+            sp1_proof_deadline_secs: None,
+            chunk_elf_path: chunk_elf_path.map(PathBuf::from),
+            acct_elf_path: acct_elf_path.map(PathBuf::from),
+        }
+    }
+
+    #[test]
+    fn native_ignores_missing_elf_paths() {
+        let backend = args(true, None, None).backend().unwrap();
+        assert!(matches!(backend, ProverBackendConfig::Native));
+    }
+
+    #[test]
+    fn sp1_requires_chunk_elf_path() {
+        let err = args(false, None, Some("/tmp/acct.elf"))
+            .backend()
+            .unwrap_err();
+        assert!(err.to_string().contains("--chunk-elf-path"));
+    }
+
+    #[test]
+    fn sp1_requires_acct_elf_path() {
+        let err = args(false, Some("/tmp/chunk.elf"), None)
+            .backend()
+            .unwrap_err();
+        assert!(err.to_string().contains("--acct-elf-path"));
+    }
+
+    #[test]
+    fn sp1_with_both_paths_succeeds() {
+        let backend = args(false, Some("/tmp/chunk.elf"), Some("/tmp/acct.elf"))
+            .backend()
+            .unwrap();
+        match backend {
+            ProverBackendConfig::Sp1 {
+                chunk_elf_path,
+                acct_elf_path,
+                ..
+            } => {
+                assert_eq!(chunk_elf_path, PathBuf::from("/tmp/chunk.elf"));
+                assert_eq!(acct_elf_path, PathBuf::from("/tmp/acct.elf"));
+            }
+            other => panic!("expected Sp1, got {other:?}"),
+        }
     }
 }
 
