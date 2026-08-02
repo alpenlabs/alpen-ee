@@ -1,12 +1,14 @@
 //! Sequencer-only startup: boot-state init, the DA/btcio pipeline, and the
 //! batch/chunk builder services that only run with `--sequencer`.
 //!
-//! [`launch`] is the sole entry point once the reth node exists: it resolves
-//! its own writer config, block-builder config, boot state, and DA reveal
-//! signing keypair, so callers only need to know a node exists and the
-//! `--sequencer` flag is set. [`initial_preconf_head`] is the one other
-//! entry point, needed earlier — before the node is built — to seed the p2p
-//! preconf head watch with the sequencer's real exec-chain tip.
+//! [`launch`] is the sole entry point once the reth node exists: it takes the
+//! already-resolved writer config (validated in `node::launch` before any
+//! DB/OL/node startup work) and resolves the block-builder config, boot
+//! state, and DA reveal signing keypair itself, so callers only need to know
+//! a node exists and the `--sequencer` flag is set. [`initial_preconf_head`]
+//! is the one other entry point, needed earlier — before the node is built —
+//! to seed the p2p preconf head watch with the sequencer's real exec-chain
+//! tip.
 
 mod da_pipeline;
 mod gas_data_provider;
@@ -240,15 +242,19 @@ pub(crate) struct SequencerLaunchCtx<'a, P> {
     /// (gossip signing needs it too), and guaranteed `Some` whenever
     /// `--sequencer` is set.
     pub(crate) sequencer_privkey: Buf32,
+    /// Resolved from `--btcio-*` flags before any node/DB/OL startup work, so
+    /// a bad btcio config fails at CLI parse time rather than deep inside
+    /// sequencer launch.
+    pub(crate) writer_config: Arc<WriterConfig>,
 }
 
 /// Launches every service that only runs when `--sequencer` is set: the
 /// exec chain / OL chain tracker, the DA (btcio) pipeline, the EE chunk +
 /// acct provers, and the batch/chunk builder services.
 ///
-/// Resolves the writer config, block-builder config, boot state, and the DA
-/// reveal signing keypair itself, so callers only need to know that a node
-/// exists and the sequencer flag is set.
+/// Takes the already-resolved writer config and resolves the block-builder
+/// config, boot state, and the DA reveal signing keypair itself, so callers
+/// only need to know that a node exists and the sequencer flag is set.
 pub(crate) async fn launch<P>(
     service_executor: &ServiceExecutor,
     ctx: SequencerLaunchCtx<'_, P>,
@@ -279,9 +285,9 @@ where
         genesis_info,
         params,
         sequencer_privkey,
+        writer_config,
     } = ctx;
 
-    let writer_config = Arc::new(ext.btcio.writer_config()?);
     log_writer_config(&writer_config);
     let block_builder_config = block_builder_config_from_env()?;
     let sequencer_keypair = sequencer_bitcoin_keypair(&sequencer_privkey)?;
@@ -435,24 +441,8 @@ where
     let genesis_blocknumhash =
         BlockNumHash::new(genesis_info.blockhash().0.into(), genesis_info.blocknum());
 
-    // Validate --chunk-sealing-gas-limit if configured.
-    //
-    // EIP-1559 lets the per-block gas limit drift from genesis by
-    // ±1/1024 per block, so the actual block gas limit at runtime
-    // may be slightly higher than genesis. We use 2× the genesis
-    // gas limit as a conservative floor to accommodate this drift
-    // while still catching obvious misconfigurations.
-    if let Some(configured) = sequencer_args.chunk_sealing_gas_limit {
-        let genesis_gas_limit = params.evm_spec().genesis().gas_limit;
-        let min_chunk_gas = genesis_gas_limit.saturating_mul(2);
-        eyre::ensure!(
-            configured >= min_chunk_gas,
-            "--chunk-sealing-gas-limit ({configured}) is below the minimum \
-             ({min_chunk_gas}, 2× genesis block gas limit {genesis_gas_limit}). \
-             A single block can use up to the per-block gas limit, so the chunk \
-             budget must be large enough to always fit at least one block.",
-        );
-    }
+    // --chunk-sealing-gas-limit is validated against the genesis gas limit in
+    // `node::launch`, before any node/DB/OL startup work.
 
     // u64::MAX effectively disables the gas policy while keeping a
     // single monomorphic code path (no dyn / enum branching).

@@ -15,6 +15,7 @@ use alpen_ee_genesis::{
     ensure_batch_genesis, ensure_finalized_exec_chain_genesis, ensure_genesis_ee_account_state,
 };
 use alpen_ee_ol_tracker::init_ol_tracker_state;
+use alpen_ee_params::AlpenParams;
 use alpen_ee_rpc_server::{AlpenEeRpcServer, EeRpcServer};
 use alpen_reth_evm::evm::AlpenEvmFactory;
 #[cfg(feature = "sequencer")]
@@ -40,7 +41,7 @@ use tracing::{error, info, info_span, Instrument};
 #[cfg(feature = "sequencer")]
 use crate::sequencer;
 use crate::{
-    args::{sequencer_privkey_from_env, AdditionalConfig, NodeArgs},
+    args::{sequencer_privkey_from_env, AdditionalConfig, NodeArgs, SequencerArgs},
     gossip::{create_gossip_task, GossipConfig},
     ol::{DummyOLClient, OLClientKind, RpcOLClient},
     service_executor::ServiceExecutor,
@@ -95,6 +96,28 @@ pub(crate) async fn launch(
         sequencer_privkey,
     };
 
+    // --- VALIDATE SEQUENCER CONFIG ---
+    //
+    // These are pure functions of already-parsed CLI args/env and the
+    // Alpen params artifact, so they run before any DB, OL, or reth node
+    // startup work: a config mistake should fail immediately, not deep
+    // inside sequencer startup after stateful work has already happened.
+    if ext.sequencer.enabled {
+        validate_chunk_sealing_gas_limit(&ext.sequencer, params.as_ref())?;
+    }
+
+    #[cfg(feature = "sequencer")]
+    let writer_config = ext
+        .sequencer
+        .enabled
+        .then(|| ext.btcio.writer_config().map(Arc::new))
+        .transpose()?;
+
+    // OL client resolution validates `--ol-client-url`/`--ol-submit-url`
+    // synchronously before its one network call, so a missing flag also
+    // fails here, before the database is touched below.
+    let (ol_client, genesis_epoch) = resolve_ol_client(&ext, &config).await?;
+
     // --- INITIALIZE STATE ---
 
     let dbs = init_db_storage(&datadir, config.db_retry_count())
@@ -102,8 +125,6 @@ pub(crate) async fn launch(
 
     let db_handle = Handle::current();
     let storage: Arc<_> = dbs.node_storage(db_handle.clone()).into();
-
-    let (ol_client, genesis_epoch) = resolve_ol_client(&ext, &config).await?;
 
     ensure_genesis(
         config.as_ref(),
@@ -304,6 +325,8 @@ pub(crate) async fn launch(
                     "sequencer_privkey_from_env already validated SEQUENCER_PRIVATE_KEY \
                      is set when --sequencer is set",
                 ),
+                writer_config: writer_config
+                    .expect("writer_config resolved above when --sequencer is set"),
             },
         )
         .await?;
@@ -379,6 +402,32 @@ async fn resolve_ol_client(
         .context("failed to fetch account genesis epoch from OL")?;
 
     Ok((ol_client, genesis_epoch))
+}
+
+/// Validates `--chunk-sealing-gas-limit` against the genesis gas limit.
+///
+/// EIP-1559 lets the per-block gas limit drift from genesis by ±1/1024 per
+/// block, so the actual block gas limit at runtime may be slightly higher
+/// than genesis. Uses 2× the genesis gas limit as a conservative floor to
+/// accommodate this drift while still catching obvious misconfigurations.
+fn validate_chunk_sealing_gas_limit(
+    sequencer_args: &SequencerArgs,
+    params: &AlpenParams,
+) -> eyre::Result<()> {
+    let Some(configured) = sequencer_args.chunk_sealing_gas_limit else {
+        return Ok(());
+    };
+
+    let genesis_gas_limit = params.evm_spec().genesis().gas_limit;
+    let min_chunk_gas = genesis_gas_limit.saturating_mul(2);
+    eyre::ensure!(
+        configured >= min_chunk_gas,
+        "--chunk-sealing-gas-limit ({configured}) is below the minimum \
+         ({min_chunk_gas}, 2× genesis block gas limit {genesis_gas_limit}). \
+         A single block can use up to the per-block gas limit, so the chunk \
+         budget must be large enough to always fit at least one block.",
+    );
+    Ok(())
 }
 
 /// Handle genesis related tasks.
