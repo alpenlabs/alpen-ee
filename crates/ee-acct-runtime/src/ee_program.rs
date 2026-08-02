@@ -195,6 +195,16 @@ pub(crate) fn apply_decoded_message(
             // Just ignore this one for now because we're not handling it.
             // TODO(STR-3685): support this
         }
+
+        DecodedEeMessageData::PredicateUpdate(_data) => {
+            // No account-state effect: the rotation drives spec-version
+            // discovery in the sequencer's block builder, which observes the
+            // message before assembly.
+            // TODO(STR-3997): accumulate the rotation into the update outputs
+            // (terminating the batch) so `check_obligations` accepts an
+            // update that declares the queued key; until then an update
+            // declaring a rotation fails verification.
+        }
     }
 
     Ok(())
