@@ -1084,6 +1084,7 @@ dependencies = [
  "reth-tasks",
  "serde",
  "serde_json",
+ "sp1-verifier",
  "ssz",
  "strata-acct-types",
  "strata-btcio",
@@ -1105,7 +1106,6 @@ dependencies = [
  "strata-primitives",
  "strata-proofimpl-alpen-acct",
  "strata-proofimpl-alpen-chunk",
- "strata-proofimpl-predicate-keys",
  "strata-service",
  "strata-snark-acct-runtime",
  "strata-snark-acct-types",
@@ -1115,6 +1115,7 @@ dependencies = [
  "tracing",
  "zkaleido",
  "zkaleido-native-adapter",
+ "zkaleido-sp1-groth16-verifier",
  "zkaleido-sp1-host",
 ]
 
@@ -15516,19 +15517,6 @@ dependencies = [
  "strata-predicate",
  "zkaleido",
  "zkaleido-native-adapter",
-]
-
-[[package]]
-name = "strata-proofimpl-predicate-keys"
-version = "0.1.0"
-dependencies = [
- "hex",
- "sp1-verifier",
- "strata-predicate",
- "strata-proofimpl-alpen-acct",
- "strata-proofimpl-alpen-chunk",
- "thiserror 2.0.18",
- "zkaleido-sp1-groth16-verifier",
 ]
 
 [[package]]

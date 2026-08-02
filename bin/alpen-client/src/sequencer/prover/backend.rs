@@ -17,11 +17,10 @@ use strata_predicate::{PredicateKey, PredicateTypeId};
 use strata_primitives::buf::Buf32;
 use strata_proofimpl_alpen_acct::process_ee_acct_update;
 use strata_proofimpl_alpen_chunk::process_ee_chunk;
-use strata_proofimpl_predicate_keys::validate_expected_predicate_key;
-#[cfg(feature = "sp1")]
-use strata_proofimpl_predicate_keys::{PredicateKeyProvider, Sp1Groth16PredicateKey};
 use tracing::info;
 use zkaleido_native_adapter::NativeHost;
+#[cfg(feature = "sp1")]
+use zkaleido_sp1_groth16_verifier::SP1Groth16Verifier;
 #[cfg(feature = "sp1")]
 use zkaleido_sp1_host::{SP1Host, SP1HostConfig};
 
@@ -72,10 +71,13 @@ pub(crate) async fn launch_validated_ee_batch_prover(
         .context("failed to fetch OL account update_vk for prover validation")?;
     let prover_config = build_ee_prover_config(builders, backend, params).await?;
 
-    validate_ee_account_prover_predicate_key(
-        &ol_account_update_vk,
-        &prover_config.account_predicate_key,
-    )?;
+    if ol_account_update_vk != prover_config.account_predicate_key {
+        return Err(eyre::eyre!(
+            "OL account update_vk does not match local EE account prover predicate key: \
+             OL {ol_account_update_vk:?}, local {:?}",
+            prover_config.account_predicate_key,
+        ));
+    }
 
     let (chunk_handle, acct_handle) =
         launch_ee_prover_services(service_executor, prover_config.provers).await?;
@@ -159,11 +161,8 @@ async fn build_ee_prover_config(
             })?;
             let chunk_host = SP1Host::init_with_config(&chunk_elf, sp1_config.clone()).await;
             let acct_host = SP1Host::init_with_config(&acct_elf, sp1_config).await;
-            let account_predicate_key = Sp1Groth16PredicateKey::new(acct_host.program_id().0)
-                .predicate_key()
-                .map_err(|e| {
-                    eyre::eyre!("failed to derive local SP1 account prover predicate key: {e}")
-                })?;
+            let account_predicate_key = sp1_groth16_predicate_key(acct_host.program_id().0)
+                .context("failed to derive local SP1 account prover predicate key")?;
 
             Ok(EeProverConfig {
                 provers: EeProvers {
@@ -209,6 +208,24 @@ fn schnorr_predicate_key(signing_key: &SigningKey) -> PredicateKey {
     )
 }
 
+/// Derives the `Sp1Groth16` predicate key that verifies proofs from the SP1 program
+/// identified by `program_id`.
+#[cfg(feature = "sp1")]
+fn sp1_groth16_predicate_key(program_id: [u8; 32]) -> eyre::Result<PredicateKey> {
+    let sp1_verifier = SP1Groth16Verifier::load(
+        &sp1_verifier::GROTH16_VK_BYTES,
+        program_id,
+        *sp1_verifier::VK_ROOT_BYTES,
+        true,
+    )
+    .map_err(|e| eyre::eyre!("failed to load SP1 Groth16 verifier: {e}"))?;
+
+    Ok(PredicateKey::new(
+        PredicateTypeId::Sp1Groth16,
+        sp1_verifier.to_uncompressed_bytes(),
+    ))
+}
+
 async fn launch_ee_prover_services(
     service_executor: &ServiceExecutor,
     provers: EeProvers,
@@ -226,17 +243,6 @@ async fn launch_ee_prover_services(
         .map_err(|e| eyre::eyre!("launching acct prover service: {e}"))?;
 
     Ok((chunk_handle, acct_handle))
-}
-
-fn validate_ee_account_prover_predicate_key(
-    ol_update_vk: &PredicateKey,
-    local_predicate_key: &PredicateKey,
-) -> eyre::Result<()> {
-    validate_expected_predicate_key(ol_update_vk, local_predicate_key).map_err(|e| {
-        eyre::eyre!(
-            "OL account update_vk does not match local EE account prover predicate key: {e}"
-        )
-    })
 }
 
 #[cfg(test)]
@@ -262,25 +268,5 @@ mod tests {
     fn parse_native_schnorr_signing_key_rejects_invalid_hex() {
         let hex = "zz".repeat(32);
         assert!(parse_native_schnorr_signing_key(&hex).is_err());
-    }
-
-    #[test]
-    fn ee_account_prover_predicate_key_validation_accepts_match() {
-        let predicate = PredicateKey::new(PredicateTypeId::Bip340Schnorr, vec![1, 2, 3]);
-
-        validate_ee_account_prover_predicate_key(&predicate, &predicate).unwrap();
-    }
-
-    #[test]
-    fn ee_account_prover_predicate_key_validation_rejects_mismatch() {
-        let ol_update_vk = PredicateKey::new(PredicateTypeId::Bip340Schnorr, vec![1, 2, 3]);
-        let local_predicate_key = PredicateKey::new(PredicateTypeId::Sp1Groth16, vec![4, 5, 6]);
-
-        let err = validate_ee_account_prover_predicate_key(&ol_update_vk, &local_predicate_key)
-            .unwrap_err()
-            .to_string();
-
-        assert!(err.contains("OL account update_vk does not match local EE account prover"));
-        assert!(err.contains("predicate key mismatch"));
     }
 }

@@ -13,7 +13,7 @@ use strata_acct_types::Hash;
 use strata_identifiers::{Buf32, Epoch, L1Height, OLBlockCommitment, OLTxId};
 use strata_predicate::PredicateKey;
 use strata_primitives::EpochCommitment;
-use strata_proofimpl_predicate_keys::{NativeAlpenAcctPredicateKey, PredicateKeyProvider};
+use strata_proofimpl_alpen_acct::EeAcctProgram;
 use strata_snark_acct_types::{ProofState, Seqno, SnarkAccountUpdate};
 
 /// A dummy OL client that returns mock responses for testing.
@@ -110,9 +110,7 @@ impl SequencerOLClient for DummyOLClient {
     }
 
     async fn get_latest_account_update_vk(&self) -> Result<PredicateKey, OLClientError> {
-        Ok(NativeAlpenAcctPredicateKey
-            .predicate_key()
-            .expect("native account predicate key must be available"))
+        Ok(EeAcctProgram::test_predicate_key())
     }
 
     async fn get_asm_manifest_commitment(
