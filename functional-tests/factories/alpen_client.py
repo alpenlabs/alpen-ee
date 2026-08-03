@@ -35,13 +35,28 @@ def generate_p2p_secret_key() -> str:
 NATIVE_CHUNK_SIGNING_KEY_HEX = "03" * 32
 NATIVE_ACCT_SIGNING_KEY_HEX = "02" * 32
 
+# A second, distinct deterministic acct signing key -- not tied to any
+# proof-impl `test_signing_key()`, just a stand-in target predicate for the
+# VK-rotation functional test (test_ee_predicate_transition.py). Its chunk
+# counterpart is reused from above: a `--prover-program` candidate's chunk
+# key only has to agree with its own acct key, not with any other
+# candidate's, so nothing requires it to differ.
+ROTATED_ACCT_SIGNING_KEY_HEX = "04" * 32
 
-def _write_native_signing_key_files(datadir: Path) -> tuple[Path, Path]:
-    """Writes the fixed native-prover signing keys OL genesis expects."""
-    chunk_key_path = datadir / "native-chunk-signing-key.hex"
-    acct_key_path = datadir / "native-acct-signing-key.hex"
-    chunk_key_path.write_text(NATIVE_CHUNK_SIGNING_KEY_HEX)
-    acct_key_path.write_text(NATIVE_ACCT_SIGNING_KEY_HEX)
+
+DEFAULT_PROVER_PROGRAMS: list[tuple[str, str]] = [
+    (NATIVE_CHUNK_SIGNING_KEY_HEX, NATIVE_ACCT_SIGNING_KEY_HEX)
+]
+
+
+def _write_signing_key_candidate_files(
+    datadir: Path, index: int, chunk_hex: str, acct_hex: str
+) -> tuple[Path, Path]:
+    """Writes one `--prover-program` candidate's native signing keys to files."""
+    chunk_key_path = datadir / f"native-chunk-signing-key-{index}.hex"
+    acct_key_path = datadir / f"native-acct-signing-key-{index}.hex"
+    chunk_key_path.write_text(chunk_hex)
+    acct_key_path.write_text(acct_hex)
     return chunk_key_path, acct_key_path
 
 
@@ -98,6 +113,7 @@ class AlpenClientFactory(flexitest.Factory):
         bridge_denomination: int = 100_000_000,
         max_withdrawal_amount: int | None = 1_000_000_000,
         beneficiary_address: str | None = None,
+        prover_programs: list[tuple[str, str]] | None = None,
         **kwargs,
     ) -> AlpenClientService:
         """
@@ -111,6 +127,10 @@ class AlpenClientFactory(flexitest.Factory):
             custom_chain: Chain spec to use
             ee_params_path: EE params file to use; generated when omitted
             da_config: Optional DA pipeline configuration for posting state diffs to L1
+            prover_programs: List of (chunk_signing_key_hex, acct_signing_key_hex)
+                candidates, each passed as its own `--prover-program` flag
+                (repeatable; see `alpen-client --help`). Defaults to a single
+                candidate using the fixed native test keys OL genesis expects.
         """
         ctx: flexitest.EnvContext = kwargs["ctx"]
 
@@ -130,7 +150,12 @@ class AlpenClientFactory(flexitest.Factory):
         key_hex = p2p_secret_key.removeprefix("0x")
         p2p_secret_key_file.write_text(key_hex)
 
-        chunk_signing_key_path, acct_signing_key_path = _write_native_signing_key_files(datadir)
+        prover_program_flags = []
+        for i, (chunk_hex, acct_hex) in enumerate(prover_programs or DEFAULT_PROVER_PROGRAMS):
+            chunk_path, acct_path = _write_signing_key_candidate_files(
+                datadir, i, chunk_hex, acct_hex
+            )
+            prover_program_flags.extend(["--prover-program", f"{chunk_path}:{acct_path}"])
 
         if ol_endpoint:
             ol_client_args = ["--ol-client-url", ol_endpoint]
@@ -180,7 +205,7 @@ class AlpenClientFactory(flexitest.Factory):
             # chunk + acct provers on the zkaleido NativeHost instead
             # (--prover-backend native is also the default).
             "--prover-backend", "native",
-            "--prover-program", f"{chunk_signing_key_path}:{acct_signing_key_path}",
+            *prover_program_flags,
         ]
         if dev_track_latest_epoch:
             # Advance the OL chain tracker on `latest` epoch (FCM)

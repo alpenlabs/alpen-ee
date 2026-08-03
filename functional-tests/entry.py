@@ -310,11 +310,6 @@ def main(argv: list[str]) -> int:
         ),
         # Environments containing both ee and ol
         "el_ol": EeOLEnv(pre_generate_blocks=110),
-        "el_ol_ee_predicate_transition": EeOLEnv(
-            pre_generate_blocks=110,
-            admin_confirmation_depth=2,
-            fund_test_cli_wallet=True,
-        ),
         # Two EE fullnodes (not just the sequencer) so a live VK-rotation ->
         # spec-version (hardfork) boundary can be verified as independently
         # observed and enforced by fullnodes, not just claimed by the

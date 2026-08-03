@@ -25,6 +25,12 @@ from common.services.bitcoin import BitcoinService
 from common.services.strata import StrataService
 from common.test_cli import create_ee_predicate_update
 from common.wait import wait_until_with_value
+from envconfigs.el_ol import EeOLEnv
+from factories.alpen_client import (
+    NATIVE_ACCT_SIGNING_KEY_HEX,
+    NATIVE_CHUNK_SIGNING_KEY_HEX,
+    ROTATED_ACCT_SIGNING_KEY_HEX,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +45,18 @@ INITIAL_ACCT_PREDICATE = (
     "Bip340Schnorr:4d4b6cd1361032ca9bd2aeb9d900aa4d45d9ead80ac9423374c451a7254d0766"
 )
 
-# The only rotation this binary can honor: V0 -> V1 (Osaka).
-SUPPORTED_ROTATION_TARGET = "AlwaysAccept"
+# The only rotation this binary can honor: V0 -> V1 (Osaka). A real
+# Bip340Schnorr predicate, not AlwaysAccept, bound to the deterministic SK
+# [0x04; 32] (`ROTATED_ACCT_SIGNING_KEY_HEX`). That key is handed to
+# alpen-client as a `--prover-program` candidate up front (see the env
+# constructed in `__init__` below), ahead of the genesis candidate, so it's
+# present at startup for whenever candidate resolution stops being a
+# startup-only, one-shot match (see the staleness TODO on
+# `launch_validated_ee_batch_prover` in
+# bin/alpen-client/src/sequencer/prover/backend.rs).
+SUPPORTED_ROTATION_TARGET = (
+    "Bip340Schnorr:462779ad4aad39514614751a71085f2f10e1c7a593e4e030efb5b8721ce55b0b"
+)
 
 # A further rotation would need V2, which has no `AlpenSpecId` variant.
 UNSUPPORTED_ROTATION_TARGET = "NeverAccept"
@@ -73,7 +89,24 @@ def _count_log_matches(log_path: Path, pattern: str, after_offset: int = 0) -> i
 @flexitest.register
 class TestEePredicateTransition(BaseTest):
     def __init__(self, ctx: flexitest.InitContext):
-        ctx.set_env("el_ol_ee_predicate_transition")
+        ctx.set_env(
+            EeOLEnv(
+                pre_generate_blocks=110,
+                admin_confirmation_depth=2,
+                fund_test_cli_wallet=True,
+                # The rotation target's key first, the genesis-matching key
+                # second: exercises the multi-candidate CLI path with a real
+                # second candidate (see ProverProgramPaths in
+                # bin/alpen-client/src/args.rs) instead of a no-op duplicate,
+                # and gives alpen-client the rotation target's signing key
+                # (see SUPPORTED_ROTATION_TARGET above) up front, ready for
+                # whichever candidate the OL's update_vk matches at startup.
+                prover_programs=[
+                    (NATIVE_CHUNK_SIGNING_KEY_HEX, ROTATED_ACCT_SIGNING_KEY_HEX),
+                    (NATIVE_CHUNK_SIGNING_KEY_HEX, NATIVE_ACCT_SIGNING_KEY_HEX),
+                ],
+            )
+        )
 
     def main(self, ctx):
         alpen_seq: AlpenClientService = self.get_service(ServiceType.AlpenSequencer)
