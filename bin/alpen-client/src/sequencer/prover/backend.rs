@@ -97,8 +97,8 @@ pub(crate) async fn launch_validated_ee_batch_prover(
 /// `AlpenSpecId` it declared, and hard-fails unless at least one candidate's
 /// derived account predicate key matches `ol_account_update_vk` right now.
 ///
-/// `backend` may carry several candidates (see [`ProverProgramPaths`]'s doc
-/// comment): an operator straddling a VK rotation hands the sequencer both
+/// `backend` may carry several candidates (see [`ProverProgramPaths`](crate::args::ProverProgramPaths)'s
+/// doc comment): an operator straddling a VK rotation hands the sequencer both
 /// the currently-active and the not-yet-active program ahead of time, so it
 /// doesn't need restarting once the rotation lands — as long as the
 /// successor version's candidate was already resident. Every candidate is
