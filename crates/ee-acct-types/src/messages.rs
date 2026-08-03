@@ -3,6 +3,9 @@
 use strata_acct_types::{MAX_MSG_PAYLOAD_DATA_BYTES, SubjectId};
 use strata_codec::{Codec, VarVec, decode_buf_exact, impl_type_flat_struct};
 use strata_msg_fmt::{Msg, MsgRef, TypeId};
+pub use strata_ol_msg_types::{
+    DEPOSIT_MSG_TYPE_ID, MAX_PREDICATE_KEY_BYTES, PREDICATE_UPDATE_MSG_TYPE_ID,
+};
 use strata_predicate::{PredicateKey, PredicateKeyBuf};
 use strata_snark_acct_runtime::IAcctMsg;
 
@@ -12,26 +15,11 @@ use crate::{MessageDecodeError, MessageDecodeResult};
 /// `MAX_MSG_PAYLOAD_DATA_BYTES` in the acct-types SSZ spec.
 const MAX_TRANSFER_DATA_BYTES: u32 = MAX_MSG_PAYLOAD_DATA_BYTES as u32;
 
-/// Maximum byte length for a rotation message's raw predicate key bytes.
-///
-/// Mirrors `strata_ol_msg_types::predicate_update::MAX_PREDICATE_KEY_BYTES`.
-const MAX_PREDICATE_KEY_BYTES: u32 = 2048;
-
-/// Message type ID for deposit messages.
-pub const DEPOSIT_MSG_TYPE: TypeId = 0x02;
-
 /// Message type ID for subject transfer messages.
 pub const SUBJ_TRANSFER_MSG_TYPE: TypeId = 0x01;
 
 /// Message type ID for commit messages.
 pub const COMMIT_MSG_TYPE: TypeId = 0x10;
-
-/// Message type ID for predicate key (update VK) rotations.
-///
-/// Mirrors `PREDICATE_UPDATE_MSG_TYPE_ID` in `strata-ol-msg-types`: the OL
-/// STF stages a rotation enacted by the admin subprotocol as an inbox message
-/// of this type, sourced from the reserved admin account.
-pub const PREDICATE_UPDATE_MSG_TYPE: TypeId = 0x20;
 
 /// Decoded possible EE account messages we want to honor.
 ///
@@ -59,7 +47,7 @@ impl DecodedEeMessageData {
         let body = msg.body();
 
         match msg.ty() {
-            DEPOSIT_MSG_TYPE => {
+            DEPOSIT_MSG_TYPE_ID => {
                 let data = decode_codec_msg_body::<DepositMsgData>(body)?;
                 Ok(DecodedEeMessageData::Deposit(data))
             }
@@ -74,7 +62,7 @@ impl DecodedEeMessageData {
                 Ok(DecodedEeMessageData::Commit(data))
             }
 
-            PREDICATE_UPDATE_MSG_TYPE => {
+            PREDICATE_UPDATE_MSG_TYPE_ID => {
                 // The body is a strata-codec-encoded VarVec of the new key's
                 // raw serialized bytes (`PredicateKeyBuf::to_bytes`), matching
                 // the OL STF's `PredicateUpdateMsgData` wire format.
@@ -182,8 +170,11 @@ mod tests {
     #[test]
     fn decode_predicate_update_message() {
         let new_key = PredicateKey::always_accept();
-        let msg = OwnedMsg::new(PREDICATE_UPDATE_MSG_TYPE, predicate_update_body(&new_key))
-            .expect("valid message");
+        let msg = OwnedMsg::new(
+            PREDICATE_UPDATE_MSG_TYPE_ID,
+            predicate_update_body(&new_key),
+        )
+        .expect("valid message");
 
         let decoded = DecodedEeMessageData::decode_raw(&msg.to_vec()).expect("decodes");
 
@@ -195,7 +186,7 @@ mod tests {
 
     #[test]
     fn predicate_update_with_garbage_body_is_invalid() {
-        let msg = OwnedMsg::new(PREDICATE_UPDATE_MSG_TYPE, vec![0xff]).expect("valid message");
+        let msg = OwnedMsg::new(PREDICATE_UPDATE_MSG_TYPE_ID, vec![0xff]).expect("valid message");
 
         assert!(matches!(
             DecodedEeMessageData::decode_raw(&msg.to_vec()),
