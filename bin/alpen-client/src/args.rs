@@ -15,7 +15,7 @@ use std::{
 
 #[cfg(feature = "sequencer")]
 use alloy_primitives::{address, Address};
-use alpen_ee_params::AlpenParams;
+use alpen_ee_params::{AlpenParams, AlpenSpecId};
 use clap::ArgAction;
 use eyre::Context;
 #[cfg(feature = "sequencer")]
@@ -253,31 +253,43 @@ pub(crate) struct SequencerArgs {
     pub blocktime_ms: u64,
 }
 
-/// The chunk + acct path pair (ELF paths for `sp1`, signing-key file paths
-/// for `native`). Coupled into a single CLI token so the two can't be
-/// mismatched by passing them as separately-ordered flags.
+/// The spec version a candidate is built for, plus its chunk + acct path pair
+/// (ELF paths for `sp1`, signing-key file paths for `native`). Coupled into a
+/// single CLI token so the three can't be mismatched by passing them as
+/// separately-ordered flags.
 ///
-/// Named around "program," not "version": this pair doesn't declare itself
-/// active — it's a candidate the process validates against whatever VK the
-/// OL currently expects (see `sequencer::prover::backend`). "Version"
-/// reads as a claim of being *the* active one, which would be actively
-/// misleading now that `--prover-program` is repeatable and can hold
-/// several resident candidates at once.
+/// The operator declares `spec_version` explicitly rather than it being
+/// derived: the process resolves all resident candidates into a
+/// version-indexed set at startup (see `sequencer::prover::backend`), and
+/// routes each batch's proof request to whichever candidate's declared
+/// version matches that batch's own governing `AlpenSpecId`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProverProgramPaths {
+    pub spec_version: AlpenSpecId,
     pub chunk_path: PathBuf,
     pub acct_path: PathBuf,
 }
 
-/// Parses a `--prover-program` value of the form `<chunk_path>:<acct_path>`.
+/// Parses a `--prover-program` value of the form
+/// `<spec_version>:<chunk_path>:<acct_path>` (e.g. `v0:/a/chunk.elf:/a/acct.elf`).
 fn parse_prover_program_paths(s: &str) -> eyre::Result<ProverProgramPaths> {
-    let (chunk, acct) = s
-        .split_once(':')
-        .ok_or_else(|| eyre::eyre!("expected <chunk_path>:<acct_path>, got {s:?}"))?;
+    let mut parts = s.splitn(3, ':');
+    let (Some(spec_version), Some(chunk), Some(acct)) = (parts.next(), parts.next(), parts.next())
+    else {
+        return Err(eyre::eyre!(
+            "expected <spec_version>:<chunk_path>:<acct_path>, got {s:?}"
+        ));
+    };
     if chunk.is_empty() || acct.is_empty() {
-        return Err(eyre::eyre!("expected <chunk_path>:<acct_path>, got {s:?}"));
+        return Err(eyre::eyre!(
+            "expected <spec_version>:<chunk_path>:<acct_path>, got {s:?}"
+        ));
     }
+    let spec_version = spec_version
+        .parse::<AlpenSpecId>()
+        .map_err(|err| eyre::eyre!("invalid spec version in {s:?}: {err}"))?;
     Ok(ProverProgramPaths {
+        spec_version,
         chunk_path: chunk.into(),
         acct_path: acct.into(),
     })
@@ -308,13 +320,17 @@ pub(crate) struct ProverArgs {
     #[arg(long, required = false)]
     pub sp1_proof_deadline_secs: Option<u64>,
 
-    /// The chunk+acct program, as `<chunk_path>:<acct_path>`. ELF paths
-    /// under `--prover-backend sp1`, signing-key file paths under `native`.
-    /// Repeatable: each occurrence adds a candidate program, and the one
-    /// whose derived account predicate key matches the OL's expected
-    /// `update_vk` at startup is the one actually used (see
-    /// `sequencer::prover::backend`). At least one is required with
-    /// `--sequencer`.
+    /// A resident chunk+acct program, as
+    /// `<spec_version>:<chunk_path>:<acct_path>` (e.g. `v0:/a/chunk.elf:/a/acct.elf`).
+    /// ELF paths under `--prover-backend sp1`, signing-key file paths under
+    /// `native`. Repeatable: each occurrence adds a candidate for the given
+    /// spec version. Every candidate is validated and loaded at startup, and
+    /// each batch's proof request is routed to whichever candidate's declared
+    /// version matches that batch's own governing spec version (see
+    /// `sequencer::prover::backend`) — so the process can keep proving
+    /// correctly across a live VK rotation, as long as the successor
+    /// version's candidate was handed to it ahead of time. At least one is
+    /// required with `--sequencer`.
     #[arg(long = "prover-program", value_parser = parse_prover_program_paths, required = false)]
     pub prover_program: Vec<ProverProgramPaths>,
 }
@@ -699,7 +715,7 @@ mod additional_config_tests {
             "--sp1-proof-deadline-secs",
             "60",
             "--prover-program",
-            "/tmp/guest-alpen-chunk.elf:/tmp/guest-alpen-acct.elf",
+            "v0:/tmp/guest-alpen-chunk.elf:/tmp/guest-alpen-acct.elf",
             "--btcio-fee-policy",
             "fixed",
             "--btcio-conf-target",
@@ -731,6 +747,7 @@ mod additional_config_tests {
         assert_eq!(
             config.sequencer.prover.prover_program,
             vec![ProverProgramPaths {
+                spec_version: AlpenSpecId::V0,
                 chunk_path: PathBuf::from("/tmp/guest-alpen-chunk.elf"),
                 acct_path: PathBuf::from("/tmp/guest-alpen-acct.elf"),
             }]
@@ -784,7 +801,7 @@ mod additional_config_tests {
             "--btc-rpc-password",
             "pass",
             "--prover-program",
-            "/tmp/native-chunk-signing-key.hex:/tmp/native-acct-signing-key.hex",
+            "v0:/tmp/native-chunk-signing-key.hex:/tmp/native-acct-signing-key.hex",
         ])
         .unwrap();
         assert!(config.sequencer.prover.backend().is_ok());
@@ -805,19 +822,21 @@ mod additional_config_tests {
             "--btc-rpc-password",
             "pass",
             "--prover-program",
-            "/tmp/chunk-a.hex:/tmp/acct-a.hex",
+            "v1:/tmp/chunk-a.hex:/tmp/acct-a.hex",
             "--prover-program",
-            "/tmp/chunk-b.hex:/tmp/acct-b.hex",
+            "v0:/tmp/chunk-b.hex:/tmp/acct-b.hex",
         ])
         .unwrap();
         assert_eq!(
             config.sequencer.prover.prover_program,
             vec![
                 ProverProgramPaths {
+                    spec_version: AlpenSpecId::V1,
                     chunk_path: PathBuf::from("/tmp/chunk-a.hex"),
                     acct_path: PathBuf::from("/tmp/acct-a.hex"),
                 },
                 ProverProgramPaths {
+                    spec_version: AlpenSpecId::V0,
                     chunk_path: PathBuf::from("/tmp/chunk-b.hex"),
                     acct_path: PathBuf::from("/tmp/acct-b.hex"),
                 },
@@ -832,6 +851,7 @@ mod prover_backend_tests {
 
     fn program() -> ProverProgramPaths {
         ProverProgramPaths {
+            spec_version: AlpenSpecId::V0,
             chunk_path: PathBuf::from("/tmp/chunk.elf"),
             acct_path: PathBuf::from("/tmp/acct.elf"),
         }
@@ -888,20 +908,38 @@ mod prover_backend_tests {
 
     #[test]
     fn parse_prover_program_paths_splits_on_colon() {
-        let p = parse_prover_program_paths("/a/chunk.elf:/a/acct.elf").unwrap();
+        let p = parse_prover_program_paths("v0:/a/chunk.elf:/a/acct.elf").unwrap();
+        assert_eq!(p.spec_version, AlpenSpecId::V0);
         assert_eq!(p.chunk_path, PathBuf::from("/a/chunk.elf"));
         assert_eq!(p.acct_path, PathBuf::from("/a/acct.elf"));
+    }
+
+    /// The acct path is everything past the second colon, so it may itself
+    /// contain colons.
+    #[test]
+    fn parse_prover_program_paths_acct_path_may_contain_colons() {
+        let p = parse_prover_program_paths("v1:/a/chunk.elf:/a/acct:with:colons.elf").unwrap();
+        assert_eq!(p.spec_version, AlpenSpecId::V1);
+        assert_eq!(p.chunk_path, PathBuf::from("/a/chunk.elf"));
+        assert_eq!(p.acct_path, PathBuf::from("/a/acct:with:colons.elf"));
     }
 
     #[test]
     fn parse_prover_program_paths_rejects_missing_separator() {
         assert!(parse_prover_program_paths("/a/chunk.elf").is_err());
+        assert!(parse_prover_program_paths("v0:/a/chunk.elf").is_err());
     }
 
     #[test]
     fn parse_prover_program_paths_rejects_empty_chunk_or_acct() {
-        assert!(parse_prover_program_paths(":/a/acct.elf").is_err());
-        assert!(parse_prover_program_paths("/a/chunk.elf:").is_err());
+        assert!(parse_prover_program_paths("v0::/a/acct.elf").is_err());
+        assert!(parse_prover_program_paths("v0:/a/chunk.elf:").is_err());
+    }
+
+    #[test]
+    fn parse_prover_program_paths_rejects_unknown_spec_version() {
+        assert!(parse_prover_program_paths("v9:/a/chunk.elf:/a/acct.elf").is_err());
+        assert!(parse_prover_program_paths("nope:/a/chunk.elf:/a/acct.elf").is_err());
     }
 }
 
