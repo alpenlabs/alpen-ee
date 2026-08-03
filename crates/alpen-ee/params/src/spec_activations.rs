@@ -6,7 +6,7 @@
 //! carries the activation schedule that gates them.
 
 use core::convert::identity;
-use std::{collections::BTreeMap, fmt};
+use std::{collections::BTreeMap, fmt, str::FromStr};
 
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Serialize};
@@ -78,6 +78,24 @@ impl fmt::Display for AlpenSpecId {
             Self::V0 => f.write_str("v0"),
             Self::V1 => f.write_str("v1"),
         }
+    }
+}
+
+/// Error returned by [`AlpenSpecId::from_str`] for an unrecognized spec name.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("unknown spec version {0:?}")]
+pub struct AlpenSpecIdParseError(String);
+
+impl FromStr for AlpenSpecId {
+    type Err = AlpenSpecIdParseError;
+
+    /// Inverse of [`Display`](fmt::Display): parses e.g. `v0`/`v1`. Matches by
+    /// comparing against every known version's own `Display` output, so a new
+    /// variant needs no update here.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        known_versions()
+            .find(|spec| spec.to_string() == s)
+            .ok_or_else(|| AlpenSpecIdParseError(s.to_string()))
     }
 }
 
@@ -285,6 +303,22 @@ mod tests {
             AlpenSpecId::V1
         );
         assert!(serde_json::from_str::<AlpenSpecId>(r#""nope""#).is_err());
+    }
+
+    /// `FromStr` is the exact inverse of `Display`; unrecognized names err
+    /// instead of silently matching nothing.
+    #[test]
+    fn spec_id_from_str_is_display_inverse() {
+        assert_eq!("v0".parse::<AlpenSpecId>().unwrap(), AlpenSpecId::V0);
+        assert_eq!("v1".parse::<AlpenSpecId>().unwrap(), AlpenSpecId::V1);
+        assert_eq!(
+            "v2".parse::<AlpenSpecId>(),
+            Err(AlpenSpecIdParseError("v2".to_string()))
+        );
+        assert_eq!(
+            "nope".parse::<AlpenSpecId>(),
+            Err(AlpenSpecIdParseError("nope".to_string()))
+        );
     }
 
     /// Raw spec ids round-trip through the enum; unknown ids surface as
