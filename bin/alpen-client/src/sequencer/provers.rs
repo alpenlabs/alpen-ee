@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use alpen_ee_common::{BatchStorage, ChunkStorage, SequencerOLClient};
 use alpen_ee_database::{EeDatabases, EeNodeStorage};
-use alpen_ee_params::AlpenParams;
+use alpen_ee_params::{AlpenParams, AlpenSpecId};
 use alpen_reth_witness::RangeWitnessExtractor;
 use bitcoind_async_client::Client as BtcClient;
 use reth_provider::{BlockReader, StateProviderFactory};
@@ -28,7 +28,7 @@ use tracing::info;
 use super::prover::{
     launch_validated_ee_batch_prover, AcctRangeWitnessFn, AcctReceiptHook, AcctSpec,
     ChunkReceiptHook, ChunkSpec, EeBatchProofDbManager, EeChunkReceiptStore, EeProverBuilders,
-    EeProverStores, EeProverTaskDbManager, PaasBatchProver,
+    EeProverStores, EeProverTaskDbManager, PaasBatchProver, VersionedTaskStore,
 };
 use crate::{args::ProverBackendConfig, service_executor::ServiceExecutor};
 
@@ -70,13 +70,6 @@ where
     let batch_storage_dyn: Arc<dyn BatchStorage> = storage.clone();
     let chunk_storage_dyn: Arc<dyn ChunkStorage> = storage.clone();
 
-    let chunk_builder =
-        ProverBuilder::new(ChunkSpec::new(chunk_storage_dyn.clone(), storage.clone()))
-            .task_store(task_store.clone())
-            .receipt_store(chunk_receipts.clone())
-            .receipt_hook(ChunkReceiptHook::new(chunk_storage_dyn.clone()))
-            .retry(RetryConfig::default());
-
     // TODO(STR-4157): the account prover still assembles its batch-range
     // witness via `RangeWitnessExtractor`, which builds a deep range
     // multiproof from per-block accessed-state records. Migrating to
@@ -90,32 +83,72 @@ where
             extractor.extract_range_witness(first_block, last_block)
         })
     };
+    let witness_db = dbs.witness_db();
 
-    let acct_builder = ProverBuilder::new(AcctSpec::new(
-        chunk_receipts.clone(),
-        batch_storage_dyn.clone(),
-        chunk_storage_dyn.clone(),
-        storage.clone(),
-        btc_client,
-        dbs.witness_db(),
-        acct_range_witness_fn,
-    ))
-    .task_store(task_store)
-    .receipt_hook(AcctReceiptHook::new(
-        batch_storage_dyn.clone(),
-        batch_proofs.clone(),
-    ))
-    .retry(RetryConfig::default());
+    // A `ProverBuilder` is single-use (`.native(host)`/`.remote(host)`
+    // consume it), but every resident `--prover-program` candidate needs its
+    // own, so these hand back a factory rather than a pre-built builder.
+    // Each call wraps the shared `task_store` in a `VersionedTaskStore`
+    // scoped to that candidate's declared version: chunk and acct tasks for
+    // every resident version otherwise share one physical sled tree, and
+    // paas's own tick/recovery loop scans that tree with no notion of which
+    // version submitted a task — without this scoping, one version's prover
+    // could claim and sign a task meant for another (see
+    // `VersionedTaskStore`'s doc comment). All other captures are cheap
+    // `Arc` clones.
+    let chunk_builder_factory: Box<dyn Fn(AlpenSpecId) -> ProverBuilder<ChunkSpec> + Send + Sync> = {
+        let chunk_storage_dyn = chunk_storage_dyn.clone();
+        let storage = storage.clone();
+        let task_store = task_store.clone();
+        let chunk_receipts = chunk_receipts.clone();
+        Box::new(move |spec_version| {
+            ProverBuilder::new(ChunkSpec::new(chunk_storage_dyn.clone(), storage.clone()))
+                .task_store(VersionedTaskStore::new(task_store.clone(), spec_version))
+                .receipt_store(chunk_receipts.clone())
+                .receipt_hook(ChunkReceiptHook::new(chunk_storage_dyn.clone()))
+                .retry(RetryConfig::default())
+        })
+    };
+
+    let acct_builder_factory: Box<dyn Fn(AlpenSpecId) -> ProverBuilder<AcctSpec> + Send + Sync> = {
+        let chunk_receipts = chunk_receipts.clone();
+        let batch_storage_dyn = batch_storage_dyn.clone();
+        let chunk_storage_dyn = chunk_storage_dyn.clone();
+        let storage = storage.clone();
+        let btc_client = btc_client.clone();
+        let witness_db = witness_db.clone();
+        let acct_range_witness_fn = acct_range_witness_fn.clone();
+        let task_store = task_store.clone();
+        let batch_proofs = batch_proofs.clone();
+        Box::new(move |spec_version| {
+            ProverBuilder::new(AcctSpec::new(
+                chunk_receipts.clone(),
+                batch_storage_dyn.clone(),
+                chunk_storage_dyn.clone(),
+                storage.clone(),
+                btc_client.clone(),
+                witness_db.clone(),
+                acct_range_witness_fn.clone(),
+            ))
+            .task_store(VersionedTaskStore::new(task_store.clone(), spec_version))
+            .receipt_hook(AcctReceiptHook::new(
+                batch_storage_dyn.clone(),
+                batch_proofs.clone(),
+            ))
+            .retry(RetryConfig::default())
+        })
+    };
 
     let batch_prover = launch_validated_ee_batch_prover(
         ol_client,
         service_executor,
         EeProverBuilders {
-            chunk: chunk_builder,
-            account: acct_builder,
+            chunk: chunk_builder_factory,
+            account: acct_builder_factory,
         },
         EeProverStores {
             chunk_storage: chunk_storage_dyn,
+            batch_storage: batch_storage_dyn,
             batch_proofs,
         },
         backend,

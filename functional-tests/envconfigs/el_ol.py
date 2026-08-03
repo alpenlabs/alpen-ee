@@ -41,6 +41,7 @@ class EeOLEnv(flexitest.EnvConfig):
         ol_block_time_ms: int | None = None,
         dev_track_latest_epoch: bool = False,
         batch_sealing_block_count: int = 10,
+        prover_programs: list[tuple[str, str, str]] | None = None,
     ):
         epoch_seal_config = (
             EpochSealingConfig.new_fixed_slot(seal_epoch_slots)
@@ -56,6 +57,7 @@ class EeOLEnv(flexitest.EnvConfig):
             enable_l1_da=True,
             batch_sealing_block_count=batch_sealing_block_count,
             dev_track_latest_epoch=dev_track_latest_epoch,
+            prover_programs=prover_programs,
         )
         self.strata_config = StrataEnvConfig(
             pre_generate_blocks=pre_generate_blocks,

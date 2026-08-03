@@ -15,7 +15,7 @@ use std::{
 
 #[cfg(feature = "sequencer")]
 use alloy_primitives::{address, Address};
-use alpen_ee_params::AlpenParams;
+use alpen_ee_params::{AlpenParams, AlpenSpecId};
 use clap::ArgAction;
 use eyre::Context;
 #[cfg(feature = "sequencer")]
@@ -253,22 +253,63 @@ pub(crate) struct SequencerArgs {
     pub blocktime_ms: u64,
 }
 
+/// The spec version a candidate is built for, plus its chunk + acct path pair
+/// (ELF paths for `sp1`, signing-key file paths for `native`). Coupled into a
+/// single CLI token so the three can't be mismatched by passing them as
+/// separately-ordered flags.
+///
+/// The operator declares `spec_version` explicitly rather than it being
+/// derived: the process resolves all resident candidates into a
+/// version-indexed set at startup (see `sequencer::prover::backend`), and
+/// routes each batch's proof request to whichever candidate's declared
+/// version matches that batch's own governing `AlpenSpecId`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProverProgramPaths {
+    pub spec_version: AlpenSpecId,
+    pub chunk_path: PathBuf,
+    pub acct_path: PathBuf,
+}
+
+/// Parses a `--prover-program` value of the form
+/// `<spec_version>:<chunk_path>:<acct_path>` (e.g. `v0:/a/chunk.elf:/a/acct.elf`).
+fn parse_prover_program_paths(s: &str) -> eyre::Result<ProverProgramPaths> {
+    let mut parts = s.splitn(3, ':');
+    let (Some(spec_version), Some(chunk), Some(acct)) = (parts.next(), parts.next(), parts.next())
+    else {
+        return Err(eyre::eyre!(
+            "expected <spec_version>:<chunk_path>:<acct_path>, got {s:?}"
+        ));
+    };
+    if chunk.is_empty() || acct.is_empty() {
+        return Err(eyre::eyre!(
+            "expected <spec_version>:<chunk_path>:<acct_path>, got {s:?}"
+        ));
+    }
+    let spec_version = spec_version
+        .parse::<AlpenSpecId>()
+        .map_err(|err| eyre::eyre!("invalid spec version in {s:?}: {err}"))?;
+    Ok(ProverProgramPaths {
+        spec_version,
+        chunk_path: chunk.into(),
+        acct_path: acct.into(),
+    })
+}
+
 /// EE chunk/acct prover backend selection and configuration.
 ///
 /// The raw flags below are cross-validated and resolved into a single
 /// [`ProverBackendConfig`] by [`ProverArgs::backend`]. They're only
 /// meaningful with `--sequencer`; a fullnode never touches the prover, so
 /// nothing here is required at the clap level — `--prover-backend` and the
-/// paths/keys it needs are validated together in [`ProverArgs::backend`]
+/// program it needs are validated together in [`ProverArgs::backend`]
 /// instead, which only runs behind the `--sequencer` gate.
 #[derive(Debug, clap::Args)]
 #[command(next_help_heading = "Prover")]
 pub(crate) struct ProverArgs {
     /// EE chunk/acct prover backend.
     ///
-    /// `native` (the default) needs `--native-chunk-signing-key` and
-    /// `--native-acct-signing-key`; `sp1` needs `--chunk-elf-path` and
-    /// `--acct-elf-path`.
+    /// `native` (the default) reads signing-key file paths from
+    /// `--prover-program`; `sp1` reads ELF paths the same way.
     #[arg(long = "prover-backend", value_enum, default_value_t = ProverBackendArg::Native)]
     pub backend: ProverBackendArg,
 
@@ -279,75 +320,45 @@ pub(crate) struct ProverArgs {
     #[arg(long, required = false)]
     pub sp1_proof_deadline_secs: Option<u64>,
 
-    /// Path to the compiled SP1 guest ELF for the chunk prover. Required
-    /// with `--sequencer --prover-backend sp1`.
-    #[arg(long, required = false)]
-    pub chunk_elf_path: Option<PathBuf>,
-
-    /// Path to the compiled SP1 guest ELF for the account prover. Same
-    /// requirements as `--chunk-elf-path`.
-    #[arg(long, required = false)]
-    pub acct_elf_path: Option<PathBuf>,
-
-    /// Path to a file holding the hex-encoded BIP-340 Schnorr signing key
-    /// the native EE chunk prover signs proofs with. Required with
-    /// `--prover-backend native`.
-    #[arg(long, required = false)]
-    pub native_chunk_signing_key: Option<PathBuf>,
-
-    /// Path to a file holding the hex-encoded BIP-340 Schnorr signing key
-    /// the native EE account prover signs proofs with. Required with
-    /// `--prover-backend native`.
-    #[arg(long, required = false)]
-    pub native_acct_signing_key: Option<PathBuf>,
+    /// A resident chunk+acct program, as
+    /// `<spec_version>:<chunk_path>:<acct_path>` (e.g. `v0:/a/chunk.elf:/a/acct.elf`).
+    /// ELF paths under `--prover-backend sp1`, signing-key file paths under
+    /// `native`. Repeatable: each occurrence adds a candidate for the given
+    /// spec version. Every candidate is validated and loaded at startup, and
+    /// each batch's proof request is routed to whichever candidate's declared
+    /// version matches that batch's own governing spec version (see
+    /// `sequencer::prover::backend`) — so the process can keep proving
+    /// correctly across a live VK rotation, as long as the successor
+    /// version's candidate was handed to it ahead of time. At least one is
+    /// required with `--sequencer`.
+    #[arg(long = "prover-program", value_parser = parse_prover_program_paths, required = false)]
+    pub prover_program: Vec<ProverProgramPaths>,
 }
 
 impl ProverArgs {
     /// Resolves the CLI flags into the EE chunk/acct prover backend.
     ///
-    /// Fails if the selected backend is missing the fields it needs (the
-    /// native signing key paths, or both SP1 elf paths). Called both as an
-    /// early fail-fast check in `main.rs` and again where the backend is
-    /// actually built, so a bad flag combination is rejected before any
-    /// node/DA/prover startup work begins rather than deep inside it.
+    /// Fails if no `--prover-program` was given. Called both as an early
+    /// fail-fast check in `main.rs` and again where the backend is actually
+    /// built, so a bad flag combination is rejected before any node/DA/
+    /// prover startup work begins rather than deep inside it.
     ///
-    /// Only checks that the paths are present, not that the files exist or
-    /// parse — same as `--chunk-elf-path`/`--acct-elf-path`, reading them is
-    /// left to the caller that actually builds the backend.
+    /// Only checks that at least one program is present, not that its paths
+    /// exist or parse — reading them is left to the caller that actually
+    /// builds the backend.
     pub(crate) fn backend(&self) -> eyre::Result<ProverBackendConfig> {
-        match self.backend {
-            ProverBackendArg::Native => {
-                let chunk_signing_key_path =
-                    self.native_chunk_signing_key.clone().ok_or_else(|| {
-                        eyre::eyre!(
-                            "--native-chunk-signing-key is required with --prover-backend native"
-                        )
-                    })?;
-                let acct_signing_key_path =
-                    self.native_acct_signing_key.clone().ok_or_else(|| {
-                        eyre::eyre!(
-                            "--native-acct-signing-key is required with --prover-backend native"
-                        )
-                    })?;
-                Ok(ProverBackendConfig::Native {
-                    chunk_signing_key_path,
-                    acct_signing_key_path,
-                })
-            }
-            ProverBackendArg::Sp1 => {
-                let chunk_elf_path = self.chunk_elf_path.clone().ok_or_else(|| {
-                    eyre::eyre!("--chunk-elf-path is required with --prover-backend sp1")
-                })?;
-                let acct_elf_path = self.acct_elf_path.clone().ok_or_else(|| {
-                    eyre::eyre!("--acct-elf-path is required with --prover-backend sp1")
-                })?;
-                Ok(ProverBackendConfig::Sp1 {
-                    deadline_secs: self.sp1_proof_deadline_secs,
-                    chunk_elf_path,
-                    acct_elf_path,
-                })
-            }
+        if self.prover_program.is_empty() {
+            return Err(eyre::eyre!("--prover-program is required with --sequencer"));
         }
+        let programs = self.prover_program.clone();
+
+        Ok(match self.backend {
+            ProverBackendArg::Native => ProverBackendConfig::Native { programs },
+            ProverBackendArg::Sp1 => ProverBackendConfig::Sp1 {
+                programs,
+                deadline_secs: self.sp1_proof_deadline_secs,
+            },
+        })
     }
 }
 
@@ -365,22 +376,22 @@ pub(crate) enum ProverBackendArg {
 /// A single tagged value instead of separately-validated paths, so the rest
 /// of the sequencer startup path threads one already-validated value
 /// instead of re-deriving the same cross-field requirement at every layer.
-/// Holds paths rather than read file contents, same as the SP1 variant's
-/// elf paths: reading is left to whoever actually builds the backend.
+/// Holds paths rather than read file contents: reading them is left to
+/// whoever actually builds the backend.
+///
+/// `programs` holds one or more candidates (see [`ProverProgramPaths`]);
+/// the backend builder picks whichever one's derived account predicate key
+/// matches the OL's expected `update_vk`.
 #[derive(Debug, Clone)]
 pub(crate) enum ProverBackendConfig {
-    /// zkaleido `NativeHost`, signing chunk/acct proofs with the keys read
-    /// from the given files.
-    Native {
-        chunk_signing_key_path: PathBuf,
-        acct_signing_key_path: PathBuf,
-    },
-    /// SP1 remote host.
+    /// zkaleido `NativeHost`s, signing chunk/acct proofs with the keys read
+    /// from the given paths.
+    Native { programs: Vec<ProverProgramPaths> },
+    /// SP1 remote hosts.
     Sp1 {
+        programs: Vec<ProverProgramPaths>,
         /// Falls back to `DEFAULT_SP1_DEADLINE_SECS` when unset.
         deadline_secs: Option<u64>,
-        chunk_elf_path: PathBuf,
-        acct_elf_path: PathBuf,
     },
 }
 
@@ -703,10 +714,8 @@ mod additional_config_tests {
             "sp1",
             "--sp1-proof-deadline-secs",
             "60",
-            "--chunk-elf-path",
-            "/tmp/guest-alpen-chunk.elf",
-            "--acct-elf-path",
-            "/tmp/guest-alpen-acct.elf",
+            "--prover-program",
+            "v0:/tmp/guest-alpen-chunk.elf:/tmp/guest-alpen-acct.elf",
             "--btcio-fee-policy",
             "fixed",
             "--btcio-conf-target",
@@ -736,23 +745,23 @@ mod additional_config_tests {
         assert_eq!(config.btcio.fee_policy, BtcioFeePolicyArg::Fixed);
         assert_eq!(config.btcio.fee_rate, Some(1.5));
         assert_eq!(
-            config.sequencer.prover.chunk_elf_path,
-            Some(PathBuf::from("/tmp/guest-alpen-chunk.elf"))
-        );
-        assert_eq!(
-            config.sequencer.prover.acct_elf_path,
-            Some(PathBuf::from("/tmp/guest-alpen-acct.elf"))
+            config.sequencer.prover.prover_program,
+            vec![ProverProgramPaths {
+                spec_version: AlpenSpecId::V0,
+                chunk_path: PathBuf::from("/tmp/guest-alpen-chunk.elf"),
+                acct_path: PathBuf::from("/tmp/guest-alpen-acct.elf"),
+            }]
         );
     }
 
-    /// `--native-chunk-signing-key`/`--native-acct-signing-key` are plain
-    /// `Option` fields at the clap level (a fullnode never needs them), so
-    /// `--prover-backend` defaulting to `native` with no key files parses
-    /// fine; `ProverArgs::backend()` is what rejects the missing keys, once
-    /// it's known `--sequencer` is actually in play (see
-    /// `prover_backend_tests::native_backend_requires_chunk_signing_key`).
+    /// `--prover-program` is a plain, unrequired `Vec` field at the clap
+    /// level (a fullnode never needs it), so `--prover-backend` defaulting
+    /// to `native` with no program parses fine; `ProverArgs::backend()` is
+    /// what rejects its absence, once it's known `--sequencer` is actually
+    /// in play (see
+    /// `prover_backend_tests::missing_prover_program_is_rejected`).
     #[test]
-    fn sequencer_parses_without_native_signing_keys() {
+    fn sequencer_parses_without_prover_program() {
         let config = try_parse_additional_config(&[
             "--dummy-ol-client",
             "--sequencer",
@@ -776,12 +785,12 @@ mod additional_config_tests {
         assert!(!config.sequencer.enabled);
     }
 
-    /// Passing both native signing key paths with `--sequencer` (default
-    /// `--prover-backend native`) parses; like `--chunk-elf-path`, the path
-    /// doesn't need to exist yet at parse time, only when the backend is
-    /// actually built (see `sequencer::prover::backend`).
+    /// Passing a `--prover-program` with `--sequencer` (default
+    /// `--prover-backend native`) parses; the paths don't need to exist yet
+    /// at parse time, only when the backend is actually built (see
+    /// `sequencer::prover::backend`).
     #[test]
-    fn native_signing_key_paths_do_not_need_to_exist_at_parse_time() {
+    fn prover_program_paths_do_not_need_to_exist_at_parse_time() {
         let config = try_parse_additional_config(&[
             "--dummy-ol-client",
             "--sequencer",
@@ -791,13 +800,48 @@ mod additional_config_tests {
             "user",
             "--btc-rpc-password",
             "pass",
-            "--native-chunk-signing-key",
-            "/tmp/native-chunk-signing-key.hex",
-            "--native-acct-signing-key",
-            "/tmp/native-acct-signing-key.hex",
+            "--prover-program",
+            "v0:/tmp/native-chunk-signing-key.hex:/tmp/native-acct-signing-key.hex",
         ])
         .unwrap();
         assert!(config.sequencer.prover.backend().is_ok());
+    }
+
+    /// `--prover-program` is repeatable: each occurrence adds a candidate,
+    /// so an operator can hand the sequencer both the currently-active and
+    /// a not-yet-active program across a VK rotation without a restart.
+    #[test]
+    fn prover_program_flag_is_repeatable() {
+        let config = try_parse_additional_config(&[
+            "--dummy-ol-client",
+            "--sequencer",
+            "--btc-rpc-url",
+            "http://localhost:18443",
+            "--btc-rpc-user",
+            "user",
+            "--btc-rpc-password",
+            "pass",
+            "--prover-program",
+            "v1:/tmp/chunk-a.hex:/tmp/acct-a.hex",
+            "--prover-program",
+            "v0:/tmp/chunk-b.hex:/tmp/acct-b.hex",
+        ])
+        .unwrap();
+        assert_eq!(
+            config.sequencer.prover.prover_program,
+            vec![
+                ProverProgramPaths {
+                    spec_version: AlpenSpecId::V1,
+                    chunk_path: PathBuf::from("/tmp/chunk-a.hex"),
+                    acct_path: PathBuf::from("/tmp/acct-a.hex"),
+                },
+                ProverProgramPaths {
+                    spec_version: AlpenSpecId::V0,
+                    chunk_path: PathBuf::from("/tmp/chunk-b.hex"),
+                    acct_path: PathBuf::from("/tmp/acct-b.hex"),
+                },
+            ]
+        );
     }
 }
 
@@ -805,14 +849,19 @@ mod additional_config_tests {
 mod prover_backend_tests {
     use super::*;
 
+    fn program() -> ProverProgramPaths {
+        ProverProgramPaths {
+            spec_version: AlpenSpecId::V0,
+            chunk_path: PathBuf::from("/tmp/chunk.elf"),
+            acct_path: PathBuf::from("/tmp/acct.elf"),
+        }
+    }
+
     fn native_args() -> ProverArgs {
         ProverArgs {
             backend: ProverBackendArg::Native,
             sp1_proof_deadline_secs: None,
-            chunk_elf_path: None,
-            acct_elf_path: None,
-            native_chunk_signing_key: Some(PathBuf::from("/tmp/chunk-signing-key.hex")),
-            native_acct_signing_key: Some(PathBuf::from("/tmp/acct-signing-key.hex")),
+            prover_program: vec![program()],
         }
     }
 
@@ -820,28 +869,15 @@ mod prover_backend_tests {
         ProverArgs {
             backend: ProverBackendArg::Sp1,
             sp1_proof_deadline_secs: None,
-            chunk_elf_path: Some(PathBuf::from("/tmp/chunk.elf")),
-            acct_elf_path: Some(PathBuf::from("/tmp/acct.elf")),
-            native_chunk_signing_key: None,
-            native_acct_signing_key: None,
+            prover_program: vec![program()],
         }
     }
 
     #[test]
     fn native_backend_resolves_to_native_config() {
         match native_args().backend().unwrap() {
-            ProverBackendConfig::Native {
-                chunk_signing_key_path,
-                acct_signing_key_path,
-            } => {
-                assert_eq!(
-                    chunk_signing_key_path,
-                    PathBuf::from("/tmp/chunk-signing-key.hex")
-                );
-                assert_eq!(
-                    acct_signing_key_path,
-                    PathBuf::from("/tmp/acct-signing-key.hex")
-                );
+            ProverBackendConfig::Native { programs } => {
+                assert_eq!(programs, vec![program()]);
             }
             other => panic!("expected Native, got {other:?}"),
         }
@@ -850,48 +886,60 @@ mod prover_backend_tests {
     #[test]
     fn sp1_backend_resolves_to_sp1_config() {
         match sp1_args().backend().unwrap() {
-            ProverBackendConfig::Sp1 {
-                chunk_elf_path,
-                acct_elf_path,
-                ..
-            } => {
-                assert_eq!(chunk_elf_path, PathBuf::from("/tmp/chunk.elf"));
-                assert_eq!(acct_elf_path, PathBuf::from("/tmp/acct.elf"));
+            ProverBackendConfig::Sp1 { programs, .. } => {
+                assert_eq!(programs, vec![program()]);
             }
             other => panic!("expected Sp1, got {other:?}"),
         }
     }
 
     #[test]
-    fn native_backend_requires_chunk_signing_key() {
+    fn missing_prover_program_is_rejected() {
         let mut args = native_args();
-        args.native_chunk_signing_key = None;
+        args.prover_program = Vec::new();
         let err = args.backend().unwrap_err();
-        assert!(err.to_string().contains("--native-chunk-signing-key"));
-    }
+        assert!(err.to_string().contains("--prover-program"));
 
-    #[test]
-    fn native_backend_requires_acct_signing_key() {
-        let mut args = native_args();
-        args.native_acct_signing_key = None;
-        let err = args.backend().unwrap_err();
-        assert!(err.to_string().contains("--native-acct-signing-key"));
-    }
-
-    #[test]
-    fn sp1_backend_requires_chunk_elf_path() {
         let mut args = sp1_args();
-        args.chunk_elf_path = None;
+        args.prover_program = Vec::new();
         let err = args.backend().unwrap_err();
-        assert!(err.to_string().contains("--chunk-elf-path"));
+        assert!(err.to_string().contains("--prover-program"));
     }
 
     #[test]
-    fn sp1_backend_requires_acct_elf_path() {
-        let mut args = sp1_args();
-        args.acct_elf_path = None;
-        let err = args.backend().unwrap_err();
-        assert!(err.to_string().contains("--acct-elf-path"));
+    fn parse_prover_program_paths_splits_on_colon() {
+        let p = parse_prover_program_paths("v0:/a/chunk.elf:/a/acct.elf").unwrap();
+        assert_eq!(p.spec_version, AlpenSpecId::V0);
+        assert_eq!(p.chunk_path, PathBuf::from("/a/chunk.elf"));
+        assert_eq!(p.acct_path, PathBuf::from("/a/acct.elf"));
+    }
+
+    /// The acct path is everything past the second colon, so it may itself
+    /// contain colons.
+    #[test]
+    fn parse_prover_program_paths_acct_path_may_contain_colons() {
+        let p = parse_prover_program_paths("v1:/a/chunk.elf:/a/acct:with:colons.elf").unwrap();
+        assert_eq!(p.spec_version, AlpenSpecId::V1);
+        assert_eq!(p.chunk_path, PathBuf::from("/a/chunk.elf"));
+        assert_eq!(p.acct_path, PathBuf::from("/a/acct:with:colons.elf"));
+    }
+
+    #[test]
+    fn parse_prover_program_paths_rejects_missing_separator() {
+        assert!(parse_prover_program_paths("/a/chunk.elf").is_err());
+        assert!(parse_prover_program_paths("v0:/a/chunk.elf").is_err());
+    }
+
+    #[test]
+    fn parse_prover_program_paths_rejects_empty_chunk_or_acct() {
+        assert!(parse_prover_program_paths("v0::/a/acct.elf").is_err());
+        assert!(parse_prover_program_paths("v0:/a/chunk.elf:").is_err());
+    }
+
+    #[test]
+    fn parse_prover_program_paths_rejects_unknown_spec_version() {
+        assert!(parse_prover_program_paths("v9:/a/chunk.elf:/a/acct.elf").is_err());
+        assert!(parse_prover_program_paths("nope:/a/chunk.elf:/a/acct.elf").is_err());
     }
 }
 

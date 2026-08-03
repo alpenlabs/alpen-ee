@@ -74,6 +74,7 @@ async fn get_block_range(
 async fn seal_batch<P: AccumulationPolicy>(
     state: &mut BatchBuilderState<P>,
     storage: &impl BatchStorage,
+    block_storage: &impl ExecBlockStorage,
 ) -> Result<Option<BatchId>> {
     if state.accumulator().is_empty() {
         return Ok(None);
@@ -83,6 +84,24 @@ async fn seal_batch<P: AccumulationPolicy>(
     let (inner_blocks, last_block) = state.accumulator_mut().drain();
     let inner_blocks: Vec<Hash> = inner_blocks.into_iter().map(|b| b.hash()).collect();
 
+    // The version governing every block in this batch: whatever the block
+    // this batch starts after (its own `prev_block`) already settled on for
+    // the block built after it. Mirrors the same derivation
+    // `block_builder::build_next_block` uses for "version governing the
+    // next block" (its `last_local_block.next_spec_version()`) — a batch
+    // never straddles a rotation, so this single value governs every block
+    // in it.
+    let spec_version = block_storage
+        .get_exec_block(prev_block.hash())
+        .await?
+        .ok_or_else(|| {
+            eyre!(
+                "missing exec block record for batch start {}",
+                prev_block.hash()
+            )
+        })?
+        .next_spec_version();
+
     let batch_idx = state.next_batch_idx();
     let batch = Batch::new(
         batch_idx,
@@ -90,6 +109,7 @@ async fn seal_batch<P: AccumulationPolicy>(
         last_block.hash(),
         last_block.blocknum(),
         inner_blocks,
+        spec_version,
     )
     .map_err(|err| eyre!(err))?;
     let batch_id = batch.id();
@@ -98,6 +118,7 @@ async fn seal_batch<P: AccumulationPolicy>(
         batch_idx = batch.idx(),
         prev_block = %prev_block.hash(),
         last_block = %last_block.hash(),
+        %spec_version,
         "Sealing batch"
     );
 
@@ -277,7 +298,13 @@ where
                 .accumulator()
                 .would_exceed(&ctx.sealing_policy, &block_data)
         {
-            if let Some(batch_id) = seal_batch(state, ctx.batch_storage.as_ref()).await? {
+            if let Some(batch_id) = seal_batch(
+                state,
+                ctx.batch_storage.as_ref(),
+                ctx.block_storage.as_ref(),
+            )
+            .await?
+            {
                 // Notify watchers of new batch
                 let _ = ctx.latest_batch_tx.send(batch_id);
                 emit_event(&ctx.event_tx, BatchBuilderEvent::batch_sealed(batch_id)).await;
@@ -305,7 +332,13 @@ where
             .await?
             .ok_or_else(|| eyre!("missing just-added block: {}", block.hash()))?;
         if record.package().outputs().new_predicate().is_some() {
-            if let Some(batch_id) = seal_batch(state, ctx.batch_storage.as_ref()).await? {
+            if let Some(batch_id) = seal_batch(
+                state,
+                ctx.batch_storage.as_ref(),
+                ctx.block_storage.as_ref(),
+            )
+            .await?
+            {
                 let _ = ctx.latest_batch_tx.send(batch_id);
                 emit_event(&ctx.event_tx, BatchBuilderEvent::batch_sealed(batch_id)).await;
             }

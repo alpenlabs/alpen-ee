@@ -118,6 +118,7 @@ pub(crate) async fn check_and_handle_reorg<P: AccumulationPolicy>(
 #[cfg(test)]
 mod tests {
     use alpen_ee_common::{Batch, BatchStatus, MockBatchStorage};
+    use alpen_ee_params::AlpenSpecId;
 
     use super::*;
     use crate::{
@@ -133,6 +134,7 @@ mod tests {
             last_block.hash(),
             last_block.blocknum(),
             vec![],
+            AlpenSpecId::V0,
         )
         .unwrap()
     }
