@@ -12,6 +12,8 @@ use std::{env, fs, path::Path, sync::Arc};
 #[cfg(feature = "sequencer")]
 use alloy_primitives::{address, Address};
 use alpen_ee_params::AlpenParams;
+#[cfg(feature = "sequencer")]
+use alpen_ee_sequencer::DEFAULT_BLOCKTIME_MS;
 use clap::ArgAction;
 use eyre::Context;
 #[cfg(feature = "sequencer")]
@@ -31,10 +33,6 @@ const DEFAULT_BTCIO_RETRY_INTERVAL_MS: u64 = 1_000;
 
 #[cfg(feature = "sequencer")]
 const DEFAULT_BENEFICIARY_ADDRESS: Address = address!("5400000000000000000000000000000000000010");
-
-// Mirrors `alpen_ee_sequencer::BlockBuilderConfig`'s default target blocktime.
-#[cfg(feature = "sequencer")]
-const DEFAULT_BLOCKTIME_MS: u64 = 5_000;
 
 /// Alpen-specific CLI args extending the reth default CLI.
 ///
