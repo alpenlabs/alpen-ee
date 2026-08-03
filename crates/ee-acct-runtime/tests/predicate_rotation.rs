@@ -14,7 +14,7 @@ use common::{
 use ssz::Encode;
 use strata_acct_types::{AccountId, BitcoinAmount, Hash, MessageEntry, MsgPayload, SubjectId};
 use strata_ee_acct_runtime::{EeVerificationInput, UpdateBuilder};
-use strata_ee_acct_types::{PREDICATE_UPDATE_MSG_TYPE, PendingInputEntry};
+use strata_ee_acct_types::{PREDICATE_UPDATE_MSG_TYPE_ID, PendingInputEntry};
 use strata_ee_chain_types::ExecOutputs;
 use strata_msg_fmt::{Msg as MsgTrait, OwnedMsg};
 use strata_predicate::PredicateKey;
@@ -114,8 +114,8 @@ fn test_non_admin_predicate_update_message_is_ignored() {
     let ee = SimpleExecutionEnvironment;
 
     let new_key = PredicateKey::always_accept();
-    let raw =
-        OwnedMsg::new(PREDICATE_UPDATE_MSG_TYPE, new_key.as_ssz_bytes()).expect("create message");
+    let raw = OwnedMsg::new(PREDICATE_UPDATE_MSG_TYPE_ID, new_key.as_ssz_bytes())
+        .expect("create message");
     let msg = MessageEntry::new(
         AccountId::from([0x99; 32]), // not ADMIN_MSG_ACCT_ID
         1,
