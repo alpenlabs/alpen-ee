@@ -1394,11 +1394,15 @@ dependencies = [
  "alpen-ee-common",
  "alpen-ee-rpc-api",
  "async-trait",
+ "http 1.4.0",
  "jsonrpsee",
  "reth-node-builder",
  "reth-provider",
+ "reth-rpc-layer",
  "strata-identifiers",
+ "tempfile",
  "tokio",
+ "tower 0.5.3",
 ]
 
 [[package]]
