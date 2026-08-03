@@ -244,7 +244,7 @@ where
     log_writer_config(&writer_config);
     let sequencer_args = &ext.sequencer;
     let block_builder_config =
-        BlockBuilderConfig::default().with_blocktime_ms(sequencer_args.blocktime_ms);
+        BlockBuilderConfig::default().with_blocktime_ms(sequencer_args.resolve_blocktime_ms()?);
     let sequencer_keypair = sequencer_bitcoin_keypair(&sequencer_privkey)?;
 
     let SequencerBootState {

@@ -250,14 +250,28 @@ pub(crate) struct SequencerArgs {
     pub beneficiary_address: Address,
 
     /// EE block time override, in milliseconds. Must be greater than zero.
+    ///
+    /// Left unvalidated by clap and un-defaulted: this only matters with
+    /// `--sequencer`, so a stray `ALPEN_EE_BLOCK_TIME_MS` in the environment
+    /// can't block an otherwise unrelated full node from starting. Call
+    /// [`SequencerArgs::resolve_blocktime_ms`] once `--sequencer` is
+    /// confirmed enabled instead.
     #[cfg(feature = "sequencer")]
-    #[arg(
-        long = "ee-block-time-ms",
-        env = "ALPEN_EE_BLOCK_TIME_MS",
-        default_value_t = DEFAULT_BLOCKTIME_MS,
-        value_parser = clap::value_parser!(u64).range(1..),
-    )]
-    pub blocktime_ms: u64,
+    #[arg(long = "ee-block-time-ms", env = "ALPEN_EE_BLOCK_TIME_MS")]
+    pub blocktime_ms: Option<u64>,
+}
+
+#[cfg(feature = "sequencer")]
+impl SequencerArgs {
+    /// Applies the default and range-checks the EE block time override.
+    /// Only call this once `--sequencer` is confirmed enabled.
+    pub(crate) fn resolve_blocktime_ms(&self) -> eyre::Result<u64> {
+        let blocktime_ms = self.blocktime_ms.unwrap_or(DEFAULT_BLOCKTIME_MS);
+        if blocktime_ms == 0 {
+            eyre::bail!("--ee-block-time-ms (ALPEN_EE_BLOCK_TIME_MS) must be greater than zero");
+        }
+        Ok(blocktime_ms)
+    }
 }
 
 /// EE DA and Bitcoin RPC args.
@@ -508,14 +522,35 @@ mod additional_config_tests {
         assert!(err.to_string().contains("--btcio-fee-rate"));
     }
 
-    /// `--ee-block-time-ms` (aliasing `ALPEN_EE_BLOCK_TIME_MS`) must be
-    /// greater than zero, enforced by clap's own range check.
+    /// `--ee-block-time-ms` (aliasing `ALPEN_EE_BLOCK_TIME_MS`) is left
+    /// unvalidated by clap: it only matters with `--sequencer`, so a stray
+    /// value in the environment must not stop an unrelated full node
+    /// (no `--sequencer`) from parsing its args at all.
     #[cfg(feature = "sequencer")]
     #[test]
-    fn ee_block_time_ms_rejects_zero() {
-        let err = try_parse_additional_config(&["--dummy-ol-client", "--ee-block-time-ms", "0"])
-            .unwrap_err();
-        assert!(err.to_string().contains("ee-block-time-ms"));
+    fn ee_block_time_ms_not_validated_by_clap() {
+        let config = parse_additional_config(&["--dummy-ol-client", "--ee-block-time-ms", "0"]);
+        assert_eq!(config.sequencer.blocktime_ms, Some(0));
+    }
+
+    /// [`SequencerArgs::resolve_blocktime_ms`] is what actually enforces the
+    /// greater-than-zero invariant, once `--sequencer` is confirmed enabled.
+    #[cfg(feature = "sequencer")]
+    #[test]
+    fn resolve_blocktime_ms_rejects_zero() {
+        let config = parse_additional_config(&["--dummy-ol-client", "--ee-block-time-ms", "0"]);
+        let err = config.sequencer.resolve_blocktime_ms().unwrap_err();
+        assert!(err.to_string().contains("greater than zero"));
+    }
+
+    #[cfg(feature = "sequencer")]
+    #[test]
+    fn resolve_blocktime_ms_defaults_when_unset() {
+        let config = parse_additional_config(&["--dummy-ol-client"]);
+        assert_eq!(
+            config.sequencer.resolve_blocktime_ms().unwrap(),
+            DEFAULT_BLOCKTIME_MS
+        );
     }
 
     /// Catches arg id / flag collisions between the flattened Alpen arg

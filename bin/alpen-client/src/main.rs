@@ -92,6 +92,11 @@ where
         eyre::bail!("sp1 feature not enabled at compile time");
     }
 
+    #[cfg(feature = "sequencer")]
+    if command.ext.sequencer.enabled {
+        command.ext.sequencer.resolve_blocktime_ms()?;
+    }
+
     // Build the tokio runtime ourselves so logging init can run inside its
     // context, then hand it to CliRunner. The OTLP tracing exporter requires
     // an active tokio handle when it is built.
