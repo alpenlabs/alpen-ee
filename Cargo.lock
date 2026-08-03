@@ -14927,6 +14927,7 @@ dependencies = [
  "strata-ee-chain-types",
  "strata-identifiers",
  "strata-msg-fmt",
+ "strata-ol-msg-types",
  "strata-predicate",
  "strata-snark-acct-runtime",
  "strata-test-utils-ssz",
