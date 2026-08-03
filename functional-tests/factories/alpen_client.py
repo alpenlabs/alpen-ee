@@ -32,20 +32,20 @@ def generate_p2p_secret_key() -> str:
 # genesis value and will reject it. These are not secrets (unlike
 # SEQUENCER_PRIVATE_KEY): they're a fixed, publicly-known value both sides
 # agree on ahead of time.
-NATIVE_CHUNK_SIGNING_KEY_HEX = "03" * 32
-NATIVE_ACCT_SIGNING_KEY_HEX = "02" * 32
+V0_NATIVE_CHUNK_SIGNING_KEY_HEX = "03" * 32
+V0_ACCT_SIGNING_KEY_HEX = "02" * 32
 
 # A second, distinct deterministic acct signing key -- not tied to any
-# proof-impl `test_signing_key()`, just a stand-in target predicate for the
-# VK-rotation functional test (test_ee_predicate_transition.py). Its chunk
-# counterpart is reused from above: a `--prover-program` candidate's chunk
-# key only has to agree with its own acct key, not with any other
+# proof-impl `test_signing_key()`, just a stand-in rotation-target predicate
+# for the VK-rotation functional test (test_ee_predicate_transition.py). Its
+# chunk counterpart is reused from above: a `--prover-program` candidate's
+# chunk key only has to agree with its own acct key, not with any other
 # candidate's, so nothing requires it to differ.
-ROTATED_ACCT_SIGNING_KEY_HEX = "04" * 32
+V1_ACCT_SIGNING_KEY_HEX = "04" * 32
 
 
 DEFAULT_PROVER_PROGRAMS: list[tuple[str, str, str]] = [
-    ("v0", NATIVE_CHUNK_SIGNING_KEY_HEX, NATIVE_ACCT_SIGNING_KEY_HEX)
+    ("v0", V0_NATIVE_CHUNK_SIGNING_KEY_HEX, V0_ACCT_SIGNING_KEY_HEX)
 ]
 
 
