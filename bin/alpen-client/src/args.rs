@@ -260,9 +260,9 @@ pub(crate) struct SequencerArgs {
 /// Named around "program," not "version": this pair doesn't declare itself
 /// active — it's a candidate the process validates against whatever VK the
 /// OL currently expects (see `sequencer::prover::backend`). "Version"
-/// reads as a claim of being *the* active one, which would only get more
-/// misleading if this ever becomes a repeatable flag holding several
-/// resident candidates at once.
+/// reads as a claim of being *the* active one, which would be actively
+/// misleading now that `--prover-program` is repeatable and can hold
+/// several resident candidates at once.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProverProgramPaths {
     pub chunk_path: PathBuf,
@@ -310,32 +310,36 @@ pub(crate) struct ProverArgs {
 
     /// The chunk+acct program, as `<chunk_path>:<acct_path>`. ELF paths
     /// under `--prover-backend sp1`, signing-key file paths under `native`.
-    /// Required with `--sequencer`.
+    /// Repeatable: each occurrence adds a candidate program, and the one
+    /// whose derived account predicate key matches the OL's expected
+    /// `update_vk` at startup is the one actually used (see
+    /// `sequencer::prover::backend`). At least one is required with
+    /// `--sequencer`.
     #[arg(long = "prover-program", value_parser = parse_prover_program_paths, required = false)]
-    pub prover_program: Option<ProverProgramPaths>,
+    pub prover_program: Vec<ProverProgramPaths>,
 }
 
 impl ProverArgs {
     /// Resolves the CLI flags into the EE chunk/acct prover backend.
     ///
-    /// Fails if `--prover-program` wasn't given. Called both as an early
+    /// Fails if no `--prover-program` was given. Called both as an early
     /// fail-fast check in `main.rs` and again where the backend is actually
     /// built, so a bad flag combination is rejected before any node/DA/
     /// prover startup work begins rather than deep inside it.
     ///
-    /// Only checks that the program is present, not that its paths exist or
-    /// parse — reading them is left to the caller that actually builds the
-    /// backend.
+    /// Only checks that at least one program is present, not that its paths
+    /// exist or parse — reading them is left to the caller that actually
+    /// builds the backend.
     pub(crate) fn backend(&self) -> eyre::Result<ProverBackendConfig> {
-        let program = self
-            .prover_program
-            .clone()
-            .ok_or_else(|| eyre::eyre!("--prover-program is required with --sequencer"))?;
+        if self.prover_program.is_empty() {
+            return Err(eyre::eyre!("--prover-program is required with --sequencer"));
+        }
+        let programs = self.prover_program.clone();
 
         Ok(match self.backend {
-            ProverBackendArg::Native => ProverBackendConfig::Native { program },
+            ProverBackendArg::Native => ProverBackendConfig::Native { programs },
             ProverBackendArg::Sp1 => ProverBackendConfig::Sp1 {
-                program,
+                programs,
                 deadline_secs: self.sp1_proof_deadline_secs,
             },
         })
@@ -358,14 +362,18 @@ pub(crate) enum ProverBackendArg {
 /// instead of re-deriving the same cross-field requirement at every layer.
 /// Holds paths rather than read file contents: reading them is left to
 /// whoever actually builds the backend.
+///
+/// `programs` holds one or more candidates (see [`ProverProgramPaths`]);
+/// the backend builder picks whichever one's derived account predicate key
+/// matches the OL's expected `update_vk`.
 #[derive(Debug, Clone)]
 pub(crate) enum ProverBackendConfig {
     /// zkaleido `NativeHost`s, signing chunk/acct proofs with the keys read
     /// from the given paths.
-    Native { program: ProverProgramPaths },
+    Native { programs: Vec<ProverProgramPaths> },
     /// SP1 remote hosts.
     Sp1 {
-        program: ProverProgramPaths,
+        programs: Vec<ProverProgramPaths>,
         /// Falls back to `DEFAULT_SP1_DEADLINE_SECS` when unset.
         deadline_secs: Option<u64>,
     },
@@ -722,16 +730,16 @@ mod additional_config_tests {
         assert_eq!(config.btcio.fee_rate, Some(1.5));
         assert_eq!(
             config.sequencer.prover.prover_program,
-            Some(ProverProgramPaths {
+            vec![ProverProgramPaths {
                 chunk_path: PathBuf::from("/tmp/guest-alpen-chunk.elf"),
                 acct_path: PathBuf::from("/tmp/guest-alpen-acct.elf"),
-            })
+            }]
         );
     }
 
-    /// `--prover-program` is a plain `Option` field at the clap level (a
-    /// fullnode never needs it), so `--prover-backend` defaulting to
-    /// `native` with no program parses fine; `ProverArgs::backend()` is
+    /// `--prover-program` is a plain, unrequired `Vec` field at the clap
+    /// level (a fullnode never needs it), so `--prover-backend` defaulting
+    /// to `native` with no program parses fine; `ProverArgs::backend()` is
     /// what rejects its absence, once it's known `--sequencer` is actually
     /// in play (see
     /// `prover_backend_tests::missing_prover_program_is_rejected`).
@@ -781,6 +789,41 @@ mod additional_config_tests {
         .unwrap();
         assert!(config.sequencer.prover.backend().is_ok());
     }
+
+    /// `--prover-program` is repeatable: each occurrence adds a candidate,
+    /// so an operator can hand the sequencer both the currently-active and
+    /// a not-yet-active program across a VK rotation without a restart.
+    #[test]
+    fn prover_program_flag_is_repeatable() {
+        let config = try_parse_additional_config(&[
+            "--dummy-ol-client",
+            "--sequencer",
+            "--btc-rpc-url",
+            "http://localhost:18443",
+            "--btc-rpc-user",
+            "user",
+            "--btc-rpc-password",
+            "pass",
+            "--prover-program",
+            "/tmp/chunk-a.hex:/tmp/acct-a.hex",
+            "--prover-program",
+            "/tmp/chunk-b.hex:/tmp/acct-b.hex",
+        ])
+        .unwrap();
+        assert_eq!(
+            config.sequencer.prover.prover_program,
+            vec![
+                ProverProgramPaths {
+                    chunk_path: PathBuf::from("/tmp/chunk-a.hex"),
+                    acct_path: PathBuf::from("/tmp/acct-a.hex"),
+                },
+                ProverProgramPaths {
+                    chunk_path: PathBuf::from("/tmp/chunk-b.hex"),
+                    acct_path: PathBuf::from("/tmp/acct-b.hex"),
+                },
+            ]
+        );
+    }
 }
 
 #[cfg(test)]
@@ -798,7 +841,7 @@ mod prover_backend_tests {
         ProverArgs {
             backend: ProverBackendArg::Native,
             sp1_proof_deadline_secs: None,
-            prover_program: Some(program()),
+            prover_program: vec![program()],
         }
     }
 
@@ -806,15 +849,15 @@ mod prover_backend_tests {
         ProverArgs {
             backend: ProverBackendArg::Sp1,
             sp1_proof_deadline_secs: None,
-            prover_program: Some(program()),
+            prover_program: vec![program()],
         }
     }
 
     #[test]
     fn native_backend_resolves_to_native_config() {
         match native_args().backend().unwrap() {
-            ProverBackendConfig::Native { program: p } => {
-                assert_eq!(p, program());
+            ProverBackendConfig::Native { programs } => {
+                assert_eq!(programs, vec![program()]);
             }
             other => panic!("expected Native, got {other:?}"),
         }
@@ -823,8 +866,8 @@ mod prover_backend_tests {
     #[test]
     fn sp1_backend_resolves_to_sp1_config() {
         match sp1_args().backend().unwrap() {
-            ProverBackendConfig::Sp1 { program: p, .. } => {
-                assert_eq!(p, program());
+            ProverBackendConfig::Sp1 { programs, .. } => {
+                assert_eq!(programs, vec![program()]);
             }
             other => panic!("expected Sp1, got {other:?}"),
         }
@@ -833,12 +876,12 @@ mod prover_backend_tests {
     #[test]
     fn missing_prover_program_is_rejected() {
         let mut args = native_args();
-        args.prover_program = None;
+        args.prover_program = Vec::new();
         let err = args.backend().unwrap_err();
         assert!(err.to_string().contains("--prover-program"));
 
         let mut args = sp1_args();
-        args.prover_program = None;
+        args.prover_program = Vec::new();
         let err = args.backend().unwrap_err();
         assert!(err.to_string().contains("--prover-program"));
     }
