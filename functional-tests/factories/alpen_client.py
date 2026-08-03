@@ -180,8 +180,7 @@ class AlpenClientFactory(flexitest.Factory):
             # chunk + acct provers on the zkaleido NativeHost instead
             # (--prover-backend native is also the default).
             "--prover-backend", "native",
-            "--native-chunk-signing-key", str(chunk_signing_key_path),
-            "--native-acct-signing-key", str(acct_signing_key_path),
+            "--prover-program", f"{chunk_signing_key_path}:{acct_signing_key_path}",
         ]
         if dev_track_latest_epoch:
             # Advance the OL chain tracker on `latest` epoch (FCM)

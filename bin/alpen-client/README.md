@@ -434,8 +434,10 @@ DA and proof failures are non-fatal; the task retries on each poll.
 - **Account (batch) proof** — consumes the batch's chunk receipts plus the prior batch's end state and a DA witness, producing the outer proof submitted to OL.
 
 **Backends**, selected via `--prover-backend`:
-- **`sp1`** — production (`sp1` feature); needs `--chunk-elf-path` and `--acct-elf-path`; deadline via `--sp1-proof-deadline-secs`
-- **`native`** (the default) — skips real Groth16 proving, signing proofs with a Schnorr key instead. Needs `--native-chunk-signing-key` / `--native-acct-signing-key` (paths to hex-encoded key files). The acct key must match whatever the OL genesis `update_vk` expects, or the account prover predicate validation at startup fails — see `crates/proof-impl/alpen-acct`'s `test_signing_key`
+- **`sp1`** — production (`sp1` feature); ELF paths come via `--prover-program`; deadline via `--sp1-proof-deadline-secs`
+- **`native`** (the default) — skips real Groth16 proving, signing proofs with a Schnorr key instead. Signing-key file paths come via `--prover-program`. The acct key must match whatever the OL genesis `update_vk` expects, or the account prover predicate validation at startup fails — see `crates/proof-impl/alpen-acct`'s `test_signing_key`
+
+The chunk+acct pair is passed as one `--prover-program <chunk_path>:<acct_path>` (ELF paths under `sp1`, signing-key file paths under `native`), coupled into a single token so the two can't be mismatched. Named around "program," not "version" — this doesn't declare itself active, it's validated against whatever VK the OL currently expects. Required with `--sequencer`.
 
 Proofs and prover tasks live in a dedicated SledDB instance, separate from OL storage.
 
@@ -747,9 +749,8 @@ The client extends the standard Reth CLI. Selected Alpen-specific flags (see [ma
 | `--batch-sealing-block-count` | Blocks per batch before sealing |
 | `--chunk-sealing-block-count` / `--chunk-sealing-gas-limit` | Chunk sealing thresholds |
 | `--prover-backend` | `native` (default) or `sp1` |
-| `--chunk-elf-path` / `--acct-elf-path` | Compiled SP1 guest ELFs; required with `--prover-backend sp1` |
+| `--prover-program <chunk_path>:<acct_path>` | The chunk+acct program. Compiled SP1 guest ELFs under `sp1`, hex-encoded Schnorr key files under `native`. Required |
 | `--sp1-proof-deadline-secs` | Deadline for remote SP1 proof requests |
-| `--native-chunk-signing-key` / `--native-acct-signing-key` | Paths to hex-encoded Schnorr key files; required with `--prover-backend native` |
 | `SEQUENCER_PRIVATE_KEY` (env) | Sequencer key for gossip signing and DA reveal signing |
 
 ### Observability

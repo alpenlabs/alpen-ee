@@ -18,6 +18,8 @@ use strata_primitives::buf::Buf32;
 use strata_proofimpl_alpen_acct::process_ee_acct_update;
 use strata_proofimpl_alpen_chunk::process_ee_chunk;
 use tracing::info;
+#[cfg(feature = "sp1")]
+use zkaleido::ZkVmExecutor;
 use zkaleido_native_adapter::NativeHost;
 #[cfg(feature = "sp1")]
 use zkaleido_sp1_groth16_verifier::SP1Groth16Verifier;
@@ -96,14 +98,11 @@ async fn build_ee_prover_config(
     params: Arc<AlpenParams>,
 ) -> eyre::Result<EeProverConfig> {
     match backend {
-        ProverBackendConfig::Native {
-            chunk_signing_key_path,
-            acct_signing_key_path,
-        } => {
+        ProverBackendConfig::Native { program } => {
             info!(target: "alpen-client", "EE chunk + acct provers: native host");
 
-            let chunk_signing_key = native_schnorr_signing_key_from_file(&chunk_signing_key_path)?;
-            let acct_signing_key = native_schnorr_signing_key_from_file(&acct_signing_key_path)?;
+            let chunk_signing_key = native_schnorr_signing_key_from_file(&program.chunk_path)?;
+            let acct_signing_key = native_schnorr_signing_key_from_file(&program.acct_path)?;
 
             let chunk_predicate_key = schnorr_predicate_key(&chunk_signing_key);
             let chunk_host = {
@@ -130,35 +129,38 @@ async fn build_ee_prover_config(
         }
         #[cfg(feature = "sp1")]
         ProverBackendConfig::Sp1 {
+            program,
             deadline_secs,
-            chunk_elf_path,
-            acct_elf_path,
         } => {
-            use zkaleido::ZkVmExecutor;
-
             let deadline_secs = deadline_secs.unwrap_or(DEFAULT_SP1_DEADLINE_SECS);
             let deadline = Duration::from_secs(deadline_secs);
             info!(
                 target: "alpen-client",
                 deadline_secs,
-                ?chunk_elf_path,
-                ?acct_elf_path,
+                chunk_path = ?program.chunk_path,
+                acct_path = ?program.acct_path,
                 "sp1 EE prover deadline configured"
             );
 
             let sp1_config = SP1HostConfig::default().with_deadline(deadline);
-            let chunk_elf = fs::read(&chunk_elf_path).with_context(|| {
+            let chunk_elf = fs::read(&program.chunk_path).with_context(|| {
                 format!(
                     "failed to read chunk guest ELF at {}",
-                    chunk_elf_path.display()
+                    program.chunk_path.display()
                 )
             })?;
-            let acct_elf = fs::read(&acct_elf_path).with_context(|| {
+            let acct_elf = fs::read(&program.acct_path).with_context(|| {
                 format!(
                     "failed to read account guest ELF at {}",
-                    acct_elf_path.display()
+                    program.acct_path.display()
                 )
             })?;
+            // TODO: cross-check that `acct_elf`'s compiled-in chunk-VK
+            // dependency actually matches `chunk_elf`'s derived VK.
+            // `ProverProgramPaths` only guarantees these two paths were
+            // passed together as one `--prover-program` token, not that
+            // they're actually a matched build output -- that's caught
+            // only by build provenance today.
             let chunk_host = SP1Host::init_with_config(&chunk_elf, sp1_config.clone()).await;
             let acct_host = SP1Host::init_with_config(&acct_elf, sp1_config).await;
             let account_predicate_key = sp1_groth16_predicate_key(acct_host.program_id().0)
