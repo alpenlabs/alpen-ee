@@ -61,6 +61,20 @@ pub struct ChunkProofCoverageResponse {
     pub first_uncovered_block: Option<u64>,
 }
 
+/// Response for `alpenadmin_getAdminStatus`.
+///
+/// Reserved for forward-compatible expansion; additional fields may be added without changing the
+/// method signature.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "jsonschema", derive(schemars::JsonSchema))]
+pub struct AdminStatusResponse {
+    /// Client version string.
+    pub version: String,
+
+    /// True when the node runs in sequencer mode.
+    pub sequencer: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,6 +107,17 @@ mod tests {
             serde_json::to_value(finalized).unwrap(),
             serde_json::json!({ "status": "finalized", "checkpoint_epoch": 0 }),
         );
+    }
+
+    #[test]
+    fn admin_status_response_round_trips() {
+        let response = AdminStatusResponse {
+            version: "0.3.0-alpha.1".to_string(),
+            sequencer: true,
+        };
+        let encoded = serde_json::to_string(&response).unwrap();
+        let decoded: AdminStatusResponse = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(response, decoded);
     }
 
     #[test]
