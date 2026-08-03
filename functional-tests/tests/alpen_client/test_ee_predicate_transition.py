@@ -1,15 +1,17 @@
 """EE predicate transition functional test.
 
 Verifies the Alpen snark account's `update_vk` rotates via an admin
-`PredicateUpdate`, and exercises the boundary of the rotation <-> EE
-spec-version coupling (`AlpenSpecId` in
-`crates/alpen-ee/params/src/spec_activations.rs`): every consumed rotation
-unconditionally advances to the successor spec version
+`PredicateUpdate`, that the sequencer's prover actually switches to the
+rotated VK's program for everything proved after the rotation (no restart),
+and exercises the boundary of the rotation <-> EE spec-version coupling
+(`AlpenSpecId` in `crates/alpen-ee/params/src/spec_activations.rs`): every
+consumed rotation unconditionally advances to the successor spec version
 (`build_next_exec_block` in `crates/alpen-ee/block-assembly/src/block.rs`),
 and this binary currently only defines `V0` and `V1` -- no `AlpenSpecId::V2`
 exists yet (TODO(STR-3997)). So the first rotation (V0 -> V1) must settle
-normally, and a second rotation (V1 -> V2) must be refused rather than
-silently misapplied.
+normally, a further update after it must also settle -- proved under the
+*new* VK, not the stale pre-rotation one -- and a second rotation (V1 -> V2)
+must be refused rather than silently misapplied.
 """
 
 import logging
@@ -37,6 +39,7 @@ logger = logging.getLogger(__name__)
 INITIAL_BLOCKS = 5
 POST_ADMIN_UPDATE_L1_BLOCKS = 5
 PREDICATE_SETTLE_TIMEOUT_SECONDS = 120
+POST_ROTATION_UPDATE_TIMEOUT_SECONDS = 180
 UNSUPPORTED_ROTATION_TIMEOUT_SECONDS = 120
 
 # Initial Alpen account predicate matches `EeAcctProgram::test_predicate_key()`
@@ -48,12 +51,11 @@ INITIAL_ACCT_PREDICATE = (
 # The only rotation this binary can honor: V0 -> V1 (Osaka). A real
 # Bip340Schnorr predicate, not AlwaysAccept, bound to the deterministic SK
 # [0x04; 32] (`ROTATED_ACCT_SIGNING_KEY_HEX`). That key is handed to
-# alpen-client as a `--prover-program` candidate up front (see the env
-# constructed in `__init__` below), ahead of the genesis candidate, so it's
-# present at startup for whenever candidate resolution stops being a
-# startup-only, one-shot match (see the staleness TODO on
-# `launch_validated_ee_batch_prover` in
-# bin/alpen-client/src/sequencer/prover/backend.rs).
+# alpen-client as a v1-tagged `--prover-program` candidate up front (see the
+# env constructed in `__init__` below), so the sequencer already has the
+# right program resident and routes to it (by the batch's own governing
+# spec version, via PaasBatchProver) the moment the rotation lands -- no
+# restart needed.
 SUPPORTED_ROTATION_TARGET = (
     "Bip340Schnorr:462779ad4aad39514614751a71085f2f10e1c7a593e4e030efb5b8721ce55b0b"
 )
@@ -94,16 +96,21 @@ class TestEePredicateTransition(BaseTest):
                 pre_generate_blocks=110,
                 admin_confirmation_depth=2,
                 fund_test_cli_wallet=True,
-                # The rotation target's key first, the genesis-matching key
-                # second: exercises the multi-candidate CLI path with a real
-                # second candidate (see ProverProgramPaths in
-                # bin/alpen-client/src/args.rs) instead of a no-op duplicate,
-                # and gives alpen-client the rotation target's signing key
-                # (see SUPPORTED_ROTATION_TARGET above) up front, ready for
-                # whichever candidate the OL's update_vk matches at startup.
+                # Two resident candidates, each tagged with the AlpenSpecId
+                # it's built for (see ProverProgramPaths in
+                # bin/alpen-client/src/args.rs): v1's acct key is the
+                # rotation target (see SUPPORTED_ROTATION_TARGET above),
+                # v0's is the genesis-matching key. Both are validated and
+                # loaded at startup; the sequencer routes each batch's proof
+                # request to whichever candidate's declared version matches
+                # that batch's own governing spec version (see
+                # PaasBatchProver in
+                # bin/alpen-client/src/sequencer/prover/batch_prover.rs), so
+                # proving keeps working across the V0 -> V1 rotation below
+                # without a restart.
                 prover_programs=[
-                    (NATIVE_CHUNK_SIGNING_KEY_HEX, ROTATED_ACCT_SIGNING_KEY_HEX),
-                    (NATIVE_CHUNK_SIGNING_KEY_HEX, NATIVE_ACCT_SIGNING_KEY_HEX),
+                    ("v1", NATIVE_CHUNK_SIGNING_KEY_HEX, ROTATED_ACCT_SIGNING_KEY_HEX),
+                    ("v0", NATIVE_CHUNK_SIGNING_KEY_HEX, NATIVE_ACCT_SIGNING_KEY_HEX),
                 ],
             )
         )
@@ -168,6 +175,44 @@ class TestEePredicateTransition(BaseTest):
             timeout=PREDICATE_SETTLE_TIMEOUT_SECONDS,
         )
         logger.info("update_vk transitioned to %s (V0 -> V1)", SUPPORTED_ROTATION_TARGET)
+
+        # --- Post-rotation: a further update must settle under the *new* VK ----
+        #
+        # The V0 -> V1 transition above only proves that the update carrying
+        # the rotation itself settles -- that update's own proof is checked
+        # against update_vk as it stood *before* the rotation, so it's
+        # provable under the old (v0) program alone. It says nothing about
+        # whether the sequencer can keep proving *after* the rotation has
+        # landed. Mine enough plain blocks (nothing Osaka-specific, so this
+        # doesn't depend on per-version guest correctness, only on host-side
+        # program routing) to force at least one more ordinary batch through
+        # sealing, DA, proving, and OL submission, and confirm the account's
+        # update sequence number advances again -- which can only happen if
+        # that update's proof verifies against the now-current
+        # SUPPORTED_ROTATION_TARGET predicate, i.e. the v1 program.
+        seq_no_after_rotation = strata_rpc.strata_getSnarkAccountStateByTag(
+            ALPEN_ACCOUNT_ID, "latest"
+        )["seq_no"]
+
+        def mine_and_fetch_seq_no() -> int:
+            btc_rpc.proxy.generatetoaddress(1, mine_addr)
+            return strata_rpc.strata_getSnarkAccountStateByTag(ALPEN_ACCOUNT_ID, "latest")["seq_no"]
+
+        wait_until_with_value(
+            mine_and_fetch_seq_no,
+            lambda seq_no: seq_no > seq_no_after_rotation,
+            error_with=(
+                "no further update settled under the rotated VK "
+                f"(seq_no stuck at {seq_no_after_rotation}); the sequencer's prover is "
+                "likely still proving with the stale, pre-rotation program"
+            ),
+            timeout=POST_ROTATION_UPDATE_TIMEOUT_SECONDS,
+        )
+        logger.info(
+            "a further update settled under %s (seq_no advanced past %d)",
+            SUPPORTED_ROTATION_TARGET,
+            seq_no_after_rotation,
+        )
 
         # --- V1 -> V2: no `AlpenSpecId` variant exists for it ------------------
         #

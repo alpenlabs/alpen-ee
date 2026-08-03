@@ -41,7 +41,7 @@ class AlpenClientEnvParams:
     batch_sealing_block_count: int = 10
     dev_track_latest_epoch: bool = False
     beneficiary_address: str | None = None
-    prover_programs: list[tuple[str, str]] | None = None
+    prover_programs: list[tuple[str, str, str]] | None = None
 
 
 class AlpenClientEnv(flexitest.EnvConfig):

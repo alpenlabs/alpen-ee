@@ -41,7 +41,7 @@ class EeOLEnv(flexitest.EnvConfig):
         ol_block_time_ms: int | None = None,
         dev_track_latest_epoch: bool = False,
         batch_sealing_block_count: int = 10,
-        prover_programs: list[tuple[str, str]] | None = None,
+        prover_programs: list[tuple[str, str, str]] | None = None,
     ):
         epoch_seal_config = (
             EpochSealingConfig.new_fixed_slot(seal_epoch_slots)

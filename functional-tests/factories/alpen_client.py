@@ -44,8 +44,8 @@ NATIVE_ACCT_SIGNING_KEY_HEX = "02" * 32
 ROTATED_ACCT_SIGNING_KEY_HEX = "04" * 32
 
 
-DEFAULT_PROVER_PROGRAMS: list[tuple[str, str]] = [
-    (NATIVE_CHUNK_SIGNING_KEY_HEX, NATIVE_ACCT_SIGNING_KEY_HEX)
+DEFAULT_PROVER_PROGRAMS: list[tuple[str, str, str]] = [
+    ("v0", NATIVE_CHUNK_SIGNING_KEY_HEX, NATIVE_ACCT_SIGNING_KEY_HEX)
 ]
 
 
@@ -113,7 +113,7 @@ class AlpenClientFactory(flexitest.Factory):
         bridge_denomination: int = 100_000_000,
         max_withdrawal_amount: int | None = 1_000_000_000,
         beneficiary_address: str | None = None,
-        prover_programs: list[tuple[str, str]] | None = None,
+        prover_programs: list[tuple[str, str, str]] | None = None,
         **kwargs,
     ) -> AlpenClientService:
         """
@@ -127,10 +127,13 @@ class AlpenClientFactory(flexitest.Factory):
             custom_chain: Chain spec to use
             ee_params_path: EE params file to use; generated when omitted
             da_config: Optional DA pipeline configuration for posting state diffs to L1
-            prover_programs: List of (chunk_signing_key_hex, acct_signing_key_hex)
-                candidates, each passed as its own `--prover-program` flag
-                (repeatable; see `alpen-client --help`). Defaults to a single
-                candidate using the fixed native test keys OL genesis expects.
+            prover_programs: List of (spec_version, chunk_signing_key_hex,
+                acct_signing_key_hex) candidates, each passed as its own
+                `--prover-program` flag (repeatable; see `alpen-client
+                --help`). `spec_version` is the `AlpenSpecId` the candidate
+                is built for (e.g. "v0", "v1"). Defaults to a single v0
+                candidate using the fixed native test keys OL genesis
+                expects.
         """
         ctx: flexitest.EnvContext = kwargs["ctx"]
 
@@ -151,11 +154,15 @@ class AlpenClientFactory(flexitest.Factory):
         p2p_secret_key_file.write_text(key_hex)
 
         prover_program_flags = []
-        for i, (chunk_hex, acct_hex) in enumerate(prover_programs or DEFAULT_PROVER_PROGRAMS):
+        for i, (spec_version, chunk_hex, acct_hex) in enumerate(
+            prover_programs or DEFAULT_PROVER_PROGRAMS
+        ):
             chunk_path, acct_path = _write_signing_key_candidate_files(
                 datadir, i, chunk_hex, acct_hex
             )
-            prover_program_flags.extend(["--prover-program", f"{chunk_path}:{acct_path}"])
+            prover_program_flags.extend(
+                ["--prover-program", f"{spec_version}:{chunk_path}:{acct_path}"]
+            )
 
         if ol_endpoint:
             ol_client_args = ["--ol-client-url", ol_endpoint]
