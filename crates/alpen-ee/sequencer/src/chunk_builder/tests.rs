@@ -2,6 +2,7 @@ use alpen_ee_common::{
     exec_block_storage_test_fns::create_exec_block, Batch, BatchId, BatchStorage, BlockNumHash,
     Chunk, ChunkStorage, InMemoryStorage, MockExecBlockStorage,
 };
+use alpen_ee_params::AlpenSpecId;
 use strata_acct_types::Hash;
 
 use super::{
@@ -46,6 +47,7 @@ async fn save_test_batch(storage: &InMemoryStorage, idx: u64, prev: u8, last: u8
         test_hash(last),
         last as u64,
         inner_blocks,
+        AlpenSpecId::V0,
     )
     .unwrap();
     storage.save_next_batch(batch.clone()).await.unwrap();
@@ -536,6 +538,7 @@ async fn cleanup_noop_when_consistent() {
         test_hash(3),
         3,
         vec![test_hash(1), test_hash(2)],
+        AlpenSpecId::V0,
     )
     .unwrap();
     storage.save_next_batch(batch1).await.unwrap();
@@ -573,6 +576,7 @@ async fn cleanup_reverts_when_batch_missing() {
         test_hash(3),
         3,
         vec![test_hash(1), test_hash(2)],
+        AlpenSpecId::V0,
     )
     .unwrap();
     storage.save_next_batch(batch1).await.unwrap();
@@ -618,6 +622,7 @@ async fn cleanup_reverts_mid_batch_chunks() {
             test_hash(4),
             test_hash(5),
         ],
+        AlpenSpecId::V0,
     )
     .unwrap();
     storage.save_next_batch(batch1).await.unwrap();
@@ -663,6 +668,7 @@ async fn backfill_enqueues_unchunked_batches() {
         test_hash(3),
         3,
         vec![test_hash(1), test_hash(2)],
+        AlpenSpecId::V0,
     )
     .unwrap();
     storage.save_next_batch(batch1.clone()).await.unwrap();
@@ -818,6 +824,7 @@ async fn repair_linkage_noop_when_already_linked() {
         test_hash(3),
         3,
         vec![test_hash(1), test_hash(2)],
+        AlpenSpecId::V0,
     )
     .unwrap();
     let batch1_id = batch1.id();
@@ -868,6 +875,7 @@ async fn repair_linkage_reconstructs_missing_link() {
             test_hash(4),
             test_hash(5),
         ],
+        AlpenSpecId::V0,
     )
     .unwrap();
     let batch1_id = batch1.id();
@@ -926,6 +934,7 @@ async fn full_startup_sequence() {
         test_hash(3),
         3,
         vec![test_hash(1), test_hash(2)],
+        AlpenSpecId::V0,
     )
     .unwrap();
     let batch1_id = batch1.id();
@@ -935,6 +944,7 @@ async fn full_startup_sequence() {
         test_hash(6),
         6,
         vec![test_hash(4), test_hash(5)],
+        AlpenSpecId::V0,
     )
     .unwrap();
     storage.save_next_batch(batch1).await.unwrap();
