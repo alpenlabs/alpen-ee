@@ -150,20 +150,32 @@ class AlpenL1FeePolicyConfig:
 
 
 @dataclass
+class AlpenProverProgram:
+    """One ``[[sequencer.prover.programs]]`` entry.
+
+    ``spec_version`` is the ``AlpenSpecId`` this program is built for (e.g.
+    ``"v0"``). The paths are signing-key files under the ``native`` backend
+    and guest ELFs under ``sp1``.
+    """
+
+    spec_version: str
+    chunk_path: str
+    acct_path: str
+
+
+@dataclass
 class AlpenProverConfig:
     """``[sequencer.prover]`` table, tagged on ``backend``.
 
     Only the fields belonging to the selected backend may be set; the Rust
-    side rejects the others as unknown.
+    side rejects the others as unknown. ``programs`` lists one entry per
+    resident spec version, and each batch's proof request is routed to the
+    entry matching that batch's own governing version.
     """
 
+    programs: list[AlpenProverProgram]
     backend: str = field(default="native")  # "native" | "sp1"
-    # backend = "native"
-    chunk_signing_key_path: str | None = field(default=None)
-    acct_signing_key_path: str | None = field(default=None)
     # backend = "sp1"
-    chunk_elf_path: str | None = field(default=None)
-    acct_elf_path: str | None = field(default=None)
     deadline_secs: int | None = field(default=None)
 
 
