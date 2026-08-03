@@ -1,5 +1,8 @@
 //! OL client wrapper that supports both real RPC and dummy implementations.
 
+mod dummy;
+mod rpc;
+
 use alpen_ee_common::{
     OLAccountStateView, OLBlockData, OLChainStatus, OLClient, OLClientError, SequencerOLClient,
     SnarkAccountEpochSummary,
@@ -9,7 +12,7 @@ use strata_identifiers::{Epoch, EpochCommitment, Hash, L1Height, OLTxId};
 use strata_predicate::PredicateKey;
 use strata_snark_acct_types::SnarkAccountUpdate;
 
-use crate::{dummy_ol_client::DummyOLClient, rpc_client::RpcOLClient};
+pub(crate) use self::{dummy::DummyOLClient, rpc::RpcOLClient};
 
 /// Enum wrapper that can hold either a real RPC client or a dummy client.
 ///

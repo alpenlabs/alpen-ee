@@ -7,11 +7,13 @@
 //! env var) keeps its existing name; the grouping only affects code layout
 //! and `--help` section headings.
 
-use std::{fs, path::Path, sync::Arc};
+use std::{env, fs, path::Path, sync::Arc};
 
 #[cfg(feature = "sequencer")]
 use alloy_primitives::{address, Address};
 use alpen_ee_params::AlpenParams;
+#[cfg(feature = "sequencer")]
+use alpen_ee_sequencer::DEFAULT_BLOCKTIME_MS;
 use clap::ArgAction;
 use eyre::Context;
 #[cfg(feature = "sequencer")]
@@ -153,7 +155,7 @@ pub(crate) struct NodeArgs {
 pub(crate) struct OlArgs {
     /// URL of OL node RPC (can be either `http[s]://` or `ws[s]://`).
     /// Required unless `--dummy-ol-client` is specified.
-    #[arg(long = "ol-client-url")]
+    #[arg(long = "ol-client-url", required_unless_present = "dummy_client")]
     pub client_url: Option<String>,
 
     /// URL of the authenticated OL transaction submission RPC.
@@ -224,7 +226,6 @@ pub(crate) struct SequencerArgs {
 
     /// Capacity of the batch builder → chunk builder event channel.
     /// Defaults to 64 if not set.
-    #[cfg(feature = "sequencer")]
     #[arg(long, required = false)]
     pub batch_event_channel_capacity: Option<usize>,
 
@@ -247,6 +248,30 @@ pub(crate) struct SequencerArgs {
     #[cfg(feature = "sequencer")]
     #[arg(long, default_value_t = DEFAULT_BENEFICIARY_ADDRESS)]
     pub beneficiary_address: Address,
+
+    /// EE block time override, in milliseconds. Must be greater than zero.
+    ///
+    /// Left unvalidated by clap and un-defaulted: this only matters with
+    /// `--sequencer`, so a stray `ALPEN_EE_BLOCK_TIME_MS` in the environment
+    /// can't block an otherwise unrelated full node from starting. Call
+    /// [`SequencerArgs::resolve_blocktime_ms`] once `--sequencer` is
+    /// confirmed enabled instead.
+    #[cfg(feature = "sequencer")]
+    #[arg(long = "ee-block-time-ms", env = "ALPEN_EE_BLOCK_TIME_MS")]
+    pub blocktime_ms: Option<u64>,
+}
+
+#[cfg(feature = "sequencer")]
+impl SequencerArgs {
+    /// Applies the default and range-checks the EE block time override.
+    /// Only call this once `--sequencer` is confirmed enabled.
+    pub(crate) fn resolve_blocktime_ms(&self) -> eyre::Result<u64> {
+        let blocktime_ms = self.blocktime_ms.unwrap_or(DEFAULT_BLOCKTIME_MS);
+        if blocktime_ms == 0 {
+            eyre::bail!("--ee-block-time-ms (ALPEN_EE_BLOCK_TIME_MS) must be greater than zero");
+        }
+        Ok(blocktime_ms)
+    }
 }
 
 /// EE DA and Bitcoin RPC args.
@@ -288,7 +313,7 @@ pub(crate) struct BtcioArgs {
     pub conf_target: u16,
 
     /// Fixed fee rate in sat/vB. Required when policy is `fixed`.
-    #[arg(long = "btcio-fee-rate")]
+    #[arg(long = "btcio-fee-rate", required_if_eq("fee_policy", "fixed"))]
     pub fee_rate: Option<f64>,
 
     /// mempool.space-compatible base URL. Required when policy is `mempool`.
@@ -390,6 +415,30 @@ fn parse_buf32(s: &str) -> eyre::Result<Buf32> {
         .map_err(|e| eyre::eyre!("Failed to parse hex string as Buf32: {e}"))
 }
 
+/// Reads `SEQUENCER_PRIVATE_KEY`, required when running with `--sequencer`.
+///
+/// Called unconditionally at startup regardless of whether the `sequencer`
+/// feature is compiled in: gossip block signing needs the raw key too, not
+/// just the sequencer-only DA reveal path, so this can't live behind the
+/// `sequencer` module boundary.
+pub(crate) fn sequencer_privkey_from_env(sequencer_enabled: bool) -> eyre::Result<Option<Buf32>> {
+    if !sequencer_enabled {
+        return Ok(None);
+    }
+
+    let privkey_str = env::var("SEQUENCER_PRIVATE_KEY").map_err(|_| {
+        eyre::eyre!(
+            "SEQUENCER_PRIVATE_KEY environment variable is required when running with --sequencer"
+        )
+    })?;
+
+    let privkey = privkey_str
+        .parse::<Buf32>()
+        .map_err(|e| eyre::eyre!("Failed to parse SEQUENCER_PRIVATE_KEY as hex: {e}"))?;
+
+    Ok(Some(privkey))
+}
+
 /// Loads the Alpen params artifact from a JSON file.
 ///
 /// Runs at CLI parse time so the embedded chain spec is available before the
@@ -414,8 +463,9 @@ mod additional_config_tests {
     const SEQUENCER_PUBKEY: &str =
         "0000000000000000000000000000000000000000000000000000000000000000";
 
-    fn parse_additional_config(args: &[&str]) -> AdditionalConfig {
-        let params_fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/res/alpen-params.json");
+    fn base_argv<'a>(args: &[&'a str]) -> Vec<&'a str> {
+        let params_fixture: &'static str =
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/res/alpen-params.json");
         let mut argv = vec![
             "alpen-client",
             "--alpen-params",
@@ -424,16 +474,83 @@ mod additional_config_tests {
             SEQUENCER_PUBKEY,
         ];
         argv.extend_from_slice(args);
-        <AdditionalConfig as clap::Parser>::parse_from(argv)
+        argv
+    }
+
+    fn parse_additional_config(args: &[&str]) -> AdditionalConfig {
+        <AdditionalConfig as clap::Parser>::parse_from(base_argv(args))
+    }
+
+    /// Like [`parse_additional_config`], but surfaces parse errors instead of
+    /// exiting the process, for asserting on clap-level rejections.
+    fn try_parse_additional_config(args: &[&str]) -> Result<AdditionalConfig, clap::Error> {
+        <AdditionalConfig as clap::Parser>::try_parse_from(base_argv(args))
     }
 
     /// The artifact loads at CLI parse time and the genesis facts are
     /// derived from its embedded EVM spec.
     #[test]
     fn alpen_params_flag_loads_the_artifact() {
-        let config = parse_additional_config(&[]);
+        let config = parse_additional_config(&["--dummy-ol-client"]);
 
         assert_eq!(config.chain.alpen_params.genesis_block_info().blocknum(), 0);
+    }
+
+    /// `--ol-client-url` is required unless `--dummy-ol-client` is set; this
+    /// must be rejected at parse time, not deep inside `node::launch` after
+    /// the database has already been opened.
+    #[test]
+    fn ol_client_url_required_unless_dummy_client() {
+        let err = try_parse_additional_config(&[]).unwrap_err();
+        assert!(err.to_string().contains("--ol-client-url"));
+    }
+
+    #[test]
+    fn ol_client_url_not_required_with_dummy_client() {
+        let config = try_parse_additional_config(&["--dummy-ol-client"]).unwrap();
+        assert!(config.ol.client_url.is_none());
+    }
+
+    /// `--btcio-fee-rate` is required when `--btcio-fee-policy=fixed`; this
+    /// must be rejected at parse time rather than inside `writer_config()`.
+    #[cfg(feature = "sequencer")]
+    #[test]
+    fn btcio_fee_rate_required_when_policy_fixed() {
+        let err =
+            try_parse_additional_config(&["--dummy-ol-client", "--btcio-fee-policy", "fixed"])
+                .unwrap_err();
+        assert!(err.to_string().contains("--btcio-fee-rate"));
+    }
+
+    /// `--ee-block-time-ms` (aliasing `ALPEN_EE_BLOCK_TIME_MS`) is left
+    /// unvalidated by clap: it only matters with `--sequencer`, so a stray
+    /// value in the environment must not stop an unrelated full node
+    /// (no `--sequencer`) from parsing its args at all.
+    #[cfg(feature = "sequencer")]
+    #[test]
+    fn ee_block_time_ms_not_validated_by_clap() {
+        let config = parse_additional_config(&["--dummy-ol-client", "--ee-block-time-ms", "0"]);
+        assert_eq!(config.sequencer.blocktime_ms, Some(0));
+    }
+
+    /// [`SequencerArgs::resolve_blocktime_ms`] is what actually enforces the
+    /// greater-than-zero invariant, once `--sequencer` is confirmed enabled.
+    #[cfg(feature = "sequencer")]
+    #[test]
+    fn resolve_blocktime_ms_rejects_zero() {
+        let config = parse_additional_config(&["--dummy-ol-client", "--ee-block-time-ms", "0"]);
+        let err = config.sequencer.resolve_blocktime_ms().unwrap_err();
+        assert!(err.to_string().contains("greater than zero"));
+    }
+
+    #[cfg(feature = "sequencer")]
+    #[test]
+    fn resolve_blocktime_ms_defaults_when_unset() {
+        let config = parse_additional_config(&["--dummy-ol-client"]);
+        assert_eq!(
+            config.sequencer.resolve_blocktime_ms().unwrap(),
+            DEFAULT_BLOCKTIME_MS
+        );
     }
 
     /// Catches arg id / flag collisions between the flattened Alpen arg

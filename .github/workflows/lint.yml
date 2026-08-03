@@ -144,9 +144,12 @@ jobs:
           SP1_SKIP_PROGRAM_BUILD: "true"
 
       # Native-only build used by test setups (drops SP1 remote proving).
-      # The bare no-default-features (fullnode-only) build is not maintained.
       - name: Check alpen-client native-only build
         run: cargo check --locked --bin alpen-client --no-default-features --features sequencer
+
+      # Fullnode-only build: no sequencer capability compiled in at all.
+      - name: Check alpen-client fullnode-only build
+        run: cargo check --locked --bin alpen-client --no-default-features
 
   fmt:
     name: Check code formatting

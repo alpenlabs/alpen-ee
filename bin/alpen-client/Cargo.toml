@@ -9,21 +9,44 @@ workspace = true
 [features]
 default = ["sequencer", "sp1"]
 sequencer = [
+  "dep:alloy-consensus",
+  "dep:alloy-eips",
+  "dep:alloy-primitives",
+  "dep:alloy-rlp",
+  "dep:alloy-rpc-types-engine",
   "dep:alpen-ee-da-provider",
   "dep:alpen-ee-da-runtime",
+  "dep:alpen-ee-da-types",
   "dep:alpen-ee-exec-chain",
   "dep:alpen-ee-sequencer",
+  "dep:alpen-reth-db",
   "dep:alpen-reth-exex",
-  "dep:alloy-eips",
-  "dep:alloy-rpc-types-engine",
+  "dep:alpen-reth-witness",
   "dep:bitcoind-async-client",
   "dep:reth-payload-builder",
+  "dep:reth-primitives-traits",
   "dep:strata-btcio",
+  "dep:strata-codec",
   "dep:strata-config",
+  "dep:strata-db-types",
+  "dep:strata-ee-acct-runtime",
+  "dep:strata-ee-acct-types",
+  "dep:strata-ee-chain-types",
+  "dep:strata-ee-chunk-runtime",
+  "dep:strata-evm-ee",
+  "dep:strata-paas",
+  "dep:strata-proofimpl-alpen-acct",
+  "dep:strata-proofimpl-alpen-chunk",
+  "dep:strata-snark-acct-runtime",
+  "dep:thiserror",
+  "dep:zkaleido",
 ]
 # SP1 remote proving for the EE chunk + acct provers. Required for
-# production; native-only test builds can drop this feature.
+# production; native-only test builds can drop this feature. Only
+# meaningful with `sequencer` (every SP1 code path lives in the
+# sequencer-only prover), so it pulls that feature in too.
 sp1 = [
+  "sequencer",
   "dep:strata-zkvm-hosts",
   "dep:zkaleido-sp1-host",
   "strata-paas/remote",
@@ -36,8 +59,8 @@ name = "alpen-client"
 path = "src/main.rs"
 
 [dependencies]
-alloy-consensus.workspace = true
-alloy-rlp.workspace = true
+alloy-consensus = { workspace = true, optional = true }
+alloy-rlp = { workspace = true, optional = true }
 alpen-chainspec.workspace = true
 alpen-ee-common.workspace = true
 alpen-ee-config.workspace = true
@@ -45,7 +68,7 @@ alpen-ee-da-provider = { workspace = true, optional = true }
 alpen-ee-da-runtime = { workspace = true, optional = true, features = [
   "builders",
 ] }
-alpen-ee-da-types.workspace = true
+alpen-ee-da-types = { workspace = true, optional = true }
 alpen-ee-database.workspace = true
 alpen-ee-engine.workspace = true
 alpen-ee-exec-chain = { workspace = true, optional = true }
@@ -54,44 +77,44 @@ alpen-ee-ol-tracker.workspace = true
 alpen-ee-params.workspace = true
 alpen-ee-rpc-server.workspace = true
 alpen-ee-sequencer = { workspace = true, optional = true }
-alpen-reth-db.workspace = true
+alpen-reth-db = { workspace = true, optional = true }
 alpen-reth-evm.workspace = true
 alpen-reth-exex = { workspace = true, optional = true }
 alpen-reth-node.workspace = true
-alpen-reth-witness.workspace = true
+alpen-reth-witness = { workspace = true, optional = true }
 bitcoind-async-client = { workspace = true, optional = true }
 ssz.workspace = true
 strata-acct-types.workspace = true
 strata-btcio = { workspace = true, optional = true }
-strata-codec.workspace = true
+strata-codec = { workspace = true, optional = true }
 strata-common = { workspace = true, features = ["async"] }
 strata-config = { workspace = true, optional = true }
-strata-db-types.workspace = true
-strata-ee-acct-runtime.workspace = true
-strata-ee-acct-types.workspace = true
-strata-ee-chain-types.workspace = true
-strata-ee-chunk-runtime.workspace = true
-strata-evm-ee.workspace = true
+strata-db-types = { workspace = true, optional = true }
+strata-ee-acct-runtime = { workspace = true, optional = true }
+strata-ee-acct-types = { workspace = true, optional = true }
+strata-ee-chain-types = { workspace = true, optional = true }
+strata-ee-chunk-runtime = { workspace = true, optional = true }
+strata-evm-ee = { workspace = true, optional = true }
 strata-identifiers.workspace = true
 strata-logging.workspace = true
 strata-ol-rpc-api = { workspace = true, features = ["client"] }
 strata-ol-rpc-types.workspace = true
-strata-paas.workspace = true
+strata-paas = { workspace = true, optional = true }
 strata-predicate.workspace = true
 strata-primitives.workspace = true
-strata-proofimpl-alpen-acct.workspace = true
-strata-proofimpl-alpen-chunk.workspace = true
+strata-proofimpl-alpen-acct = { workspace = true, optional = true }
+strata-proofimpl-alpen-chunk = { workspace = true, optional = true }
 strata-proofimpl-predicate-keys.workspace = true
 strata-service.workspace = true
-strata-snark-acct-runtime.workspace = true
+strata-snark-acct-runtime = { workspace = true, optional = true }
 strata-snark-acct-types.workspace = true
 strata-zkvm-hosts = { workspace = true, optional = true }
-zkaleido.workspace = true
+zkaleido = { workspace = true, optional = true }
 zkaleido-sp1-host = { workspace = true, optional = true }
 
 
 alloy-eips = { workspace = true, optional = true }
-alloy-primitives.workspace = true
+alloy-primitives = { workspace = true, optional = true }
 alloy-rpc-types-engine = { workspace = true, optional = true }
 anyhow.workspace = true
 async-trait.workspace = true
@@ -109,11 +132,11 @@ reth-network-api.workspace = true
 reth-node-builder.workspace = true
 reth-payload-builder = { workspace = true, optional = true }
 reth-primitives.workspace = true
-reth-primitives-traits.workspace = true
+reth-primitives-traits = { workspace = true, optional = true }
 reth-provider.workspace = true
 reth-tasks.workspace = true
 serde_json.workspace = true
-thiserror.workspace = true
+thiserror = { workspace = true, optional = true }
 tokio.workspace = true
 tracing.workspace = true
 
