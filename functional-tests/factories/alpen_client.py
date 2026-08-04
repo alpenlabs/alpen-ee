@@ -11,7 +11,15 @@ from pathlib import Path
 import flexitest
 
 from common.alpen_params import compose_alpen_params
-from common.config import EeDaConfig
+from common.config import (
+    AlpenClientConfig,
+    AlpenFullNodeConfig,
+    AlpenL1FeePolicyConfig,
+    AlpenOlConfig,
+    AlpenSequencerConfig,
+    BitcoindConfig,
+    EeDaConfig,
+)
 from common.config.constants import DEFAULT_EE_BLOCK_TIME_MS
 from common.datatool import generate_ee_params
 from common.services import AlpenClientProps, AlpenClientService
@@ -60,7 +68,6 @@ class AlpenClientFactory(flexitest.Factory):
     @flexitest.with_ectx("ctx")
     def create_sequencer(
         self,
-        sequencer_pubkey: str,
         sequencer_privkey: str,
         p2p_secret_key: str | None = None,
         enable_discovery: bool = False,
@@ -81,14 +88,20 @@ class AlpenClientFactory(flexitest.Factory):
         Create an alpen-client sequencer node.
 
         Args:
-            sequencer_pubkey: Sequencer's public key (hex, 32 bytes)
-            sequencer_privkey: Sequencer's private key (hex, 32 bytes) - set as env var
+            sequencer_privkey: Sequencer's private key (hex, 32 bytes) - set as env var.
+                The gossip/DA-reveal pubkey is derived from this, not configured separately.
             p2p_secret_key: P2P secret key for deterministic enode (hex, 32 bytes)
             enable_discovery: Enable discv5 peer discovery (for bootnode mode)
             custom_chain: Chain spec to use
             ee_params_path: EE params file to use; generated when omitted
-            da_config: Optional DA pipeline configuration for posting state diffs to L1
+            da_config: DA pipeline configuration for posting state diffs to L1. A sequencer's
+                `--alpen-config` always requires a `[sequencer.bitcoind]` table, so this is
+                required despite the `| None` type (kept optional to match the dataclass-style
+                keyword-arg call sites elsewhere).
         """
+        if da_config is None:
+            raise ValueError("da_config is required to start an alpen-client sequencer")
+
         ctx: flexitest.EnvContext = kwargs["ctx"]
 
         datadir = Path(ctx.make_service_dir("ee_sequencer"))
@@ -107,13 +120,6 @@ class AlpenClientFactory(flexitest.Factory):
         key_hex = p2p_secret_key.removeprefix("0x")
         p2p_secret_key_file.write_text(key_hex)
 
-        if ol_endpoint:
-            ol_client_args = ["--ol-client-url", ol_endpoint]
-            if ol_submit_endpoint:
-                ol_client_args.extend(["--ol-submit-url", ol_submit_endpoint])
-        else:
-            ol_client_args = ["--dummy-ol-client"]
-
         if ee_params_path is None:
             ee_params_path = generate_ee_params(datadir)
         alpen_params_path = compose_alpen_params(
@@ -122,19 +128,54 @@ class AlpenClientFactory(flexitest.Factory):
             chain=custom_chain,
             bridge_denomination=bridge_denomination,
             max_withdrawal_amount=max_withdrawal_amount,
-            da_magic_bytes=(
-                da_config.magic_bytes.decode("ascii") if da_config is not None else "ALPN"
-            ),
+            da_magic_bytes=da_config.magic_bytes.decode("ascii"),
         )
+
+        ol_config = (
+            AlpenOlConfig(
+                source="rpc",
+                client_url=ol_endpoint,
+                submit_url=ol_submit_endpoint,
+                dev_track_latest_epoch=dev_track_latest_epoch,
+            )
+            if ol_endpoint
+            else AlpenOlConfig(source="dummy", dev_track_latest_epoch=dev_track_latest_epoch)
+        )
+
+        sequencer_config = AlpenSequencerConfig(
+            bitcoind=BitcoindConfig(
+                rpc_url=da_config.btc_rpc_url,
+                rpc_user=da_config.btc_rpc_user,
+                rpc_password=da_config.btc_rpc_password,
+                network=da_config.network,
+            ),
+            beneficiary_address=beneficiary_address,
+            blocktime_ms=DEFAULT_EE_BLOCK_TIME_MS,
+            batch_sealing_block_count=batch_sealing_block_count,
+            # Functional tests don't ship the SP1 guest ELFs, so run the EE
+            # chunk + acct provers on the zkaleido NativeHost.
+            dev_native_prover=True,
+            l1_fee_policy=AlpenL1FeePolicyConfig(fee_policy="fixed", fixed_fee_rate=1.0),
+        )
+
+        alpen_config = AlpenClientConfig(
+            mode="sequencer",
+            ol=ol_config,
+            sequencer=sequencer_config,
+            health_check_host="127.0.0.1",
+            health_check_port=0,
+            l1_reorg_safe_depth=da_config.l1_reorg_safe_depth,
+            genesis_l1_height=da_config.genesis_l1_height,
+        )
+        alpen_config_path = datadir / "alpen-config.toml"
+        alpen_config_path.write_text(alpen_config.as_toml_string())
 
         # fmt: off
         cmd = [
             "alpen-client",
             "--datadir", str(datadir),
-            "--sequencer",
-            "--sequencer-pubkey", sequencer_pubkey,
+            "--alpen-config", str(alpen_config_path),
             "--alpen-params", str(alpen_params_path),
-            *ol_client_args,
             "--addr", "127.0.0.1",  # Force IPv4 for testing
             "--nat", "extip:127.0.0.1",  # Force enode to show 127.0.0.1
             "--port", str(p2p_port),
@@ -142,21 +183,9 @@ class AlpenClientFactory(flexitest.Factory):
             "--http.port", str(http_port),
             "--http.api", "eth,net,admin,debug,alpen",
             "--authrpc.port", str(authrpc_port),
-            "--health-check-host", "127.0.0.1",
-            "--health-check-port", "0",
             "--p2p-secret-key", str(p2p_secret_key_file),
-            "--batch-sealing-block-count", str(batch_sealing_block_count),
             "-vvvv",
-            # Functional tests don't ship the SP1 guest ELFs, so run the
-            # EE chunk + acct provers on the zkaleido NativeHost.
-            "--dev-native-prover",
         ]
-        if dev_track_latest_epoch:
-            # Advance the OL chain tracker on `latest` epoch (FCM)
-            # instead of `confirmed` epoch (CSM/L1-checkpoint). Lets
-            # the EE block builder consume inbox messages without
-            # waiting on the L1 checkpoint round-trip.
-            cmd.append("--dev-track-latest-epoch")
         # fmt: on
 
         # Discovery mode configuration:
@@ -176,23 +205,6 @@ class AlpenClientFactory(flexitest.Factory):
             # Disable all discovery - peers connect via admin_addPeer or --trusted-peers
             cmd.append("-d")
 
-        if beneficiary_address is not None:
-            cmd.extend(["--beneficiary-address", beneficiary_address])
-
-        # DA pipeline configuration
-        if da_config is not None:
-            # fmt: off
-            cmd.extend([
-                "--btc-rpc-url", da_config.btc_rpc_url,
-                "--btc-rpc-user", da_config.btc_rpc_user,
-                "--btc-rpc-password", da_config.btc_rpc_password,
-                "--btcio-fee-policy", "fixed",
-                "--btcio-fee-rate", "1.0",
-                "--l1-reorg-safe-depth", str(da_config.l1_reorg_safe_depth),
-                "--genesis-l1-height", str(da_config.genesis_l1_height),
-            ])
-            # fmt: on
-
         http_url = f"http://127.0.0.1:{http_port}"
 
         props: AlpenClientProps = {
@@ -207,7 +219,6 @@ class AlpenClientFactory(flexitest.Factory):
         # Set environment variable for sequencer private key
         env = os.environ.copy()
         env["SEQUENCER_PRIVATE_KEY"] = sequencer_privkey
-        env["ALPEN_EE_BLOCK_TIME_MS"] = str(DEFAULT_EE_BLOCK_TIME_MS)
         if ol_submit_token:
             env["STRATA_SUBMIT_RPC_TOKEN"] = ol_submit_token
 
@@ -283,7 +294,11 @@ class AlpenClientFactory(flexitest.Factory):
         key_hex = p2p_secret_key.removeprefix("0x")
         p2p_secret_key_file.write_text(key_hex)
 
-        ol_client_args = ["--ol-client-url", ol_endpoint] if ol_endpoint else ["--dummy-ol-client"]
+        ol_config = (
+            AlpenOlConfig(source="rpc", client_url=ol_endpoint)
+            if ol_endpoint
+            else AlpenOlConfig(source="dummy")
+        )
         if ee_params_path is None:
             ee_params_path = generate_ee_params(datadir)
         alpen_params_path = compose_alpen_params(
@@ -294,13 +309,25 @@ class AlpenClientFactory(flexitest.Factory):
             max_withdrawal_amount=max_withdrawal_amount,
         )
 
+        alpen_config = AlpenClientConfig(
+            mode="full_node",
+            ol=ol_config,
+            full_node=AlpenFullNodeConfig(
+                sequencer_pubkey=sequencer_pubkey,
+                sequencer_http_url=sequencer_http,
+            ),
+            health_check_host="127.0.0.1",
+            health_check_port=0,
+        )
+        alpen_config_path = datadir / "alpen-config.toml"
+        alpen_config_path.write_text(alpen_config.as_toml_string())
+
         # fmt: off
         cmd = [
             "alpen-client",
             "--datadir", str(datadir),
-            "--sequencer-pubkey", sequencer_pubkey,
+            "--alpen-config", str(alpen_config_path),
             "--alpen-params", str(alpen_params_path),
-            *ol_client_args,
             "--addr", "127.0.0.1",  # Force IPv4 for testing
             "--nat", "extip:127.0.0.1",  # Force enode to show 127.0.0.1
             "--port", str(p2p_port),
@@ -308,8 +335,6 @@ class AlpenClientFactory(flexitest.Factory):
             "--http.port", str(http_port),
             "--http.api", "eth,net,admin,debug,alpen",
             "--authrpc.port", str(authrpc_port),
-            "--health-check-host", "127.0.0.1",
-            "--health-check-port", "0",
             "--p2p-secret-key", str(p2p_secret_key_file),
             "-vvvv",
         ]
@@ -322,10 +347,6 @@ class AlpenClientFactory(flexitest.Factory):
         # Add bootnodes if provided (requires discovery to be enabled)
         if bootnodes:
             cmd.extend(["--bootnodes", ",".join(bootnodes)])
-
-        # Add sequencer HTTP URL for transaction forwarding
-        if sequencer_http:
-            cmd.extend(["--sequencer-http", sequencer_http])
 
         # Discovery mode configuration:
         # - enable_discovery=True: Use discv5 only (disable discv4)

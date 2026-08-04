@@ -155,7 +155,6 @@ class AlpenClientEnv(flexitest.EnvConfig):
 
         # Start sequencer
         sequencer = factory.create_sequencer(
-            sequencer_pubkey=pubkey,
             sequencer_privkey=privkey,
             enable_discovery=envparams.enable_discovery,
             ol_endpoint=ol_endpoint,

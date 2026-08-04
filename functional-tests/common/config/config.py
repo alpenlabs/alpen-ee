@@ -114,6 +114,7 @@ class EeDaConfig:
     btc_rpc_user: str
     btc_rpc_password: str
     magic_bytes: bytes  # 4 bytes for OP_RETURN tagging
+    network: str = field(default="regtest")
     l1_reorg_safe_depth: int = field(default=6)
     genesis_l1_height: int = field(default=0)
     batch_sealing_block_count: int = field(default=100)
@@ -121,6 +122,69 @@ class EeDaConfig:
     def __post_init__(self):
         if len(self.magic_bytes) != 4:
             raise ValueError(f"magic_bytes must be exactly 4 bytes, got {len(self.magic_bytes)}")
+
+
+@dataclass
+class AlpenOlConfig:
+    """``[ol]`` table of an alpen-client ``--alpen-config`` TOML."""
+
+    source: str = field(default="dummy")  # "dummy" | "rpc"
+    client_url: str | None = field(default=None)
+    submit_url: str | None = field(default=None)
+    dev_track_latest_epoch: bool = field(default=False)
+
+
+@dataclass
+class AlpenFullNodeConfig:
+    """``[full_node]`` table; present iff ``mode = "full_node"``."""
+
+    sequencer_pubkey: str
+    sequencer_http_url: str | None = field(default=None)
+
+
+@dataclass
+class AlpenL1FeePolicyConfig:
+    """``[sequencer.l1_fee_policy]`` table."""
+
+    fee_policy: str = field(default="fixed")
+    fixed_fee_rate: float | None = field(default=1.0)
+
+
+@dataclass
+class AlpenSequencerConfig:
+    """``[sequencer]`` table; present iff ``mode = "sequencer"``."""
+
+    bitcoind: BitcoindConfig
+    beneficiary_address: str | None = field(default=None)
+    blocktime_ms: int = field(default=5_000)
+    batch_sealing_block_count: int = field(default=100)
+    chunk_sealing_block_count: int | None = field(default=None)
+    chunk_sealing_gas_limit: int | None = field(default=None)
+    dev_native_prover: bool = field(default=False)
+    sp1_proof_deadline_secs: int | None = field(default=None)
+    l1_fee_policy: AlpenL1FeePolicyConfig = field(default_factory=AlpenL1FeePolicyConfig)
+
+
+@dataclass
+class AlpenClientConfig:
+    """Top-level ``--alpen-config`` TOML, mirroring the Rust
+    ``AlpenClientConfigFile`` schema in ``bin/alpen-client/src/config.rs``.
+    """
+
+    mode: str  # "full_node" | "sequencer"
+    ol: AlpenOlConfig = field(default_factory=AlpenOlConfig)
+    full_node: AlpenFullNodeConfig | None = field(default=None)
+    sequencer: AlpenSequencerConfig | None = field(default=None)
+    health_check_host: str = field(default="127.0.0.1")
+    health_check_port: int = field(default=0)
+    db_retry_count: int = field(default=3)
+    l1_reorg_safe_depth: int = field(default=6)
+    genesis_l1_height: int = field(default=0)
+
+    def as_toml_string(self) -> str:
+        d = asdict(self)
+        d = {k: v for k, v in d.items() if v is not None}
+        return toml.dumps(d)
 
 
 @dataclass

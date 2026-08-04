@@ -3,6 +3,11 @@ Configuration and parameter dataclasses.
 """
 
 from common.config.config import (
+    AlpenClientConfig,
+    AlpenFullNodeConfig,
+    AlpenL1FeePolicyConfig,
+    AlpenOlConfig,
+    AlpenSequencerConfig,
     BitcoindConfig,
     BroadcasterConfig,
     BtcioConfig,
@@ -52,6 +57,11 @@ __all__ = [
     "SequencerRuntimeConfig",
     "EeDaConfig",
     "EpochSealingConfig",
+    "AlpenClientConfig",
+    "AlpenOlConfig",
+    "AlpenFullNodeConfig",
+    "AlpenSequencerConfig",
+    "AlpenL1FeePolicyConfig",
     # constants.py
     "ServiceType",
     "DEV_PRIVATE_KEY",
