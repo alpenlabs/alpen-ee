@@ -11,6 +11,7 @@
 //! (`tracing/release_max_level_*`) disables the spans and silently drops the tag.
 
 mod args;
+mod config;
 mod gossip;
 mod node;
 mod ol;
@@ -29,9 +30,13 @@ use reth_cli_runner::{tokio_runtime, CliRunner};
 use reth_cli_util::sigsegv_handler;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use strata_logging::{init_logging_from_config, LoggingInitConfig};
-use tracing::{error, info};
+#[cfg(feature = "sequencer")]
+use tracing::error;
+use tracing::info;
 
 use crate::args::AdditionalConfig;
+#[cfg(feature = "sequencer")]
+use crate::config::NodeMode;
 
 fn main() {
     sigsegv_handler::install();
@@ -45,7 +50,7 @@ fn main() {
     let mut command = NodeCommand::<AlpenChainSpecParser, AdditionalConfig>::parse();
 
     // use the EVM chain spec embedded in the Alpen params artifact
-    command.chain = Arc::new(command.ext.chain.alpen_params.chain_spec().clone());
+    command.chain = Arc::new(command.ext.alpen_params.chain_spec().clone());
     // enable engine api v4
     command.engine.accept_execution_requests_hash = true;
     // allow chain fork blocks to be created
@@ -71,30 +76,22 @@ where
         AdditionalConfig,
     ) -> eyre::Result<()>,
 {
-    if command.ext.sequencer.enabled && !cfg!(feature = "sequencer") {
-        error!(
-            target: "alpen-client",
-            component = "alpen",
-            "Sequencer flag enabled but binary built without `sequencer` feature. Rebuild with default features or enable the `sequencer` feature."
-        );
-        eyre::bail!("sequencer feature not enabled at compile time");
-    }
-
-    if command.ext.sequencer.enabled
-        && !command.ext.sequencer.dev_native_prover
-        && !cfg!(feature = "sp1")
-    {
-        error!(
-            target: "alpen-client",
-            component = "alpen",
-            "Remote SP1 prover requested but binary built without `sp1` feature. Pass --dev-native-prover or rebuild with the `sp1` feature."
-        );
-        eyre::bail!("sp1 feature not enabled at compile time");
-    }
-
+    // Sequencer-mode-without-the-feature and blocktime validation both already
+    // happened during `AlpenClientConfig::from_toml_str` (config-parse time),
+    // before this point. The `sp1`-feature check below is the one that stays
+    // here: it's not about whether the config is internally valid, it's about
+    // whether this compiled binary (an `sp1`-feature question, orthogonal to
+    // `sequencer`) can satisfy what the config asks for.
     #[cfg(feature = "sequencer")]
-    if command.ext.sequencer.enabled {
-        command.ext.sequencer.resolve_blocktime_ms()?;
+    if let NodeMode::Sequencer(seq) = &command.ext.alpen_config.mode {
+        if !seq.dev_native_prover && !cfg!(feature = "sp1") {
+            error!(
+                target: "alpen-client",
+                component = "alpen",
+                "Remote SP1 prover requested but binary built without `sp1` feature. Set sequencer.dev_native_prover = true or rebuild with the `sp1` feature."
+            );
+            eyre::bail!("sp1 feature not enabled at compile time");
+        }
     }
 
     // Build the tokio runtime ourselves so logging init can run inside its

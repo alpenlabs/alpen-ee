@@ -18,16 +18,29 @@ use tokio::{
 use tracing::{debug, error, info, warn};
 
 /// Configuration for the gossip task.
+///
+/// A full node only ever validates incoming gossip against a known
+/// sequencer pubkey; a sequencer signs outgoing gossip with its own keypair.
+/// Modeled as an enum (not a struct with an `Option<Buf32>` privkey field)
+/// so "sequencer mode enabled but no private key configured" is
+/// unrepresentable rather than a runtime check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct GossipConfig {
-    /// Sequencer's public key for signature validation.
-    pub sequencer_pubkey: Buf32,
+pub(crate) enum GossipConfig {
+    FullNode { sequencer_pubkey: Buf32 },
+    Sequencer {
+        sequencer_pubkey: Buf32,
+        sequencer_privkey: Buf32,
+    },
+}
 
-    /// Whether the local node should produce and sign gossip messages.
-    pub sequencer_enabled: bool,
-
-    /// Sequencer's private key for signing (only in sequencer mode).
-    pub sequencer_privkey: Option<Buf32>,
+impl GossipConfig {
+    fn sequencer_pubkey(&self) -> Buf32 {
+        match self {
+            Self::FullNode { sequencer_pubkey } | Self::Sequencer { sequencer_pubkey, .. } => {
+                *sequencer_pubkey
+            }
+        }
+    }
 }
 
 /// Handles a gossip event (connection established/closed or package received).
@@ -93,7 +106,7 @@ fn handle_gossip_package(
     }
 
     // Verify the public key matches the expected sequencer public key
-    if package.public_key() != &config.sequencer_pubkey {
+    if package.public_key() != &config.sequencer_pubkey() {
         error!(
             target: "alpen-gossip",
             %peer_id,
@@ -201,9 +214,13 @@ fn broadcast_new_block(
     connections: &HashMap<PeerId, mpsc::UnboundedSender<AlpenGossipCommand>>,
     config: &GossipConfig,
 ) {
-    if !config.sequencer_enabled {
+    let GossipConfig::Sequencer {
+        sequencer_pubkey,
+        sequencer_privkey,
+    } = config
+    else {
         return;
-    }
+    };
 
     info!(
         target: "alpen-gossip",
@@ -213,14 +230,6 @@ fn broadcast_new_block(
         "Broadcasting new block to peers"
     );
 
-    let Some(sequencer_privkey) = config.sequencer_privkey else {
-        error!(
-            target: "alpen-gossip",
-            "Sequencer mode enabled but no private key configured; skipping broadcast"
-        );
-        return;
-    };
-
     let msg = AlpenGossipMessage::new(
         tip.clone(),
         // NOTE: we use the block number as the sequence number
@@ -228,7 +237,7 @@ fn broadcast_new_block(
         //       provides monotonic, unique sequence numbers for gossip messages.
         tip.number,
     );
-    let pkg = msg.into_package(config.sequencer_pubkey, sequencer_privkey);
+    let pkg = msg.into_package(*sequencer_pubkey, *sequencer_privkey);
 
     for (peer_id, sender) in connections {
         if sender

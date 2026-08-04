@@ -1,7 +1,7 @@
 //! Reth node bootstrap: health check, config/storage/genesis setup, OL
 //! client resolution, node building and launch, and full-node task
 //! spawning. Hands off to [`sequencer`] once the node
-//! exists, when `--sequencer` is set.
+//! exists, when running in sequencer mode.
 
 use std::sync::Arc;
 
@@ -15,7 +15,6 @@ use alpen_ee_genesis::{
     ensure_batch_genesis, ensure_finalized_exec_chain_genesis, ensure_genesis_ee_account_state,
 };
 use alpen_ee_ol_tracker::init_ol_tracker_state;
-use alpen_ee_params::AlpenParams;
 use alpen_ee_rpc_server::{AlpenEeRpcServer, EeRpcServer};
 use alpen_reth_evm::evm::AlpenEvmFactory;
 #[cfg(feature = "sequencer")]
@@ -30,8 +29,11 @@ use reth_network::{protocol::IntoRlpxSubProtocol, NetworkProtocols};
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_provider::CanonStateSubscriptions;
 use strata_common::healthz::{start_health_check_server, HealthCheckState};
+#[cfg(feature = "sequencer")]
+use strata_config::btcio::WriterConfig;
 use strata_identifiers::{EpochCommitment, OLBlockId};
 use strata_predicate::PredicateKey;
+use strata_primitives::buf::Buf32;
 use tokio::{
     runtime::Handle,
     sync::{mpsc, watch},
@@ -39,9 +41,12 @@ use tokio::{
 use tracing::{error, info, info_span, Instrument};
 
 #[cfg(feature = "sequencer")]
+use crate::args::sequencer_privkey_from_env;
+#[cfg(feature = "sequencer")]
 use crate::sequencer;
 use crate::{
-    args::{sequencer_privkey_from_env, AdditionalConfig, NodeArgs, SequencerArgs},
+    args::{ol_submit_bearer_token_from_env, AdditionalConfig},
+    config::{AlpenClientConfig, NodeMode, OlSource},
     gossip::{create_gossip_task, GossipConfig},
     ol::{DummyOLClient, OLClientKind, RpcOLClient},
     service_executor::ServiceExecutor,
@@ -52,14 +57,19 @@ pub(crate) async fn launch(
     builder: WithLaunchContext<NodeBuilder<Arc<reth_db::DatabaseEnv>, ChainSpec>>,
     ext: AdditionalConfig,
 ) -> eyre::Result<()> {
+    let alpen_config = ext.alpen_config.clone();
+    let is_sequencer = !matches!(alpen_config.mode, NodeMode::FullNode(_));
     let service_executor = ServiceExecutor::from_reth(builder.task_executor().clone());
-    let (health_check_state, _health_check_handle) = start_health_check(&ext.node).await?;
+    let (health_check_state, _health_check_handle) = start_health_check(
+        &alpen_config.health_check_host,
+        alpen_config.health_check_port,
+    )
+    .await?;
 
     // --- CONFIGS ---
     let datadir = builder.config().datadir().data_dir().to_path_buf();
 
-    // TODO(STR-2982): read config from file
-    let params = ext.chain.alpen_params.clone();
+    let params = ext.alpen_params.clone();
     let genesis_info = params.genesis_block_info();
 
     info!(target: "alpen-client", component = "alpen", blockhash=%genesis_info.blockhash(), "EE genesis info");
@@ -68,19 +78,30 @@ pub(crate) async fn launch(
         target: "alpen-client", component = "alpen",
         account_id = ?params.strata_exec_account_id(),
         ?bridge_params,
-        sequencer = ext.sequencer.enabled,
+        sequencer = is_sequencer,
         "Starting EE Node",
     );
 
     // OL client URL is not used when the dummy OL client is enabled
-    let ol_client_url = ext.ol.client_url.clone().unwrap_or_default();
+    let ol_client_url = match &alpen_config.ol.source {
+        OlSource::Dummy => String::new(),
+        OlSource::Rpc { client_url, .. } => client_url.clone(),
+    };
+
+    // Sequencer-only fields (tx-forward target, or None for a sequencer,
+    // which never forwards to itself) resolved once, up front.
+    let sequencer_http_url = match &alpen_config.mode {
+        NodeMode::FullNode(fc) => fc.sequencer_http_url.clone(),
+        #[cfg(feature = "sequencer")]
+        NodeMode::Sequencer(_) => None,
+    };
 
     let config = Arc::new(AlpenEeConfig::new(
         params.clone(),
         PredicateKey::always_accept(),
         ol_client_url,
-        ext.sequencer.http_url.clone(),
-        ext.node.db_retry_count,
+        sequencer_http_url.clone(),
+        Some(alpen_config.db_retry_count),
     ));
 
     // NOTE: ATM we reuse `SEQUENCER_PRIVATE_KEY` for both gossip
@@ -88,35 +109,53 @@ pub(crate) async fn launch(
     // operationally convenient for now, but it couples network
     // identity with Bitcoin DA spend authority. Should we split this
     // into a dedicated DA reveal signing key/config?
-    let sequencer_privkey = sequencer_privkey_from_env(ext.sequencer.enabled)?;
-
-    let gossip_config = GossipConfig {
-        sequencer_pubkey: ext.sequencer.pubkey,
-        sequencer_enabled: ext.sequencer.enabled,
-        sequencer_privkey,
+    //
+    // The sequencer's gossip pubkey is *derived* from this key, not taken as
+    // separate config — see `sequencer::sequencer_gossip_pubkey`'s doc comment.
+    #[cfg_attr(not(feature = "sequencer"), allow(unused_variables))]
+    let (gossip_config, sequencer_privkey): (GossipConfig, Option<Buf32>) = match &alpen_config.mode
+    {
+        NodeMode::FullNode(fc) => (
+            GossipConfig::FullNode {
+                sequencer_pubkey: fc.sequencer_pubkey,
+            },
+            None,
+        ),
+        #[cfg(feature = "sequencer")]
+        NodeMode::Sequencer(_) => {
+            let privkey = sequencer_privkey_from_env()?;
+            let pubkey = sequencer::sequencer_gossip_pubkey(&privkey)?;
+            (
+                GossipConfig::Sequencer {
+                    sequencer_pubkey: pubkey,
+                    sequencer_privkey: privkey,
+                },
+                Some(privkey),
+            )
+        }
     };
 
     // --- VALIDATE SEQUENCER CONFIG ---
     //
-    // These are pure functions of already-parsed CLI args/env and the
-    // Alpen params artifact, so they run before any DB, OL, or reth node
-    // startup work: a config mistake should fail immediately, not deep
-    // inside sequencer startup after stateful work has already happened.
-    if ext.sequencer.enabled {
-        validate_chunk_sealing_gas_limit(&ext.sequencer, params.as_ref())?;
-    }
-
+    // These are pure functions of the already-parsed config and the Alpen
+    // params artifact, so they run before any DB, OL, or reth node startup
+    // work: a config mistake should fail immediately, not deep inside
+    // sequencer startup after stateful work has already happened.
     #[cfg(feature = "sequencer")]
-    let writer_config = ext
-        .sequencer
-        .enabled
-        .then(|| ext.btcio.writer_config().map(Arc::new))
-        .transpose()?;
+    let writer_config = if let NodeMode::Sequencer(seq_config) = &alpen_config.mode {
+        seq_config.validate_against_params(params.as_ref())?;
+        Some(Arc::new(WriterConfig {
+            l1_fee_policy_config: seq_config.l1_fee_policy.clone(),
+            ..Default::default()
+        }))
+    } else {
+        None
+    };
 
-    // OL client resolution validates `--ol-client-url`/`--ol-submit-url`
-    // synchronously before its one network call, so a missing flag also
-    // fails here, before the database is touched below.
-    let (ol_client, genesis_epoch) = resolve_ol_client(&ext, &config).await?;
+    // OL client resolution validates the OL config synchronously before its
+    // one network call, so a missing/invalid setting also fails here, before
+    // the database is touched below.
+    let (ol_client, genesis_epoch) = resolve_ol_client(&alpen_config, is_sequencer, &config).await?;
 
     // --- INITIALIZE STATE ---
 
@@ -126,15 +165,10 @@ pub(crate) async fn launch(
     let db_handle = Handle::current();
     let storage: Arc<_> = dbs.node_storage(db_handle.clone()).into();
 
-    ensure_genesis(
-        config.as_ref(),
-        &genesis_epoch,
-        storage.as_ref(),
-        ext.sequencer.enabled,
-    )
-    .instrument(info_span!("ensure_genesis", component = "alpen"))
-    .await
-    .context("genesis should not fail")?;
+    ensure_genesis(config.as_ref(), &genesis_epoch, storage.as_ref(), is_sequencer)
+        .instrument(info_span!("ensure_genesis", component = "alpen"))
+        .await
+        .context("genesis should not fail")?;
 
     let ol_chain_status = chain_status_checked(ol_client.as_ref())
         .instrument(info_span!("chain_status_check", component = "alpen"))
@@ -152,7 +186,7 @@ pub(crate) async fn launch(
     let sequencer_head = {
         #[cfg(feature = "sequencer")]
         {
-            sequencer::initial_preconf_head(ext.sequencer.enabled, storage.as_ref()).await?
+            sequencer::initial_preconf_head(is_sequencer, storage.as_ref()).await?
         }
         #[cfg(not(feature = "sequencer"))]
         {
@@ -180,7 +214,7 @@ pub(crate) async fn launch(
         genesis_epoch.epoch(),
         storage.clone(),
         ol_client.clone(),
-        ext.ol.dev_track_latest_epoch,
+        alpen_config.ol.dev_track_latest_epoch,
         &service_executor,
     )
     .await
@@ -188,7 +222,7 @@ pub(crate) async fn launch(
 
     let evm_factory = AlpenEvmFactory::from_bridge_params(&bridge_params);
     let node_args = AlpenNodeArgs {
-        sequencer_http: ext.sequencer.http_url.clone(),
+        sequencer_http: sequencer_http_url,
         evm_factory,
     };
 
@@ -216,7 +250,7 @@ pub(crate) async fn launch(
     // Install state diff exex for sequencer DA.
     // The exex persists per-block state diffs that the blob provider reads.
     #[cfg(feature = "sequencer")]
-    if ext.sequencer.enabled {
+    if is_sequencer {
         node_builder = node_builder.install_exex("state_diffs", {
             let state_diff_db = dbs.witness_db();
             |ctx| async { Ok(StateDiffGenerator::new(ctx, state_diff_db).start()) }
@@ -258,7 +292,7 @@ pub(crate) async fn launch(
     let node = &handle.node;
 
     // Sync chainstate to engine for sequencer nodes before starting other tasks
-    if ext.sequencer.enabled {
+    if is_sequencer {
         let engine = AlpenRethExecEngine::new(node.beacon_engine_handle.clone());
         let storage_clone = storage.clone();
         let provider_clone = node.provider.clone();
@@ -302,7 +336,7 @@ pub(crate) async fn launch(
     );
 
     #[cfg(feature = "sequencer")]
-    if ext.sequencer.enabled {
+    if let NodeMode::Sequencer(seq_config) = &alpen_config.mode {
         sequencer::launch(
             &service_executor,
             sequencer::SequencerLaunchCtx {
@@ -310,7 +344,9 @@ pub(crate) async fn launch(
                 task_executor: node.task_executor.clone(),
                 payload_builder_handle: node.payload_builder_handle.clone(),
                 beacon_engine_handle: node.beacon_engine_handle.clone(),
-                ext: &ext,
+                sequencer_config: seq_config,
+                l1_reorg_safe_depth: alpen_config.l1_reorg_safe_depth,
+                genesis_l1_height: alpen_config.genesis_l1_height,
                 storage: storage.clone(),
                 dbs: &dbs,
                 db_handle: db_handle.clone(),
@@ -322,11 +358,10 @@ pub(crate) async fn launch(
                 genesis_info,
                 params: params.clone(),
                 sequencer_privkey: sequencer_privkey.expect(
-                    "sequencer_privkey_from_env already validated SEQUENCER_PRIVATE_KEY \
-                     is set when --sequencer is set",
+                    "resolved above whenever NodeMode::Sequencer is matched",
                 ),
                 writer_config: writer_config
-                    .expect("writer_config resolved above when --sequencer is set"),
+                    .expect("resolved above whenever NodeMode::Sequencer is matched"),
             },
         )
         .await?;
@@ -343,13 +378,11 @@ pub(crate) async fn launch(
 /// by the caller for as long as the server should keep running: dropping it
 /// closes the watch channel the server's accept loop stops on.
 async fn start_health_check(
-    node_args: &NodeArgs,
+    health_check_host: &str,
+    health_check_port: u16,
 ) -> eyre::Result<(HealthCheckState, ServerHandle)> {
     let health_check_state = HealthCheckState::new();
-    let health_check_addr = format!(
-        "{}:{}",
-        node_args.health_check_host, node_args.health_check_port
-    );
+    let health_check_addr = format!("{health_check_host}:{health_check_port}");
     let health_check_handle =
         start_health_check_server(health_check_addr.clone(), health_check_state.clone())
             .instrument(info_span!("start_health_check_server", component = "alpen"))
@@ -363,34 +396,41 @@ async fn start_health_check(
 /// Resolves the OL client (dummy or real RPC) and fetches its genesis epoch
 /// commitment.
 async fn resolve_ol_client(
-    ext: &AdditionalConfig,
+    alpen_config: &AlpenClientConfig,
+    is_sequencer: bool,
     config: &AlpenEeConfig,
 ) -> eyre::Result<(Arc<OLClientKind>, EpochCommitment)> {
-    let ol_client = if ext.ol.dummy_client {
-        use strata_identifiers::Buf32;
-        use strata_primitives::EpochCommitment;
-        let genesis_epoch = EpochCommitment::new(0, 0, OLBlockId::from(Buf32([1; 32])));
-        info!(target: "alpen-client", component = "alpen", "Using dummy OL client (no real OL connection)");
-        OLClientKind::Dummy(DummyOLClient { genesis_epoch })
-    } else {
-        let ol_url = ext.ol.client_url.as_ref().ok_or_else(|| {
-            eyre::eyre!("--ol-client-url is required when not using --dummy-ol-client")
-        })?;
-        if ext.sequencer.enabled && ext.ol.submit_url.is_none() {
-            eyre::bail!(
-                "--ol-submit-url is required with --sequencer when not using \
-                 --dummy-ol-client"
-            );
+    let ol_client = match &alpen_config.ol.source {
+        OlSource::Dummy => {
+            use strata_identifiers::Buf32;
+            use strata_primitives::EpochCommitment;
+            let genesis_epoch = EpochCommitment::new(0, 0, OLBlockId::from(Buf32([1; 32])));
+            info!(target: "alpen-client", component = "alpen", "Using dummy OL client (no real OL connection)");
+            OLClientKind::Dummy(DummyOLClient { genesis_epoch })
         }
-        OLClientKind::Rpc(
-            RpcOLClient::try_new(
-                config.params().strata_exec_account_id(),
-                ol_url,
-                ext.ol.submit_url.as_deref(),
-                ext.ol.submit_bearer_token.as_deref(),
+        OlSource::Rpc {
+            client_url,
+            submit_url,
+        } => {
+            // `ol.submit_url` required-when-sequencer is already enforced by
+            // `AlpenClientConfig`'s `TryFrom` at config-parse time; the
+            // bearer token authenticating it is a secret, read from the
+            // environment here rather than stored in the config file.
+            let submit_bearer_token = if is_sequencer && submit_url.is_some() {
+                Some(ol_submit_bearer_token_from_env()?)
+            } else {
+                None
+            };
+            OLClientKind::Rpc(
+                RpcOLClient::try_new(
+                    config.params().strata_exec_account_id(),
+                    client_url,
+                    submit_url.as_deref(),
+                    submit_bearer_token.as_deref(),
+                )
+                .map_err(|e| eyre::eyre!("failed to create OL client: {e}"))?,
             )
-            .map_err(|e| eyre::eyre!("failed to create OL client: {e}"))?,
-        )
+        }
     };
     let ol_client = Arc::new(ol_client);
 
@@ -402,32 +442,6 @@ async fn resolve_ol_client(
         .context("failed to fetch account genesis epoch from OL")?;
 
     Ok((ol_client, genesis_epoch))
-}
-
-/// Validates `--chunk-sealing-gas-limit` against the genesis gas limit.
-///
-/// EIP-1559 lets the per-block gas limit drift from genesis by ±1/1024 per
-/// block, so the actual block gas limit at runtime may be slightly higher
-/// than genesis. Uses 2× the genesis gas limit as a conservative floor to
-/// accommodate this drift while still catching obvious misconfigurations.
-fn validate_chunk_sealing_gas_limit(
-    sequencer_args: &SequencerArgs,
-    params: &AlpenParams,
-) -> eyre::Result<()> {
-    let Some(configured) = sequencer_args.chunk_sealing_gas_limit else {
-        return Ok(());
-    };
-
-    let genesis_gas_limit = params.evm_spec().genesis().gas_limit;
-    let min_chunk_gas = genesis_gas_limit.saturating_mul(2);
-    eyre::ensure!(
-        configured >= min_chunk_gas,
-        "--chunk-sealing-gas-limit ({configured}) is below the minimum \
-         ({min_chunk_gas}, 2× genesis block gas limit {genesis_gas_limit}). \
-         A single block can use up to the per-block gas limit, so the chunk \
-         budget must be large enough to always fit at least one block.",
-    );
-    Ok(())
 }
 
 /// Handle genesis related tasks.

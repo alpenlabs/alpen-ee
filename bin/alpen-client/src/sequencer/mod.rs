@@ -49,7 +49,7 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskExecutor;
 use strata_config::btcio::{fee_rate_to_sat_per_vb, FeePolicy, WriterConfig};
-use strata_primitives::buf::Buf32;
+use strata_primitives::{buf::Buf32, L1Height};
 use tokio::{
     runtime::Handle,
     sync::{mpsc, watch},
@@ -57,10 +57,7 @@ use tokio::{
 use tracing::{info, info_span, Instrument};
 
 use self::{gas_data_provider::RethGasDataProvider, payload_builder::AlpenRethPayloadEngine};
-use crate::{args::AdditionalConfig, ol::OLClientKind, service_executor::ServiceExecutor};
-
-/// Default capacity for the batch builder → chunk builder event channel.
-const DEFAULT_BATCH_EVENT_CHANNEL_CAPACITY: usize = 64;
+use crate::{config::SequencerConfig, ol::OLClientKind, service_executor::ServiceExecutor};
 
 /// Startup state that only the EE sequencer needs: the OL chain tracker,
 /// exec chain, batch builder, and batch lifecycle states loaded from
@@ -133,10 +130,19 @@ fn log_writer_config(cfg: &WriterConfig) {
     }
 }
 
-fn sequencer_bitcoin_keypair(privkey: &Buf32) -> eyre::Result<Keypair> {
+pub(crate) fn sequencer_bitcoin_keypair(privkey: &Buf32) -> eyre::Result<Keypair> {
     let sk = SecretKey::from_slice(privkey.as_ref()).context("invalid sequencer private key")?;
     let secp = Secp256k1::signing_only();
     Ok(Keypair::from_secret_key(&secp, &sk))
+}
+
+/// Derives the sequencer's gossip pubkey from its private key, rather than
+/// taking it as separate config — a sequencer can't be told a pubkey that
+/// disagrees with its private key if there's no second value to disagree.
+pub(crate) fn sequencer_gossip_pubkey(privkey: &Buf32) -> eyre::Result<Buf32> {
+    let keypair = sequencer_bitcoin_keypair(privkey)?;
+    let (x_only_pubkey, _parity) = keypair.x_only_public_key();
+    Ok(Buf32(x_only_pubkey.serialize()))
 }
 
 /// Loads sequencer boot state: OL chain tracker, exec chain, batch builder,
@@ -180,7 +186,11 @@ pub(crate) struct SequencerLaunchCtx<'a, P> {
     pub(crate) task_executor: TaskExecutor,
     pub(crate) payload_builder_handle: PayloadBuilderHandle<AlpenEngineTypes>,
     pub(crate) beacon_engine_handle: ConsensusEngineHandle<AlpenEngineTypes>,
-    pub(crate) ext: &'a AdditionalConfig,
+    pub(crate) sequencer_config: &'a SequencerConfig,
+    /// Rollup-to-L1 facts, not sequencer config — see `AlpenClientConfig`'s
+    /// doc comment for why these live outside `SequencerConfig`.
+    pub(crate) l1_reorg_safe_depth: u32,
+    pub(crate) genesis_l1_height: L1Height,
     pub(crate) storage: Arc<EeNodeStorage>,
     pub(crate) dbs: &'a EeDatabases,
     pub(crate) db_handle: Handle,
@@ -226,7 +236,9 @@ where
         task_executor,
         payload_builder_handle,
         beacon_engine_handle,
-        ext,
+        sequencer_config,
+        l1_reorg_safe_depth,
+        genesis_l1_height,
         storage,
         dbs,
         db_handle,
@@ -242,9 +254,8 @@ where
     } = ctx;
 
     log_writer_config(&writer_config);
-    let sequencer_args = &ext.sequencer;
     let block_builder_config =
-        BlockBuilderConfig::default().with_blocktime_ms(sequencer_args.resolve_blocktime_ms()?);
+        BlockBuilderConfig::default().with_blocktime_ms(sequencer_config.blocktime_ms);
     let sequencer_keypair = sequencer_bitcoin_keypair(&sequencer_privkey)?;
 
     let SequencerBootState {
@@ -257,7 +268,7 @@ where
     let payload_engine = Arc::new(AlpenRethPayloadEngine::new(
         payload_builder_handle,
         beacon_engine_handle,
-        sequencer_args.beneficiary_address,
+        sequencer_config.beneficiary_address,
         storage.clone(),
     ));
 
@@ -284,7 +295,7 @@ where
         .await?;
 
     let batch_sealing_policy =
-        FixedBlockCountSealing::new(sequencer_args.batch_sealing_block_count);
+        FixedBlockCountSealing::new(sequencer_config.batch_sealing_block_count);
     let block_data_provider = Arc::new(BlockCountDataProvider);
 
     // Per-block proof witnesses are captured inline during payload
@@ -294,11 +305,8 @@ where
     // chunk-seal extraction step and no chunk-spanning multiproof.
 
     // Channel from batch builder → chunk builder.
-    let (batch_event_tx, batch_event_rx) = mpsc::channel::<BatchBuilderEvent>(
-        sequencer_args
-            .batch_event_channel_capacity
-            .unwrap_or(DEFAULT_BATCH_EVENT_CHANNEL_CAPACITY),
-    );
+    let (batch_event_tx, batch_event_rx) =
+        mpsc::channel::<BatchBuilderEvent>(sequencer_config.batch_event_channel_capacity);
 
     let (batch_builder_handle, batch_builder_task) = create_batch_builder(
         latest_batch.id(),
@@ -317,8 +325,9 @@ where
         service_executor,
         &task_executor,
         da_pipeline::DaPipelineInputs {
-            da_args: &ext.da,
-            btcio_args: &ext.btcio,
+            bitcoind: &sequencer_config.bitcoind,
+            l1_reorg_safe_depth,
+            genesis_l1_height,
             dbs,
             db_handle,
             storage: storage.clone(),
@@ -338,8 +347,8 @@ where
             storage: storage.clone(),
             node_provider: node_provider.clone(),
             btc_client: da_pipeline.btc_client,
-            dev_native_prover: sequencer_args.dev_native_prover,
-            sp1_deadline_secs: sequencer_args.sp1_proof_deadline_secs,
+            dev_native_prover: sequencer_config.dev_native_prover,
+            sp1_deadline_secs: sequencer_config.sp1_proof_deadline_secs,
             params: params.clone(),
         },
     )
@@ -388,18 +397,16 @@ where
     );
 
     // --- Chunk builder service ---
-    let chunk_block_count = sequencer_args
-        .chunk_sealing_block_count
-        .unwrap_or(sequencer_args.batch_sealing_block_count);
+    let chunk_block_count = sequencer_config.chunk_sealing_block_count();
     let genesis_blocknumhash =
         BlockNumHash::new(genesis_info.blockhash().0.into(), genesis_info.blocknum());
 
-    // --chunk-sealing-gas-limit is validated against the genesis gas limit in
-    // `node::launch`, before any node/DB/OL startup work.
+    // sequencer.chunk_sealing_gas_limit is validated against the genesis gas
+    // limit in `node::launch`, before any node/DB/OL startup work.
 
     // u64::MAX effectively disables the gas policy while keeping a
     // single monomorphic code path (no dyn / enum branching).
-    let chunk_gas_limit = sequencer_args.chunk_sealing_gas_limit.unwrap_or(u64::MAX);
+    let chunk_gas_limit = sequencer_config.chunk_sealing_gas_limit.unwrap_or(u64::MAX);
     let chunk_sealing_policy = OrSealing::new(
         FixedBlockCountSealing::new(chunk_block_count),
         MaxGasSealing::new(chunk_gas_limit),
