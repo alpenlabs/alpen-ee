@@ -175,7 +175,7 @@ mod tests {
 
     /// When gas limit is `u64::MAX` the gas policy never fires, so only
     /// block count matters. This mirrors the production path when
-    /// `--chunk-sealing-gas-limit` is omitted.
+    /// `sequencer.chunk_sealing_gas_limit` is omitted from `--alpen-config`.
     #[test]
     fn test_gas_disabled_via_max() {
         let sealing = OrSealing::new(FixedBlockCountSealing::new(3), MaxGasSealing::new(u64::MAX));
