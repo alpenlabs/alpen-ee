@@ -42,6 +42,7 @@ class AlpenClientEnvParams:
     dev_track_latest_epoch: bool = False
     beneficiary_address: str | None = None
     prover_programs: list[tuple[str, str, str]] | None = None
+    prover_backend: str = "native"
 
 
 class AlpenClientEnv(flexitest.EnvConfig):
@@ -168,6 +169,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
             dev_track_latest_epoch=envparams.dev_track_latest_epoch,
             beneficiary_address=envparams.beneficiary_address,
             prover_programs=envparams.prover_programs,
+            prover_backend=envparams.prover_backend,
         )
         sequencer.wait_for_ready(timeout=60)
         seq_enode = sequencer.get_enode()

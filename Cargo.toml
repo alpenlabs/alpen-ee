@@ -37,6 +37,7 @@ members = [
   "crates/rpc/open-rpc-spec",
   "crates/simple-ee",
   "provers/sp1",
+  "provers/sp1-func-test-guests",
 
   # binaries listed separately
   "bin/alpen-cli",

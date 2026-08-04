@@ -43,6 +43,16 @@ V0_ACCT_SIGNING_KEY_HEX = "02" * 32
 # candidate's, so nothing requires it to differ.
 V1_ACCT_SIGNING_KEY_HEX = "04" * 32
 
+# The native backend's predicates, derived from the two signing keys above --
+# see common/prover_backend.py, which resolves these (native) or the real
+# `Sp1Groth16` equivalents (sp1) depending on `EE_PROVER_BACKEND`.
+#
+# V0_ACCT_PREDICATE matches `EeAcctProgram::test_predicate_key()` (deterministic
+# test SK = [0x02; 32] in strata_proofimpl_alpen_acct, V0_ACCT_SIGNING_KEY_HEX).
+V0_ACCT_PREDICATE = "Bip340Schnorr:4d4b6cd1361032ca9bd2aeb9d900aa4d45d9ead80ac9423374c451a7254d0766"
+# The rotation target: a Bip340Schnorr predicate bound to V1_ACCT_SIGNING_KEY_HEX.
+V1_ACCT_PREDICATE = "Bip340Schnorr:462779ad4aad39514614751a71085f2f10e1c7a593e4e030efb5b8721ce55b0b"
+
 
 DEFAULT_PROVER_PROGRAMS: list[tuple[str, str, str]] = [
     ("v0", V0_NATIVE_CHUNK_SIGNING_KEY_HEX, V0_ACCT_SIGNING_KEY_HEX)
@@ -114,6 +124,7 @@ class AlpenClientFactory(flexitest.Factory):
         max_withdrawal_amount: int | None = 1_000_000_000,
         beneficiary_address: str | None = None,
         prover_programs: list[tuple[str, str, str]] | None = None,
+        prover_backend: str = "native",
         **kwargs,
     ) -> AlpenClientService:
         """
@@ -127,13 +138,17 @@ class AlpenClientFactory(flexitest.Factory):
             custom_chain: Chain spec to use
             ee_params_path: EE params file to use; generated when omitted
             da_config: Optional DA pipeline configuration for posting state diffs to L1
-            prover_programs: List of (spec_version, chunk_signing_key_hex,
-                acct_signing_key_hex) candidates, each passed as its own
-                `--prover-program` flag (repeatable; see `alpen-client
-                --help`). `spec_version` is the `AlpenSpecId` the candidate
-                is built for (e.g. "v0", "v1"). Defaults to a single v0
-                candidate using the fixed native test keys OL genesis
-                expects.
+            prover_programs: List of (spec_version, chunk_path, acct_path)
+                candidates, each passed as its own `--prover-program` flag
+                (repeatable; see `alpen-client --help`). `spec_version` is the
+                `AlpenSpecId` the candidate is built for (e.g. "v0", "v1").
+                Under `prover_backend="native"`, `chunk_path`/`acct_path` are
+                signing-key hex written to files by this factory; under
+                `"sp1"`, they're already-built guest ELF paths, used as-is.
+                Defaults to a single v0 candidate using the fixed native test
+                keys OL genesis expects.
+            prover_backend: `"native"` (default) or `"sp1"` -- see
+                `common/prover_backend.py`.
         """
         ctx: flexitest.EnvContext = kwargs["ctx"]
 
@@ -154,12 +169,16 @@ class AlpenClientFactory(flexitest.Factory):
         p2p_secret_key_file.write_text(key_hex)
 
         prover_program_flags = []
-        for i, (spec_version, chunk_hex, acct_hex) in enumerate(
+        for i, (spec_version, chunk_path, acct_path) in enumerate(
             prover_programs or DEFAULT_PROVER_PROGRAMS
         ):
-            chunk_path, acct_path = _write_signing_key_candidate_files(
-                datadir, i, chunk_hex, acct_hex
-            )
+            if prover_backend == "native":
+                # native candidates are signing-key hex; write them to files
+                # (alpen-client reads native candidates as key files, same as
+                # ELF paths under sp1).
+                chunk_path, acct_path = _write_signing_key_candidate_files(
+                    datadir, i, chunk_path, acct_path
+                )
             prover_program_flags.extend(
                 ["--prover-program", f"{spec_version}:{chunk_path}:{acct_path}"]
             )
@@ -208,10 +227,11 @@ class AlpenClientFactory(flexitest.Factory):
             "--p2p-secret-key", str(p2p_secret_key_file),
             "--batch-sealing-block-count", str(batch_sealing_block_count),
             "-vvvv",
-            # Functional tests don't ship the SP1 guest ELFs, so run the EE
-            # chunk + acct provers on the zkaleido NativeHost instead
-            # (--prover-backend native is also the default).
-            "--prover-backend", "native",
+            # Functional tests default to the zkaleido NativeHost instead of
+            # real SP1 proving (see common/prover_backend.py for the
+            # EE_PROVER_BACKEND=sp1 opt-in, which builds and passes real
+            # guest ELFs instead).
+            "--prover-backend", prover_backend,
             *prover_program_flags,
         ]
         if dev_track_latest_epoch:

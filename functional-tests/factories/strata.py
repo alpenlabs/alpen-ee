@@ -79,6 +79,8 @@ class StrataFactory(flexitest.Factory):
         ol_block_time_ms: int | None = None,
         shared_params: "StrataNodeParams | None" = None,
         l1_reorg_safe_depth: int | None = None,
+        ee_params_path_override: Path | None = None,
+        alpen_predicate_override: str | None = None,
         **kwargs,
     ) -> CreateNodeResult:
         """
@@ -101,6 +103,16 @@ class StrataFactory(flexitest.Factory):
             l1_reorg_safe_depth: Optional btcio L1 reorg-safe depth. Pin this in tests
                 whose behavior depends on the buried-manifest cutoff so they do not
                 break when the global default changes.
+            ee_params_path_override: If provided (and `shared_params` isn't),
+                reuse this ee-params.json instead of generating a fresh one.
+                Used by `EE_PROVER_BACKEND=sp1` (see
+                `common/prover_backend.py`) so the live EE node's
+                alpen-params.json is composed from the exact same
+                ee-params.json baked into the real v0/v1 SP1 guest ELFs.
+            alpen_predicate_override: Forwarded to
+                `common.datatool.generate_ol_params`'s
+                `alpen_predicate_override`. Ignored when `ol_params` is set
+                (that path never calls datatool at all).
         """
         # Ensured by `with_ectx` decorator. Don't like this though.
         ctx: flexitest.EnvContext = kwargs["ctx"]
@@ -177,7 +189,11 @@ class StrataFactory(flexitest.Factory):
         else:
             # Generate the sequencer key + operator pubkeys consumed when building ASM params.
             seq_artifacts = generate_sequencer_artifacts(datadir, use_unchecked_cred_rule)
-            ee_params_path = generate_ee_params(datadir)
+            if ee_params_path_override is not None:
+                ee_params_path = datadir / "ee-params.json"
+                shutil.copyfile(ee_params_path_override, ee_params_path)
+            else:
+                ee_params_path = generate_ee_params(datadir)
 
             # Generate or write OL params.
             if ol_params is not None:
@@ -189,6 +205,7 @@ class StrataFactory(flexitest.Factory):
                     bconfig,
                     genesis_l1_height,
                     ee_params_path=ee_params_path,
+                    alpen_predicate_override=alpen_predicate_override,
                 )
 
             # Generate ASM params via datatool (computes correct genesis_ol_blkid from OL params).
