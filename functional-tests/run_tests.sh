@@ -18,6 +18,17 @@ case "$EE_PROVER_BACKEND" in
 esac
 export EE_PROVER_BACKEND
 
+# Under sp1, the test drives far more blocks over a much longer real-time
+# window than native (batch_sealing_block_count=600 vs 10 -- real proving
+# takes minutes, not the near-instant native signing), and Reth's own
+# engine/trie internals are extremely chatty at `debug`. Left unsuppressed
+# they dominate the service log (measured ~140 of 148MB in one run). Quiet
+# them the same way sled/hyper/etc. are already quieted above.
+if [ "$EE_PROVER_BACKEND" = sp1 ]; then
+  RUST_LOG="$RUST_LOG,engine::tree=info,trie=info,payload_builder=info"
+  export RUST_LOG
+fi
+
 # Sets up PATH for built binaries.
 setup_path() {
     if [ "$EE_PROVER_BACKEND" = sp1 ]; then
