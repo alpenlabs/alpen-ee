@@ -1,9 +1,11 @@
+import json
 import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 from common.config.config import BitcoindConfig
+from common.config.constants import ALPEN_ACCOUNT_ID
 
 DEFAULT_OL_BLOCK_TIME_MS = 5_000
 
@@ -152,8 +154,23 @@ def generate_ol_params(
     bconfig: BitcoindConfig,
     genesis_l1_height: int,
     ee_params_path: Path | None = None,
+    alpen_predicate_override: str | None = None,
 ) -> Path:
-    """Generates OL params via ``strata-datatool gen-ol-params``."""
+    """Generates OL params via ``strata-datatool gen-ol-params``.
+
+    Args:
+        alpen_predicate_override: If set, overwrites the Alpen account's
+            genesis predicate in the generated JSON with this literal value
+            (the same ``"TypeName:hex"`` format `strata-predicate`'s serde
+            impl parses) after datatool runs, instead of the fixed
+            `bip340-schnorr-test` value. Used by ``EE_PROVER_BACKEND=sp1``
+            (see ``common/prover_backend.py``): datatool's own
+            `--alpen-predicate sp1-groth16` derives its key from a
+            out-of-sync guest build, so the real predicate is computed
+            elsewhere (`provers/sp1-func-test-guests/build.rs`) and patched
+            in here. `inner_state`/`balance` are left exactly as datatool
+            computed them; only `predicate` is overwritten.
+    """
     params_path = datadir / "ol-params.json"
 
     args = [
@@ -169,6 +186,12 @@ def generate_ol_params(
         args.extend(["--ee-params", str(ee_params_path)])
 
     run_datatool(args, bconfig)
+
+    if alpen_predicate_override is not None:
+        data = json.loads(params_path.read_text())
+        data["accounts"][ALPEN_ACCOUNT_ID]["predicate"] = alpen_predicate_override
+        params_path.write_text(json.dumps(data, indent=2))
+
     return params_path
 
 

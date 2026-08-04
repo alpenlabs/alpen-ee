@@ -20,38 +20,50 @@ import flexitest
 
 from common.base_test import BaseTest
 from common.config.constants import ALPEN_ACCOUNT_ID, ServiceType
+from common.prover_backend import resolve_prover_backend
 from common.services.alpen_client import AlpenClientService
 from common.services.bitcoin import BitcoinService
 from common.services.strata import StrataService
 from common.test_cli import create_ee_predicate_update
 from common.wait import wait_until_with_value
 from envconfigs.el_ol import EeOLEnv
-from factories.alpen_client import (
-    V0_ACCT_SIGNING_KEY_HEX,
-    V0_NATIVE_CHUNK_SIGNING_KEY_HEX,
-    V1_ACCT_SIGNING_KEY_HEX,
-)
 
 logger = logging.getLogger(__name__)
 
 INITIAL_BLOCKS = 5
 POST_ADMIN_UPDATE_L1_BLOCKS = 5
-PREDICATE_SETTLE_TIMEOUT_SECONDS = 120
-POST_ROTATION_UPDATE_TIMEOUT_SECONDS = 180
-UNSUPPORTED_ROTATION_TIMEOUT_SECONDS = 120
 
-# Initial Alpen account predicate matches `EeAcctProgram::test_predicate_key()`
-# (deterministic test SK = [0x02; 32] in strata_proofimpl_alpen_acct,
-# `V0_ACCT_SIGNING_KEY_HEX`).
-V0_ACCT_PREDICATE = "Bip340Schnorr:4d4b6cd1361032ca9bd2aeb9d900aa4d45d9ead80ac9423374c451a7254d0766"
+# Resolved once from EE_PROVER_BACKEND (default: native) -- see
+# common/prover_backend.py. Under native, V0_ACCT_PREDICATE/V1_ACCT_PREDICATE
+# are the fixed Bip340Schnorr test-key predicates (matching
+# `EeAcctProgram::test_predicate_key()` and the rotation-target stand-in key,
+# respectively). Under sp1, they're the real `Sp1Groth16` predicates derived
+# from the v0/v1 guest ELFs built by provers/sp1-func-test-guests.
+PROVER_BACKEND = resolve_prover_backend()
+V0_ACCT_PREDICATE = PROVER_BACKEND.v0_acct_predicate
+V1_ACCT_PREDICATE = PROVER_BACKEND.v1_acct_predicate
 
-# The rotation target: a Bip340Schnorr predicate bound to the deterministic
-# SK [0x04; 32] (`V1_ACCT_SIGNING_KEY_HEX`).
-V1_ACCT_PREDICATE = "Bip340Schnorr:462779ad4aad39514614751a71085f2f10e1c7a593e4e030efb5b8721ce55b0b"
+# Real SP1 CPU Groth16 proving takes minutes per proof, not the near-instant
+# signing the native backend does -- both the settle timeouts and the batch
+# cadence need to scale accordingly, or a real-proving run can never catch up
+# (a batch seals every `batch_sealing_block_count` EE blocks regardless of
+# how slow proving is, so a short cadence under sp1 queues real proof work
+# far faster than the CPU can retire it).
+if PROVER_BACKEND.backend == "sp1":
+    PREDICATE_SETTLE_TIMEOUT_SECONDS = 2700
+    POST_ROTATION_UPDATE_TIMEOUT_SECONDS = 2700
+    UNSUPPORTED_ROTATION_TIMEOUT_SECONDS = 600
+    BATCH_SEALING_BLOCK_COUNT = 600
+else:
+    PREDICATE_SETTLE_TIMEOUT_SECONDS = 120
+    POST_ROTATION_UPDATE_TIMEOUT_SECONDS = 180
+    UNSUPPORTED_ROTATION_TIMEOUT_SECONDS = 120
+    BATCH_SEALING_BLOCK_COUNT = 10
 
 # A further rotation target, standing in for spec version V2 -- which this
 # binary has no support for, so the rotation to it can't be handled and must
-# be refused.
+# be refused. Independent of prover backend: it's testing rejection of an
+# unsupported spec version, not predicate verification.
 V2_ACCOUNT_PREDICATE = "NeverAccept"
 
 UNHONORABLE_ROTATION_LOG_PATTERN = r"consumed a rotation to unknown spec version"
@@ -89,20 +101,21 @@ class TestEePredicateTransition(BaseTest):
                 fund_test_cli_wallet=True,
                 # Two resident candidates, each tagged with the AlpenSpecId
                 # it's built for (see ProverProgramPaths in
-                # bin/alpen-client/src/args.rs): v1's acct key is the
-                # rotation target (see V1_ACCT_PREDICATE above),
-                # v0's is the genesis-matching key. Both are validated and
-                # loaded at startup; the sequencer routes each batch's proof
-                # request to whichever candidate's declared version matches
-                # that batch's own governing spec version (see
-                # PaasBatchProver in
+                # bin/alpen-client/src/args.rs): v1's is the rotation target
+                # (see V1_ACCT_PREDICATE above), v0's is the genesis-matching
+                # one. Both are validated and loaded at startup; the
+                # sequencer routes each batch's proof request to whichever
+                # candidate's declared version matches that batch's own
+                # governing spec version (see PaasBatchProver in
                 # bin/alpen-client/src/sequencer/prover/batch_prover.rs), so
                 # proving keeps working across the V0 -> V1 rotation below
-                # without a restart.
-                prover_programs=[
-                    ("v1", V0_NATIVE_CHUNK_SIGNING_KEY_HEX, V1_ACCT_SIGNING_KEY_HEX),
-                    ("v0", V0_NATIVE_CHUNK_SIGNING_KEY_HEX, V0_ACCT_SIGNING_KEY_HEX),
-                ],
+                # without a restart. See common/prover_backend.py for what
+                # each candidate actually is under native vs sp1.
+                prover_programs=PROVER_BACKEND.prover_programs,
+                prover_backend=PROVER_BACKEND.backend,
+                ee_params_path_override=PROVER_BACKEND.ee_params_path_override,
+                alpen_predicate_override=PROVER_BACKEND.genesis_predicate_override,
+                batch_sealing_block_count=BATCH_SEALING_BLOCK_COUNT,
             )
         )
 
