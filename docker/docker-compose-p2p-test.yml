@@ -1,5 +1,7 @@
-# Minimal 2-node P2P test: sequencer + fullnode with --dummy-ol-client.
-# No strata or bitcoind needed. Verifies gossip handshake works.
+# Minimal 2-node P2P test: two full nodes with dummy-ol-client, verifying
+# the custom gossip RLPx subprotocol handshake (not real block broadcasting
+# -- neither container runs in sequencer mode, so nothing signs/gossips
+# blocks; "seq"/"fn" below are just container names describing topology).
 #
 # Usage:
 #   docker compose --env-file .env.alpen -f docker-compose-p2p-test.yml up
@@ -10,11 +12,6 @@ services:
     image: alpen-client:latest
     container_name: alpen_p2p_seq
     command:
-      - --sequencer-pubkey
-      - ${SEQUENCER_PUBKEY}
-      - --dummy-ol-client
-      - --datadir
-      - /app/data
       - --p2p-secret-key
       - /app/keys/seq-p2p.hex
       - --addr
@@ -36,6 +33,9 @@ services:
     environment:
       RUST_LOG: info,alpen_gossip=debug
       ALPEN_PARAMS_PATH: ${ALPEN_PARAMS_PATH:-/app/configs/generated/alpen-params.json}
+      SEQUENCER_PUBKEY: ${SEQUENCER_PUBKEY}
+      DUMMY_OL_CLIENT: "1"
+      GENESIS_L1_HEIGHT: "0"
     ports:
       - "8545:8545"
       - "30303:30303"
@@ -52,13 +52,6 @@ services:
     depends_on:
       - alpen-client
     command:
-      - --sequencer-pubkey
-      - ${SEQUENCER_PUBKEY}
-      - --dummy-ol-client
-      - --datadir
-      - /app/data
-      - --sequencer-http
-      - http://alpen-client:8545
       - --p2p-secret-key
       - /app/keys/fn-p2p.hex
       - --addr
@@ -82,6 +75,10 @@ services:
     environment:
       RUST_LOG: info,alpen_gossip=debug
       ALPEN_PARAMS_PATH: ${ALPEN_PARAMS_PATH:-/app/configs/generated/alpen-params.json}
+      SEQUENCER_PUBKEY: ${SEQUENCER_PUBKEY}
+      DUMMY_OL_CLIENT: "1"
+      GENESIS_L1_HEIGHT: "0"
+      SEQUENCER_HTTP_URL: http://alpen-client:8545
     ports:
       - "9545:8545"
       - "31303:30303"

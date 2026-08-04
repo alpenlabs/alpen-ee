@@ -38,11 +38,6 @@ services:
       bitcoind:
         condition: service_healthy
     command:
-      - --sequencer
-      - --sequencer-pubkey
-      - ${SEQUENCER_PUBKEY}
-      - --dummy-ol-client
-      - --dev-native-prover
       - --datadir
       - /app/data
       - --p2p-secret-key
@@ -61,22 +56,21 @@ services:
       - "8545"
       - --http.api
       - eth,net,web3,txpool,admin,debug
-      - --btc-rpc-url
-      - http://bitcoind:${BITCOIND_RPC_PORT:-18443}
-      - --btc-rpc-user
-      - ${BITCOIND_RPC_USER:-rpcuser}
-      - --btc-rpc-password
-      - ${BITCOIND_RPC_PASSWORD:-rpcpassword}
-      - --l1-reorg-safe-depth
-      - "${L1_REORG_SAFE_DEPTH:-1}"
-      - --genesis-l1-height
-      - "${GENESIS_L1_HEIGHT:-101}"
-      - --batch-sealing-block-count
-      - "${BATCH_SEALING_BLOCK_COUNT:-5}"
       - --color
       - never
     environment:
       SEQUENCER_PRIVATE_KEY: ${SEQUENCER_PRIVATE_KEY}
+      SEQUENCER_MODE: "true"
+      SEQUENCER_PUBKEY: ${SEQUENCER_PUBKEY}
+      DUMMY_OL_CLIENT: "1"
+      DEV_NATIVE_PROVER: "1"
+      BITCOIND_RPC_URL: http://bitcoind:${BITCOIND_RPC_PORT:-18443}
+      BITCOIND_RPC_USER: ${BITCOIND_RPC_USER:-rpcuser}
+      BITCOIND_RPC_PASSWORD: ${BITCOIND_RPC_PASSWORD:-rpcpassword}
+      BITCOIN_NETWORK: regtest
+      L1_REORG_SAFE_DEPTH: ${L1_REORG_SAFE_DEPTH:-1}
+      GENESIS_L1_HEIGHT: ${GENESIS_L1_HEIGHT:-101}
+      BATCH_SEALING_BLOCK_COUNT: ${BATCH_SEALING_BLOCK_COUNT:-5}
       RUST_LOG: ${RUST_LOG:-info}
       ALPEN_PARAMS_PATH: ${ALPEN_PARAMS_PATH:-/app/configs/generated/alpen-params.json}
     ports:
