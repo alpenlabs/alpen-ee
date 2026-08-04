@@ -15718,6 +15718,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "strata-sp1-func-test-guests"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alloy-consensus",
+ "alpen-ee-params",
+ "serde_json",
+ "sp1-build",
+ "sp1-sdk",
+ "sp1-verifier",
+ "zkaleido-sp1-groth16-verifier",
+]
+
+[[package]]
 name = "strata-sp1-guest-builder"
 version = "0.3.0-alpha.1"
 dependencies = [

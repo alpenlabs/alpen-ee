@@ -1,0 +1,17 @@
+[package]
+edition = "2021"
+name = "strata-sp1-func-test-guests"
+version = "0.3.0-alpha.1"
+
+[build-dependencies]
+# Forces the `serde` feature on alloy-consensus in this build-dependency's feature-unification
+alloy-consensus = { workspace = true, features = ["serde"] }
+alpen-ee-params.workspace = true
+serde_json.workspace = true
+sp1-build.workspace = true
+sp1-sdk = { workspace = true, features = ["blocking"] }
+sp1-verifier.workspace = true
+zkaleido-sp1-groth16-verifier.workspace = true
+
+[features]
+docker-build = []
