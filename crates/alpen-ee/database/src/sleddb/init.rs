@@ -20,7 +20,7 @@ use crate::{
 /// An opened sled instance, from which databases are created per role.
 ///
 /// Sled holds an exclusive file lock on its directory, so the instance can
-/// only be opened once per process. That open happens in [`open_ee_db`];
+/// only be opened once per process. That open happens in [`crate::open_ee_db`];
 /// callers then take just the databases their role needs — every node calls
 /// [`EeDb::node_storage`], and only a sequencer additionally calls
 /// [`EeDb::sequencer_databases`]. Trees are created on demand, so a full
