@@ -12,6 +12,7 @@
 
 mod args;
 mod config;
+mod full_node;
 mod gossip;
 mod node;
 mod ol;

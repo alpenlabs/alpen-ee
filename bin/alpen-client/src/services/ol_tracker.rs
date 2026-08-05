@@ -1,6 +1,8 @@
 use std::{sync::Arc, time::Duration};
 
-use alpen_ee_common::{ConsensusHeads, OLClient, OLFinalizedStatus, Storage};
+#[cfg(feature = "sequencer")]
+use alpen_ee_common::OLFinalizedStatus;
+use alpen_ee_common::{ConsensusHeads, OLClient, Storage};
 use alpen_ee_ol_tracker::{
     EpochTrackingMode, OLTrackerService, OLTrackerServiceState, OLTrackerState, OLTrackerStatus,
 };
@@ -18,13 +20,10 @@ const DEFAULT_POLL_WAIT_MS: u64 = 1_000;
 /// Handle for accessing OL tracker state updates.
 #[derive(Debug)]
 pub(crate) struct OLTrackerHandle {
-    #[cfg_attr(
-        not(feature = "sequencer"),
-        expect(
-            dead_code,
-            reason = "only read by ol_status_watcher, which is sequencer-only"
-        )
-    )]
+    /// Only the sequencer path reads OL finalized status; see
+    /// [`start_ol_tracker_service_with`] for why a full node can simply not
+    /// hold this.
+    #[cfg(feature = "sequencer")]
     ol_status_rx: watch::Receiver<OLFinalizedStatus>,
     consensus_rx: watch::Receiver<ConsensusHeads>,
     monitor: ServiceMonitor<OLTrackerStatus>,
@@ -33,10 +32,7 @@ pub(crate) struct OLTrackerHandle {
 
 impl OLTrackerHandle {
     /// Returns a watcher for OL finalized status updates.
-    #[cfg_attr(
-        not(feature = "sequencer"),
-        expect(dead_code, reason = "only sequencer::launch calls this")
-    )]
+    #[cfg(feature = "sequencer")]
     pub(crate) fn ol_status_watcher(&self) -> watch::Receiver<OLFinalizedStatus> {
         self.ol_status_rx.clone()
     }
@@ -112,6 +108,11 @@ where
     let (ol_status_tx, ol_status_rx) = watch::channel(state.get_ol_status());
     let (consensus_tx, consensus_rx) = watch::channel(state.get_consensus_heads());
 
+    // A full node has no reader for OL finalized status. The tracker ignores
+    // send errors, so dropping the receiver here costs nothing.
+    #[cfg(not(feature = "sequencer"))]
+    drop(ol_status_rx);
+
     if tracking_mode == EpochTrackingMode::Latest {
         warn!(
             component = "alpen",
@@ -139,6 +140,7 @@ where
         .await?;
 
     Ok(OLTrackerHandle {
+        #[cfg(feature = "sequencer")]
         ol_status_rx,
         consensus_rx,
         monitor,

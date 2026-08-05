@@ -11,6 +11,7 @@ use std::{env, fs, path::Path, sync::Arc};
 use alpen_ee_params::AlpenParams;
 use clap::ArgAction;
 use eyre::Context;
+#[cfg(feature = "sequencer")]
 use strata_primitives::buf::Buf32;
 
 use crate::config::AlpenClientConfig;
@@ -105,9 +106,9 @@ impl DisplayArgs {
 
 /// Reads `SEQUENCER_PRIVATE_KEY`, required when running with sequencer mode.
 ///
-/// Only ever called from `node.rs`'s `NodeMode::Sequencer` branch — a slim
-/// build (no `sequencer` feature) can't hold that variant at all, so this is
-/// unreachable there rather than needing its own feature gate.
+/// Read exactly once per startup, at the top of [`crate::sequencer::run`],
+/// which passes the key on to everything that needs it.
+#[cfg(feature = "sequencer")]
 pub(crate) fn sequencer_privkey_from_env() -> eyre::Result<Buf32> {
     let privkey_str = env::var("SEQUENCER_PRIVATE_KEY").map_err(|_| {
         eyre::eyre!("SEQUENCER_PRIVATE_KEY environment variable is required in sequencer mode")

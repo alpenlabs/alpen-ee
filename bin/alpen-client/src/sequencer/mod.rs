@@ -1,12 +1,12 @@
-//! Sequencer-only startup: boot-state init, the DA/btcio pipeline, and the
-//! batch/chunk builder services that only run in sequencer mode.
+//! Sequencer startup: builds, launches, and runs the reth node, then starts
+//! the services that only run in sequencer mode.
 //!
-//! [`launch`] is the sole entry point once the reth node exists: it resolves
-//! the writer config, block-builder config, boot state, and DA reveal
-//! signing key itself, so callers only need to know a node exists and that
-//! it is running as a sequencer. [`initial_preconf_head`] is the one other
-//! entry point, needed earlier — before the node is built — to seed the p2p
-//! preconf head watch with the sequencer's real exec-chain tip.
+//! [`run`] is the sole entry point, the counterpart to
+//! [`crate::full_node::run`]. It owns the whole sequencer path: the
+//! sequencer-only genesis steps, the reth builder chain (including the DA
+//! and witness ExExes), the chainstate sync, and [`start_services`], which
+//! brings up the DA/btcio pipeline, the provers, and the batch/chunk
+//! builders.
 
 mod da_pipeline;
 mod gas_data_provider;
@@ -19,8 +19,11 @@ mod services;
 use std::sync::Arc;
 
 use alpen_ee_common::{require_latest_batch, BlockNumHash, SequencerOLClient};
-use alpen_ee_database::EeNodeStorage;
+use alpen_ee_database::{EeDb, EeNodeStorage, SequencerDatabases};
+use alpen_ee_engine::{sync_chainstate_to_engine, AlpenRethExecEngine};
 use alpen_ee_exec_chain::{init_exec_chain_state_from_storage, ExecChainState};
+use alpen_ee_genesis::{ensure_batch_genesis, ensure_finalized_exec_chain_genesis};
+use alpen_ee_rpc_server::{AlpenEeRpcServer, EeRpcServer};
 use alpen_ee_sequencer::{
     block_builder_task, build_ol_chain_tracker, create_batch_builder, create_batch_lifecycle_task,
     create_update_submitter_task, init_batch_builder_state, init_lifecycle_state,
@@ -33,27 +36,52 @@ use alpen_ee_sequencer::{
     BatchBuilderEvent, BatchBuilderState, BatchLifecycleState, BlockBuilderConfig,
     OLChainTrackerState,
 };
-use alpen_reth_node::AlpenEngineTypes;
+use alpen_reth_evm::evm::AlpenEvmFactory;
+use alpen_reth_exex::{AccessedStateGenerator, StateDiffGenerator};
+use alpen_reth_node::{
+    AlpenEngineTypes, AlpenEthereumNode, AlpenGossipProtocolHandler, AlpenGossipState,
+    AlpenNodeMode,
+};
 use bitcoind_async_client::corepc_types::bitcoin::{
     key::Keypair,
     secp256k1::{Secp256k1, SecretKey},
 };
 use eyre::Context;
-use reth_node_builder::ConsensusEngineHandle;
+use reth_chainspec::ChainSpec;
+use reth_network::{protocol::IntoRlpxSubProtocol, NetworkProtocols};
+use reth_node_builder::{ConsensusEngineHandle, NodeBuilder, WithLaunchContext};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskExecutor;
 use strata_config::btcio::{fee_rate_to_sat_per_vb, FeePolicy, WriterConfig};
+use strata_identifiers::EpochCommitment;
 use strata_primitives::buf::Buf32;
 use tokio::sync::{mpsc, watch};
-use tracing::{info, info_span, Instrument};
+use tracing::{error, info, info_span, Instrument};
 
 use self::{gas_data_provider::RethGasDataProvider, payload_builder::AlpenRethPayloadEngine};
 use crate::{
     args::sequencer_privkey_from_env,
-    config::{AlpenClientConfig, NodeMode},
-    node::NodeBootstrap,
+    config::SequencerMode,
+    gossip::GossipConfig,
+    node::{NodeBootstrap, SharedTasks},
+    ol::OLClientKind,
+    service_executor::ServiceExecutor,
 };
+
+/// What the sequencer path needs from [`crate::node`]'s bootstrap that a
+/// full node has no use for: the sled handle its extra databases come from,
+/// the OL client behind the tracker, and the genesis epoch both were seeded
+/// from.
+///
+/// Held behind the `sequencer` feature on [`NodeBootstrap`] so a
+/// full-node-only build never carries them.
+pub(crate) struct BootstrapResources {
+    pub(crate) service_executor: ServiceExecutor,
+    pub(crate) db: EeDb,
+    pub(crate) ol_client: Arc<OLClientKind>,
+    pub(crate) genesis_epoch: EpochCommitment,
+}
 
 /// Startup state that only the EE sequencer needs: the OL chain tracker,
 /// exec chain, batch builder, and batch lifecycle states loaded from
@@ -68,12 +96,12 @@ struct SequencerBootState {
 /// The sequencer's exec-chain tip, used to seed the p2p preconf head watch
 /// before the reth node (and therefore the engine-control task) is built.
 ///
-/// Only loads the exec-chain piece of boot state; [`launch`] loads the full
-/// [`SequencerBootState`] again once the node is up. Both reads are cheap,
+/// Only loads the exec-chain piece of boot state; [`start_services`] loads
+/// the full [`SequencerBootState`] again once the node is up. Both reads are cheap,
 /// local, read-only sled reads with nothing else touching storage in
 /// between, so re-reading is simpler than threading a boot-state value
 /// across the generic parts of node startup.
-pub(crate) async fn initial_preconf_head(storage: &EeNodeStorage) -> eyre::Result<BlockNumHash> {
+async fn initial_preconf_head(storage: &EeNodeStorage) -> eyre::Result<BlockNumHash> {
     let exec_chain = init_exec_chain_state_from_storage(storage)
         .instrument(info_span!(
             "init_exec_chain_head_probe",
@@ -119,7 +147,7 @@ fn log_writer_config(cfg: &WriterConfig) {
     }
 }
 
-pub(crate) fn sequencer_bitcoin_keypair(privkey: &Buf32) -> eyre::Result<Keypair> {
+fn sequencer_bitcoin_keypair(privkey: &Buf32) -> eyre::Result<Keypair> {
     let sk = SecretKey::from_slice(privkey.as_ref()).context("invalid sequencer private key")?;
     let secp = Secp256k1::signing_only();
     Ok(Keypair::from_secret_key(&secp, &sk))
@@ -186,18 +214,174 @@ pub(crate) struct RethNodeParts<P> {
     pub(crate) preconf_rx: watch::Receiver<BlockNumHash>,
 }
 
+/// Builds, launches, and runs a sequencer node.
+///
+/// The sequencer-only genesis steps come first: they have to land before the
+/// exec-chain tip can be read back out, and that tip seeds the preconf watch
+/// the engine-control task starts from — so both must happen before the reth
+/// node is built.
+pub(crate) async fn run(
+    builder: WithLaunchContext<NodeBuilder<Arc<reth_db::DatabaseEnv>, ChainSpec>>,
+    common: NodeBootstrap,
+    mode: &SequencerMode,
+) -> eyre::Result<()> {
+    // NOTE: ATM we reuse `SEQUENCER_PRIVATE_KEY` for both gossip package
+    // signing and EE DA reveal tapscript signing. That is operationally
+    // convenient for now, but it couples network identity with Bitcoin DA
+    // spend authority. Should we split this into a dedicated DA reveal
+    // signing key/config?
+    let privkey = sequencer_privkey_from_env()?;
+
+    // Creating these also creates their sled trees, which is why it happens
+    // here and not in bootstrap: a full node should never materialize them.
+    let sequencer_dbs = common
+        .sequencer
+        .db
+        .sequencer_databases()
+        .context("failed to open sequencer databases")?;
+
+    // Account-state genesis is common to every node and already done during
+    // bootstrap; exec-chain and batch genesis only matter once a sequencer
+    // is producing blocks.
+    ensure_finalized_exec_chain_genesis(
+        common.params.as_ref(),
+        common.sequencer.genesis_epoch.to_block_commitment(),
+        common.storage.as_ref(),
+    )
+    .instrument(info_span!("ensure_exec_chain_genesis", component = "alpen"))
+    .await
+    .context("genesis should not fail")?;
+    ensure_batch_genesis(common.params.as_ref(), common.storage.as_ref())
+        .instrument(info_span!("ensure_batch_genesis", component = "alpen"))
+        .await
+        .context("genesis should not fail")?;
+
+    // The sequencer's real exec-chain tip, readable only after the genesis
+    // steps above. Seeding the preconf channel with anything else would
+    // start the engine-control task from the wrong fork-choice head.
+    let initial_preconf_head = initial_preconf_head(common.storage.as_ref()).await?;
+
+    let evm_factory = AlpenEvmFactory::from_bridge_params(common.params.bridge_params());
+    let node = AlpenEthereumNode::new(evm_factory, AlpenNodeMode::sequencer());
+
+    let consensus_watcher = common.ol_tracker.consensus_watcher();
+
+    // Create gossip channel before building the node so we can register it early
+    let (gossip_tx, gossip_rx) = mpsc::unbounded_channel();
+    let (preconf_tx, preconf_rx) = watch::channel(initial_preconf_head);
+
+    let handle = builder
+        .node(node)
+        // Register Alpen gossip RLPx subprotocol
+        .on_component_initialized(move |node| {
+            // Add the custom RLPx subprotocol before node fully starts
+            // See: crates/reth/node/src/gossip/
+            let handler = AlpenGossipProtocolHandler::new(AlpenGossipState::new(gossip_tx));
+            node.components
+                .network
+                .add_rlpx_sub_protocol(handler.into_rlpx_sub_protocol());
+            info!(target: "alpen-gossip", component = "alpen", "Registered Alpen gossip RLPx subprotocol");
+            Ok(())
+        })
+        // Install state diff exex for sequencer DA.
+        // The exex persists per-block state diffs that the blob provider reads.
+        .install_exex("state_diffs", {
+            let state_diff_db = sequencer_dbs.witness_db();
+            |ctx| async { Ok(StateDiffGenerator::new(ctx, state_diff_db).start()) }
+        })
+        // Per-block accessed-state capture. The CHUNK proof's witness is
+        // now produced inline during payload build (see the EE node's
+        // `try_build_payload` / `AlpenRethPayloadEngine`); this exex
+        // remains only to feed the ACCOUNT proof's batch-range witness
+        // (`RangeWitnessExtractor` reads `AccessedStateStore`). Retiring
+        // it is a separate acct-proof migration tracked as follow-up
+        // work to STR-3649.
+        .install_exex("accessed_state", {
+            let accessed_state_store = common.storage.clone();
+            |ctx| async { Ok(AccessedStateGenerator::new(ctx, accessed_state_store).start()) }
+        })
+        .extend_rpc_modules({
+            let consensus_watcher = consensus_watcher.clone();
+            let storage = common.storage.clone();
+            move |ctx| {
+                let provider = ctx.provider().clone();
+                let ee_rpc_server = EeRpcServer::new(
+                    provider,
+                    consensus_watcher,
+                    storage.clone(),
+                    storage.clone(),
+                );
+                ctx.modules.merge_configured(ee_rpc_server.into_rpc())?;
+                Ok(())
+            }
+        })
+        .launch()
+        .await?;
+    info!(target: "alpen-client", component = "alpen", "installed StateDiffGenerator exex for DA");
+    info!(target: "alpen-client", component = "alpen", "installed AccessedStateGenerator exex (account-proof range witness)");
+
+    let node = &handle.node;
+
+    // Sync chainstate to engine before starting other tasks
+    let engine = AlpenRethExecEngine::new(node.beacon_engine_handle.clone());
+    let sync_result = sync_chainstate_to_engine(common.storage.as_ref(), &node.provider, &engine)
+        .instrument(info_span!("chainstate_sync", component = "alpen"))
+        .await;
+    if let Err(e) = sync_result {
+        error!(target: "alpen-client", component = "alpen", error = ?e, "failed to sync chainstate to engine on startup");
+        return Err(eyre::eyre!("chainstate sync failed: {e}"));
+    }
+    info!(target: "alpen-client", component = "alpen", "chainstate sync completed successfully");
+
+    // The preconf handles are cloned rather than moved because the sequencer
+    // services below need them too; the extra clones live as long as this
+    // function, which runs for the whole node lifetime either way.
+    SharedTasks {
+        provider: node.provider.clone(),
+        task_executor: node.task_executor.clone(),
+        beacon_engine_handle: node.beacon_engine_handle.clone(),
+        consensus_watcher,
+        preconf_rx: preconf_rx.clone(),
+        preconf_tx: preconf_tx.clone(),
+        gossip_rx,
+        // The sequencer's gossip pubkey is *derived* from its private key,
+        // not taken as separate config. Contrast `GossipConfig::full_node`,
+        // which is told the pubkey.
+        gossip_config: GossipConfig::sequencer(privkey)?,
+    }
+    .spawn();
+
+    start_services(
+        &common,
+        mode,
+        privkey,
+        &sequencer_dbs,
+        RethNodeParts {
+            node_provider: node.provider.clone(),
+            task_executor: node.task_executor.clone(),
+            payload_builder_handle: node.payload_builder_handle.clone(),
+            beacon_engine_handle: node.beacon_engine_handle.clone(),
+            preconf_tx,
+            preconf_rx,
+        },
+    )
+    .await?;
+
+    common.run_until_exit(handle.node_exit_future).await
+}
+
 /// Launches every service that only runs in sequencer mode: the exec chain /
 /// OL chain tracker, the DA (btcio) pipeline, the EE chunk + acct provers,
 /// and the batch/chunk builder services.
 ///
-/// Takes the shared node bootstrap and the whole client config, and pulls
-/// what it needs out of them itself. It also resolves the btcio writer
-/// config, block-builder config, boot state, and the DA reveal signing key,
-/// so callers only need to know that a node exists and that it is running as
-/// a sequencer.
-pub(crate) async fn launch<P>(
+/// Resolves the btcio writer config, block-builder config, and boot state
+/// itself, so [`run`] only has to hand over what came from bootstrap and
+/// from the launched node.
+async fn start_services<P>(
     common: &NodeBootstrap,
-    alpen_config: &AlpenClientConfig,
+    mode: &SequencerMode,
+    privkey: Buf32,
+    sequencer_dbs: &SequencerDatabases,
     node_parts: RethNodeParts<P>,
 ) -> eyre::Result<()>
 where
@@ -218,20 +402,18 @@ where
         preconf_rx,
     } = node_parts;
 
-    // `node::run_node` only calls this in sequencer mode, so the other arm is
-    // a caller bug rather than a config problem.
-    let NodeMode::Sequencer(sequencer_mode) = &alpen_config.mode else {
-        eyre::bail!("sequencer::launch called on a node that is not a sequencer");
-    };
-    let sequencer_config = &sequencer_mode.config;
+    let sequencer_config = &mode.config;
 
     let NodeBootstrap {
-        service_executor,
-        dbs,
         storage,
-        ol_client,
         params,
         ol_tracker,
+        sequencer:
+            BootstrapResources {
+                service_executor,
+                ol_client,
+                ..
+            },
         ..
     } = common;
     let consensus_watcher = ol_tracker.consensus_watcher();
@@ -249,13 +431,7 @@ where
     let block_builder_config =
         BlockBuilderConfig::default().with_blocktime_ms(sequencer_config.blocktime_ms);
 
-    // Reads `SEQUENCER_PRIVATE_KEY` here rather than taking it from the
-    // caller, which already read it to derive the gossip pubkey and failed
-    // startup if it was missing or malformed — so this read cannot be the
-    // first to fail. Keeping the two independent means splitting DA reveal
-    // signing from gossip signing (see the note in `node.rs`) stays a local
-    // change at each site.
-    let sequencer_keypair = sequencer_bitcoin_keypair(&sequencer_privkey_from_env()?)?;
+    let sequencer_keypair = sequencer_bitcoin_keypair(&privkey)?;
 
     let SequencerBootState {
         ol_chain_tracker: ol_chain_tracker_state,
@@ -325,9 +501,9 @@ where
         &task_executor,
         da_pipeline::DaPipelineInputs {
             bitcoind: &sequencer_config.bitcoind,
-            l1_reorg_safe_depth: sequencer_mode.l1_reorg_safe_depth,
-            genesis_l1_height: sequencer_mode.genesis_l1_height,
-            dbs,
+            l1_reorg_safe_depth: mode.l1_reorg_safe_depth,
+            genesis_l1_height: mode.genesis_l1_height,
+            dbs: sequencer_dbs,
             storage: storage.clone(),
             node_provider: node_provider.clone(),
             params: params.clone(),
@@ -339,7 +515,7 @@ where
 
     let batch_prover = provers::launch(
         service_executor,
-        dbs,
+        sequencer_dbs,
         ol_client.as_ref(),
         provers::EeProverInputs {
             storage: storage.clone(),
