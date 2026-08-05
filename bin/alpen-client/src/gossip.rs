@@ -17,6 +17,9 @@ use tokio::{
 };
 use tracing::{debug, error, info, warn};
 
+#[cfg(feature = "sequencer")]
+use crate::sequencer::sequencer_gossip_pubkey;
+
 /// Configuration for the gossip task.
 ///
 /// A full node only ever validates incoming gossip against a known
@@ -26,7 +29,9 @@ use tracing::{debug, error, info, warn};
 /// unrepresentable rather than a runtime check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum GossipConfig {
-    FullNode { sequencer_pubkey: Buf32 },
+    FullNode {
+        sequencer_pubkey: Buf32,
+    },
     Sequencer {
         sequencer_pubkey: Buf32,
         sequencer_privkey: Buf32,
@@ -34,11 +39,31 @@ pub(crate) enum GossipConfig {
 }
 
 impl GossipConfig {
+    /// Builds [`GossipConfig::FullNode`].
+    pub(crate) fn full_node(sequencer_pubkey: Buf32) -> Self {
+        Self::FullNode { sequencer_pubkey }
+    }
+
+    /// Builds [`GossipConfig::Sequencer`], deriving the pubkey from the key
+    /// that will sign outgoing gossip.
+    ///
+    /// Taking only the private key is what keeps the two halves in step — a
+    /// caller passing both could pass a pubkey from a different key, and the
+    /// node would then sign packages that every peer rejects.
+    #[cfg(feature = "sequencer")]
+    pub(crate) fn sequencer(sequencer_privkey: Buf32) -> eyre::Result<Self> {
+        Ok(Self::Sequencer {
+            sequencer_pubkey: sequencer_gossip_pubkey(&sequencer_privkey)?,
+            sequencer_privkey,
+        })
+    }
+
     fn sequencer_pubkey(&self) -> Buf32 {
         match self {
-            Self::FullNode { sequencer_pubkey } | Self::Sequencer { sequencer_pubkey, .. } => {
-                *sequencer_pubkey
-            }
+            Self::FullNode { sequencer_pubkey }
+            | Self::Sequencer {
+                sequencer_pubkey, ..
+            } => *sequencer_pubkey,
         }
     }
 }

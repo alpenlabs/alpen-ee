@@ -40,7 +40,6 @@ pub(crate) struct DaPipelineInputs<'a, P> {
     pub(crate) l1_reorg_safe_depth: u32,
     pub(crate) genesis_l1_height: L1Height,
     pub(crate) dbs: &'a EeDatabases,
-    pub(crate) db_handle: Handle,
     pub(crate) storage: Arc<EeNodeStorage>,
     pub(crate) node_provider: P,
     pub(crate) params: Arc<AlpenParams>,
@@ -72,7 +71,6 @@ where
         l1_reorg_safe_depth,
         genesis_l1_height,
         dbs,
-        db_handle,
         storage,
         node_provider,
         params,
@@ -125,7 +123,9 @@ where
         .await
         .map_err(|e| eyre::eyre!("failed to get sequencer address: {e}"))?;
 
-    // Wrap raw DBs in ops using the shared runtime handle.
+    // Wrap raw DBs in ops using the runtime this task is already running on,
+    // the same one `node::bootstrap_node` builds the node storage against.
+    let db_handle = Handle::current();
     let broadcast_ops = Arc::new(dbs.broadcast_ops(db_handle.clone()));
     let envelope_ops = Arc::new(dbs.chunked_envelope_ops(db_handle));
 

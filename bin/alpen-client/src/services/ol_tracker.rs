@@ -18,6 +18,13 @@ const DEFAULT_POLL_WAIT_MS: u64 = 1_000;
 /// Handle for accessing OL tracker state updates.
 #[derive(Debug)]
 pub(crate) struct OLTrackerHandle {
+    #[cfg_attr(
+        not(feature = "sequencer"),
+        expect(
+            dead_code,
+            reason = "only read by ol_status_watcher, which is sequencer-only"
+        )
+    )]
     ol_status_rx: watch::Receiver<OLFinalizedStatus>,
     consensus_rx: watch::Receiver<ConsensusHeads>,
     monitor: ServiceMonitor<OLTrackerStatus>,
@@ -26,6 +33,10 @@ pub(crate) struct OLTrackerHandle {
 
 impl OLTrackerHandle {
     /// Returns a watcher for OL finalized status updates.
+    #[cfg_attr(
+        not(feature = "sequencer"),
+        expect(dead_code, reason = "only sequencer::launch calls this")
+    )]
     pub(crate) fn ol_status_watcher(&self) -> watch::Receiver<OLFinalizedStatus> {
         self.ol_status_rx.clone()
     }

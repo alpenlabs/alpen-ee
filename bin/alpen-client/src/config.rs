@@ -160,18 +160,25 @@ pub(crate) enum OlSource {
     },
 }
 
-/// The resolved runtime representation — not "the" runtime config in the
-/// `AlpenEeConfig` sense, just the primitives `AlpenEeConfig::new(...)` needs
-/// (params comes from the separate `--alpen-params` flag) plus the binary's
-/// own control flow. Plain struct, no Serde derive: `AlpenClientConfigFile`
-/// is the only type that round-trips through TOML.
+/// The resolved runtime representation the rest of the binary uses (params
+/// comes from the separate `--alpen-params` flag). Plain struct, no Serde
+/// derive: `AlpenClientConfigFile` is the only type that round-trips through
+/// TOML.
 #[derive(Debug)]
 pub(crate) struct AlpenClientConfig {
     pub(crate) health_check_host: String,
     pub(crate) health_check_port: u16,
     pub(crate) db_retry_count: u16,
     pub(crate) ol: OlConfig,
+    #[cfg_attr(
+        not(feature = "sequencer"),
+        expect(dead_code, reason = "only read by sequencer::launch")
+    )]
     pub(crate) l1_reorg_safe_depth: u32,
+    #[cfg_attr(
+        not(feature = "sequencer"),
+        expect(dead_code, reason = "only read by sequencer::launch")
+    )]
     pub(crate) genesis_l1_height: L1Height,
     pub(crate) mode: NodeMode,
 }
@@ -257,7 +264,10 @@ impl SequencerConfig {
     /// Needs the `AlpenParams` artifact (loaded from the separate
     /// `--alpen-params` flag), so it can't be checked during TOML
     /// deserialization — called once from `node::launch` instead.
-    pub(crate) fn validate_against_params(&self, params: &AlpenParams) -> eyre::Result<()> {
+    pub(crate) fn validate_chunk_sealing_gas_limit(
+        &self,
+        params: &AlpenParams,
+    ) -> eyre::Result<()> {
         let Some(configured) = self.chunk_sealing_gas_limit else {
             return Ok(());
         };
@@ -310,8 +320,12 @@ impl TryFrom<AlpenClientConfigFile> for AlpenClientConfig {
         // slim (non-`sequencer`) build `mode` can only ever be `FullNode`, so the check is
         // moot there — `NodeMode::Sequencer` isn't even nameable in that build.
         #[cfg(feature = "sequencer")]
-        if let (NodeMode::Sequencer(_), OlSource::Rpc { submit_url: None, .. }) =
-            (&mode, &raw.ol.source)
+        if let (
+            NodeMode::Sequencer(_),
+            OlSource::Rpc {
+                submit_url: None, ..
+            },
+        ) = (&mode, &raw.ol.source)
         {
             eyre::bail!(
                 "ol.submit_url is required when mode = \"sequencer\" unless ol.source = \"dummy\""

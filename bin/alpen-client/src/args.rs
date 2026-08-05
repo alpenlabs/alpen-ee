@@ -124,7 +124,9 @@ pub(crate) fn sequencer_privkey_from_env() -> eyre::Result<Buf32> {
 /// field (see `crate::config::OlSource::Rpc`'s doc comment).
 pub(crate) fn ol_submit_bearer_token_from_env() -> eyre::Result<String> {
     env::var("STRATA_SUBMIT_RPC_TOKEN").map_err(|_| {
-        eyre::eyre!("STRATA_SUBMIT_RPC_TOKEN environment variable is required when ol.submit_url is set")
+        eyre::eyre!(
+            "STRATA_SUBMIT_RPC_TOKEN environment variable is required when ol.submit_url is set"
+        )
     })
 }
 
@@ -163,8 +165,10 @@ mod tests {
     fn base_argv<'a>(args: &[&'a str]) -> Vec<&'a str> {
         let params_fixture: &'static str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/tests/res/alpen-params.json");
-        let config_fixture: &'static str =
-            concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/config.full_node.toml");
+        let config_fixture: &'static str = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/testdata/config.full_node.toml"
+        );
         let mut argv = vec![
             "alpen-client",
             "--alpen-params",
