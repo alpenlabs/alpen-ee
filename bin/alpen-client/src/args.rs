@@ -106,8 +106,9 @@ impl DisplayArgs {
 
 /// Reads `SEQUENCER_PRIVATE_KEY`, required when running with sequencer mode.
 ///
-/// Read exactly once per startup, at the top of [`crate::sequencer::run`],
-/// which passes the key on to everything that needs it.
+/// Read exactly once per startup in [`crate::node::launch`], before common
+/// bootstrap performs any network or database work. The parsed key is then
+/// passed on to everything that needs it.
 #[cfg(feature = "sequencer")]
 pub(crate) fn sequencer_privkey_from_env() -> eyre::Result<Buf32> {
     let privkey_str = env::var("SEQUENCER_PRIVATE_KEY").map_err(|_| {

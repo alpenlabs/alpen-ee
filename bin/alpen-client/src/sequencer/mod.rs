@@ -63,7 +63,6 @@ use tracing::{error, info, info_span, Instrument};
 
 use self::{gas_data_provider::RethGasDataProvider, payload_builder::AlpenRethPayloadEngine};
 use crate::{
-    args::sequencer_privkey_from_env,
     config::SequencerMode,
     gossip::GossipConfig,
     node::{LaunchedNode, NodeBootstrap},
@@ -205,14 +204,8 @@ pub(crate) async fn run(
     builder: WithLaunchContext<NodeBuilder<Arc<reth_db::DatabaseEnv>, ChainSpec>>,
     common: NodeBootstrap,
     mode: &SequencerMode,
+    privkey: Buf32,
 ) -> eyre::Result<()> {
-    // NOTE: ATM we reuse `SEQUENCER_PRIVATE_KEY` for both gossip package
-    // signing and EE DA reveal tapscript signing. That is operationally
-    // convenient for now, but it couples network identity with Bitcoin DA
-    // spend authority. Should we split this into a dedicated DA reveal
-    // signing key/config?
-    let privkey = sequencer_privkey_from_env()?;
-
     // Creating these also creates their sled trees, which is why it happens
     // here and not in bootstrap: a full node should never materialize them.
     let sequencer_dbs = common

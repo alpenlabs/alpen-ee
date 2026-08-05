@@ -42,7 +42,7 @@ use tokio::{
 use tracing::{info, info_span, Instrument};
 
 #[cfg(feature = "sequencer")]
-use crate::sequencer;
+use crate::{args::sequencer_privkey_from_env, sequencer};
 use crate::{
     args::{ol_submit_bearer_token_from_env, AdditionalConfig},
     config::{AlpenClientConfig, NodeMode, OlSource},
@@ -72,6 +72,22 @@ pub(crate) async fn launch(
         "Starting EE Node",
     );
 
+    // NOTE: ATM we reuse `SEQUENCER_PRIVATE_KEY` for both gossip package
+    // signing and EE DA reveal tapscript signing. That is operationally
+    // convenient for now, but it couples network identity with Bitcoin DA
+    // spend authority. Should we split this into a dedicated DA reveal
+    // signing key/config?
+    //
+    // Resolve the sequencer identity before bootstrap connects to OL, opens
+    // Sled, initializes genesis state, or starts the OL tracker. A missing or
+    // malformed key is a configuration error and must not perform stateful
+    // startup work first.
+    #[cfg(feature = "sequencer")]
+    let sequencer_privkey = match &alpen_config.mode {
+        NodeMode::FullNode(_) => None,
+        NodeMode::Sequencer(_) => Some(sequencer_privkey_from_env()?),
+    };
+
     let common = bootstrap_node(&builder, &alpen_config, &params).await?;
 
     match &alpen_config.mode {
@@ -80,7 +96,9 @@ pub(crate) async fn launch(
         }
         #[cfg(feature = "sequencer")]
         NodeMode::Sequencer(sequencer_mode) => {
-            sequencer::run(builder, common, sequencer_mode).await
+            let privkey = sequencer_privkey
+                .expect("sequencer key was resolved before bootstrap for sequencer mode");
+            sequencer::run(builder, common, sequencer_mode, privkey).await
         }
     }
 }
