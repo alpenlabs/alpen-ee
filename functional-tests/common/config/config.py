@@ -182,9 +182,9 @@ class AlpenClientConfig:
     genesis_l1_height: int = field(default=0)
 
     def as_toml_string(self) -> str:
-        d = asdict(self)
-        d = {k: v for k, v in d.items() if v is not None}
-        return toml.dumps(d)
+        # `toml.dumps` skips `None` values at every level, so unset optional
+        # fields drop out on their own and Rust sees them as absent.
+        return toml.dumps(asdict(self))
 
 
 @dataclass
