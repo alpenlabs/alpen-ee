@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use alpen_ee_da_provider::{ChunkedEnvelopeDaProvider, DaBlobSource, StateDiffBlobProvider};
-use alpen_ee_database::{EeDatabases, EeNodeStorage};
+use alpen_ee_database::{EeNodeStorage, SequencerDatabases};
 use alpen_ee_params::AlpenParams;
 use bitcoind_async_client::{
     corepc_types::bitcoin::key::Keypair,
@@ -39,7 +39,7 @@ pub(crate) struct DaPipelineInputs<'a, P> {
     /// doc comment for why these come from outside `SequencerConfig`.
     pub(crate) l1_reorg_safe_depth: u32,
     pub(crate) genesis_l1_height: L1Height,
-    pub(crate) dbs: &'a EeDatabases,
+    pub(crate) dbs: &'a SequencerDatabases,
     pub(crate) storage: Arc<EeNodeStorage>,
     pub(crate) node_provider: P,
     pub(crate) params: Arc<AlpenParams>,

@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use alpen_ee_common::{chain_status_checked, BlockNumHash, OLClient};
-use alpen_ee_database::{init_db_storage, EeDatabases, EeNodeStorage};
+use alpen_ee_database::{open_ee_db, EeNodeStorage, SequencerDatabases};
 #[cfg(feature = "sequencer")]
 use alpen_ee_engine::sync_chainstate_to_engine;
 use alpen_ee_engine::{create_engine_control_task, AlpenRethExecEngine};
@@ -103,7 +103,7 @@ pub(crate) struct NodeBootstrap {
     health_check_state: HealthCheckState,
     _health_check_handle: ServerHandle,
     pub(crate) params: Arc<AlpenParams>,
-    pub(crate) dbs: EeDatabases,
+    pub(crate) dbs: SequencerDatabases,
     pub(crate) storage: Arc<EeNodeStorage>,
     pub(crate) ol_client: Arc<OLClientKind>,
     genesis_epoch: EpochCommitment,
@@ -134,10 +134,17 @@ async fn bootstrap_node(
 
     // --- INITIALIZE STATE ---
 
-    let dbs = init_db_storage(&datadir, alpen_config.db_retry_count)
+    let db = open_ee_db(&datadir, alpen_config.db_retry_count)
         .context("failed to load alpen database")?;
 
-    let storage: Arc<_> = dbs.node_storage(Handle::current()).into();
+    let storage: Arc<_> = db
+        .node_storage(Handle::current())
+        .context("failed to open EE node storage")?
+        .into();
+
+    let dbs = db
+        .sequencer_databases()
+        .context("failed to open sequencer databases")?;
 
     ensure_genesis_ee_account_state(params.as_ref(), &genesis_epoch, storage.as_ref())
         .instrument(info_span!("ensure_genesis", component = "alpen"))
