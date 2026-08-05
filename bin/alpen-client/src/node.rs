@@ -74,15 +74,6 @@ pub(crate) async fn launch(
         "Starting EE Node",
     );
 
-    // Pure function of the already-parsed config and the Alpen params
-    // artifact, so it runs before any DB, OL, or reth node startup work: a
-    // config mistake should fail immediately, not deep inside sequencer
-    // startup after stateful work has already happened.
-    #[cfg(feature = "sequencer")]
-    if let NodeMode::Sequencer(seq_config) = &alpen_config.mode {
-        seq_config.validate_chunk_sealing_gas_limit(params.as_ref())?;
-    }
-
     let common = bootstrap_node(&builder, &alpen_config, &params).await?;
     let mode_setup = resolve_mode_setup(&alpen_config.mode, &common).await?;
 

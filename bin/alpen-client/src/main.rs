@@ -78,13 +78,19 @@ where
 {
     // Sequencer-mode-without-the-feature and blocktime validation both already
     // happened during `AlpenClientConfig::from_toml_str` (config-parse time),
-    // before this point. The `sp1`-feature check below is the one that stays
-    // here: it's not about whether the config is internally valid, it's about
-    // whether this compiled binary (an `sp1`-feature question, orthogonal to
-    // `sequencer`) can satisfy what the config asks for.
+    // before this point. The two checks below are the ones that can't: both
+    // need something the config file alone doesn't carry — the params
+    // artifact, and which features this binary was built with.
     #[cfg(feature = "sequencer")]
     if let NodeMode::Sequencer(seq) = &command.ext.alpen_config.mode {
-        if !seq.dev_native_prover && !cfg!(feature = "sp1") {
+        // Pure function of the already-parsed config and the Alpen params
+        // artifact, so it runs before any DB, OL, or node startup work: a
+        // config mistake should fail immediately, not deep inside sequencer
+        // startup after stateful work has already happened.
+        seq.config
+            .validate_chunk_sealing_gas_limit(&command.ext.alpen_params)?;
+
+        if !seq.config.dev_native_prover && !cfg!(feature = "sp1") {
             error!(
                 target: "alpen-client",
                 component = "alpen",

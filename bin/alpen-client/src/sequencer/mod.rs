@@ -220,9 +220,10 @@ where
 
     // `node::run_node` only calls this in sequencer mode, so the other arm is
     // a caller bug rather than a config problem.
-    let NodeMode::Sequencer(sequencer_config) = &alpen_config.mode else {
+    let NodeMode::Sequencer(sequencer_mode) = &alpen_config.mode else {
         eyre::bail!("sequencer::launch called on a node that is not a sequencer");
     };
+    let sequencer_config = &sequencer_mode.config;
 
     let NodeBootstrap {
         service_executor,
@@ -324,8 +325,8 @@ where
         &task_executor,
         da_pipeline::DaPipelineInputs {
             bitcoind: &sequencer_config.bitcoind,
-            l1_reorg_safe_depth: alpen_config.l1_reorg_safe_depth,
-            genesis_l1_height: alpen_config.genesis_l1_height,
+            l1_reorg_safe_depth: sequencer_mode.l1_reorg_safe_depth,
+            genesis_l1_height: sequencer_mode.genesis_l1_height,
             dbs,
             storage: storage.clone(),
             node_provider: node_provider.clone(),

@@ -9,6 +9,7 @@
 
 use alloy_primitives::{address, Address};
 use alpen_ee_ol_tracker::EpochTrackingMode;
+#[cfg(feature = "sequencer")]
 use alpen_ee_params::AlpenParams;
 use serde::{de::Error as DeError, Deserialize, Deserializer, Serialize};
 use strata_config::{btcio::L1FeePolicyConfig, BitcoindConfig};
@@ -170,16 +171,6 @@ pub(crate) struct AlpenClientConfig {
     pub(crate) health_check_port: u16,
     pub(crate) db_retry_count: u16,
     pub(crate) ol: OlConfig,
-    #[cfg_attr(
-        not(feature = "sequencer"),
-        expect(dead_code, reason = "only read by sequencer::launch")
-    )]
-    pub(crate) l1_reorg_safe_depth: u32,
-    #[cfg_attr(
-        not(feature = "sequencer"),
-        expect(dead_code, reason = "only read by sequencer::launch")
-    )]
-    pub(crate) genesis_l1_height: L1Height,
     pub(crate) mode: NodeMode,
 }
 
@@ -187,7 +178,23 @@ pub(crate) struct AlpenClientConfig {
 pub(crate) enum NodeMode {
     FullNode(FullNodeConfig),
     #[cfg(feature = "sequencer")]
-    Sequencer(SequencerConfig),
+    Sequencer(SequencerMode),
+}
+
+/// Everything the sequencer path reads out of config.
+///
+/// The `[sequencer]` table plus the two top-level L1 keys that only the
+/// sequencer's DA pipeline consumes. They stay top-level in the TOML file
+/// (see [`AlpenClientConfigFile`]) because they describe the rollup's
+/// relationship to L1 rather than an operator preference, but nothing on the
+/// full-node path reads them, so the runtime config keeps them here instead
+/// of on [`AlpenClientConfig`].
+#[cfg(feature = "sequencer")]
+#[derive(Debug)]
+pub(crate) struct SequencerMode {
+    pub(crate) config: SequencerConfig,
+    pub(crate) l1_reorg_safe_depth: u32,
+    pub(crate) genesis_l1_height: L1Height,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -208,14 +215,12 @@ pub(crate) struct FullNodeConfig {
     pub(crate) sequencer_http_url: Option<String>,
 }
 
-// Exists at all only when the `sequencer` feature is compiled in — gated once, on the enum
-// variant holding it (`NodeMode::Sequencer` above), not per-field or on this struct itself.
-// The struct *definition* stays unconditional: `AlpenClientConfigFile.sequencer:
-// Option<SequencerConfig>` has to be nameable in every build the same way `BitcoindConfig`/
-// `L1FeePolicyConfig` do, and gating individual fields is backwards anyway — `main.rs`
-// already hard-bails at startup on `mode = "sequencer"` in a slim build, so a slim build can
-// parse-and-reject the `[sequencer]` table but never construct a live `NodeMode::Sequencer(_)`
-// — the type existing latently, unused, costs nothing.
+// Reachable at runtime only when the `sequencer` feature is compiled in — gated once, on
+// [`SequencerMode`] above, not per-field or on this struct itself. The struct *definition*
+// stays unconditional: `AlpenClientConfigFile.sequencer: Option<SequencerConfig>` has to be
+// nameable in every build the same way `BitcoindConfig`/`L1FeePolicyConfig` do. A slim build
+// can therefore parse-and-reject the `[sequencer]` table but never construct a live
+// `NodeMode::Sequencer(_)` — the type existing latently costs nothing.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct SequencerConfig {
     #[serde(default = "default_beneficiary_address")]
@@ -248,6 +253,9 @@ pub(crate) struct SequencerConfig {
     pub(crate) l1_fee_policy: L1FeePolicyConfig,
 }
 
+// Only the sequencer path calls these; the struct itself still has to exist
+// in every build so `AlpenClientConfigFile` can name it (see above).
+#[cfg(feature = "sequencer")]
 impl SequencerConfig {
     pub(crate) fn chunk_sealing_block_count(&self) -> u64 {
         self.chunk_sealing_block_count
@@ -309,7 +317,11 @@ impl TryFrom<AlpenClientConfigFile> for AlpenClientConfig {
                     let seq = raw.sequencer.ok_or_else(|| {
                         eyre::eyre!("[sequencer] table required when mode = \"sequencer\"")
                     })?;
-                    NodeMode::Sequencer(seq)
+                    NodeMode::Sequencer(SequencerMode {
+                        config: seq,
+                        l1_reorg_safe_depth: raw.l1_reorg_safe_depth,
+                        genesis_l1_height: raw.genesis_l1_height,
+                    })
                 }
             }
         };
@@ -337,8 +349,6 @@ impl TryFrom<AlpenClientConfigFile> for AlpenClientConfig {
             health_check_port: raw.health_check_port,
             db_retry_count: raw.db_retry_count,
             ol: raw.ol,
-            l1_reorg_safe_depth: raw.l1_reorg_safe_depth,
-            genesis_l1_height: raw.genesis_l1_height,
             mode,
         })
     }
@@ -427,9 +437,9 @@ mod tests {
         let NodeMode::Sequencer(seq) = &config.mode else {
             panic!("expected sequencer mode");
         };
-        assert_eq!(seq.blocktime_ms, 5_000);
-        assert_eq!(seq.batch_sealing_block_count, 100);
-        assert_eq!(seq.chunk_sealing_block_count(), 100);
+        assert_eq!(seq.config.blocktime_ms, 5_000);
+        assert_eq!(seq.config.batch_sealing_block_count, 100);
+        assert_eq!(seq.config.chunk_sealing_block_count(), 100);
     }
 
     #[test]
