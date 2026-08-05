@@ -19,6 +19,10 @@ services:
       - --nat
       - none
       - --disable-discovery
+      # admin is what the peering checks in operations.md use
+      # (admin_nodeInfo, admin_peers, admin_addPeer).
+      - --http.api
+      - eth,net,web3,txpool,admin,debug
       - --color
       - never
     environment:
@@ -51,6 +55,9 @@ services:
       - --disable-discovery
       - --trusted-peers
       - enode://${SEQ_P2P_PUBKEY}@alpen-client:30303
+      # See the note on the other service.
+      - --http.api
+      - eth,net,web3,txpool,admin,debug
       - --color
       - never
     environment:

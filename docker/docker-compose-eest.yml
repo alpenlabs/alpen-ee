@@ -49,6 +49,10 @@ services:
       - --nat
       - none
       - --disable-discovery
+      # Beyond the entrypoint's default module set: the spec tests poke at
+      # debug endpoints, admin is there for peer inspection.
+      - --http.api
+      - eth,net,web3,txpool,admin,debug
       - --color
       - never
     environment:

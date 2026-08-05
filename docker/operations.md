@@ -74,7 +74,7 @@ Environment variables the entrypoint reads:
 | `ALPEN_CONFIG_PATH` | `/app/configs/alpen-config.toml` |
 | `ALPEN_PARAMS_PATH` | `/app/configs/generated/alpen-params.json` |
 | `DATADIR` | `/app/data` |
-| `HTTP_PORT` / `HTTP_API` | `8545` / `eth,net,web3,txpool,admin,debug` |
+| `HTTP_PORT` / `HTTP_API` | `8545` / `eth,net,web3,txpool` |
 | `WS_PORT` / `WS_API` | `8546` / `eth,net,web3,txpool` |
 | `AUTHRPC_PORT` / `JWT_SECRET` | `8551` / `/app/keys/jwt.hex` |
 | `TXPOOL_MIN_PROTOCOL_FEE` | `0` |
