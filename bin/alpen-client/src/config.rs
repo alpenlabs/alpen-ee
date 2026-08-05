@@ -248,12 +248,7 @@ pub(crate) struct SequencerConfig {
     /// the prover code that uses it, not eagerly here.
     pub(crate) sp1_proof_deadline_secs: Option<u64>,
     /// `[sequencer.bitcoind]` — reused verbatim from `strata_config`.
-    // TODO: `rpc_user`/`rpc_password` are credentials sitting in a config file, unlike
-    // `SEQUENCER_PRIVATE_KEY`/`STRATA_SUBMIT_RPC_TOKEN`, which are env-only for exactly that
-    // reason. Not fixed here because `BitcoindConfig` is shared with the strata OL node, which
-    // reads the same fields from its own TOML — changing it on one side only would mean the
-    // same credentials get configured two different ways. Fix it in both binaries at once, and
-    // prefer bitcoind's cookie-file auth over adding more env vars.
+    // TODO(STR-4177): stop configuring `rpc_user`/`rpc_password` as plaintext TOML fields.
     pub(crate) bitcoind: BitcoindConfig,
     /// `[sequencer.l1_fee_policy]` — reused verbatim from `strata_config::btcio`.
     pub(crate) l1_fee_policy: L1FeePolicyConfig,
