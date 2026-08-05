@@ -1,3 +1,4 @@
+use alpen_reth_evm::evm::AlpenEvmFactory;
 use alpen_reth_rpc::{eth::AlpenEthApiBuilder, SequencerClient};
 use reth_chainspec::ChainSpec;
 use reth_evm::{ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes};
@@ -19,21 +20,67 @@ use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use revm::context::TxEnv;
 
 use crate::{
-    args::AlpenNodeArgs, engine::AlpenEngineValidatorBuilder, evm::AlpenExecutorBuilder,
+    engine::AlpenEngineValidatorBuilder, evm::AlpenExecutorBuilder,
     payload_builder::AlpenPayloadBuilderBuilder, pool::AlpenEthereumPoolBuilder, AlpenEngineTypes,
 };
 
-#[derive(Debug, Clone, Default)]
+/// Which role the node plays on the network.
+///
+/// The only thing the role changes about the reth node itself is whether
+/// submitted transactions are forwarded, so the forwarding target lives on the
+/// variant that can have one. A sequencer with a forwarding target is then not
+/// expressible.
+#[derive(Debug, Clone)]
+pub enum AlpenNodeMode {
+    /// Builds blocks itself, so it never forwards. It is what full nodes
+    /// forward to.
+    Sequencer,
+    /// Forwards `eth_sendRawTransaction` to the sequencer.
+    ///
+    /// `sequencer_http` is genuinely optional. Without it the node still serves
+    /// reads and follows the chain over gossip and reth P2P, it just can't
+    /// accept transaction submissions.
+    FullNode { sequencer_http: Option<String> },
+}
+
+impl AlpenNodeMode {
+    /// Builds [`AlpenNodeMode::Sequencer`].
+    pub fn sequencer() -> Self {
+        Self::Sequencer
+    }
+
+    /// Builds [`AlpenNodeMode::FullNode`].
+    pub fn full_node(sequencer_http: Option<String>) -> Self {
+        Self::FullNode { sequencer_http }
+    }
+
+    /// The URL that submitted transactions are forwarded to, if any.
+    fn forward_target(&self) -> Option<String> {
+        match self {
+            Self::Sequencer => None,
+            Self::FullNode { sequencer_http } => sequencer_http.clone(),
+        }
+    }
+}
+
+/// The Alpen EE node type.
+///
+/// Reth builds components and add-ons from `&self` once the node value has been
+/// handed to its builder, so anything they need has to be resolved up front and
+/// stored here.
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct AlpenEthereumNode {
-    // Strata node args.
-    pub args: AlpenNodeArgs,
+    /// Carries the bridge params the Alpen precompiles validate against. Has to
+    /// match what the provers build from the same params, otherwise a block
+    /// executes one way on the node and another way in its proof.
+    evm_factory: AlpenEvmFactory,
+    mode: AlpenNodeMode,
 }
 
 impl AlpenEthereumNode {
-    /// Creates a new instance of the StrataEthereum node type.
-    pub fn new(args: AlpenNodeArgs) -> Self {
-        Self { args }
+    pub fn new(evm_factory: AlpenEvmFactory, mode: AlpenNodeMode) -> Self {
+        Self { evm_factory, mode }
     }
 }
 
@@ -74,7 +121,7 @@ where
         ComponentsBuilder::default()
             .node_types::<N>()
             .pool(AlpenEthereumPoolBuilder::default())
-            .executor(AlpenExecutorBuilder::new(self.args.evm_factory.clone()))
+            .executor(AlpenExecutorBuilder::new(self.evm_factory.clone()))
             .payload(BasicPayloadServiceBuilder::default())
             .network(EthereumNetworkBuilder::default())
             .consensus(EthereumConsensusBuilder::default())
@@ -82,7 +129,7 @@ where
 
     fn add_ons(&self) -> Self::AddOns {
         Self::AddOns::builder()
-            .with_sequencer(self.args.sequencer_http.clone())
+            .with_sequencer(self.mode.forward_target())
             .build()
     }
 }

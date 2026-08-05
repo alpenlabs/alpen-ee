@@ -20,7 +20,7 @@ use alpen_reth_evm::evm::AlpenEvmFactory;
 #[cfg(feature = "sequencer")]
 use alpen_reth_exex::{AccessedStateGenerator, StateDiffGenerator};
 use alpen_reth_node::{
-    args::AlpenNodeArgs, AlpenEthereumNode, AlpenGossipProtocolHandler, AlpenGossipState,
+    AlpenEthereumNode, AlpenGossipProtocolHandler, AlpenGossipState, AlpenNodeMode,
 };
 use eyre::Context;
 use jsonrpsee::server::ServerHandle;
@@ -221,16 +221,17 @@ pub(crate) async fn launch(
     .map_err(|e| eyre::eyre!("failed to start ol tracker service: {e}"))?;
 
     let evm_factory = AlpenEvmFactory::from_bridge_params(&bridge_params);
-    let node_args = AlpenNodeArgs {
-        sequencer_http: sequencer_http_url,
-        evm_factory,
+    let node_mode = match &alpen_config.mode {
+        NodeMode::FullNode(fc) => AlpenNodeMode::full_node(fc.sequencer_http_url.clone()),
+        #[cfg(feature = "sequencer")]
+        NodeMode::Sequencer(_) => AlpenNodeMode::sequencer(),
     };
 
     let consensus_watcher = ol_tracker.consensus_watcher();
     let status_watcher = ol_tracker.ol_status_watcher();
 
     let mut node_builder = builder
-            .node(AlpenEthereumNode::new(node_args))
+            .node(AlpenEthereumNode::new(evm_factory, node_mode))
             // Register Alpen gossip RLPx subprotocol
             .on_component_initialized({
                 let gossip_tx = gossip_tx.clone();
