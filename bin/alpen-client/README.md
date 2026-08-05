@@ -434,8 +434,8 @@ DA and proof failures are non-fatal; the task retries on each poll.
 - **Account (batch) proof** — consumes the batch's chunk receipts plus the prior batch's end state and a DA witness, producing the outer proof submitted to OL.
 
 **Backends**:
-- **SP1 remote** — production (`sp1` feature; deadline via `--sp1-proof-deadline-secs`)
-- **Native** — dev/test only (`--dev-native-prover`), skips real Groth16 proving and compiled guest ELFs
+- **SP1 remote** — production (`sp1` feature; deadline via `sequencer.sp1_proof_deadline_secs`)
+- **Native** — dev/test only (`sequencer.dev_native_prover`), skips real Groth16 proving and compiled guest ELFs
 
 Proofs and prover tasks live in a dedicated SledDB instance, separate from OL storage.
 
