@@ -9,8 +9,8 @@
 //! The builder chain isn't shared because reth's builder changes generic type
 //! at `.node(...)`, so a helper taking or returning it would have to name
 //! those deeply generic types. Everything that runs *after* launch is shared
-//! instead, via [`SharedTasks`] and [`NodeBootstrap::run_until_exit`], both of
-//! which take the node's handles individually.
+//! instead, via [`LaunchedNode`] and [`NodeBootstrap::run_until_exit`], both
+//! of which take the node's handles individually.
 
 use std::{future::Future, sync::Arc};
 
@@ -195,43 +195,55 @@ async fn bootstrap_node(
     })
 }
 
-/// The handles the shared post-launch tasks need from a launched reth node.
+/// The handles a launched reth node hands back to Alpen code.
 ///
 /// Grouped into a struct because the launched node's own type is too generic
-/// to hand across a function boundary — the same reason
-/// [`sequencer::RethNodeParts`] exists.
-pub(crate) struct SharedTasks<N: NodeTypesWithDB + ProviderNodeTypes> {
+/// to pass across a function boundary, and because both the shared tasks
+/// below and (on a sequencer) `sequencer::start_services` want the same set.
+/// Every field is read by [`Self::spawn_shared_tasks`], so both modes use all
+/// of them.
+///
+/// The one handle deliberately left out is the payload builder: only the
+/// sequencer's payload engine touches it, so it travels as its own argument
+/// rather than as a field nothing on the full-node path would read.
+pub(crate) struct LaunchedNode<N: NodeTypesWithDB + ProviderNodeTypes> {
     pub(crate) provider: BlockchainProvider<N>,
     pub(crate) task_executor: TaskExecutor,
     pub(crate) beacon_engine_handle: ConsensusEngineHandle<AlpenEngineTypes>,
-    pub(crate) consensus_watcher: watch::Receiver<ConsensusHeads>,
-    pub(crate) preconf_rx: watch::Receiver<BlockNumHash>,
+    /// Both ends are kept rather than deriving the receiver from the sender
+    /// on demand: `Sender::subscribe` marks the current value as already
+    /// seen, so a head update published between channel creation and a later
+    /// `subscribe` would be missed by the batch builder.
     pub(crate) preconf_tx: watch::Sender<BlockNumHash>,
-    pub(crate) gossip_rx: mpsc::UnboundedReceiver<AlpenGossipEvent>,
-    pub(crate) gossip_config: GossipConfig,
+    pub(crate) preconf_rx: watch::Receiver<BlockNumHash>,
 }
 
-impl<N> SharedTasks<N>
+impl<N> LaunchedNode<N>
 where
     N: NodeTypesWithDB + ProviderNodeTypes + NodeTypes<Primitives = EthPrimitives>,
 {
     /// Spawns the two tasks every node runs: engine control and gossip.
-    pub(crate) fn spawn(self) {
+    pub(crate) fn spawn_shared_tasks(
+        &self,
+        consensus_watcher: watch::Receiver<ConsensusHeads>,
+        gossip_rx: mpsc::UnboundedReceiver<AlpenGossipEvent>,
+        gossip_config: GossipConfig,
+    ) {
         let engine_control_task = create_engine_control_task(
-            self.preconf_rx,
-            self.consensus_watcher,
+            self.preconf_rx.clone(),
+            consensus_watcher,
             self.provider.clone(),
-            AlpenRethExecEngine::new(self.beacon_engine_handle),
+            AlpenRethExecEngine::new(self.beacon_engine_handle.clone()),
         );
 
         // Subscribe to canonical state notifications for broadcasting new blocks
         let state_events = self.provider.subscribe_to_canonical_state();
 
         let gossip_task = create_gossip_task(
-            self.gossip_rx,
+            gossip_rx,
             state_events,
-            self.preconf_tx,
-            self.gossip_config,
+            self.preconf_tx.clone(),
+            gossip_config,
         );
 
         self.task_executor.spawn_critical(

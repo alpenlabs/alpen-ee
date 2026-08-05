@@ -22,7 +22,7 @@ use tracing::info;
 use crate::{
     config::FullNodeConfig,
     gossip::GossipConfig,
-    node::{NodeBootstrap, SharedTasks},
+    node::{LaunchedNode, NodeBootstrap},
 };
 
 pub(crate) async fn run(
@@ -78,19 +78,20 @@ pub(crate) async fn run(
         .launch()
         .await?;
 
-    SharedTasks {
+    LaunchedNode {
         provider: handle.node.provider.clone(),
         task_executor: handle.node.task_executor.clone(),
         beacon_engine_handle: handle.node.beacon_engine_handle.clone(),
-        consensus_watcher,
-        preconf_rx,
         preconf_tx,
+        preconf_rx,
+    }
+    .spawn_shared_tasks(
+        consensus_watcher,
         gossip_rx,
         // A full node is *told* the sequencer's pubkey — it can't derive it,
         // holding no private key. Contrast `GossipConfig::sequencer`.
-        gossip_config: GossipConfig::full_node(config.sequencer_pubkey),
-    }
-    .spawn();
+        GossipConfig::full_node(config.sequencer_pubkey),
+    );
 
     common.run_until_exit(handle.node_exit_future).await
 }

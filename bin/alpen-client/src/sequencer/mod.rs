@@ -49,10 +49,12 @@ use bitcoind_async_client::corepc_types::bitcoin::{
 use eyre::Context;
 use reth_chainspec::ChainSpec;
 use reth_network::{protocol::IntoRlpxSubProtocol, NetworkProtocols};
-use reth_node_builder::{ConsensusEngineHandle, NodeBuilder, WithLaunchContext};
+use reth_node_builder::{NodeBuilder, NodeTypesWithDB, WithLaunchContext};
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
-use reth_tasks::TaskExecutor;
+use reth_provider::{
+    providers::{BlockchainProvider, ProviderNodeTypes},
+    BlockReader, HeaderProvider, StateProviderFactory,
+};
 use strata_config::btcio::{fee_rate_to_sat_per_vb, FeePolicy, WriterConfig};
 use strata_identifiers::EpochCommitment;
 use strata_primitives::buf::Buf32;
@@ -64,7 +66,7 @@ use crate::{
     args::sequencer_privkey_from_env,
     config::SequencerMode,
     gossip::GossipConfig,
-    node::{NodeBootstrap, SharedTasks},
+    node::{LaunchedNode, NodeBootstrap},
     ol::OLClientKind,
     service_executor::ServiceExecutor,
 };
@@ -193,27 +195,6 @@ async fn init_boot_state(
     })
 }
 
-/// The pieces of sequencer startup that exist only because the reth node has
-/// launched, and so can't be reached through [`NodeBootstrap`] or
-/// [`AlpenClientConfig`]: the node's handles, plus the preconf head channel
-/// that is created alongside them.
-///
-/// `P` is the reth node's state/block/header provider type; kept generic
-/// (rather than naming the concrete `FullNode<...>` type) since only three
-/// call sites here need it.
-pub(crate) struct RethNodeParts<P> {
-    pub(crate) node_provider: P,
-    pub(crate) task_executor: TaskExecutor,
-    pub(crate) payload_builder_handle: PayloadBuilderHandle<AlpenEngineTypes>,
-    pub(crate) beacon_engine_handle: ConsensusEngineHandle<AlpenEngineTypes>,
-    /// Both ends are handed over rather than deriving the receiver from the
-    /// sender here: `Sender::subscribe` marks the current value as already
-    /// seen, so a head update published between channel creation and this
-    /// point would be missed by the batch builder.
-    pub(crate) preconf_tx: watch::Sender<BlockNumHash>,
-    pub(crate) preconf_rx: watch::Receiver<BlockNumHash>,
-}
-
 /// Builds, launches, and runs a sequencer node.
 ///
 /// The sequencer-only genesis steps come first: they have to land before the
@@ -333,37 +314,32 @@ pub(crate) async fn run(
     }
     info!(target: "alpen-client", component = "alpen", "chainstate sync completed successfully");
 
-    // The preconf handles are cloned rather than moved because the sequencer
-    // services below need them too; the extra clones live as long as this
-    // function, which runs for the whole node lifetime either way.
-    SharedTasks {
+    // Built once and borrowed by both callees below, rather than cloning the
+    // same handles into two bundles.
+    let launched = LaunchedNode {
         provider: node.provider.clone(),
         task_executor: node.task_executor.clone(),
         beacon_engine_handle: node.beacon_engine_handle.clone(),
+        preconf_tx,
+        preconf_rx,
+    };
+
+    launched.spawn_shared_tasks(
         consensus_watcher,
-        preconf_rx: preconf_rx.clone(),
-        preconf_tx: preconf_tx.clone(),
         gossip_rx,
         // The sequencer's gossip pubkey is *derived* from its private key,
         // not taken as separate config. Contrast `GossipConfig::full_node`,
         // which is told the pubkey.
-        gossip_config: GossipConfig::sequencer(privkey)?,
-    }
-    .spawn();
+        GossipConfig::sequencer(privkey)?,
+    );
 
     start_services(
         &common,
         mode,
         privkey,
         &sequencer_dbs,
-        RethNodeParts {
-            node_provider: node.provider.clone(),
-            task_executor: node.task_executor.clone(),
-            payload_builder_handle: node.payload_builder_handle.clone(),
-            beacon_engine_handle: node.beacon_engine_handle.clone(),
-            preconf_tx,
-            preconf_rx,
-        },
+        &launched,
+        node.payload_builder_handle.clone(),
     )
     .await?;
 
@@ -377,15 +353,17 @@ pub(crate) async fn run(
 /// Resolves the btcio writer config, block-builder config, and boot state
 /// itself, so [`run`] only has to hand over what came from bootstrap and
 /// from the launched node.
-async fn start_services<P>(
+async fn start_services<N>(
     common: &NodeBootstrap,
     mode: &SequencerMode,
     privkey: Buf32,
     sequencer_dbs: &SequencerDatabases,
-    node_parts: RethNodeParts<P>,
+    launched: &LaunchedNode<N>,
+    payload_builder_handle: PayloadBuilderHandle<AlpenEngineTypes>,
 ) -> eyre::Result<()>
 where
-    P: StateProviderFactory
+    N: NodeTypesWithDB + ProviderNodeTypes,
+    BlockchainProvider<N>: StateProviderFactory
         + BlockReader<Block = reth_primitives::Block>
         + HeaderProvider<Header = reth_primitives::Header>
         + Clone
@@ -393,14 +371,13 @@ where
         + Sync
         + 'static,
 {
-    let RethNodeParts {
-        node_provider,
+    let LaunchedNode {
+        provider: node_provider,
         task_executor,
-        payload_builder_handle,
         beacon_engine_handle,
         preconf_tx,
         preconf_rx,
-    } = node_parts;
+    } = launched;
 
     let sequencer_config = &mode.config;
 
@@ -442,7 +419,7 @@ where
 
     let payload_engine = Arc::new(AlpenRethPayloadEngine::new(
         payload_builder_handle,
-        beacon_engine_handle,
+        beacon_engine_handle.clone(),
         sequencer_config.beneficiary_address,
         storage.clone(),
     ));
@@ -487,7 +464,7 @@ where
         latest_batch.id(),
         genesis_blocknumhash,
         batch_builder_state,
-        preconf_rx,
+        preconf_rx.clone(),
         block_data_provider,
         batch_sealing_policy,
         storage.clone(),
@@ -498,7 +475,7 @@ where
 
     let da_pipeline = da_pipeline::start(
         service_executor,
-        &task_executor,
+        task_executor,
         da_pipeline::DaPipelineInputs {
             bitcoind: &sequencer_config.bitcoind,
             l1_reorg_safe_depth: mode.l1_reorg_safe_depth,
