@@ -1,7 +1,7 @@
 //! For handling deterministic genesis blocks used in EE.
 
 use alpen_ee_common::ExecBlockStorage;
-use alpen_ee_config::AlpenEeConfig;
+use alpen_ee_params::AlpenParams;
 use eyre::Context;
 use strata_identifiers::OLBlockCommitment;
 use tracing::info;
@@ -9,14 +9,13 @@ use tracing::info;
 use crate::build_genesis_exec_block;
 
 pub async fn ensure_finalized_exec_chain_genesis<TStorage: ExecBlockStorage>(
-    config: &AlpenEeConfig,
+    params: &AlpenParams,
     genesis_ol_block: OLBlockCommitment,
     storage: &TStorage,
 ) -> eyre::Result<()> {
-    let genesis_ee_blockhash = config.params().genesis_block_info().blockhash().0.into();
+    let genesis_ee_blockhash = params.genesis_block_info().blockhash().0.into();
     info!(%genesis_ee_blockhash, "genesis ee blockhash");
-    let (genesis_block, genesis_block_payload) =
-        build_genesis_exec_block(config.params(), genesis_ol_block);
+    let (genesis_block, genesis_block_payload) = build_genesis_exec_block(params, genesis_ol_block);
 
     // If exists, does not overwrite
     storage

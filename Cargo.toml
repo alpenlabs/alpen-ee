@@ -5,7 +5,6 @@ members = [
   "crates/alpen-ee/block-assembly",
   "crates/alpen-ee/exec-chain",
   "crates/alpen-ee/common",
-  "crates/alpen-ee/config",
   "crates/alpen-ee/da/provider",
   "crates/alpen-ee/da/runtime",
   "crates/alpen-ee/da/types",
@@ -71,7 +70,6 @@ rustdoc.all = "warn"
 alpen-chainspec = { path = "crates/reth/chainspec" }
 alpen-ee-block-assembly = { path = "crates/alpen-ee/block-assembly" }
 alpen-ee-common = { path = "crates/alpen-ee/common" }
-alpen-ee-config = { path = "crates/alpen-ee/config" }
 alpen-ee-da-provider = { path = "crates/alpen-ee/da/provider" }
 alpen-ee-da-runtime = { path = "crates/alpen-ee/da/runtime" }
 alpen-ee-da-types = { path = "crates/alpen-ee/da/types" }

@@ -8,7 +8,6 @@ workspace = true
 
 [dependencies]
 alpen-ee-common.workspace = true
-alpen-ee-config.workspace = true
 alpen-ee-params.workspace = true
 strata-acct-types.workspace = true
 strata-ee-acct-types.workspace = true

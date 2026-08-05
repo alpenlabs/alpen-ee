@@ -1,5 +1,5 @@
 use alpen_ee_common::Storage;
-use alpen_ee_config::AlpenEeConfig;
+use alpen_ee_params::AlpenParams;
 use eyre::eyre;
 use strata_identifiers::EpochCommitment;
 use tracing::{error, warn};
@@ -7,11 +7,11 @@ use tracing::{error, warn};
 use crate::build_genesis_ee_account_state;
 
 pub async fn ensure_genesis_ee_account_state<TStorage: Storage>(
-    config: &AlpenEeConfig,
+    params: &AlpenParams,
     genesis_ol_epoch: &EpochCommitment,
     storage: &TStorage,
 ) -> eyre::Result<()> {
-    let genesis_state = build_genesis_ee_account_state(config.params());
+    let genesis_state = build_genesis_ee_account_state(params);
 
     if let Some(stored_genesis_state) = storage
         .ee_account_state(genesis_ol_epoch.last_blkid().into())

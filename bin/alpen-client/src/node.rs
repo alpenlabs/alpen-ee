@@ -8,13 +8,13 @@ use std::sync::Arc;
 use alpen_ee_common::{
     chain_status_checked, BatchStorage, BlockNumHash, ExecBlockStorage, OLClient, Storage,
 };
-use alpen_ee_config::AlpenEeConfig;
 use alpen_ee_database::init_db_storage;
 use alpen_ee_engine::{create_engine_control_task, sync_chainstate_to_engine, AlpenRethExecEngine};
 use alpen_ee_genesis::{
     ensure_batch_genesis, ensure_finalized_exec_chain_genesis, ensure_genesis_ee_account_state,
 };
 use alpen_ee_ol_tracker::init_ol_tracker_state;
+use alpen_ee_params::AlpenParams;
 use alpen_ee_rpc_server::{AlpenEeRpcServer, EeRpcServer};
 use alpen_reth_evm::evm::AlpenEvmFactory;
 #[cfg(feature = "sequencer")]
@@ -32,7 +32,6 @@ use strata_common::healthz::{start_health_check_server, HealthCheckState};
 #[cfg(feature = "sequencer")]
 use strata_config::btcio::WriterConfig;
 use strata_identifiers::{EpochCommitment, OLBlockId};
-use strata_predicate::PredicateKey;
 use strata_primitives::buf::Buf32;
 use tokio::{
     runtime::Handle,
@@ -81,28 +80,6 @@ pub(crate) async fn launch(
         sequencer = is_sequencer,
         "Starting EE Node",
     );
-
-    // OL client URL is not used when the dummy OL client is enabled
-    let ol_client_url = match &alpen_config.ol.source {
-        OlSource::Dummy => String::new(),
-        OlSource::Rpc { client_url, .. } => client_url.clone(),
-    };
-
-    // Sequencer-only fields (tx-forward target, or None for a sequencer,
-    // which never forwards to itself) resolved once, up front.
-    let sequencer_http_url = match &alpen_config.mode {
-        NodeMode::FullNode(fc) => fc.sequencer_http_url.clone(),
-        #[cfg(feature = "sequencer")]
-        NodeMode::Sequencer(_) => None,
-    };
-
-    let config = Arc::new(AlpenEeConfig::new(
-        params.clone(),
-        PredicateKey::always_accept(),
-        ol_client_url,
-        sequencer_http_url.clone(),
-        Some(alpen_config.db_retry_count),
-    ));
 
     // NOTE: ATM we reuse `SEQUENCER_PRIVATE_KEY` for both gossip
     // package signing and EE DA reveal tapscript signing. That is
@@ -155,17 +132,18 @@ pub(crate) async fn launch(
     // OL client resolution validates the OL config synchronously before its
     // one network call, so a missing/invalid setting also fails here, before
     // the database is touched below.
-    let (ol_client, genesis_epoch) = resolve_ol_client(&alpen_config, is_sequencer, &config).await?;
+    let (ol_client, genesis_epoch) =
+        resolve_ol_client(&alpen_config, is_sequencer, params.as_ref()).await?;
 
     // --- INITIALIZE STATE ---
 
-    let dbs = init_db_storage(&datadir, config.db_retry_count())
+    let dbs = init_db_storage(&datadir, alpen_config.db_retry_count)
         .context("failed to load alpen database")?;
 
     let db_handle = Handle::current();
     let storage: Arc<_> = dbs.node_storage(db_handle.clone()).into();
 
-    ensure_genesis(config.as_ref(), &genesis_epoch, storage.as_ref(), is_sequencer)
+    ensure_genesis(params.as_ref(), &genesis_epoch, storage.as_ref(), is_sequencer)
         .instrument(info_span!("ensure_genesis", component = "alpen"))
         .await
         .context("genesis should not fail")?;
@@ -399,7 +377,7 @@ async fn start_health_check(
 async fn resolve_ol_client(
     alpen_config: &AlpenClientConfig,
     is_sequencer: bool,
-    config: &AlpenEeConfig,
+    params: &AlpenParams,
 ) -> eyre::Result<(Arc<OLClientKind>, EpochCommitment)> {
     let ol_client = match &alpen_config.ol.source {
         OlSource::Dummy => {
@@ -424,7 +402,7 @@ async fn resolve_ol_client(
             };
             OLClientKind::Rpc(
                 RpcOLClient::try_new(
-                    config.params().strata_exec_account_id(),
+                    params.strata_exec_account_id(),
                     client_url,
                     submit_url.as_deref(),
                     submit_bearer_token.as_deref(),
@@ -448,17 +426,17 @@ async fn resolve_ol_client(
 /// Handle genesis related tasks.
 /// Mainly deals with ensuring database has minimal expected state.
 async fn ensure_genesis<TStorage: Storage + ExecBlockStorage + BatchStorage>(
-    config: &AlpenEeConfig,
+    params: &AlpenParams,
     genesis_epoch: &EpochCommitment,
     storage: &TStorage,
     is_sequencer: bool,
 ) -> eyre::Result<()> {
-    ensure_genesis_ee_account_state(config, genesis_epoch, storage).await?;
+    ensure_genesis_ee_account_state(params, genesis_epoch, storage).await?;
 
     if is_sequencer {
-        ensure_finalized_exec_chain_genesis(config, genesis_epoch.to_block_commitment(), storage)
+        ensure_finalized_exec_chain_genesis(params, genesis_epoch.to_block_commitment(), storage)
             .await?;
-        ensure_batch_genesis(config, storage).await?;
+        ensure_batch_genesis(params, storage).await?;
     }
 
     Ok(())

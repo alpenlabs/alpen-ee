@@ -1044,7 +1044,6 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alpen-chainspec",
  "alpen-ee-common",
- "alpen-ee-config",
  "alpen-ee-da-provider",
  "alpen-ee-da-runtime",
  "alpen-ee-da-types",
@@ -1169,21 +1168,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "alpen-ee-config"
-version = "0.3.0-alpha.1"
-dependencies = [
- "alloy-primitives",
- "alpen-chainspec",
- "alpen-ee-common",
- "alpen-ee-params",
- "serde_json",
- "strata-bridge-params",
- "strata-config",
- "strata-l1-txfmt",
- "strata-predicate",
 ]
 
 [[package]]
@@ -1330,7 +1314,6 @@ name = "alpen-ee-genesis"
 version = "0.3.0-alpha.1"
 dependencies = [
  "alpen-ee-common",
- "alpen-ee-config",
  "alpen-ee-params",
  "eyre",
  "strata-acct-types",

@@ -1,14 +1,14 @@
 //! For handling deterministic genesis blocks used in EE.
 
 use alpen_ee_common::{Batch, BatchStorage};
-use alpen_ee_config::AlpenEeConfig;
+use alpen_ee_params::AlpenParams;
 use eyre::{eyre, Context};
 
 pub async fn ensure_batch_genesis<TStorage: BatchStorage>(
-    config: &AlpenEeConfig,
+    params: &AlpenParams,
     storage: &TStorage,
 ) -> eyre::Result<()> {
-    let genesis_info = config.params().genesis_block_info();
+    let genesis_info = params.genesis_block_info();
     let expected_genesis_batch =
         Batch::new_genesis_batch(genesis_info.blockhash().0.into(), genesis_info.blocknum())
             .map_err(|err| eyre!("ensure_batch_genesis: {err}"))?;

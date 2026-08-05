@@ -8,7 +8,6 @@
 //! module.
 
 use alloy_primitives::{address, Address};
-use alpen_ee_config::defaults::DEFAULT_DB_RETRY_COUNT;
 use alpen_ee_ol_tracker::EpochTrackingMode;
 use alpen_ee_params::AlpenParams;
 use serde::{de::Error as DeError, Deserialize, Deserializer, Serialize};
@@ -24,6 +23,7 @@ const DEFAULT_HEALTH_CHECK_PORT: u16 = 8080;
 const DEFAULT_BENEFICIARY_ADDRESS: Address = address!("5400000000000000000000000000000000000010");
 const DEFAULT_L1_REORG_SAFE_DEPTH: u32 = 6;
 const DEFAULT_BATCH_SEALING_BLOCK_COUNT: u64 = 100;
+const DEFAULT_DB_RETRY_COUNT: u16 = 5;
 
 // These two mirror constants defined behind the `sequencer` feature
 // (`alpen_ee_sequencer::DEFAULT_BLOCKTIME_MS` and a private constant in
@@ -100,9 +100,6 @@ struct AlpenClientConfigFile {
     health_check_host: String,
     #[serde(default = "default_health_check_port")]
     health_check_port: u16,
-    // fixed constant default (alpen_ee_config::defaults::DEFAULT_DB_RETRY_COUNT, reused not
-    // duplicated) — resolved here rather than left to AlpenEeConfig::new's own .unwrap_or,
-    // since there's no reason for this layer to pass through an unresolved value.
     #[serde(default = "default_db_retry_count")]
     db_retry_count: u16,
 
