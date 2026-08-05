@@ -19,4 +19,5 @@ post-split params/keys flow is in place (see the repo-split notes).
 | `alpen-client/` | EE node (`Dockerfile` for CI/registry builds, `Dockerfile.local` for local compose builds) |
 | `bitcoind/` | Regtest bitcoind used by the test composes |
 
-See `simple-doc.md` for alpen-client setup and operations.
+See `operations.md` for alpen-client setup and operations, and
+`../bin/alpen-client/README.md` for the config schema.

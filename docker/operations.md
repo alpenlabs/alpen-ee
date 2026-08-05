@@ -1,8 +1,16 @@
-# Alpen-Client: Setup and Operations Guide
+# alpen-client: Setup and Operations Guide
+
+How to run an alpen-client node: what to give it, how to wire up P2P, and how
+to check it is working.
+
+For what the node *is* and how it works internally — architecture, the
+settlement pipeline, and the full `--alpen-config` schema — see
+[`bin/alpen-client/README.md`](../bin/alpen-client/README.md).
 
 ## What is alpen-client
 
 alpen-client is the Execution Environment (EE) node for Alpen — a custom Reth with:
+
 - `alpen_gossip/1` RLPx subprotocol for real-time block header propagation between peers
 - OL (Orchestration Layer) state tracking for finalized chain state
 - Rollup-specific EVM precompiles
@@ -11,39 +19,53 @@ It runs in two modes: **sequencer** (produces blocks) or **fullnode** (follows t
 
 ---
 
-## Run as Sequencer
+## What a node needs
 
-The sequencer builds EE blocks, signs block headers with Schnorr, and broadcasts them to all connected peers via the gossip protocol.
+alpen-client takes only two Alpen-specific flags. Everything else is a
+Reth-native flag.
 
-alpen-client takes only two Alpen-specific flags: `--alpen-params` (the chain/protocol artifact) and `--alpen-config` (this node's own TOML config — mode, OL connection, DA, sealing). Everything else is a Reth-native flag. `docker/alpen-client/entrypoint.sh` generates the `--alpen-config` file from env vars at container startup (see `docker/.env.alpen.example`); the same TOML can also be written by hand and passed directly if you're running the binary outside Docker.
+| Input | Description |
+|-------|-------------|
+| `--alpen-config <path>` | This node's own TOML config: mode, OL connection, DA, sealing. Required. |
+| `--alpen-params <path>` | The chain/protocol params artifact (JSON): EE account id, bridge params, DA stream identity, embedded EVM chain spec. Shared by every node on the chain. Required. |
+| `--p2p-secret-key <file>` | 32-byte hex secp256k1 key that fixes this node's enode identity. Reth generates one if the file is missing. |
+| `--authrpc.jwtsecret <file>` | JWT secret for the Engine API. |
+| `SEQUENCER_PRIVATE_KEY` (env) | Sequencer only. 32-byte hex Schnorr key used to sign gossip messages and DA reveals. The gossip pubkey is derived from it, so a sequencer never configures one. Accepts an `0x` prefix. |
+| `STRATA_SUBMIT_RPC_TOKEN` (env) | Sequencer only, and only with `ol.source = "rpc"`. Bearer token for the OL submission RPC. Kept out of the config file because it is a secret. |
 
-### `--alpen-config` for a sequencer
+Writing the config file: the schema, defaults, and two complete round-trip
+tested examples live in
+[`bin/alpen-client/README.md`](../bin/alpen-client/README.md#configuration),
+[`bin/alpen-client/testdata/`](../bin/alpen-client/testdata/), and
+[`bin/alpen-client/src/config.rs`](../bin/alpen-client/src/config.rs). Start
+from a testdata file and edit it.
 
-```toml
-l1_reorg_safe_depth = 6
-genesis_l1_height = <height>
-mode = "sequencer"
+Building the params artifact: the pinned `strata-datatool` does not have
+`gen-alpen-params` yet, so until it ships, compose the JSON by hand. See the
+`AlpenParams` schema in
+[`crates/alpen-ee/params/src/params.rs`](../crates/alpen-ee/params/src/params.rs),
+or [`functional-tests/common/alpen_params.py`](../functional-tests/common/alpen_params.py)
+for a working example that stitches it together from `gen-ee-params` output
+and an in-repo chain spec.
 
-[ol]
-source = "rpc"
-client_url = "ws://<strata-host>:8432"
-submit_url = "ws://<strata-host>:8435"
-# bearer token is not a file field -- set STRATA_SUBMIT_RPC_TOKEN in the environment
+---
 
-[sequencer]
-batch_sealing_block_count = 100
+## Running in Docker
 
-[sequencer.bitcoind]
-rpc_url = "http://<bitcoind-host>:18443"
-rpc_user = "<user>"
-rpc_password = "<pass>"
-network = "regtest"
+`docker/alpen-client/entrypoint.sh` generates the `--alpen-config` file from
+environment variables at container startup (see
+[`.env.alpen.example`](.env.alpen.example)), then execs `alpen-client` with a
+set of Reth defaults. Set `SEQUENCER_MODE=true` to run as a sequencer.
 
-[sequencer.l1_fee_policy]
-fee_policy = "bitcoind"
-```
+Secrets are never written into the generated file -- alpen-client reads
+`SEQUENCER_PRIVATE_KEY` and `STRATA_SUBMIT_RPC_TOKEN` straight from the
+environment.
 
-### Required flags and env vars
+---
+
+## Running the binary directly
+
+Sequencer:
 
 ```bash
 SEQUENCER_PRIVATE_KEY=<32-byte-hex> \
@@ -63,26 +85,10 @@ alpen-client \
   --authrpc.addr 0.0.0.0 --authrpc.port 8551 --authrpc.jwtsecret /path/to/jwt.hex
 ```
 
-### What each flag does
+A fullnode is the same command without the two env vars, pointed at a config
+with `mode = "full_node"`.
 
-**Identity and role:**
-
-| Flag / Env | Description |
-|------------|-------------|
-| `SEQUENCER_PRIVATE_KEY` | Env var. 32-byte hex Schnorr private key for signing gossip messages. Required when `--alpen-config`'s `mode = "sequencer"`. Accepts `0x` prefix. The gossip pubkey is derived from this key, not configured separately. |
-| `STRATA_SUBMIT_RPC_TOKEN` | Env var. Bearer token for the OL submission RPC. Required when `mode = "sequencer"` and `ol.source = "rpc"`. Kept out of the config file since it's a secret. |
-| `mode = "sequencer"` (`--alpen-config`) | Enables block building mode. Without this (i.e. `mode = "full_node"`), the node is a fullnode. Requires the `[sequencer]` table. |
-| `full_node.sequencer_pubkey` | 32-byte x-only Schnorr public key. Only set on fullnode configs — the sequencer derives its own pubkey from `SEQUENCER_PRIVATE_KEY`, so it never configures one. Fullnodes need it to validate gossip signatures; it must match the sequencer's private key. |
-
-**Chain and OL connection:**
-
-| Flag | Description |
-|------|-------------|
-| `--alpen-params <path>` | Path to the Alpen params artifact (JSON). Carries the EE account id, bridge params, DA stream identity, and the embedded EVM chain spec. The pinned `strata-datatool` doesn't have `gen-alpen-params` yet, so until it ships, compose the JSON by hand: see the `AlpenParams` schema in `crates/alpen-ee/params/src/params.rs`, or `functional-tests/common/alpen_params.py` for a working example that stitches it together from `gen-ee-params` output and an in-repo chain spec. Required. |
-| `--alpen-config <path>` | Path to this node's TOML config. Required. See the schema above and `bin/alpen-client/src/config.rs`. |
-| `ol.client_url` (`[ol]`) | WebSocket or HTTP URL of the OL (strata) node. Example: `ws://strata:8432`. Required unless `ol.source = "dummy"`. |
-| `ol.source = "dummy"` | Use a fake OL client. Only for isolated EE testing — not for production. |
-| `--datadir <path>` | Where chain data, keys, and databases are stored. |
+### Reth flags that matter
 
 **P2P networking** (detailed in the P2P section below):
 
@@ -107,71 +113,8 @@ alpen-client \
 | `--authrpc.addr` / `--authrpc.port` | Engine API endpoint (for OL ↔ EE communication). |
 | `--authrpc.jwtsecret <file>` | JWT secret file for Engine API authentication. Shared between OL and this node. |
 
-**DA pipeline** (`[sequencer]`/`[sequencer.bitcoind]`/`[sequencer.l1_fee_policy]` in `--alpen-config`, required when `mode = "sequencer"`):
-
-| Field | Description |
-|-------|-------------|
-| `sequencer.bitcoind.rpc_url` / `rpc_user` / `rpc_password` | Bitcoin Core RPC endpoint and credentials. |
-| `sequencer.bitcoind.network` | Bitcoin network (e.g. `regtest`, `signet`, `bitcoin`). Cross-checked against the connected bitcoind's own reported network at startup — alpen-client refuses to start on a mismatch. |
-| `l1_reorg_safe_depth` (top-level) | Number of L1 confirmations before considering a block final. Default: `6`. Shared with fullnode configs — not sequencer-only. |
-| `genesis_l1_height` (top-level) | The first L1 block height the rollup cares about. Default: `0`. Shared with fullnode configs — not sequencer-only. |
-| `sequencer.batch_sealing_block_count` | Number of EE blocks per batch before sealing and posting DA. Default: `100`. Lower values seal more frequently. |
-| `sequencer.l1_fee_policy.fee_policy` | Fee policy: `bitcoind`, `fixed`, or `mempool`. |
-
----
-
-## Run as Fullnode
-
-A fullnode validates gossip signatures, re-broadcasts to other peers, and optionally forwards user transactions to the sequencer.
-
-### `--alpen-config` for a fullnode
-
-```toml
-l1_reorg_safe_depth = 6
-genesis_l1_height = <height>
-mode = "full_node"
-
-[ol]
-source = "rpc"
-client_url = "ws://<strata-host>:8432"
-
-[full_node]
-sequencer_pubkey = "<same-pubkey-as-sequencer>"
-sequencer_http_url = "http://<sequencer-host>:8545"  # omit for a read-only fullnode
-```
-
-```bash
-alpen-client \
-  --datadir /data/fullnode \
-  --alpen-config /path/to/alpen-config.toml \
-  --alpen-params /path/to/alpen-params.json \
-  --p2p-secret-key /path/to/p2p-fn.hex \
-  --port 30303 \
-  --addr 0.0.0.0 \
-  --nat extip:<public-ip> \
-  --disable-discovery \
-  --trusted-peers <enode-urls> \
-  --http --http.addr 0.0.0.0 --http.port 8545 --http.api eth,net,web3,txpool \
-  --ws --ws.addr 0.0.0.0 --ws.port 8546 --ws.api eth,net,web3,txpool \
-  --authrpc.addr 0.0.0.0 --authrpc.port 8551 --authrpc.jwtsecret /path/to/jwt.hex
-```
-
-### Differences from sequencer
-
-| | Sequencer | Fullnode |
-|---|-----------|---------|
-| `mode` (`--alpen-config`) | `"sequencer"` | `"full_node"` |
-| `SEQUENCER_PRIVATE_KEY` env | Yes (signs gossip; pubkey derived from it) | No |
-| `full_node.sequencer_pubkey` | Not set — derives its own from the private key | Yes (validates the sequencer's sigs) |
-| `full_node.sequencer_http_url` | N/A | Optional — URL of sequencer's HTTP RPC. |
-| `[sequencer]` table (DA, L1 posting) | Yes (posts state diffs to L1) | No |
-| Block production | Yes | No — follows chain via gossip |
-
-### Fullnode-specific field
-
-| Field | Description |
-|-------|-------------|
-| `full_node.sequencer_http_url` | Sequencer's HTTP RPC URL (e.g. `http://sequencer:8545`). When a user sends a transaction to this fullnode, it gets forwarded to the sequencer for inclusion. A fullnode remains a valid read-only node without it — blocks arrive via gossip + Reth P2P regardless — it just can't accept writes. |
+Reth's own `--config` flag points at `reth.toml` and is unrelated to
+`--alpen-config`.
 
 ---
 
@@ -271,7 +214,7 @@ Once two alpen-client nodes are connected via P2P:
 1. They negotiate the `alpen_gossip/1` RLPx subprotocol during the handshake.
 2. If either side **doesn't** support `alpen_gossip/1`, the connection is **dropped** (`OnNotSupported::Disconnect`). This means plain Reth nodes cannot peer with alpen-client.
 3. The sequencer broadcasts signed block headers to all connected peers whenever a new block is committed.
-4. Fullnodes validate the Schnorr signature against `--sequencer-pubkey`, then re-broadcast to all their peers (except the sender). This is how blocks propagate through the mesh.
+4. Fullnodes validate the Schnorr signature against `full_node.sequencer_pubkey`, then re-broadcast to all their peers (except the sender). This is how blocks propagate through the mesh.
 5. Duplicate/stale blocks (sequence number <= highest seen) are silently dropped.
 
 ### Network topology patterns
@@ -405,4 +348,4 @@ Same as above — the gossip message was signed with a key that doesn't match th
 `--alpen-config`'s `sequencer.bitcoind.network` doesn't match what the connected bitcoind actually reports (e.g. configured `regtest` but pointed at a `signet` node). Fix the `network` field or point `sequencer.bitcoind.rpc_url` at the right node.
 
 **TOML parse error / "unknown field" on `--alpen-config`**
-The config file doesn't match the schema. Check field names and table nesting against `bin/alpen-client/src/config.rs` or the checked-in examples at `bin/alpen-client/testdata/config.*.toml`.
+The config file doesn't match the schema. Check field names and table nesting against [`bin/alpen-client/src/config.rs`](../bin/alpen-client/src/config.rs) or the checked-in examples at [`bin/alpen-client/testdata/`](../bin/alpen-client/testdata/).

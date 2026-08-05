@@ -723,6 +723,10 @@ The client extends the standard Reth CLI with three Alpen-specific flags (see [m
 
 Reth's own `--config <path>` flag is unrelated — it points at `reth.toml` and is untouched by Alpen.
 
+The pinned `strata-datatool` doesn't have `gen-alpen-params` yet, so until it ships, compose the params JSON by hand: see the `AlpenParams` schema in [crates/alpen-ee/params/src/params.rs](../../crates/alpen-ee/params/src/params.rs), or [functional-tests/common/alpen_params.py](../../functional-tests/common/alpen_params.py) for a working example that stitches it together from `gen-ee-params` output and an in-repo chain spec.
+
+For deployment — Docker, P2P peering and discovery, and troubleshooting a running node — see [docker/operations.md](../../docker/operations.md).
+
 ### `--alpen-config` schema
 
 Every field except `mode`, `[ol]`, and the mode-specific table has a default. Two canonical, round-trip-tested examples are checked in at [testdata/config.full_node.toml](testdata/config.full_node.toml) and [testdata/config.sequencer.toml](testdata/config.sequencer.toml); see [src/config.rs](src/config.rs) for the exact schema and validation rules.
