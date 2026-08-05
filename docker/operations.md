@@ -52,14 +52,38 @@ and an in-repo chain spec.
 
 ## Running in Docker
 
-`docker/alpen-client/entrypoint.sh` generates the `--alpen-config` file from
-environment variables at container startup (see
-[`.env.alpen.example`](.env.alpen.example)), then execs `alpen-client` with a
-set of Reth defaults. Set `SEQUENCER_MODE=true` to run as a sequencer.
+The image's entrypoint does not build any config. It checks that both files
+exist, then execs `alpen-client` with a set of Reth defaults (HTTP, WS,
+authrpc, `--addr 0.0.0.0`) plus whatever extra flags the container is given.
+Mount the two files and set the secrets in the environment:
 
-Secrets are never written into the generated file -- alpen-client reads
-`SEQUENCER_PRIVATE_KEY` and `STRATA_SUBMIT_RPC_TOKEN` straight from the
-environment.
+```yaml
+environment:
+  SEQUENCER_PRIVATE_KEY: ${SEQUENCER_PRIVATE_KEY}
+  ALPEN_CONFIG_PATH: /app/configs/alpen-config.toml
+  ALPEN_PARAMS_PATH: /app/configs/generated/alpen-params.json
+volumes:
+  - ./configs/my-sequencer.toml:/app/configs/alpen-config.toml:ro
+  - ./configs/generated/alpen-params.json:/app/configs/generated/alpen-params.json:ro
+```
+
+Environment variables the entrypoint reads:
+
+| Variable | Default |
+|----------|---------|
+| `ALPEN_CONFIG_PATH` | `/app/configs/alpen-config.toml` |
+| `ALPEN_PARAMS_PATH` | `/app/configs/generated/alpen-params.json` |
+| `DATADIR` | `/app/data` |
+| `HTTP_PORT` / `HTTP_API` | `8545` / `eth,net,web3,txpool,admin,debug` |
+| `WS_PORT` / `WS_API` | `8546` / `eth,net,web3,txpool` |
+| `AUTHRPC_PORT` / `JWT_SECRET` | `8551` / `/app/keys/jwt.hex` |
+| `TXPOOL_MIN_PROTOCOL_FEE` | `0` |
+
+Everything else — `--p2p-secret-key`, `--port`, `--nat`, `--trusted-peers`,
+and any other Reth flag — goes in the container's `command`. See
+[`docker-compose-eest.yml`](docker-compose-eest.yml) and
+[`docker-compose-p2p-test.yml`](docker-compose-p2p-test.yml) for working
+examples, with their configs in [`configs/`](configs/).
 
 ---
 
@@ -314,6 +338,9 @@ done
 ---
 
 ## Troubleshooting
+
+**"entrypoint: ALPEN_CONFIG_PATH is ..., which is not a file"**
+The container didn't get a config file at that path. Check the volume mount and that `ALPEN_CONFIG_PATH` matches the mount target. Same for `ALPEN_PARAMS_PATH`.
 
 **"SEQUENCER_PRIVATE_KEY environment variable is required"**
 `--alpen-config`'s `mode = "sequencer"` but the env var is missing. Export it before starting the process.

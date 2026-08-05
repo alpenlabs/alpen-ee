@@ -1,6 +1,10 @@
 # Setup for Ethereum Execution Spec Tests (EEST).
 # Runs alpen-client in sequencer mode with dummy OL + regtest bitcoind for DA.
 #
+# Node settings live in configs/eest-sequencer.toml, mounted as the node's
+# --alpen-config. The bitcoind credentials below are hardcoded so they can't
+# drift from that file.
+#
 # Usage:
 #   ./init-alpen-client-keys.sh
 #   docker compose --env-file .env.alpen-client -f docker-compose-eest.yml up
@@ -14,8 +18,8 @@ services:
     container_name: eest_bitcoind
     environment:
       RPC_ALLOW_IP: "0.0.0.0/0"
-      BITCOIND_RPC_USER: ${BITCOIND_RPC_USER:-rpcuser}
-      BITCOIND_RPC_PASSWORD: ${BITCOIND_RPC_PASSWORD:-rpcpassword}
+      BITCOIND_RPC_USER: rpcuser
+      BITCOIND_RPC_PASSWORD: rpcpassword
       BITCOIND_WALLET: default
       GENERATE_BLOCKS: 101
     volumes:
@@ -23,7 +27,7 @@ services:
     ports:
       - "18443:18443"
     healthcheck:
-      test: ["CMD-SHELL", "bitcoin-cli -regtest -rpcuser=${BITCOIND_RPC_USER} -rpcpassword=${BITCOIND_RPC_PASSWORD} getwalletinfo"]
+      test: ["CMD-SHELL", "bitcoin-cli -regtest -rpcuser=rpcuser -rpcpassword=rpcpassword getwalletinfo"]
       interval: 2s
       timeout: 5s
       retries: 30
@@ -38,44 +42,24 @@ services:
       bitcoind:
         condition: service_healthy
     command:
-      - --datadir
-      - /app/data
       - --p2p-secret-key
       - /app/keys/seq-p2p.hex
-      - --addr
-      - "0.0.0.0"
       - --port
       - "30303"
       - --nat
       - none
       - --disable-discovery
-      - --http
-      - --http.addr
-      - "0.0.0.0"
-      - --http.port
-      - "8545"
-      - --http.api
-      - eth,net,web3,txpool,admin,debug
       - --color
       - never
     environment:
       SEQUENCER_PRIVATE_KEY: ${SEQUENCER_PRIVATE_KEY}
-      SEQUENCER_MODE: "true"
-      SEQUENCER_PUBKEY: ${SEQUENCER_PUBKEY}
-      DUMMY_OL_CLIENT: "1"
-      DEV_NATIVE_PROVER: "1"
-      BITCOIND_RPC_URL: http://bitcoind:${BITCOIND_RPC_PORT:-18443}
-      BITCOIND_RPC_USER: ${BITCOIND_RPC_USER:-rpcuser}
-      BITCOIND_RPC_PASSWORD: ${BITCOIND_RPC_PASSWORD:-rpcpassword}
-      BITCOIN_NETWORK: regtest
-      L1_REORG_SAFE_DEPTH: ${L1_REORG_SAFE_DEPTH:-1}
-      GENESIS_L1_HEIGHT: ${GENESIS_L1_HEIGHT:-101}
-      BATCH_SEALING_BLOCK_COUNT: ${BATCH_SEALING_BLOCK_COUNT:-5}
       RUST_LOG: ${RUST_LOG:-info}
+      ALPEN_CONFIG_PATH: /app/configs/alpen-config.toml
       ALPEN_PARAMS_PATH: ${ALPEN_PARAMS_PATH:-/app/configs/generated/alpen-params.json}
     ports:
       - "8545:8545"
     volumes:
+      - ./configs/eest-sequencer.toml:/app/configs/alpen-config.toml:ro
       - ./configs/generated/alpen-params.json:${ALPEN_PARAMS_PATH:-/app/configs/generated/alpen-params.json}:ro
       - ./configs/alpen-client/seq-p2p.hex:/app/keys/seq-p2p.hex:ro
     entrypoint: ["/usr/local/bin/entrypoint.sh"]

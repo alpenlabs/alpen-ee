@@ -1,4 +1,4 @@
-# Minimal 2-node P2P test: two full nodes with dummy-ol-client, verifying
+# Minimal 2-node P2P test: two full nodes with a dummy OL client, verifying
 # the custom gossip RLPx subprotocol handshake (not real block broadcasting
 # -- neither container runs in sequencer mode, so nothing signs/gossips
 # blocks; "seq"/"fn" below are just container names describing topology).
@@ -14,32 +14,22 @@ services:
     command:
       - --p2p-secret-key
       - /app/keys/seq-p2p.hex
-      - --addr
-      - "0.0.0.0"
       - --port
       - "30303"
       - --nat
       - none
       - --disable-discovery
-      - --http
-      - --http.addr
-      - "0.0.0.0"
-      - --http.port
-      - "8545"
-      - --http.api
-      - eth,net,web3,txpool,admin,debug
       - --color
       - never
     environment:
       RUST_LOG: info,alpen_gossip=debug
+      ALPEN_CONFIG_PATH: /app/configs/alpen-config.toml
       ALPEN_PARAMS_PATH: ${ALPEN_PARAMS_PATH:-/app/configs/generated/alpen-params.json}
-      SEQUENCER_PUBKEY: ${SEQUENCER_PUBKEY}
-      DUMMY_OL_CLIENT: "1"
-      GENESIS_L1_HEIGHT: "0"
     ports:
       - "8545:8545"
       - "30303:30303"
     volumes:
+      - ./configs/p2p-test-node-a.toml:/app/configs/alpen-config.toml:ro
       - ./configs/generated/alpen-params.json:${ALPEN_PARAMS_PATH:-/app/configs/generated/alpen-params.json}:ro
       - ./configs/generated/seq-p2p.hex:/app/keys/seq-p2p.hex:ro
     entrypoint: ["/usr/local/bin/entrypoint.sh"]
@@ -54,8 +44,6 @@ services:
     command:
       - --p2p-secret-key
       - /app/keys/fn-p2p.hex
-      - --addr
-      - "0.0.0.0"
       - --port
       - "30303"
       - --nat
@@ -63,26 +51,17 @@ services:
       - --disable-discovery
       - --trusted-peers
       - enode://${SEQ_P2P_PUBKEY}@alpen-client:30303
-      - --http
-      - --http.addr
-      - "0.0.0.0"
-      - --http.port
-      - "8545"
-      - --http.api
-      - eth,net,web3,txpool,admin,debug
       - --color
       - never
     environment:
       RUST_LOG: info,alpen_gossip=debug
+      ALPEN_CONFIG_PATH: /app/configs/alpen-config.toml
       ALPEN_PARAMS_PATH: ${ALPEN_PARAMS_PATH:-/app/configs/generated/alpen-params.json}
-      SEQUENCER_PUBKEY: ${SEQUENCER_PUBKEY}
-      DUMMY_OL_CLIENT: "1"
-      GENESIS_L1_HEIGHT: "0"
-      SEQUENCER_HTTP_URL: http://alpen-client:8545
     ports:
       - "9545:8545"
       - "31303:30303"
     volumes:
+      - ./configs/p2p-test-node-b.toml:/app/configs/alpen-config.toml:ro
       - ./configs/generated/alpen-params.json:${ALPEN_PARAMS_PATH:-/app/configs/generated/alpen-params.json}:ro
       - ./configs/generated/fn-p2p.hex:/app/keys/fn-p2p.hex:ro
     entrypoint: ["/usr/local/bin/entrypoint.sh"]
