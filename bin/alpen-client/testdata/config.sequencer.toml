@@ -9,7 +9,7 @@ mode = "sequencer"
 source = "rpc"
 client_url = "ws://strata:8432"
 submit_url = "ws://strata:8435"
-dev_track_latest_epoch = false
+epoch_tracking_mode = "confirmed"
 # submit bearer token is not a file field -- set STRATA_SUBMIT_RPC_TOKEN in the environment
 
 [sequencer]

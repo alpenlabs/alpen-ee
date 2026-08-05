@@ -131,7 +131,7 @@ class AlpenOlConfig:
     source: str = field(default="dummy")  # "dummy" | "rpc"
     client_url: str | None = field(default=None)
     submit_url: str | None = field(default=None)
-    dev_track_latest_epoch: bool = field(default=False)
+    epoch_tracking_mode: str = field(default="confirmed")  # "confirmed" | "latest"
 
 
 @dataclass

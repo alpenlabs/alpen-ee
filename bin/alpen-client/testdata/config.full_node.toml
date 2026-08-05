@@ -8,7 +8,7 @@ mode = "full_node"
 [ol]
 source = "rpc"
 client_url = "ws://strata:8432"
-dev_track_latest_epoch = false
+epoch_tracking_mode = "confirmed"
 
 [full_node]
 sequencer_pubkey = "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f"

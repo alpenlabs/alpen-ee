@@ -214,7 +214,7 @@ pub(crate) async fn launch(
         genesis_epoch.epoch(),
         storage.clone(),
         ol_client.clone(),
-        alpen_config.ol.dev_track_latest_epoch,
+        alpen_config.ol.epoch_tracking_mode,
         &service_executor,
     )
     .await

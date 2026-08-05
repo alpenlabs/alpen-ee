@@ -7,7 +7,7 @@ use std::{
 };
 
 use alpen_ee_common::{ConsensusHeads, OLClient, OLFinalizedStatus, Storage};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use strata_service::{AsyncService, Response, Service, ServiceState};
 use tokio::sync::watch;
 use tracing::{debug, error};
@@ -31,7 +31,9 @@ pub struct OLTrackerService<TStorage, TOLClient>(PhantomData<(TStorage, TOLClien
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct OLTrackerStatus;
 
-#[derive(Clone, Copy, Debug, Default)]
+/// Which OL epoch the tracker advances against.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum EpochTrackingMode {
     /// Tracks the `confirmed` epoch of OL chain.
     /// This represents the last OL checkpoint seen on L1. Default.

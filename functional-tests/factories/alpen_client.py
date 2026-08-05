@@ -78,7 +78,7 @@ class AlpenClientFactory(flexitest.Factory):
         ol_submit_token: str | None = None,
         da_config: EeDaConfig | None = None,
         batch_sealing_block_count: int = 100,
-        dev_track_latest_epoch: bool = False,
+        epoch_tracking_mode: str = "confirmed",
         bridge_denomination: int = 100_000_000,
         max_withdrawal_amount: int | None = 1_000_000_000,
         beneficiary_address: str | None = None,
@@ -136,10 +136,10 @@ class AlpenClientFactory(flexitest.Factory):
                 source="rpc",
                 client_url=ol_endpoint,
                 submit_url=ol_submit_endpoint,
-                dev_track_latest_epoch=dev_track_latest_epoch,
+                epoch_tracking_mode=epoch_tracking_mode,
             )
             if ol_endpoint
-            else AlpenOlConfig(source="dummy", dev_track_latest_epoch=dev_track_latest_epoch)
+            else AlpenOlConfig(source="dummy", epoch_tracking_mode=epoch_tracking_mode)
         )
 
         sequencer_config = AlpenSequencerConfig(

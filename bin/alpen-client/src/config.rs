@@ -9,6 +9,7 @@
 
 use alloy_primitives::{address, Address};
 use alpen_ee_config::defaults::DEFAULT_DB_RETRY_COUNT;
+use alpen_ee_ol_tracker::EpochTrackingMode;
 use alpen_ee_params::AlpenParams;
 use serde::{de::Error as DeError, Deserialize, Deserializer, Serialize};
 use strata_config::{btcio::L1FeePolicyConfig, BitcoindConfig};
@@ -136,11 +137,12 @@ enum NodeModeTag {
 pub(crate) struct OlConfig {
     #[serde(flatten)]
     pub(crate) source: OlSource,
-    /// Have the OL chain tracker advance against the latest completed OL
-    /// epoch in the connected Strata node instead of the canonical
-    /// `confirmed` epoch (CSM-based). Dev/test only.
+    /// Which OL epoch the chain tracker advances against. Defaults to the
+    /// canonical `confirmed` epoch (CSM-based); `latest` (the newest epoch
+    /// completed by the connected Strata node, not yet checkpointed on L1)
+    /// is dev/test only.
     #[serde(default)]
-    pub(crate) dev_track_latest_epoch: bool,
+    pub(crate) epoch_tracking_mode: EpochTrackingMode,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

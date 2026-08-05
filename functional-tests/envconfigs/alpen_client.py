@@ -39,7 +39,7 @@ class AlpenClientEnvParams:
     da_magic_bytes: bytes = b"ALPN"
     l1_reorg_safe_depth: int = 2
     batch_sealing_block_count: int = 10
-    dev_track_latest_epoch: bool = False
+    epoch_tracking_mode: str = "confirmed"
     beneficiary_address: str | None = None
 
 
@@ -163,7 +163,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
             ee_params_path=ee_params_path,
             da_config=da_config,
             batch_sealing_block_count=envparams.batch_sealing_block_count,
-            dev_track_latest_epoch=envparams.dev_track_latest_epoch,
+            epoch_tracking_mode=envparams.epoch_tracking_mode,
             beneficiary_address=envparams.beneficiary_address,
         )
         sequencer.wait_for_ready(timeout=60)
