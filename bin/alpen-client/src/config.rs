@@ -87,6 +87,56 @@ fn buf32_from_hex<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Buf32, D
     s.parse::<Buf32>().map_err(DeError::custom)
 }
 
+/// Returns every input key that the typed config did not consume.
+///
+/// Comparing the parsed input with the typed config's serialized form keeps
+/// unknown-field detection effective across [`OlConfig`]'s flattened enum and
+/// the config types reused from `strata_config`, where
+/// `#[serde(deny_unknown_fields)]` cannot be added locally.
+fn unknown_field_paths(input: &toml::Value, typed: &toml::Value) -> Vec<String> {
+    fn collect(
+        input: &toml::Value,
+        typed: Option<&toml::Value>,
+        path: &str,
+        out: &mut Vec<String>,
+    ) {
+        match input {
+            toml::Value::Table(input_table) => {
+                let typed_table = typed.and_then(toml::Value::as_table);
+                for (key, input_value) in input_table {
+                    let field_path = if path.is_empty() {
+                        key.clone()
+                    } else {
+                        format!("{path}.{key}")
+                    };
+                    let Some(typed_value) = typed_table.and_then(|table| table.get(key)) else {
+                        out.push(field_path);
+                        continue;
+                    };
+                    collect(input_value, Some(typed_value), &field_path, out);
+                }
+            }
+            toml::Value::Array(input_values) => {
+                let typed_values = typed.and_then(toml::Value::as_array);
+                for (index, input_value) in input_values.iter().enumerate() {
+                    let item_path = format!("{path}[{index}]");
+                    let Some(typed_value) = typed_values.and_then(|values| values.get(index))
+                    else {
+                        out.push(item_path);
+                        continue;
+                    };
+                    collect(input_value, Some(typed_value), &item_path, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut unknown_fields = Vec::new();
+    collect(input, Some(typed), "", &mut unknown_fields);
+    unknown_fields
+}
+
 /// The TOML file format. Private: [`AlpenClientConfig::from_toml_str`] is the
 /// only place this type is constructed or consumed.
 // Field order matters here, not just for readability: TOML requires every
@@ -362,7 +412,15 @@ impl AlpenClientConfig {
     /// outside this function can hold a config whose `mode`/`ol`
     /// combination hasn't already been checked.
     pub(crate) fn from_toml_str(contents: &str) -> eyre::Result<Self> {
-        let file: AlpenClientConfigFile = toml::from_str(contents)?;
+        let input: toml::Value = toml::from_str(contents)?;
+        let file: AlpenClientConfigFile = input.clone().try_into()?;
+        let typed = toml::Value::try_from(&file)?;
+        let unknown_fields = unknown_field_paths(&input, &typed);
+        eyre::ensure!(
+            unknown_fields.is_empty(),
+            "unknown field(s): {}",
+            unknown_fields.join(", ")
+        );
         file.try_into()
     }
 }
@@ -456,6 +514,31 @@ mod tests {
                 .parse()
                 .unwrap()
         );
+    }
+
+    #[test]
+    fn unknown_top_level_field_is_rejected() {
+        let toml = FULL_NODE_TOML.replace("db_retry_count", "db_retry_counts");
+        let err = AlpenClientConfig::from_toml_str(&toml).unwrap_err();
+        assert!(err.to_string().contains("db_retry_counts"));
+    }
+
+    #[test]
+    fn unknown_flattened_ol_field_is_rejected() {
+        let toml = FULL_NODE_TOML.replace("epoch_tracking_mode", "epoch_tracking_mod");
+        let err = AlpenClientConfig::from_toml_str(&toml).unwrap_err();
+        assert!(err.to_string().contains("ol.epoch_tracking_mod"));
+    }
+
+    #[cfg(feature = "sequencer")]
+    #[test]
+    fn unknown_nested_upstream_config_field_is_rejected() {
+        let toml = SEQUENCER_TOML.replace(
+            "network = \"regtest\"",
+            "network = \"regtest\"\nretry_counts = 3",
+        );
+        let err = AlpenClientConfig::from_toml_str(&toml).unwrap_err();
+        assert!(err.to_string().contains("sequencer.bitcoind.retry_counts"));
     }
 
     #[cfg(feature = "sequencer")]
