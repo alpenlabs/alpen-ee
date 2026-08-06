@@ -202,12 +202,6 @@ pub(crate) enum OlSource {
     Rpc {
         /// URL of the OL node RPC (`http[s]://` or `ws[s]://`).
         client_url: String,
-        /// URL of the authenticated OL transaction submission RPC. Required
-        /// (only) when `mode = "sequencer"` — checked in `AlpenClientConfig`'s
-        /// `TryFrom` below, not here (spans two independent enums). The
-        /// bearer token authenticating submission is deliberately not a
-        /// field here at all — see `node.rs::resolve_ol_client`.
-        submit_url: Option<String>,
     },
 }
 
@@ -301,6 +295,19 @@ pub(crate) struct SequencerConfig {
     /// runs on the remote SP1 backend. `None` leaves the prover to apply its
     /// own deadline, so nothing is resolved here.
     pub(crate) sp1_proof_deadline_secs: Option<u64>,
+    /// URL of the authenticated OL transaction submission RPC.
+    ///
+    /// Required, and checked by [`AlpenClientConfig`]. The [`Option`] covers
+    /// exactly one case: [`OlSource::Dummy`], where there is no OL node to
+    /// submit to.
+    ///
+    /// Sits here rather than beside `client_url` in [`OlConfig`] because only
+    /// a sequencer submits to OL. A full node has no `[sequencer]` table, so
+    /// it cannot express this at all.
+    ///
+    /// The bearer token that authenticates submission is a secret, so it is
+    /// read from `STRATA_SUBMIT_RPC_TOKEN` rather than being a field here.
+    pub(crate) ol_submit_url: Option<String>,
     /// `[sequencer.bitcoind]` — reused verbatim from `strata_config`.
     // TODO(STR-4177): stop configuring `rpc_user`/`rpc_password` as plaintext TOML fields.
     pub(crate) bitcoind: BitcoindConfig,
@@ -380,21 +387,16 @@ impl TryFrom<AlpenClientConfigFile> for AlpenClientConfig {
             }
         };
 
-        // The one cross-tree check no per-field attribute can express: `ol.submit_url` only
-        // makes sense (and is only required) when this node both submits to OL (Sequencer)
-        // and talks to a real OL RPC endpoint (Rpc, not Dummy) — two independent enums. In a
-        // slim (non-`sequencer`) build `mode` can only ever be `FullNode`, so the check is
-        // moot there — `NodeMode::Sequencer` isn't even nameable in that build.
+        // The one rule left that no field attribute can express, because it spans the
+        // `[sequencer]` table and the `[ol]` one: a sequencer pointed at a real OL node has
+        // to say where it submits. Against `OlSource::Dummy` there is nothing to submit to.
+        // A slim (non-`sequencer`) build can only ever be a full node, which has no
+        // `[sequencer]` table and so cannot reach this at all.
         #[cfg(feature = "sequencer")]
-        if let (
-            NodeMode::Sequencer(_),
-            OlSource::Rpc {
-                submit_url: None, ..
-            },
-        ) = (&mode, &raw.ol.source)
-        {
-            eyre::bail!(
-                "ol.submit_url is required when mode = \"sequencer\" unless ol.source = \"dummy\""
+        if let (NodeMode::Sequencer(seq), OlSource::Rpc { .. }) = (&mode, &raw.ol.source) {
+            eyre::ensure!(
+                seq.config.ol_submit_url.is_some(),
+                "sequencer.ol_submit_url is required unless ol.source = \"dummy\""
             );
         }
 
@@ -587,7 +589,24 @@ mod tests {
             fee_policy = "bitcoind"
         "#;
         let err = AlpenClientConfig::from_toml_str(toml).unwrap_err();
-        assert!(err.to_string().contains("submit_url"));
+        assert!(err.to_string().contains("ol_submit_url"));
+    }
+
+    /// The submission URL moved to `[sequencer]`, so a full node can't name
+    /// it under `[ol]` any more. The unknown-field check is what says so.
+    #[test]
+    fn submit_url_under_ol_is_rejected() {
+        let toml = r#"
+            mode = "full_node"
+            [ol]
+            source = "rpc"
+            client_url = "ws://strata:8432"
+            submit_url = "http://strata:8433"
+            [full_node]
+            sequencer_pubkey = "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f"
+        "#;
+        let err = AlpenClientConfig::from_toml_str(toml).unwrap_err();
+        assert!(err.to_string().contains("ol.submit_url"), "{err}");
     }
 
     #[cfg(feature = "sequencer")]

@@ -122,14 +122,13 @@ pub(crate) fn sequencer_privkey_from_env() -> eyre::Result<Buf32> {
         .map_err(|e| eyre::eyre!("Failed to parse SEQUENCER_PRIVATE_KEY as hex: {e}"))
 }
 
-/// Reads `STRATA_SUBMIT_RPC_TOKEN`, required when `ol.submit_url` is set.
-///
-/// A secret, like `SEQUENCER_PRIVATE_KEY` — deliberately not a TOML config
-/// field (see `crate::config::OlSource::Rpc`'s doc comment).
+/// Reads `STRATA_SUBMIT_RPC_TOKEN`, required when `sequencer.ol_submit_url`
+/// is set.
 pub(crate) fn ol_submit_bearer_token_from_env() -> eyre::Result<String> {
     env::var("STRATA_SUBMIT_RPC_TOKEN").map_err(|_| {
         eyre::eyre!(
-            "STRATA_SUBMIT_RPC_TOKEN environment variable is required when ol.submit_url is set"
+            "STRATA_SUBMIT_RPC_TOKEN environment variable is required when \
+             sequencer.ol_submit_url is set"
         )
     })
 }

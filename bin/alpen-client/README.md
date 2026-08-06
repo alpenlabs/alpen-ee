@@ -758,10 +758,9 @@ mode = "sequencer"
 [ol]
 source = "rpc"
 client_url = "ws://strata:8432"
-submit_url = "ws://strata:8435"
-# submit bearer token is not a file field -- set STRATA_SUBMIT_RPC_TOKEN in the environment
 
 [sequencer]
+ol_submit_url = "ws://strata:8435"
 batch_sealing_block_count = 100
 beneficiary_address = "0x5400000000000000000000000000000000000010"
 blocktime_ms = 5000
@@ -777,7 +776,10 @@ fee_policy = "fixed"
 fixed_fee_rate = 1.0
 ```
 
-`SEQUENCER_PRIVATE_KEY` (env, sequencer only) is the Schnorr key used for both gossip signing and DA reveal signing; the gossip pubkey is derived from it, not configured separately. `full_node.sequencer_pubkey` is the one piece of network knowledge a full node can't derive on its own, since it doesn't hold the sequencer's private key.
+Two secrets are read from the environment instead of the config file, both sequencer only:
+
+- `SEQUENCER_PRIVATE_KEY` — the Schnorr key used for both gossip signing and DA reveal signing; the gossip pubkey is derived from it, not configured separately.
+- `STRATA_SUBMIT_RPC_TOKEN` — the bearer token for the authenticated OL submission RPC, required whenever `sequencer.ol_submit_url` is set.
 
 ---
 

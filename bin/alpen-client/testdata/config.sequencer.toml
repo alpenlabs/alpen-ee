@@ -8,11 +8,10 @@ mode = "sequencer"
 [ol]
 source = "rpc"
 client_url = "ws://strata:8432"
-submit_url = "ws://strata:8435"
 epoch_tracking_mode = "confirmed"
-# submit bearer token is not a file field -- set STRATA_SUBMIT_RPC_TOKEN in the environment
 
 [sequencer]
+ol_submit_url = "ws://strata:8435"
 batch_sealing_block_count = 100
 beneficiary_address = "0x5400000000000000000000000000000000000010"
 blocktime_ms = 5000

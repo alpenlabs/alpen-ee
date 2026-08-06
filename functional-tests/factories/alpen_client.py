@@ -135,7 +135,6 @@ class AlpenClientFactory(flexitest.Factory):
             AlpenOlConfig(
                 source="rpc",
                 client_url=ol_endpoint,
-                submit_url=ol_submit_endpoint,
                 epoch_tracking_mode=epoch_tracking_mode,
             )
             if ol_endpoint
@@ -149,6 +148,8 @@ class AlpenClientFactory(flexitest.Factory):
                 rpc_password=da_config.btc_rpc_password,
                 network=da_config.network,
             ),
+            # Required against a real OL node, meaningless against the dummy one.
+            ol_submit_url=ol_submit_endpoint if ol_endpoint else None,
             beneficiary_address=beneficiary_address,
             blocktime_ms=DEFAULT_EE_BLOCK_TIME_MS,
             batch_sealing_block_count=batch_sealing_block_count,

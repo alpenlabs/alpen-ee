@@ -297,7 +297,14 @@ async fn resolve_ol_client(
     alpen_config: &AlpenClientConfig,
     params: &AlpenParams,
 ) -> eyre::Result<(Arc<OLClientKind>, EpochCommitment)> {
-    let is_sequencer = !matches!(alpen_config.mode, NodeMode::FullNode(_));
+    // Only a sequencer has a submission URL, and only against a real OL node,
+    // both settled by `AlpenClientConfig` at config-parse time.
+    let submit_url = match &alpen_config.mode {
+        NodeMode::FullNode(_) => None,
+        #[cfg(feature = "sequencer")]
+        NodeMode::Sequencer(seq) => seq.config.ol_submit_url.as_deref(),
+    };
+
     let ol_client = match &alpen_config.ol.source {
         OlSource::Dummy => {
             use strata_identifiers::Buf32;
@@ -306,24 +313,19 @@ async fn resolve_ol_client(
             info!(target: "alpen-client", component = "alpen", "Using dummy OL client (no real OL connection)");
             OLClientKind::Dummy(DummyOLClient { genesis_epoch })
         }
-        OlSource::Rpc {
-            client_url,
-            submit_url,
-        } => {
-            // `ol.submit_url` required-when-sequencer is already enforced by
-            // `AlpenClientConfig`'s `TryFrom` at config-parse time; the
-            // bearer token authenticating it is a secret, read from the
-            // environment here rather than stored in the config file.
-            let submit_bearer_token = if is_sequencer && submit_url.is_some() {
-                Some(ol_submit_bearer_token_from_env()?)
-            } else {
-                None
-            };
+        OlSource::Rpc { client_url } => {
+            // A URL here means this node submits, so it needs the token that
+            // authenticates submission. The token is a secret, so it comes
+            // from the environment rather than the config file.
+            let submit_bearer_token = submit_url
+                .is_some()
+                .then(ol_submit_bearer_token_from_env)
+                .transpose()?;
             OLClientKind::Rpc(
                 RpcOLClient::try_new(
                     params.strata_exec_account_id(),
                     client_url,
-                    submit_url.as_deref(),
+                    submit_url,
                     submit_bearer_token.as_deref(),
                 )
                 .map_err(|e| eyre::eyre!("failed to create OL client: {e}"))?,

@@ -130,7 +130,6 @@ class AlpenOlConfig:
 
     source: str = field(default="dummy")  # "dummy" | "rpc"
     client_url: str | None = field(default=None)
-    submit_url: str | None = field(default=None)
     epoch_tracking_mode: str = field(default="confirmed")  # "confirmed" | "latest"
 
 
@@ -155,6 +154,7 @@ class AlpenSequencerConfig:
     """``[sequencer]`` table; present iff ``mode = "sequencer"``."""
 
     bitcoind: BitcoindConfig
+    ol_submit_url: str | None = field(default=None)
     beneficiary_address: str | None = field(default=None)
     blocktime_ms: int = field(default=5_000)
     batch_sealing_block_count: int = field(default=100)
