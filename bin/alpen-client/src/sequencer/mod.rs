@@ -399,7 +399,7 @@ where
     log_writer_config(&writer_config);
 
     let block_builder_config =
-        BlockBuilderConfig::default().with_blocktime_ms(sequencer_config.blocktime_ms);
+        BlockBuilderConfig::default().with_blocktime_ms(sequencer_config.blocktime_ms.get());
 
     let sequencer_keypair = sequencer_bitcoin_keypair(&privkey)?;
 
@@ -451,7 +451,7 @@ where
 
     // Channel from batch builder → chunk builder.
     let (batch_event_tx, batch_event_rx) =
-        mpsc::channel::<BatchBuilderEvent>(sequencer_config.batch_event_channel_capacity);
+        mpsc::channel::<BatchBuilderEvent>(sequencer_config.batch_event_channel_capacity.get());
 
     let (batch_builder_handle, batch_builder_task) = create_batch_builder(
         latest_batch.id(),

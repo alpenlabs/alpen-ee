@@ -7,6 +7,8 @@
 //! entry point between the two; [`AlpenClientConfigFile`] never leaves this
 //! module.
 
+use std::num::{NonZeroU64, NonZeroUsize};
+
 use alloy_primitives::{address, Address};
 use alpen_ee_ol_tracker::EpochTrackingMode;
 #[cfg(feature = "sequencer")]
@@ -22,15 +24,9 @@ const DEFAULT_BENEFICIARY_ADDRESS: Address = address!("5400000000000000000000000
 const DEFAULT_L1_REORG_SAFE_DEPTH: u32 = 6;
 const DEFAULT_BATCH_SEALING_BLOCK_COUNT: u64 = 100;
 const DEFAULT_DB_RETRY_COUNT: u16 = 5;
-
-// These two mirror constants defined behind the `sequencer` feature
-// (`alpen_ee_sequencer::DEFAULT_BLOCKTIME_MS` and a private constant in
-// `sequencer/mod.rs`) rather than referencing them directly: `SequencerConfig`
-// has to compile in every build (it's an unconditional field on
-// `AlpenClientConfigFile`, see below), but those crates/modules aren't linked
-// in a slim (non-`sequencer`) build.
-const DEFAULT_BLOCKTIME_MS: u64 = 5_000;
-const DEFAULT_BATCH_EVENT_CHANNEL_CAPACITY: usize = 64;
+const DEFAULT_BLOCKTIME_MS: NonZeroU64 = NonZeroU64::new(5_000).expect("5000 is always NonZero");
+const DEFAULT_BATCH_EVENT_CHANNEL_CAPACITY: NonZeroUsize =
+    NonZeroUsize::new(64).expect("64 is always NonZero");
 
 fn default_health_check_host() -> String {
     DEFAULT_HEALTH_CHECK_HOST.to_owned()
@@ -52,7 +48,7 @@ fn default_beneficiary_address() -> Address {
     DEFAULT_BENEFICIARY_ADDRESS
 }
 
-fn default_blocktime_ms() -> u64 {
+fn default_blocktime_ms() -> NonZeroU64 {
     DEFAULT_BLOCKTIME_MS
 }
 
@@ -60,18 +56,8 @@ fn default_batch_sealing_block_count() -> u64 {
     DEFAULT_BATCH_SEALING_BLOCK_COUNT
 }
 
-fn default_batch_event_channel_capacity() -> usize {
+fn default_batch_event_channel_capacity() -> NonZeroUsize {
     DEFAULT_BATCH_EVENT_CHANNEL_CAPACITY
-}
-
-/// Rejects `0`; replaces `SequencerArgs::resolve_blocktime_ms`'s validation,
-/// done inline during deserialize instead of as a separate resolve step.
-fn positive_u64<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
-    let value = u64::deserialize(deserializer)?;
-    if value == 0 {
-        return Err(DeError::custom("must be greater than zero"));
-    }
-    Ok(value)
 }
 
 /// Deserializes a [`Buf32`] from hex, with or without an `0x` prefix.
@@ -273,10 +259,9 @@ pub(crate) struct FullNodeConfig {
 pub(crate) struct SequencerConfig {
     #[serde(default = "default_beneficiary_address")]
     pub(crate) beneficiary_address: Address,
-    /// Replaces `SequencerArgs::resolve_blocktime_ms`; validated `> 0` inline
-    /// during deserialize instead of as a separate resolve step.
-    #[serde(default = "default_blocktime_ms", deserialize_with = "positive_u64")]
-    pub(crate) blocktime_ms: u64,
+    /// How long the sequencer waits between blocks.
+    #[serde(default = "default_blocktime_ms")]
+    pub(crate) blocktime_ms: NonZeroU64,
     #[serde(default = "default_batch_sealing_block_count")]
     pub(crate) batch_sealing_block_count: u64,
     /// Omitting this falls back to `batch_sealing_block_count`, a sibling
@@ -287,8 +272,9 @@ pub(crate) struct SequencerConfig {
     /// on block count alone. No number expresses that, which is why this
     /// takes no default.
     pub(crate) chunk_sealing_gas_limit: Option<u64>,
+    /// Non-zero because `mpsc::channel` panics on a zero-capacity buffer.
     #[serde(default = "default_batch_event_channel_capacity")]
-    pub(crate) batch_event_channel_capacity: usize,
+    pub(crate) batch_event_channel_capacity: NonZeroUsize,
     #[serde(default)]
     pub(crate) dev_native_prover: bool,
     /// Read only when `dev_native_prover` is false, which is when proving
@@ -553,7 +539,7 @@ mod tests {
         let NodeMode::Sequencer(seq) = &config.mode else {
             panic!("expected sequencer mode");
         };
-        assert_eq!(seq.config.blocktime_ms, 5_000);
+        assert_eq!(seq.config.blocktime_ms.get(), 5_000);
         assert_eq!(seq.config.batch_sealing_block_count, 100);
         assert_eq!(seq.config.chunk_sealing_block_count(), 100);
     }
@@ -609,25 +595,41 @@ mod tests {
         assert!(err.to_string().contains("ol.submit_url"), "{err}");
     }
 
+    /// Zero blocktime would busy-loop the block builder, and a zero-capacity
+    /// event channel panics inside `mpsc::channel`. Both fields are
+    /// `NonZero`, so serde rejects the value and names the offending key.
     #[cfg(feature = "sequencer")]
     #[test]
-    fn blocktime_ms_rejects_zero() {
-        let toml = r#"
-            mode = "sequencer"
-            [ol]
-            source = "dummy"
-            [sequencer]
-            blocktime_ms = 0
-            [sequencer.bitcoind]
-            rpc_url = "http://bitcoind:18443"
-            rpc_user = "user"
-            rpc_password = "pass"
-            network = "regtest"
-            [sequencer.l1_fee_policy]
-            fee_policy = "bitcoind"
-        "#;
-        let err = AlpenClientConfig::from_toml_str(toml).unwrap_err();
-        assert!(err.to_string().contains("greater than zero"));
+    fn zero_is_rejected_for_nonzero_fields() {
+        for (field, key) in [
+            ("blocktime_ms = 0", "sequencer.blocktime_ms"),
+            (
+                "batch_event_channel_capacity = 0",
+                "sequencer.batch_event_channel_capacity",
+            ),
+        ] {
+            let toml = format!(
+                r#"
+                mode = "sequencer"
+                [ol]
+                source = "dummy"
+                [sequencer]
+                {field}
+                [sequencer.bitcoind]
+                rpc_url = "http://bitcoind:18443"
+                rpc_user = "user"
+                rpc_password = "pass"
+                network = "regtest"
+                [sequencer.l1_fee_policy]
+                fee_policy = "bitcoind"
+            "#
+            );
+            let err = AlpenClientConfig::from_toml_str(&toml)
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("nonzero"), "{field}: {err}");
+            assert!(err.contains(key), "{field}: {err}");
+        }
     }
 
     #[cfg(feature = "sequencer")]
