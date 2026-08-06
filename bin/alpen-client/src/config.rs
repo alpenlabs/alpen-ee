@@ -344,14 +344,26 @@ impl TryFrom<AlpenClientConfigFile> for AlpenClientConfig {
     type Error = eyre::Report;
 
     fn try_from(raw: AlpenClientConfigFile) -> eyre::Result<Self> {
+        // Only the table matching `mode` may be present. Accepting the other one and
+        // dropping it would let a stale or copy-pasted table read as live: an operator
+        // could see proving and OL submission configured under `[sequencer]` while the
+        // process runs as a full node that never looks at either.
         let mode = match raw.mode {
             NodeModeTag::FullNode => {
+                eyre::ensure!(
+                    raw.sequencer.is_none(),
+                    "[sequencer] table is not allowed when mode = \"full_node\""
+                );
                 let fc = raw.full_node.ok_or_else(|| {
                     eyre::eyre!("[full_node] table required when mode = \"full_node\"")
                 })?;
                 NodeMode::FullNode(fc)
             }
             NodeModeTag::Sequencer => {
+                eyre::ensure!(
+                    raw.full_node.is_none(),
+                    "[full_node] table is not allowed when mode = \"sequencer\""
+                );
                 #[cfg(not(feature = "sequencer"))]
                 {
                     eyre::bail!(
@@ -505,6 +517,47 @@ mod tests {
                 .parse()
                 .unwrap()
         );
+    }
+
+    /// A leftover table for the mode the node is not running in must not parse
+    /// quietly, or its settings look active when nothing reads them.
+    #[test]
+    fn inactive_mode_table_is_rejected() {
+        let full_node_with_sequencer = r#"
+            mode = "full_node"
+            [ol]
+            source = "dummy"
+            [full_node]
+            sequencer_pubkey = "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f"
+            [sequencer]
+            [sequencer.bitcoind]
+            rpc_url = "http://bitcoind:18443"
+            rpc_user = "user"
+            rpc_password = "pass"
+            network = "regtest"
+            [sequencer.l1_fee_policy]
+            fee_policy = "bitcoind"
+        "#;
+        let err = AlpenClientConfig::from_toml_str(full_node_with_sequencer).unwrap_err();
+        assert!(err.to_string().contains("[sequencer] table"), "{err}");
+
+        let sequencer_with_full_node = r#"
+            mode = "sequencer"
+            [ol]
+            source = "dummy"
+            [full_node]
+            sequencer_pubkey = "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f"
+            [sequencer]
+            [sequencer.bitcoind]
+            rpc_url = "http://bitcoind:18443"
+            rpc_user = "user"
+            rpc_password = "pass"
+            network = "regtest"
+            [sequencer.l1_fee_policy]
+            fee_policy = "bitcoind"
+        "#;
+        let err = AlpenClientConfig::from_toml_str(sequencer_with_full_node).unwrap_err();
+        assert!(err.to_string().contains("[full_node] table"), "{err}");
     }
 
     #[test]
