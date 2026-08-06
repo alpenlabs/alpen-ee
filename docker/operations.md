@@ -369,7 +369,7 @@ Same as above — the gossip message was signed with a key that doesn't match th
 **Blocks not propagating to fullnodes**
 - Verify the sequencer log shows "Broadcasting new block to peers" with `peer_count > 0`.
 - Verify fullnode logs show gossip connection established.
-- If the sequencer shows `peer_count=0`, the P2P connections exist but the gossip subprotocol didn't negotiate. Check both sides are running the same alpen-client version.
+- `peer_count` counts gossip connections, not P2P peers. If the sequencer shows `peer_count=0`, check `net_peerCount` (or `admin_peers`) first: zero there means the nodes never connected at all, so work through "Peer count stuck at 0" above. If P2P peers are connected but `peer_count` is still 0, the gossip subprotocol didn't negotiate — check both sides are running the same alpen-client version.
 
 **"sequencer.bitcoind.network is configured as ..., but the connected bitcoind reports ..."**
 `--alpen-config`'s `sequencer.bitcoind.network` doesn't match what the connected bitcoind actually reports (e.g. configured `regtest` but pointed at a `signet` node). Fix the `network` field or point `sequencer.bitcoind.rpc_url` at the right node.
