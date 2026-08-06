@@ -4,7 +4,7 @@
 //! the public TOML file format (the only type that round-trips through
 //! `toml`), [`AlpenClientConfig`] is the validated runtime representation the
 //! rest of the binary uses. [`AlpenClientConfig::from_toml_str`] is the sole
-//! entry point between the two; `AlpenClientConfigFile` never leaves this
+//! entry point between the two; [`AlpenClientConfigFile`] never leaves this
 //! module.
 
 use alloy_primitives::{address, Address};
@@ -15,10 +15,7 @@ use serde::{de::Error as DeError, Deserialize, Deserializer, Serialize};
 use strata_config::{btcio::L1FeePolicyConfig, BitcoindConfig};
 use strata_primitives::{buf::Buf32, L1Height};
 
-// Mirrors bitcoind-async-client's upstream defaults, same as today's
-// `bin/alpen-client/src/args.rs` (moved here since this is now where the
-// `[sequencer.bitcoind]` defaults belong, but `BitcoindConfig` itself is
-// defined upstream and doesn't apply its own defaults).
+// Applied when the matching TOML field is omitted.
 const DEFAULT_HEALTH_CHECK_HOST: &str = "0.0.0.0";
 const DEFAULT_HEALTH_CHECK_PORT: u16 = 8080;
 const DEFAULT_BENEFICIARY_ADDRESS: Address = address!("5400000000000000000000000000000000000010");
@@ -77,11 +74,14 @@ fn positive_u64<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u64, D::Er
     Ok(value)
 }
 
-/// `Buf32`'s derived `Deserialize` goes through the `hex` crate's serde
-/// helper, which (unlike `Buf32`'s own `FromStr`, used by the CLI/env-var
-/// paths for `SEQUENCER_PRIVATE_KEY`/`--sequencer-pubkey` today) rejects an
-/// `0x` prefix. Parse through `FromStr` instead so this field accepts the
-/// same input shape as everywhere else a Buf32 is hand-typed by an operator.
+/// Deserializes a [`Buf32`] from hex, with or without an `0x` prefix.
+///
+/// [`Buf32`]'s derived [`Deserialize`] goes through the `hex` crate's serde
+/// helper, which rejects the prefix. Its [`FromStr`] accepts it, and that is
+/// what reads `SEQUENCER_PRIVATE_KEY` from the environment, so parsing
+/// through [`FromStr`] keeps every hand-typed key the same shape.
+///
+/// [`FromStr`]: std::str::FromStr
 fn buf32_from_hex<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Buf32, D::Error> {
     let s = String::deserialize(deserializer)?;
     s.parse::<Buf32>().map_err(DeError::custom)
@@ -144,7 +144,7 @@ fn unknown_field_paths(input: &toml::Value, typed: &toml::Value) -> Vec<String> 
 // toml serializer emits fields in declaration order, so all scalar fields
 // must come before `ol`/`full_node`/`sequencer` (each of which serializes as
 // a table) — reordering them any other way fails to serialize at all
-// (`ValueAfterTable`), caught by the round-trip tests below.
+// (`ValueAfterTable`), which the round-trip tests in this module catch.
 #[derive(Debug, Serialize, Deserialize)]
 struct AlpenClientConfigFile {
     #[serde(default = "default_health_check_host")]
@@ -213,8 +213,8 @@ pub(crate) enum OlSource {
 
 /// The resolved runtime representation the rest of the binary uses (params
 /// comes from the separate `--alpen-params` flag). Plain struct, no Serde
-/// derive: `AlpenClientConfigFile` is the only type that round-trips through
-/// TOML.
+/// derive: [`AlpenClientConfigFile`] is the only type that round-trips
+/// through TOML.
 #[derive(Debug)]
 pub(crate) struct AlpenClientConfig {
     pub(crate) health_check_host: String,
@@ -249,10 +249,7 @@ pub(crate) struct SequencerMode {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct FullNodeConfig {
-    /// Full nodes can't derive the sequencer's pubkey themselves (they don't
-    /// hold its private key) — operator-supplied network knowledge; contrast
-    /// [`NodeMode::Sequencer`], which derives its own instead of being told
-    /// it (see the note on `GossipConfig` construction in `node.rs`).
+    /// The key every gossiped block must be signed with.
     #[serde(deserialize_with = "buf32_from_hex")]
     pub(crate) sequencer_pubkey: Buf32,
     /// The sequencer's HTTP RPC endpoint, used to forward transactions
@@ -274,12 +271,10 @@ pub(crate) struct FullNodeConfig {
     pub(crate) sequencer_http_url: Option<String>,
 }
 
-// Reachable at runtime only when the `sequencer` feature is compiled in — gated once, on
-// [`SequencerMode`] above, not per-field or on this struct itself. The struct *definition*
-// stays unconditional: `AlpenClientConfigFile.sequencer: Option<SequencerConfig>` has to be
-// nameable in every build the same way `BitcoindConfig`/`L1FeePolicyConfig` do. A slim build
-// can therefore parse-and-reject the `[sequencer]` table but never construct a live
-// `NodeMode::Sequencer(_)` — the type existing latently costs nothing.
+// The `sequencer` feature gate sits on `SequencerMode`, not on this struct or its fields.
+// The definition stays unconditional because `AlpenClientConfigFile` names it in every build,
+// the same way it names `BitcoindConfig` and `L1FeePolicyConfig`. A slim build can therefore
+// parse a `[sequencer]` table and reject it, while never constructing a live sequencer mode.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct SequencerConfig {
     #[serde(default = "default_beneficiary_address")]
@@ -290,21 +285,21 @@ pub(crate) struct SequencerConfig {
     pub(crate) blocktime_ms: u64,
     #[serde(default = "default_batch_sealing_block_count")]
     pub(crate) batch_sealing_block_count: u64,
-    /// No serde default: defaults to `batch_sealing_block_count`, a sibling
-    /// field, not a fixed constant — see the [`SequencerConfig::chunk_sealing_block_count`]
-    /// accessor below.
+    /// Omitting this falls back to `batch_sealing_block_count`, a sibling
+    /// field rather than a constant, which no serde default can express.
+    /// [`SequencerConfig::chunk_sealing_block_count`] applies the fallback.
     pub(crate) chunk_sealing_block_count: Option<u64>,
-    /// Genuinely optional, not "has a default": `None` disables the
-    /// gas-limit sealing policy entirely (block-count-only sealing) — no
-    /// numeric default would mean that.
+    /// `None` turns the gas-limit sealing policy off, leaving chunks to seal
+    /// on block count alone. No number expresses that, which is why this
+    /// takes no default.
     pub(crate) chunk_sealing_gas_limit: Option<u64>,
     #[serde(default = "default_batch_event_channel_capacity")]
     pub(crate) batch_event_channel_capacity: usize,
     #[serde(default)]
     pub(crate) dev_native_prover: bool,
-    /// Genuinely optional: only consulted when `dev_native_prover = false`
-    /// (remote SP1 backend); `None` resolves to a built-in deadline inside
-    /// the prover code that uses it, not eagerly here.
+    /// Read only when `dev_native_prover` is false, which is when proving
+    /// runs on the remote SP1 backend. `None` leaves the prover to apply its
+    /// own deadline, so nothing is resolved here.
     pub(crate) sp1_proof_deadline_secs: Option<u64>,
     /// `[sequencer.bitcoind]` — reused verbatim from `strata_config`.
     // TODO(STR-4177): stop configuring `rpc_user`/`rpc_password` as plaintext TOML fields.
@@ -313,8 +308,8 @@ pub(crate) struct SequencerConfig {
     pub(crate) l1_fee_policy: L1FeePolicyConfig,
 }
 
-// Only the sequencer path calls these; the struct itself still has to exist
-// in every build so `AlpenClientConfigFile` can name it (see above).
+// Only the sequencer path calls these, so they can be gated even though the
+// struct itself cannot be.
 #[cfg(feature = "sequencer")]
 impl SequencerConfig {
     pub(crate) fn chunk_sealing_block_count(&self) -> u64 {
@@ -322,16 +317,15 @@ impl SequencerConfig {
             .unwrap_or(self.batch_sealing_block_count)
     }
 
-    /// `--chunk-sealing-gas-limit` (now `chunk_sealing_gas_limit`) is
-    /// validated against the genesis gas limit. EIP-1559 lets the per-block
-    /// gas limit drift from genesis by ±1/1024 per block, so the actual
-    /// block gas limit at runtime may be slightly higher than genesis. Uses
-    /// 2× the genesis gas limit as a conservative floor to accommodate this
-    /// drift while still catching obvious misconfigurations.
+    /// Checks `chunk_sealing_gas_limit` against the genesis block gas limit.
     ///
-    /// Needs the `AlpenParams` artifact (loaded from the separate
-    /// `--alpen-params` flag), so it can't be checked during TOML
-    /// deserialization — called once from `node::launch` instead.
+    /// A chunk has to fit at least one block, so the configured budget must
+    /// clear the per-block limit. EIP-1559 lets that limit drift from genesis
+    /// by ±1/1024 per block, so the floor is 2× genesis: loose enough to
+    /// absorb the drift, tight enough to catch an obviously wrong value.
+    ///
+    /// This needs [`AlpenParams`], which arrives from a separate file, so it
+    /// runs at startup rather than during deserialization.
     pub(crate) fn validate_chunk_sealing_gas_limit(
         &self,
         params: &AlpenParams,

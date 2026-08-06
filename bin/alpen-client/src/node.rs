@@ -2,8 +2,8 @@
 //!
 //! [`launch`] resolves the resources every node needs — health check server,
 //! database and storage, the OL client, and the OL tracker — then dispatches
-//! on [`NodeMode`] to the path for the configured mode:
-//! [`crate::full_node::run`] or [`crate::sequencer::run`]. Each of those owns
+//! on [`NodeMode`] to the path for the configured mode: [`crate::full_node`],
+//! or the `sequencer` module in a build with that feature. Each of those owns
 //! its reth builder chain end to end.
 //!
 //! The builder chain isn't shared because reth's builder changes generic type
@@ -104,11 +104,6 @@ pub(crate) async fn launch(
 }
 
 /// Resources every node holds once bootstrap is done, whatever its mode.
-///
-/// The sequencer additionally needs a few things bootstrap already had to
-/// build — see [`sequencer::BootstrapResources`]. Those live behind the
-/// `sequencer` feature rather than on this struct, so a full-node-only build
-/// doesn't carry fields nothing reads.
 pub(crate) struct NodeBootstrap {
     health_check_state: HealthCheckState,
     /// Kept alive for the node's lifetime: dropping it closes the watch
@@ -216,10 +211,9 @@ async fn bootstrap_node(
 /// The handles a launched reth node hands back to Alpen code.
 ///
 /// Grouped into a struct because the launched node's own type is too generic
-/// to pass across a function boundary, and because both the shared tasks
-/// below and (on a sequencer) `sequencer::start_services` want the same set.
-/// Every field is read by [`Self::spawn_shared_tasks`], so both modes use all
-/// of them.
+/// to pass across a function boundary, and because the shared tasks and the
+/// sequencer's own startup both want the same set. Every field is read by
+/// [`Self::spawn_shared_tasks`], so both modes use all of them.
 ///
 /// The one handle deliberately left out is the payload builder: only the
 /// sequencer's payload engine touches it, so it travels as its own argument

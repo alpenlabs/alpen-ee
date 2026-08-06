@@ -1,9 +1,10 @@
 //! Full-node startup: builds, launches, and runs the reth node.
 //!
-//! The counterpart to [`crate::sequencer::run`]. A full node produces no
-//! blocks of its own, so this is the whole of its mode-specific startup:
-//! there is no genesis work beyond what [`crate::node`] already did, no
-//! ExExes, and no services past the two every node runs.
+//! The counterpart to the sequencer's own startup, which only exists in a
+//! build with the `sequencer` feature. A full node produces no blocks of its
+//! own, so this is the whole of its mode-specific startup: there is no
+//! genesis work beyond what [`crate::node`] already did, no ExExes, and no
+//! services past the two every node runs.
 
 use std::sync::Arc;
 

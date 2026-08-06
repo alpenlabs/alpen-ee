@@ -36,12 +36,14 @@ pub(crate) struct AdditionalConfig {
 
     /// Path to this node's own TOML configuration file.
     ///
-    /// Not reth's `--config` (that's reth's own `reth.toml`, untouched) and
-    /// not `--alpen-params` (that's the chain/protocol artifact above) —
-    /// this is node-local config: OL connection, full-node vs. sequencer
-    /// mode, and (in sequencer mode) sealing/proving/DA settings. See
-    /// `bin/alpen-client/testdata/config.{full_node,sequencer}.toml` for
-    /// annotated examples of the schema.
+    /// Node-local settings: the OL connection, full-node or sequencer mode,
+    /// and in sequencer mode the sealing, proving and DA settings. Distinct
+    /// from reth's own `--config`, which keeps pointing at `reth.toml`, and
+    /// from `--alpen-params`, which carries chain-wide protocol values every
+    /// node on the network shares.
+    ///
+    /// [`AlpenClientConfig`] defines the schema. The `testdata` directory
+    /// holds an annotated example for each mode.
     #[arg(
         long,
         value_name = "PATH",
