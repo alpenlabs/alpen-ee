@@ -77,7 +77,7 @@ class TestFullnodeSync(AlpenClientTest):
     """Test historical block sync from fullnode to late-joining fullnode."""
 
     def __init__(self, ctx: flexitest.InitContext):
-        ctx.set_env(AlpenClientEnv(enable_l1_da=True, batch_sealing_block_count=1000))
+        ctx.set_env(AlpenClientEnv(batch_sealing_block_count=1000))
 
     def main(self, ctx):
         ee_sequencer = self.get_service(ServiceType.AlpenSequencer)

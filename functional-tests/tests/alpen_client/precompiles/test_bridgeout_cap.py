@@ -124,7 +124,7 @@ class TestBridgeoutWithdrawalCap(BaseTest):
     """Bridgeout precompile: over-cap reverts, at-cap succeeds."""
 
     def __init__(self, ctx: flexitest.InitContext):
-        ctx.set_env(AlpenClientEnv(fullnode_count=0, enable_l1_da=True))
+        ctx.set_env(AlpenClientEnv(fullnode_count=0))
 
     def main(self, ctx) -> bool:
         sequencer: AlpenClientService = self.get_service(ServiceType.AlpenSequencer)

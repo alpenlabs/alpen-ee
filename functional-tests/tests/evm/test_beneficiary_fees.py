@@ -21,11 +21,7 @@ TRANSFER_AMOUNT_WEI = 10**17
 @flexitest.register
 class TestBeneficiaryFees(AlpenClientTest):
     def __init__(self, ctx: flexitest.InitContext):
-        ctx.set_env(
-            AlpenClientEnv(
-                fullnode_count=0, enable_l1_da=True, beneficiary_address=CUSTOM_BENEFICIARY
-            )
-        )
+        ctx.set_env(AlpenClientEnv(fullnode_count=0, beneficiary_address=CUSTOM_BENEFICIARY))
 
     def main(self, ctx):
         ee_sequencer = self.get_service(ServiceType.AlpenSequencer)

@@ -53,7 +53,6 @@ class EeOLEnv(flexitest.EnvConfig):
             enable_discovery=enable_discovery,
             pure_discovery=pure_discovery,
             mesh_bootnodes=mesh_bootnodes,
-            enable_l1_da=True,
             batch_sealing_block_count=batch_sealing_block_count,
             epoch_tracking_mode=epoch_tracking_mode,
         )

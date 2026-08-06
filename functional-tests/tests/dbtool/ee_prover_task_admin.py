@@ -40,7 +40,7 @@ class DbtoolEeProverTaskAdminTest(AlpenClientTest):
         # Use a private env: the test stops the sequencer to poke at the
         # sled DB directly, so it must not share the `alpen_ee` env with
         # other tests that expect the sequencer to be live.
-        ctx.set_env(AlpenClientEnv(fullnode_count=0, enable_l1_da=True))
+        ctx.set_env(AlpenClientEnv(fullnode_count=0))
 
     def main(self, ctx):
         seq_service = self.get_service(ServiceType.AlpenSequencer)

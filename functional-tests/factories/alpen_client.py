@@ -69,6 +69,7 @@ class AlpenClientFactory(flexitest.Factory):
     def create_sequencer(
         self,
         sequencer_privkey: str,
+        da_config: EeDaConfig,
         p2p_secret_key: str | None = None,
         enable_discovery: bool = False,
         custom_chain: str = "dev",
@@ -76,7 +77,6 @@ class AlpenClientFactory(flexitest.Factory):
         ol_endpoint: str | None = None,
         ol_submit_endpoint: str | None = None,
         ol_submit_token: str | None = None,
-        da_config: EeDaConfig | None = None,
         batch_sealing_block_count: int = 100,
         epoch_tracking_mode: str = "confirmed",
         bridge_denomination: int = 100_000_000,
@@ -90,18 +90,14 @@ class AlpenClientFactory(flexitest.Factory):
         Args:
             sequencer_privkey: Sequencer's private key (hex, 32 bytes) - set as env var.
                 The gossip/DA-reveal pubkey is derived from this, not configured separately.
+            da_config: DA pipeline configuration for posting state diffs to L1. Required,
+                because a sequencer's `--alpen-config` always needs a `[sequencer.bitcoind]`
+                table.
             p2p_secret_key: P2P secret key for deterministic enode (hex, 32 bytes)
             enable_discovery: Enable discv5 peer discovery (for bootnode mode)
             custom_chain: Chain spec to use
             ee_params_path: EE params file to use; generated when omitted
-            da_config: DA pipeline configuration for posting state diffs to L1. A sequencer's
-                `--alpen-config` always requires a `[sequencer.bitcoind]` table, so this is
-                required despite the `| None` type (kept optional to match the dataclass-style
-                keyword-arg call sites elsewhere).
         """
-        if da_config is None:
-            raise ValueError("da_config is required to start an alpen-client sequencer")
-
         ctx: flexitest.EnvContext = kwargs["ctx"]
 
         datadir = Path(ctx.make_service_dir("ee_sequencer"))
