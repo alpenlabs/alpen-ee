@@ -748,7 +748,6 @@ epoch_tracking_mode = "confirmed"
 
 [full_node]
 sequencer_pubkey = "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f"
-# sequencer_http_url omitted -> read-only full node, no tx forwarding to the sequencer
 ```
 
 **Sequencer:**

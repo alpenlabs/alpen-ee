@@ -37,9 +37,10 @@ pub enum AlpenNodeMode {
     Sequencer,
     /// Forwards `eth_sendRawTransaction` to the sequencer.
     ///
-    /// `sequencer_http` is genuinely optional. Without it the node still serves
-    /// reads and follows the chain over gossip and reth P2P, it just can't
-    /// accept transaction submissions.
+    /// `sequencer_http` is optional. A submitted transaction always goes into
+    /// the local pool, so it still reaches the sequencer over reth's P2P
+    /// transaction gossip. Setting it adds a direct hop that doesn't depend on
+    /// the peer mesh.
     FullNode { sequencer_http: Option<String> },
 }
 

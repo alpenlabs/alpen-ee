@@ -255,13 +255,22 @@ pub(crate) struct FullNodeConfig {
     /// it (see the note on `GossipConfig` construction in `node.rs`).
     #[serde(deserialize_with = "buf32_from_hex")]
     pub(crate) sequencer_pubkey: Buf32,
-    /// Genuinely optional, not "required, currently unmodeled": full nodes
-    /// get blocks purely via gossip (signed headers) + reth P2P sync — this
-    /// URL is used for exactly one thing, forwarding user-submitted
-    /// transactions to the sequencer's mempool
-    /// (`crates/reth/node/src/node.rs`, `AlpenRethAddOnsBuilder::with_sequencer`).
-    /// A full node without it is a valid read-only node (serves reads/sync,
-    /// doesn't accept writes).
+    /// The sequencer's HTTP RPC endpoint, used to forward transactions
+    /// submitted to this node.
+    ///
+    /// When set, `eth_sendRawTransaction` posts the raw transaction to that
+    /// endpoint and adds it to the local pool. The bytes go out before this
+    /// node checks anything past the encoding and the signature. The sequencer
+    /// applies the nonce, balance and fee checks itself, exactly as it would
+    /// for a direct submission, so it and the local pool can disagree on
+    /// whether to accept a transaction.
+    ///
+    /// When unset, the transaction only enters the local pool and reaches the
+    /// sequencer over reth's P2P transaction gossip. That handles the common
+    /// case, but two cases slip through it. Only executable transactions are
+    /// gossiped, so one with a future nonce waits in the local queue until the
+    /// gap fills. Gossip also needs a live peer path to the sequencer, which a
+    /// sparsely peered node may not have. Forwarding covers both.
     pub(crate) sequencer_http_url: Option<String>,
 }
 
