@@ -1,0 +1,19 @@
+[package]
+edition = "2021"
+name = "alpen-ee-da-batch-replay"
+version = "0.3.0-alpha.1"
+
+[lints]
+workspace = true
+
+[dependencies]
+alpen-ee-da-types.workspace = true
+alpen-reth-statediff.workspace = true
+strata-identifiers.workspace = true
+
+alloy-primitives.workspace = true
+rsp-mpt.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+alpen-reth-statediff = { workspace = true, features = ["test-utils"] }
