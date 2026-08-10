@@ -164,7 +164,7 @@ where
     /// into a single `AccumulatedState`. Also returns the alloy `Block`
     /// objects (still read from reth, just no execution).
     ///
-    /// Bridges async sled reads to the sync caller via
+    /// Bridges async database reads to the sync caller via
     /// [`Handle::current().block_on`]. The caller must be inside a Tokio
     /// runtime context (e.g. invoked via `task::spawn_blocking` from an
     /// async task) — which the chunk-builder's `seal_batch` is.

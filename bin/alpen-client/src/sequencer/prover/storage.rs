@@ -1,4 +1,4 @@
-//! Sled-backed storage managers for the EE prover.
+//! MDBX-backed storage managers for the EE prover.
 //!
 //! Three managers, all wrapping the shared [`EeProverDbMdbx`]:
 //!
@@ -11,11 +11,11 @@
 //!   here.
 //!
 //! Parallels the OL pattern (`strata_storage::managers::{ProverTaskDbManager,
-//! CheckpointProofDbManager}`) but lives in its own sled instance
+//! CheckpointProofDbManager}`) but lives in its own MDBX instance
 //! under the alpen-client datadir — no cross-wiring with OL's
 //! checkpoint storage.
 //!
-//! All methods are synchronous. Sled ops are fast; PAAS drives these
+//! All methods are synchronous. MDBX ops are fast; PAAS drives these
 //! from a background tick loop and its `ReceiptHook` is already async,
 //! so calls from async contexts don't block meaningfully. No threadpool
 //! layer for now — add one if this shows up in profiling.
@@ -37,7 +37,7 @@ fn db_err(e: DbError) -> ProverError {
     }
 }
 
-/// Sled-backed shared prover task store.
+/// MDBX-backed shared prover task store.
 ///
 /// Both chunk and acct provers hold an `Arc<Self>` and pass it to
 /// `ProverBuilder::task_store(...)`. Task keys carry a single-byte
@@ -118,7 +118,7 @@ impl TaskStore for EeProverTaskDbManager {
     }
 }
 
-/// Sled-backed chunk receipt store.
+/// MDBX-backed chunk receipt store.
 ///
 /// Keyed by chunk task bytes (matches paas's `ReceiptStore`). The chunk
 /// prover writes via its auto-store after proving; `AcctSpec::fetch_input`
@@ -148,7 +148,7 @@ impl ReceiptStore for EeChunkReceiptStore {
 
 /// Typed outer-proof storage keyed by [`BatchId`].
 ///
-/// Sled-backed replacement for the earlier in-memory `HashMap` version.
+/// MDBX-backed replacement for the earlier in-memory `HashMap` version.
 /// The `AcctReceiptHook` writes here; `PaasBatchProver::get_proof(proof_id)`
 /// serves OL submission from the secondary `ProofId → BatchId` index.
 #[derive(Debug, Clone)]
@@ -162,7 +162,7 @@ impl EeBatchProofDbManager {
     }
 
     /// `ProofId` for a batch — its `last_block` hash. Stable across
-    /// in-memory and sled storage layers so the secondary index is
+    /// in-memory and MDBX storage layers so the secondary index is
     /// a 1:1 map with the manager's public API.
     pub(crate) fn proof_id_for(batch_id: BatchId) -> ProofId {
         batch_id.last_block()
@@ -177,7 +177,7 @@ impl EeBatchProofDbManager {
     }
 
     pub(crate) fn has_proof(&self, batch_id: BatchId) -> bool {
-        // sled errors surface as "not found"; callers treat this as a
+        // MDBX errors surface as "not found"; callers treat this as a
         // storage-level concern and log separately.
         self.db.has_acct_proof(batch_id).unwrap_or(false)
     }

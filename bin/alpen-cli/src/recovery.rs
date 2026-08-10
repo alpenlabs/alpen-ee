@@ -355,7 +355,7 @@ impl BigEndianRangeBounds {
 
     /// Returns whether `key` falls within the range, comparing the full key
     /// bytes against the 4-byte height bounds lexicographically. This matches
-    /// the semantics of the previous sled range: a longer key that shares the
+    /// the semantics of a lexicographic byte range: a longer key that shares the
     /// bound's 4-byte prefix sorts after it.
     fn contains_key(&self, key: &[u8]) -> bool {
         let after_start = match &self.start {

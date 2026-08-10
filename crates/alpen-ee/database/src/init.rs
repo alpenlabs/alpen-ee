@@ -1,7 +1,7 @@
 //! EE database initialization.
 //!
 //! Opens the EE stores under `<datadir>/mdbx` as MDBX environments, mirroring
-//! the role split of the previous sled layout: every node opens the node store
+//! the role split of the previous layout: every node opens the node store
 //! via [`EeDb::node_storage`], and only a sequencer additionally opens the
 //! DA/witness/prover stores via [`EeDb::sequencer_databases`]. Each store is an
 //! isolated environment (independent write-locks); the DA-context filter shares
@@ -45,7 +45,7 @@ pub struct EeDb {
 /// [`EeDb::node_storage`] for chain state, and [`EeDb::sequencer_databases`] for
 /// the DA and prover databases only a sequencer uses.
 ///
-/// `_db_retry_count` is accepted for compatibility with the sled layout but
+/// `_db_retry_count` is accepted for compatibility with the previous layout but
 /// unused: MDBX serializes writers, so there is no optimistic-retry backoff.
 pub fn open_ee_db(datadir: &Path, _db_retry_count: u16) -> Result<EeDb> {
     let mdbx_dir = datadir.join("mdbx");

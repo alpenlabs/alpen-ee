@@ -1,7 +1,7 @@
 //! Declarative macros for defining MDBX tables and their key/value codecs.
 //!
-//! These mirror the `strata-db-store-sled` macro surface so table definitions
-//! read the same across both engines. A table is a zero-sized marker type that
+//! These give table definitions a compact, uniform surface. A table is a
+//! zero-sized marker type that
 //! implements [`Schema`](crate::Schema); codec impls are attached to the key and
 //! value types via the `impl_*_codec` macros.
 

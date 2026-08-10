@@ -1,6 +1,6 @@
 //! MDBX-backed implementation of [`L1ChunkedEnvelopeDatabase`].
 //!
-//! Mirrors the previous sled store: a single index-keyed table of Borsh-encoded
+//! A single index-keyed table of Borsh-encoded
 //! [`ChunkedEnvelopeEntry`] values. The range delete runs inside one atomic
 //! `update` closure under the single MDBX writer.
 
