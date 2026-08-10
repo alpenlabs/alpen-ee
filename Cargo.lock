@@ -1171,6 +1171,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "alpen-batch-replay"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alloy-primitives",
+ "alpen-da-types",
+ "alpen-reth-statediff",
+ "rsp-mpt",
+ "strata-identifiers",
+ "strata-snark-acct-types",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "alpen-block-assembly"
 version = "0.3.0-alpha.1"
 dependencies = [
