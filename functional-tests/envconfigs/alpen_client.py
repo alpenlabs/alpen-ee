@@ -35,11 +35,10 @@ class AlpenClientEnvParams:
     enable_discovery: bool
     pure_discovery: bool
     mesh_bootnodes: bool
-    enable_l1_da: bool = False
     da_magic_bytes: bytes = b"ALPN"
     l1_reorg_safe_depth: int = 2
     batch_sealing_block_count: int = 10
-    dev_track_latest_epoch: bool = False
+    epoch_tracking_mode: str = "confirmed"
     beneficiary_address: str | None = None
 
 
@@ -55,7 +54,6 @@ class AlpenClientEnv(flexitest.EnvConfig):
         mesh_bootnodes: If True, each fullnode uses previous fullnodes as bootnodes
                         (in addition to sequencer) to help form mesh topology.
                         Requires enable_discovery=True. (default False)
-        enable_l1_da: Enable DA pipeline for posting state diffs to Bitcoin L1 (default False)
         da_magic_bytes: 4-byte magic for OP_RETURN tagging (default: b"ALPN")
         l1_reorg_safe_depth: Confirmation depth for L1 transactions (default: 1)
         batch_sealing_block_count: Number of blocks before sealing a batch (default: 5)
@@ -67,7 +65,6 @@ class AlpenClientEnv(flexitest.EnvConfig):
         enable_discovery: bool = False,
         pure_discovery: bool = False,
         mesh_bootnodes: bool = False,
-        enable_l1_da: bool = False,
         da_magic_bytes: bytes = DEFAULT_DA_MAGIC_BYTES,
         l1_reorg_safe_depth: int = 1,
         batch_sealing_block_count: int = 5,
@@ -78,7 +75,6 @@ class AlpenClientEnv(flexitest.EnvConfig):
             enable_discovery=enable_discovery,
             pure_discovery=pure_discovery,
             mesh_bootnodes=mesh_bootnodes,
-            enable_l1_da=enable_l1_da,
             da_magic_bytes=da_magic_bytes,
             l1_reorg_safe_depth=l1_reorg_safe_depth,
             batch_sealing_block_count=batch_sealing_block_count,
@@ -109,53 +105,51 @@ class AlpenClientEnv(flexitest.EnvConfig):
         privkey, pubkey = generate_sequencer_keypair()
 
         services = {}
-        da_config = None
 
-        # Start Bitcoin if DA is enabled
-        if envparams.enable_l1_da:
-            if bitcoin_service is None:
-                btc_factory = cast(BitcoinFactory, ectx.get_factory(ServiceType.Bitcoin))
-                bitcoin = btc_factory.create_regtest()
-                bitcoin.wait_for_ready(timeout=30)
-
-                btc_rpc = bitcoin.create_rpc()
-                btc_rpc.proxy.createwallet("testwallet")
-                mining_address = btc_rpc.proxy.getnewaddress()
-                _generate_blocks_in_chunks(btc_rpc, INITIAL_L1_MATURITY_BLOCKS, mining_address)
-
-                # DA publishing can sign multiple commits before earlier
-                # change outputs become confirmed spendable. Split a matured
-                # coinbase into normal wallet UTXOs so the signer has an
-                # independent spend source for each pending commit.
-                funding_outputs = {
-                    btc_rpc.proxy.getnewaddress(): 1 for _ in range(DA_WALLET_FUNDING_OUTPUTS)
-                }
-                btc_rpc.proxy.sendmany("", funding_outputs)
-                btc_rpc.proxy.generatetoaddress(1, mining_address)
-            else:
-                bitcoin = bitcoin_service
+        # A sequencer's config always needs a `[sequencer.bitcoind]` table, so bitcoind is
+        # not optional here.
+        if bitcoin_service is None:
+            btc_factory = cast(BitcoinFactory, ectx.get_factory(ServiceType.Bitcoin))
+            bitcoin = btc_factory.create_regtest()
+            bitcoin.wait_for_ready(timeout=30)
 
             btc_rpc = bitcoin.create_rpc()
+            btc_rpc.proxy.createwallet("testwallet")
+            mining_address = btc_rpc.proxy.getnewaddress()
+            _generate_blocks_in_chunks(btc_rpc, INITIAL_L1_MATURITY_BLOCKS, mining_address)
 
-            genesis_l1_height = btc_rpc.proxy.getblockcount()
+            # DA publishing can sign multiple commits before earlier
+            # change outputs become confirmed spendable. Split a matured
+            # coinbase into normal wallet UTXOs so the signer has an
+            # independent spend source for each pending commit.
+            funding_outputs = {
+                btc_rpc.proxy.getnewaddress(): 1 for _ in range(DA_WALLET_FUNDING_OUTPUTS)
+            }
+            btc_rpc.proxy.sendmany("", funding_outputs)
+            btc_rpc.proxy.generatetoaddress(1, mining_address)
+        else:
+            bitcoin = bitcoin_service
 
-            # Construct clean RPC URL without credentials (Rust BtcClient expects separate auth)
-            btc_rpc_url = f"http://localhost:{bitcoin.props['rpc_port']}"
+        btc_rpc = bitcoin.create_rpc()
 
-            da_config = EeDaConfig(
-                btc_rpc_url=btc_rpc_url,
-                btc_rpc_user=bitcoin.props["rpc_user"],
-                btc_rpc_password=bitcoin.props["rpc_password"],
-                magic_bytes=envparams.da_magic_bytes,
-                l1_reorg_safe_depth=envparams.l1_reorg_safe_depth,
-                genesis_l1_height=genesis_l1_height,
-                batch_sealing_block_count=envparams.batch_sealing_block_count,
-            )
-            services[ServiceType.Bitcoin] = bitcoin
+        genesis_l1_height = btc_rpc.proxy.getblockcount()
+
+        # Construct clean RPC URL without credentials (Rust BtcClient expects separate auth)
+        btc_rpc_url = f"http://localhost:{bitcoin.props['rpc_port']}"
+
+        da_config = EeDaConfig(
+            btc_rpc_url=btc_rpc_url,
+            btc_rpc_user=bitcoin.props["rpc_user"],
+            btc_rpc_password=bitcoin.props["rpc_password"],
+            magic_bytes=envparams.da_magic_bytes,
+            l1_reorg_safe_depth=envparams.l1_reorg_safe_depth,
+            genesis_l1_height=genesis_l1_height,
+            batch_sealing_block_count=envparams.batch_sealing_block_count,
+        )
+        services[ServiceType.Bitcoin] = bitcoin
 
         # Start sequencer
         sequencer = factory.create_sequencer(
-            sequencer_pubkey=pubkey,
             sequencer_privkey=privkey,
             enable_discovery=envparams.enable_discovery,
             ol_endpoint=ol_endpoint,
@@ -164,7 +158,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
             ee_params_path=ee_params_path,
             da_config=da_config,
             batch_sealing_block_count=envparams.batch_sealing_block_count,
-            dev_track_latest_epoch=envparams.dev_track_latest_epoch,
+            epoch_tracking_mode=envparams.epoch_tracking_mode,
             beneficiary_address=envparams.beneficiary_address,
         )
         sequencer.wait_for_ready(timeout=60)

@@ -163,7 +163,6 @@ Execution Environment implementation.
 | `alpen-ee/sequencer` | EE block building and OL chain tracking |
 | `alpen-ee/database` | EE-specific storage (SledDB) |
 | `alpen-ee/common` | Shared EE types and traits |
-| `alpen-ee/config` | EE configuration |
 | `alpen-ee/da` | EE data availability payload and inclusion helpers |
 | `alpen-ee/genesis` | EE genesis state |
 | `alpen-ee/block-assembly` | EE block and package assembly |

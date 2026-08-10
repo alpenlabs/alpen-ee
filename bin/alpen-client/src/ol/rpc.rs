@@ -82,7 +82,10 @@ impl RpcOLClient {
         let submit_client = match ol_submit_url {
             Some(url) => {
                 let token = ol_submit_bearer_token.ok_or_else(|| {
-                    OLClientError::rpc("--ol-submit-bearer-token is required with --ol-submit-url")
+                    OLClientError::rpc(
+                        "STRATA_SUBMIT_RPC_TOKEN environment variable is required with \
+                         sequencer.ol_submit_url",
+                    )
                 })?;
                 RpcTransportClient::from_url_with_headers(
                     url.to_string(),
@@ -585,7 +588,7 @@ mod tests {
 
         match err {
             OLClientError::Rpc(msg) => {
-                assert!(msg.contains("--ol-submit-bearer-token"));
+                assert!(msg.contains("STRATA_SUBMIT_RPC_TOKEN"));
             }
             other => panic!("unexpected error: {other:?}"),
         }

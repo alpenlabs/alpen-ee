@@ -10,64 +10,39 @@ if [ "${1-}" = "help" ] || [ "${1-}" = "--help" ] || [ "${1-}" = "-h" ]; then
     exec alpen-client --help
 fi
 
-# Build command from environment variables.
-# Set SEQUENCER_MODE=true to run as sequencer (default: fullnode).
+# Thin launcher. Both Alpen inputs are files the operator supplies and mounts
+# into the container: the node's own TOML config (--alpen-config) and the
+# chain params artifact (--alpen-params). Neither is built here -- one config
+# format, one place it comes from.
+#
+# Secrets (SEQUENCER_PRIVATE_KEY, STRATA_SUBMIT_RPC_TOKEN) stay in the
+# environment; alpen-client reads them straight from there.
 
-SEQUENCER_MODE="${SEQUENCER_MODE:-false}"
-SEQUENCER_PUBKEY="${SEQUENCER_PUBKEY:?SEQUENCER_PUBKEY must be set}"
+ALPEN_CONFIG_PATH="${ALPEN_CONFIG_PATH:-/app/configs/alpen-config.toml}"
 ALPEN_PARAMS_PATH="${ALPEN_PARAMS_PATH:-/app/configs/generated/alpen-params.json}"
+DATADIR="${DATADIR:-/app/data}"
 
-if [ "${DUMMY_OL_CLIENT:-0}" = "1" ]; then
-    set -- --dummy-ol-client "$@"
-else
-    set -- \
-        --ol-client-url "${OL_CLIENT_URL:-ws://strata:8432}" \
-        "$@"
-fi
-
-# Sequencer-only: submit URL, DA flags, and BTC credentials
-if [ "${SEQUENCER_MODE}" = "true" ]; then
-    BITCOIND_RPC_URL="${BITCOIND_RPC_URL:?BITCOIND_RPC_URL must be set}"
-    BITCOIND_RPC_USER="${BITCOIND_RPC_USER:?BITCOIND_RPC_USER must be set}"
-    BITCOIND_RPC_PASSWORD="${BITCOIND_RPC_PASSWORD:?BITCOIND_RPC_PASSWORD must be set}"
-    STRATA_SUBMIT_RPC_TOKEN="${STRATA_SUBMIT_RPC_TOKEN:?STRATA_SUBMIT_RPC_TOKEN must be set}"
-    BTCIO_FEE_POLICY="${BTCIO_FEE_POLICY:-bitcoind}"
-
-    set -- \
-        --sequencer \
-        --ol-submit-url "${OL_SUBMIT_URL:-ws://strata:8435}" \
-        --btc-rpc-url "${BITCOIND_RPC_URL}" \
-        --btc-rpc-user "${BITCOIND_RPC_USER}" \
-        --btc-rpc-password "${BITCOIND_RPC_PASSWORD}" \
-        --btcio-fee-policy "${BTCIO_FEE_POLICY}" \
-        "$@"
-
-    if [ -n "${BTCIO_CONF_TARGET:-}" ]; then
-        set -- "$@" --btcio-conf-target "${BTCIO_CONF_TARGET}"
+require_file() {
+    if [ ! -f "$2" ]; then
+        echo "entrypoint: $1 is \"$2\", which is not a file. Mount it into the container." >&2
+        exit 1
     fi
+}
 
-    if [ -n "${BTCIO_FEE_RATE:-}" ]; then
-        set -- "$@" --btcio-fee-rate "${BTCIO_FEE_RATE}"
-    fi
+require_file ALPEN_CONFIG_PATH "${ALPEN_CONFIG_PATH}"
+require_file ALPEN_PARAMS_PATH "${ALPEN_PARAMS_PATH}"
 
-    if [ -n "${BTCIO_MEMPOOL_BASE_URL:-}" ]; then
-        set -- "$@" --btcio-mempool-base-url "${BTCIO_MEMPOOL_BASE_URL}"
-    fi
-
-    if [ -n "${BTCIO_MEMPOOL_TIER:-}" ]; then
-        set -- "$@" --btcio-mempool-tier "${BTCIO_MEMPOOL_TIER}"
-    fi
-fi
+mkdir -p "${DATADIR}"
 
 exec alpen-client \
-    --sequencer-pubkey "${SEQUENCER_PUBKEY}" \
+    --alpen-config "${ALPEN_CONFIG_PATH}" \
     --alpen-params "${ALPEN_PARAMS_PATH}" \
-    --datadir "${DATADIR:-/app/data}" \
+    --datadir "${DATADIR}" \
     --addr 0.0.0.0 \
     --http \
     --http.addr 0.0.0.0 \
     --http.port "${HTTP_PORT:-8545}" \
-    --http.api "${HTTP_API:-eth,net,web3,txpool,admin,debug}" \
+    --http.api "${HTTP_API:-eth,net,web3,txpool}" \
     --ws \
     --ws.addr 0.0.0.0 \
     --ws.port "${WS_PORT:-8546}" \
@@ -75,8 +50,5 @@ exec alpen-client \
     --authrpc.addr 0.0.0.0 \
     --authrpc.port "${AUTHRPC_PORT:-8551}" \
     --authrpc.jwtsecret "${JWT_SECRET:-/app/keys/jwt.hex}" \
-    --l1-reorg-safe-depth "${L1_REORG_SAFE_DEPTH:-4}" \
-    --batch-sealing-block-count "${BATCH_SEALING_BLOCK_COUNT:-120}" \
     --txpool.minimal-protocol-fee "${TXPOOL_MIN_PROTOCOL_FEE:-0}" \
-    --genesis-l1-height "${GENESIS_L1_HEIGHT:?GENESIS_L1_HEIGHT must be set}" \
     "$@"

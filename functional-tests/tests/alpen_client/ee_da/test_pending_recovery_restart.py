@@ -40,7 +40,6 @@ class TestDaPendingRecoveryRestartTest(BaseTest):
         ctx.set_env(
             AlpenClientEnv(
                 fullnode_count=0,
-                enable_l1_da=True,
                 l1_reorg_safe_depth=self.L1_REORG_SAFE_DEPTH,
                 batch_sealing_block_count=self.BATCH_SEALING_BLOCK_COUNT,
             )

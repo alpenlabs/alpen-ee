@@ -1,0 +1,14 @@
+# alpen-client config for the "seq" container in docker-compose-p2p-test.yml.
+#
+# Both containers in that compose are full nodes with a dummy OL client -- the
+# test only exercises the alpen_gossip RLPx handshake, nothing signs or
+# gossips blocks. sequencer_pubkey is therefore never used to verify anything
+# here; it is a placeholder to satisfy the schema.
+
+mode = "full_node"
+
+[ol]
+source = "dummy"
+
+[full_node]
+sequencer_pubkey = "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f"

@@ -289,7 +289,7 @@ def main(argv: list[str]) -> int:
     # instead.
     global_envs: dict[str, flexitest.EnvConfig] = {
         # Alpen-client (EE) environments
-        "alpen_ee": AlpenClientEnv(enable_l1_da=True),
+        "alpen_ee": AlpenClientEnv(),
         # EEST needs the externally observable OL/EE path, not a
         # test-only client surface.
         "alpen_eest": EeOLEnv(
@@ -297,16 +297,13 @@ def main(argv: list[str]) -> int:
             pre_generate_blocks=110,
             batch_sealing_block_count=5,
         ),
-        "alpen_ee_discovery": AlpenClientEnv(
-            enable_discovery=True, pure_discovery=True, enable_l1_da=True
-        ),
-        "alpen_ee_multi": AlpenClientEnv(fullnode_count=3, enable_l1_da=True),
+        "alpen_ee_discovery": AlpenClientEnv(enable_discovery=True, pure_discovery=True),
+        "alpen_ee_multi": AlpenClientEnv(fullnode_count=3),
         "alpen_ee_mesh": AlpenClientEnv(
             fullnode_count=5,
             enable_discovery=True,
             pure_discovery=True,
             mesh_bootnodes=True,
-            enable_l1_da=True,
         ),
         # Environments containing both ee and ol
         "el_ol": EeOLEnv(pre_generate_blocks=110),
@@ -322,7 +319,7 @@ def main(argv: list[str]) -> int:
         # job but the alpen-client tracker, ASM checkpoint pipeline, and
         # btcio reader all stay comfortable. If this proves flaky on CI,
         # bump to 2000ms and accept a longer runtime.
-        # `dev_track_latest_epoch=True` switches the alpen-client's OL
+        # `epoch_tracking_mode="latest"` switches the alpen-client's OL
         # chain tracker to advance against Strata's latest completed OL
         # epoch instead of `confirmed` (CSM/L1-checkpoint-based) so the EE
         # block builder consumes inbox messages without waiting for the L1
@@ -330,7 +327,7 @@ def main(argv: list[str]) -> int:
         "el_ol_bridge": EeOLEnv(
             pre_generate_blocks=110,
             ol_block_time_ms=1000,
-            dev_track_latest_epoch=True,
+            epoch_tracking_mode="latest",
             batch_sealing_block_count=5,
         ),
     }

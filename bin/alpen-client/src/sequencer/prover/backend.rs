@@ -29,7 +29,7 @@ use super::{AcctSpec, ChunkSpec, EeBatchProofDbManager, PaasBatchProver};
 use crate::service_executor::ServiceExecutor;
 
 /// Default end-to-end deadline applied to the SP1 prover network for the EE
-/// chunk + acct provers when `--sp1-proof-deadline-secs` is not set. Chosen
+/// chunk + acct provers when `sequencer.sp1_proof_deadline_secs` is not set. Chosen
 /// to comfortably cover chunk/acct proofs while still failing fast on stuck
 /// requests.
 #[cfg(feature = "sp1")]
@@ -166,7 +166,7 @@ async fn build_ee_prover_config(
         }
         #[cfg(not(feature = "sp1"))]
         EeProverBackend::Sp1 { .. } => Err(eyre::eyre!(
-            "remote SP1 prover is not compiled in; pass --dev-native-prover \
+            "remote SP1 prover is not compiled in; set sequencer.dev_native_prover = true \
              or build with the `sp1` feature"
         )),
     }

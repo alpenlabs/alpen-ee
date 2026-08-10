@@ -256,7 +256,7 @@ Batch Lifecycle ─ latest proof-ready ─► Update Submitter
 
 ## Components
 
-Components marked **(Sequencer)** run only when the node is started with `--sequencer`.
+Components marked **(Sequencer)** run only when the node's `--alpen-config` sets `mode = "sequencer"`.
 
 ### OL Tracker
 
@@ -345,7 +345,7 @@ finalized block       →    finalized_block_hash
 **Location**: [crates/alpen-ee/sequencer/src/block_builder/](../../crates/alpen-ee/sequencer/src/block_builder/)
 
 **Responsibilities**:
-- Produce a block every block time (default 5,000ms; override with `ALPEN_EE_BLOCK_TIME_MS`)
+- Produce a block every block time (default 5,000ms; override via `sequencer.blocktime_ms` in `--alpen-config`)
 - Fetch finalized inbox messages (deposits) from the OL Chain Tracker
 - Build execution payloads via Reth's payload builder
 - Extract withdrawal intents from execution results
@@ -434,8 +434,8 @@ DA and proof failures are non-fatal; the task retries on each poll.
 - **Account (batch) proof** — consumes the batch's chunk receipts plus the prior batch's end state and a DA witness, producing the outer proof submitted to OL.
 
 **Backends**:
-- **SP1 remote** — production (`sp1` feature; deadline via `--sp1-proof-deadline-secs`)
-- **Native** — dev/test only (`--dev-native-prover`), skips real Groth16 proving and compiled guest ELFs
+- **SP1 remote** — production (`sp1` feature; deadline via `sequencer.sp1_proof_deadline_secs`)
+- **Native** — dev/test only (`sequencer.dev_native_prover`), skips real Groth16 proving and compiled guest ELFs
 
 Proofs and prover tasks live in a dedicated SledDB instance, separate from OL storage.
 
@@ -713,50 +713,73 @@ Tracks EE blocks, distinguishing finalized from unfinalized:
 
 ## Configuration
 
-The client extends the standard Reth CLI. Selected Alpen-specific flags (see [main.rs](src/main.rs) for the full list):
-
-### Core
-
-| Flag / Env | Purpose |
-|------------|---------|
-| `--alpen-params` | Path to the JSON Alpen params artifact (required); carries the EE account id, bridge params, DA stream identity, and the embedded EVM chain spec |
-| `--sequencer` | Run as a sequencer (requires the DA flags below) |
-| `--sequencer-pubkey` | Sequencer pubkey for gossip signature validation (required) |
-| `ALPEN_EE_BLOCK_TIME_MS` (env) | Override the sequencer block interval |
-
-### OL Connection
-
-| Flag / Env | Purpose |
-|------------|---------|
-| `--ol-client-url` | OL node RPC (required unless `--dummy-ol-client`) |
-| `--ol-submit-url` | Authenticated OL submission RPC (sequencer) |
-| `--ol-submit-bearer-token` / `STRATA_SUBMIT_RPC_TOKEN` | Auth token for submission RPC |
-| `--dummy-ol-client` | Use a stub OL client for isolated EE testing |
-
-### DA (Sequencer)
+The client extends the standard Reth CLI with three Alpen-specific flags (see [main.rs](src/main.rs)):
 
 | Flag | Purpose |
 |------|---------|
-| `--btc-rpc-url` / `--btc-rpc-user` / `--btc-rpc-password` | Bitcoin Core RPC for posting DA |
-| `--btcio-fee-policy` | Fee policy: `bitcoind`, `fixed`, or `mempool` |
+| `--alpen-params <path>` | Path to the JSON Alpen params artifact (required); carries the EE account id, bridge params, DA stream identity, and the embedded EVM chain spec |
+| `--alpen-config <path>` | Path to this node's TOML config (required); everything else — mode, OL connection, DA, sealing, observability |
+| `-v..-vvvvv` / `--quiet` / `--otlp-url` | Log verbosity and OTLP tracing endpoint (unchanged Reth-style display flags) |
 
-### Sealing & Proving (Sequencer)
+Reth's own `--config <path>` flag is unrelated — it points at `reth.toml` and is untouched by Alpen.
 
-| Flag | Purpose |
-|------|---------|
-| `--batch-sealing-block-count` | Blocks per batch before sealing |
-| `--chunk-sealing-block-count` / `--chunk-sealing-gas-limit` | Chunk sealing thresholds |
-| `--sp1-proof-deadline-secs` | Deadline for remote SP1 proof requests |
-| `--dev-native-prover` | Use the native prover (dev/test only) |
-| `SEQUENCER_PRIVATE_KEY` (env) | Sequencer key for gossip signing and DA reveal signing |
+The pinned `strata-datatool` doesn't have `gen-alpen-params` yet, so until it ships, compose the params JSON by hand: see the `AlpenParams` schema in [crates/alpen-ee/params/src/params.rs](../../crates/alpen-ee/params/src/params.rs), or [functional-tests/common/alpen_params.py](../../functional-tests/common/alpen_params.py) for a working example that stitches it together from `gen-ee-params` output and an in-repo chain spec.
 
-### Observability
+For deployment — Docker, P2P peering and discovery, and troubleshooting a running node — see [docker/operations.md](../../docker/operations.md).
 
-| Flag / Env | Purpose |
-|------------|---------|
-| `--health-check-host` / `--health-check-port` | HTTP health check endpoint |
-| `--otlp-url` / `OTEL_EXPORTER_OTLP_ENDPOINT` (env) | OTLP tracing endpoint |
-| `-v..-vvvvv` / `--quiet` | Log verbosity |
+### `--alpen-config` schema
+
+Every field except `mode`, `[ol]`, and the mode-specific table has a default. Two canonical, round-trip-tested examples are checked in at [testdata/config.full_node.toml](testdata/config.full_node.toml) and [testdata/config.sequencer.toml](testdata/config.sequencer.toml); see [src/config.rs](src/config.rs) for the exact schema and validation rules.
+
+**Full node:**
+
+```toml
+health_check_host = "0.0.0.0"
+health_check_port = 8080
+db_retry_count = 3
+l1_reorg_safe_depth = 6
+genesis_l1_height = 0
+mode = "full_node"
+
+[ol]
+source = "rpc"          # or "dummy" for isolated EE testing
+client_url = "ws://strata:8432"
+epoch_tracking_mode = "confirmed"
+
+[full_node]
+sequencer_pubkey = "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f"
+```
+
+**Sequencer:**
+
+```toml
+mode = "sequencer"
+
+[ol]
+source = "rpc"
+client_url = "ws://strata:8432"
+
+[sequencer]
+ol_submit_url = "ws://strata:8435"
+batch_sealing_block_count = 100
+beneficiary_address = "0x5400000000000000000000000000000000000010"
+blocktime_ms = 5000
+
+[sequencer.bitcoind]
+rpc_url = "http://bitcoind:18443"
+rpc_user = "user"
+rpc_password = "pass"
+network = "regtest"     # cross-checked against the connected bitcoind at startup
+
+[sequencer.l1_fee_policy]
+fee_policy = "fixed"
+fixed_fee_rate = 1.0
+```
+
+Two secrets are read from the environment instead of the config file, both sequencer only:
+
+- `SEQUENCER_PRIVATE_KEY` — the Schnorr key used for both gossip signing and DA reveal signing; the gossip pubkey is derived from it, not configured separately.
+- `STRATA_SUBMIT_RPC_TOKEN` — the bearer token for the authenticated OL submission RPC, required whenever `sequencer.ol_submit_url` is set.
 
 ---
 

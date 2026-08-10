@@ -27,7 +27,6 @@ class TestDaTransportLifecycleTest(BaseTest):
         ctx.set_env(
             AlpenClientEnv(
                 fullnode_count=0,
-                enable_l1_da=True,
             )
         )
 

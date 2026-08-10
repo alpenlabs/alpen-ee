@@ -1,14 +1,15 @@
 use std::path::Path;
 
-pub use sleddb::EeDatabases;
+pub use sleddb::{EeDb, SequencerDatabases};
 
 use crate::sleddb;
 
-/// Opens a single sled instance at `<datadir>/sled` and returns all raw
-/// database types.
+/// Opens the single sled instance at `<datadir>/sled`.
 ///
-/// Callers wrap individual DBs in ops/managers/threadpools as needed. This
-/// keeps DB initialization separate from the ops layer.
-pub fn init_db_storage(datadir: &Path, db_retry_count: u16) -> eyre::Result<EeDatabases> {
-    sleddb::init_database(datadir, db_retry_count)
+/// Returns a handle from which each role takes the databases it needs:
+/// [`EeDb::node_storage`] for chain state, and [`EeDb::sequencer_databases`]
+/// for the DA and prover databases only a sequencer uses. Sled locks its
+/// directory exclusively, so this open must happen exactly once per process.
+pub fn open_ee_db(datadir: &Path, db_retry_count: u16) -> eyre::Result<EeDb> {
+    sleddb::open_database(datadir, db_retry_count)
 }

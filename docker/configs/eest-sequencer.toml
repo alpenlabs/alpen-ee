@@ -1,0 +1,31 @@
+# alpen-client config for docker-compose-eest.yml.
+#
+# Sequencer with a dummy OL client and a regtest bitcoind for DA. Dev/test
+# only: the dummy OL client and the native prover are not production paths.
+
+l1_reorg_safe_depth = 1
+# Must match GENERATE_BLOCKS on the bitcoind service in the compose file, and
+# the genesis height used when generating alpen-params.json.
+genesis_l1_height = 101
+mode = "sequencer"
+
+[ol]
+source = "dummy"
+
+[sequencer]
+batch_sealing_block_count = 5
+# Skips real Groth16 proving, so no compiled SP1 guest ELFs are needed.
+dev_native_prover = true
+
+[sequencer.bitcoind]
+# Throwaway regtest credentials, matching the bitcoind service in the compose
+# file. They're in here so the two can't drift, which is fine for a container
+# reachable only on the compose network. Don't copy the pattern for a real
+# deployment -- keep those credentials out of a file you might commit.
+rpc_url = "http://bitcoind:18443"
+rpc_user = "rpcuser"
+rpc_password = "rpcpassword"
+network = "regtest"
+
+[sequencer.l1_fee_policy]
+fee_policy = "bitcoind"

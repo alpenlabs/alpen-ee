@@ -19,4 +19,12 @@ post-split params/keys flow is in place (see the repo-split notes).
 | `alpen-client/` | EE node (`Dockerfile` for CI/registry builds, `Dockerfile.local` for local compose builds) |
 | `bitcoind/` | Regtest bitcoind used by the test composes |
 
-See `simple-doc.md` for alpen-client setup and operations.
+## Configs
+
+`configs/` holds the `--alpen-config` TOML files the test composes mount into
+their containers. The entrypoint does not build a config from environment
+variables — it checks that the config and params files exist and then starts
+the node.
+
+See `operations.md` for alpen-client setup and operations, and
+`../bin/alpen-client/README.md` for the config schema.

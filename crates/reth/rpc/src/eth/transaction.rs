@@ -27,15 +27,23 @@ where
         self.inner.eth_api.send_raw_transaction_sync_timeout()
     }
 
-    /// Decodes and recovers the transaction and submits it to the pool.
+    /// Decodes and recovers the transaction, forwards it to the sequencer when
+    /// a forwarding target is configured, and submits it to the pool.
     ///
-    /// Returns the hash of the transaction.
+    /// Returns the hash of the transaction. That hash means the local pool
+    /// accepted it, not that the sequencer will include it. The two steps can
+    /// disagree. Forwarding runs first and its result is discarded, so an
+    /// unreachable sequencer still returns a hash. A pool rejection returns an
+    /// error even though the sequencer already has the transaction and may
+    /// well include it.
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
         let recovered = recover_raw_transaction(&tx)?;
         let pool_transaction = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
 
-        // On Strata, transactions are forwarded directly to the sequencer to be included in
-        // blocks that it builds.
+        // Forward before validating anything past the signature. The sequencer runs its own
+        // checks on what it receives, and it is the only node whose pool decides inclusion.
+        // Sending a transaction it would queue on a nonce gap is the point: gossip only
+        // carries executable transactions, so without this the gapped one never leaves.
         if let Some(client) = self.raw_tx_forwarder().as_ref() {
             tracing::debug!( target: "rpc::eth",  "forwarding raw transaction to");
             let _ = client.forward_raw_transaction(&tx).await.inspect_err(|err| {

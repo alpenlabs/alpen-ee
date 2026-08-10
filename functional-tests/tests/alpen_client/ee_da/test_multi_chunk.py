@@ -37,7 +37,6 @@ class TestDaMultiChunkTest(BaseTest):
         ctx.set_env(
             AlpenClientEnv(
                 fullnode_count=0,
-                enable_l1_da=True,
                 batch_sealing_block_count=self.BATCH_SEALING_BLOCK_COUNT,
             )
         )

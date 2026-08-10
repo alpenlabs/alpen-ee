@@ -1,9 +1,10 @@
 use std::{sync::Arc, time::Duration};
 
-use alpen_ee_common::{ConsensusHeads, OLClient, OLFinalizedStatus, Storage};
+#[cfg(feature = "sequencer")]
+use alpen_ee_common::OLFinalizedStatus;
+use alpen_ee_common::{ConsensusHeads, OLClient, Storage};
 use alpen_ee_ol_tracker::{
-    service::EpochTrackingMode, OLTrackerService, OLTrackerServiceState, OLTrackerState,
-    OLTrackerStatus,
+    EpochTrackingMode, OLTrackerService, OLTrackerServiceState, OLTrackerState, OLTrackerStatus,
 };
 use strata_service::{
     AsyncExecutor, DumbTickHandle, DumbTickingInput, ServiceBuilder, ServiceMonitor,
@@ -19,6 +20,10 @@ const DEFAULT_POLL_WAIT_MS: u64 = 1_000;
 /// Handle for accessing OL tracker state updates.
 #[derive(Debug)]
 pub(crate) struct OLTrackerHandle {
+    /// Only the sequencer path reads OL finalized status; see
+    /// [`start_ol_tracker_service_with`] for why a full node can simply not
+    /// hold this.
+    #[cfg(feature = "sequencer")]
     ol_status_rx: watch::Receiver<OLFinalizedStatus>,
     consensus_rx: watch::Receiver<ConsensusHeads>,
     monitor: ServiceMonitor<OLTrackerStatus>,
@@ -27,6 +32,7 @@ pub(crate) struct OLTrackerHandle {
 
 impl OLTrackerHandle {
     /// Returns a watcher for OL finalized status updates.
+    #[cfg(feature = "sequencer")]
     pub(crate) fn ol_status_watcher(&self) -> watch::Receiver<OLFinalizedStatus> {
         self.ol_status_rx.clone()
     }
@@ -59,7 +65,7 @@ pub(crate) async fn start_ol_tracker_service<TStorage, TOLClient>(
     genesis_epoch: u32,
     storage: Arc<TStorage>,
     ol_client: Arc<TOLClient>,
-    track_latest_epoch: bool,
+    tracking_mode: EpochTrackingMode,
     executor: &impl AsyncExecutor,
 ) -> anyhow::Result<OLTrackerHandle>
 where
@@ -71,7 +77,7 @@ where
         genesis_epoch,
         storage,
         ol_client,
-        track_latest_epoch,
+        tracking_mode,
         DEFAULT_POLL_WAIT_MS,
         DEFAULT_MAX_EPOCHS_FETCH,
         executor,
@@ -89,7 +95,7 @@ pub(crate) async fn start_ol_tracker_service_with<TStorage, TOLClient>(
     genesis_epoch: u32,
     storage: Arc<TStorage>,
     ol_client: Arc<TOLClient>,
-    track_latest_epoch: bool,
+    tracking_mode: EpochTrackingMode,
     poll_wait_ms: u64,
     max_epochs_fetch: u32,
     executor: &impl AsyncExecutor,
@@ -102,15 +108,17 @@ where
     let (ol_status_tx, ol_status_rx) = watch::channel(state.get_ol_status());
     let (consensus_tx, consensus_rx) = watch::channel(state.get_consensus_heads());
 
-    let tracking_mode = if track_latest_epoch {
+    // A full node has no reader for OL finalized status. The tracker ignores
+    // send errors, so dropping the receiver here costs nothing.
+    #[cfg(not(feature = "sequencer"))]
+    drop(ol_status_rx);
+
+    if tracking_mode == EpochTrackingMode::Latest {
         warn!(
             component = "alpen",
             "ol_tracker: Tracking latest epoch. This should only be used for testing"
         );
-        EpochTrackingMode::Latest
-    } else {
-        EpochTrackingMode::Confirmed
-    };
+    }
 
     let service_state = OLTrackerServiceState {
         storage,
@@ -132,6 +140,7 @@ where
         .await?;
 
     Ok(OLTrackerHandle {
+        #[cfg(feature = "sequencer")]
         ol_status_rx,
         consensus_rx,
         monitor,

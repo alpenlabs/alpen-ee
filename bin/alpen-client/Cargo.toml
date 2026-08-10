@@ -11,7 +11,6 @@ default = ["sequencer", "sp1"]
 sequencer = [
   "dep:alloy-consensus",
   "dep:alloy-eips",
-  "dep:alloy-primitives",
   "dep:alloy-rlp",
   "dep:alloy-rpc-types-engine",
   "dep:alpen-ee-da-provider",
@@ -27,7 +26,6 @@ sequencer = [
   "dep:reth-primitives-traits",
   "dep:strata-btcio",
   "dep:strata-codec",
-  "dep:strata-config",
   "dep:strata-db-types",
   "dep:strata-ee-acct-runtime",
   "dep:strata-ee-acct-types",
@@ -63,7 +61,6 @@ alloy-consensus = { workspace = true, optional = true }
 alloy-rlp = { workspace = true, optional = true }
 alpen-chainspec.workspace = true
 alpen-ee-common.workspace = true
-alpen-ee-config.workspace = true
 alpen-ee-da-provider = { workspace = true, optional = true }
 alpen-ee-da-runtime = { workspace = true, optional = true, features = [
   "builders",
@@ -88,7 +85,7 @@ strata-acct-types.workspace = true
 strata-btcio = { workspace = true, optional = true }
 strata-codec = { workspace = true, optional = true }
 strata-common = { workspace = true, features = ["async"] }
-strata-config = { workspace = true, optional = true }
+strata-config.workspace = true
 strata-db-types = { workspace = true, optional = true }
 strata-ee-acct-runtime = { workspace = true, optional = true }
 strata-ee-acct-types = { workspace = true, optional = true }
@@ -114,7 +111,7 @@ zkaleido-sp1-host = { workspace = true, optional = true }
 
 
 alloy-eips = { workspace = true, optional = true }
-alloy-primitives = { workspace = true, optional = true }
+alloy-primitives.workspace = true
 alloy-rpc-types-engine = { workspace = true, optional = true }
 anyhow.workspace = true
 async-trait.workspace = true
@@ -135,9 +132,11 @@ reth-primitives.workspace = true
 reth-primitives-traits = { workspace = true, optional = true }
 reth-provider.workspace = true
 reth-tasks.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 thiserror = { workspace = true, optional = true }
 tokio.workspace = true
+toml.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]

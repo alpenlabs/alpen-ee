@@ -39,7 +39,7 @@ class EeOLEnv(flexitest.EnvConfig):
         admin_confirmation_depth: int | None = None,
         fund_test_cli_wallet: bool = False,
         ol_block_time_ms: int | None = None,
-        dev_track_latest_epoch: bool = False,
+        epoch_tracking_mode: str = "confirmed",
         batch_sealing_block_count: int = 10,
     ):
         epoch_seal_config = (
@@ -53,9 +53,8 @@ class EeOLEnv(flexitest.EnvConfig):
             enable_discovery=enable_discovery,
             pure_discovery=pure_discovery,
             mesh_bootnodes=mesh_bootnodes,
-            enable_l1_da=True,
             batch_sealing_block_count=batch_sealing_block_count,
-            dev_track_latest_epoch=dev_track_latest_epoch,
+            epoch_tracking_mode=epoch_tracking_mode,
         )
         self.strata_config = StrataEnvConfig(
             pre_generate_blocks=pre_generate_blocks,

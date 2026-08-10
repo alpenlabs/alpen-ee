@@ -5,10 +5,12 @@
 use std::sync::Arc;
 
 use alpen_ee_da_provider::{ChunkedEnvelopeDaProvider, DaBlobSource, StateDiffBlobProvider};
-use alpen_ee_database::{EeDatabases, EeNodeStorage};
+use alpen_ee_database::{EeNodeStorage, SequencerDatabases};
 use alpen_ee_params::AlpenParams;
 use bitcoind_async_client::{
-    corepc_types::bitcoin::key::Keypair, traits::Wallet as _, Auth, Client as BtcClient,
+    corepc_types::bitcoin::key::Keypair,
+    traits::{Reader, Wallet as _},
+    Auth, Client as BtcClient,
 };
 use reth_provider::HeaderProvider;
 use reth_tasks::TaskExecutor;
@@ -16,22 +18,28 @@ use strata_btcio::{
     broadcaster::BroadcasterBuilder, writer::chunked_envelope::create_chunked_envelope_task,
     BtcioParams,
 };
-use strata_config::btcio::WriterConfig;
+use strata_config::{btcio::WriterConfig, BitcoindConfig};
+use strata_primitives::L1Height;
 use tokio::runtime::Handle;
 use tracing::{info, info_span, Instrument};
 
 use super::header_summary::RethHeaderSummaryProvider;
-use crate::{
-    args::{BtcioArgs, DaArgs},
-    service_executor::ServiceExecutor,
-};
+use crate::service_executor::ServiceExecutor;
+
+// Mirrors bitcoind-async-client's upstream defaults, applied when
+// `BitcoindConfig.retry_count`/`retry_interval` are left unset in
+// `[sequencer.bitcoind]`.
+const DEFAULT_BTCIO_RETRY_COUNT: u16 = 3;
+const DEFAULT_BTCIO_RETRY_INTERVAL_MS: u64 = 1_000;
 
 /// Everything [`start`] needs to bring up the DA pipeline.
 pub(crate) struct DaPipelineInputs<'a, P> {
-    pub(crate) da_args: &'a DaArgs,
-    pub(crate) btcio_args: &'a BtcioArgs,
-    pub(crate) dbs: &'a EeDatabases,
-    pub(crate) db_handle: Handle,
+    pub(crate) bitcoind: &'a BitcoindConfig,
+    /// Rollup-to-L1 facts, not sequencer config — see `AlpenClientConfig`'s
+    /// doc comment for why these come from outside `SequencerConfig`.
+    pub(crate) l1_reorg_safe_depth: u32,
+    pub(crate) genesis_l1_height: L1Height,
+    pub(crate) dbs: &'a SequencerDatabases,
     pub(crate) storage: Arc<EeNodeStorage>,
     pub(crate) node_provider: P,
     pub(crate) params: Arc<AlpenParams>,
@@ -59,10 +67,10 @@ where
     P: HeaderProvider<Header = reth_primitives::Header> + Send + Sync + 'static,
 {
     let DaPipelineInputs {
-        da_args,
-        btcio_args,
+        bitcoind,
+        l1_reorg_safe_depth,
+        genesis_l1_height,
         dbs,
-        db_handle,
         storage,
         node_provider,
         params,
@@ -70,35 +78,43 @@ where
         sequencer_keypair,
     } = inputs;
 
-    // clap `requires_all` on --sequencer guarantees all DA args are present.
     let magic_bytes = params.blob_spec().magic_bytes();
-    let btc_url = da_args.btc_rpc_url.as_ref().expect("enforced by clap");
-    let btc_user = da_args.btc_rpc_user.as_ref().expect("enforced by clap");
-    let btc_pass = da_args.btc_rpc_password.as_ref().expect("enforced by clap");
+    let btcio_params = BtcioParams::new(l1_reorg_safe_depth, magic_bytes, genesis_l1_height);
 
-    // Create BtcioParams directly from CLI args.
-    let btcio_params = BtcioParams::new(
-        da_args.l1_reorg_safe_depth,
-        magic_bytes,
-        da_args.genesis_l1_height,
-    );
+    let retry_count = bitcoind.retry_count.unwrap_or(DEFAULT_BTCIO_RETRY_COUNT);
+    let retry_interval = bitcoind
+        .retry_interval
+        .unwrap_or(DEFAULT_BTCIO_RETRY_INTERVAL_MS);
 
     // Bitcoin RPC client.
     let btc_client = Arc::new(
         BtcClient::new(
-            btc_url.clone(),
-            Auth::UserPass(btc_user.clone(), btc_pass.clone()),
-            Some(btcio_args.retry_count),
-            Some(btcio_args.retry_interval),
+            bitcoind.rpc_url.clone(),
+            Auth::UserPass(bitcoind.rpc_user.clone(), bitcoind.rpc_password.clone()),
+            Some(retry_count),
+            Some(retry_interval),
             None,
         )
         .map_err(|e| eyre::eyre!("creating Bitcoin RPC client: {e}"))?,
     );
     info!(
         target: "alpen-client", component = "alpen",
-        retry_count = btcio_args.retry_count,
-        retry_interval_ms = btcio_args.retry_interval,
+        retry_count, retry_interval_ms = retry_interval,
         "btcio Bitcoin RPC retry policy configured",
+    );
+
+    // Fail fast if the connected bitcoind is on a different network than
+    // configured — today alpen-client has no other check that it's pointed
+    // at the right chain, mirroring bin/strata's own startup network check.
+    let live_network = btc_client
+        .network()
+        .await
+        .map_err(|e| eyre::eyre!("querying Bitcoin RPC network: {e}"))?;
+    eyre::ensure!(
+        live_network == bitcoind.network,
+        "sequencer.bitcoind.network is configured as {:?}, but the connected \
+         bitcoind reports {live_network:?}",
+        bitcoind.network,
     );
 
     // Sequencer address from bitcoin wallet.
@@ -107,7 +123,9 @@ where
         .await
         .map_err(|e| eyre::eyre!("failed to get sequencer address: {e}"))?;
 
-    // Wrap raw DBs in ops using the shared runtime handle.
+    // Wrap raw DBs in ops using the runtime this task is already running on,
+    // the same one `node::bootstrap_node` builds the node storage against.
+    let db_handle = Handle::current();
     let broadcast_ops = Arc::new(dbs.broadcast_ops(db_handle.clone()));
     let envelope_ops = Arc::new(dbs.chunked_envelope_ops(db_handle));
 

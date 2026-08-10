@@ -1,0 +1,28 @@
+health_check_host = "0.0.0.0"
+health_check_port = 8080
+db_retry_count = 3
+l1_reorg_safe_depth = 6
+genesis_l1_height = 0
+mode = "sequencer"
+
+[ol]
+source = "rpc"
+client_url = "ws://strata:8432"
+epoch_tracking_mode = "confirmed"
+
+[sequencer]
+ol_submit_url = "ws://strata:8435"
+batch_sealing_block_count = 100
+beneficiary_address = "0x5400000000000000000000000000000000000010"
+blocktime_ms = 5000
+dev_native_prover = false
+
+[sequencer.bitcoind]
+rpc_url = "http://bitcoind:18443"
+rpc_user = "user"
+rpc_password = "pass"
+network = "regtest"
+
+[sequencer.l1_fee_policy]
+fee_policy = "fixed"
+fixed_fee_rate = 1.0
