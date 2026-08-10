@@ -1,11 +1,9 @@
 use alpen_ee_common::{BatchId, ChunkId, StorageError};
-use sled::transaction::TransactionError;
 use strata_acct_types::Hash;
 use strata_identifiers::OLBlockId;
 use strata_storage_common::exec::OpsError;
 use thiserror::Error;
 use tokio::task::JoinError;
-use typed_sled::error::Error as SledError;
 
 pub type DbResult<T> = Result<T, DbError>;
 
@@ -102,14 +100,6 @@ pub enum DbError {
     #[error("db worker task failed to return a result: {0}")]
     WorkerPanic(String),
 
-    /// Sled database error.
-    #[error("sled: {0}")]
-    Sled(String),
-
-    /// Sled transaction error.
-    #[error("sled txn: {0}")]
-    SledTxn(String),
-
     /// MDBX database error (engine or codec).
     #[error("mdbx: {0}")]
     Mdbx(String),
@@ -128,24 +118,6 @@ impl DbError {
 impl From<JoinError> for DbError {
     fn from(err: JoinError) -> Self {
         DbError::WorkerPanic(err.to_string())
-    }
-}
-
-impl From<SledError> for DbError {
-    fn from(maybe_dberr: SledError) -> Self {
-        match maybe_dberr.downcast_abort::<DbError>() {
-            Ok(dberr) => dberr,
-            Err(other) => DbError::Sled(other.to_string()),
-        }
-    }
-}
-
-impl From<TransactionError<SledError>> for DbError {
-    fn from(value: TransactionError<SledError>) -> Self {
-        match value {
-            TransactionError::Abort(tsled_err) => tsled_err.into(),
-            err => DbError::SledTxn(err.to_string()),
-        }
     }
 }
 

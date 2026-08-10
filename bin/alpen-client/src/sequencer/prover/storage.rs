@@ -1,6 +1,6 @@
 //! Sled-backed storage managers for the EE prover.
 //!
-//! Three managers, all wrapping the shared [`EeProverDbSled`]:
+//! Three managers, all wrapping the shared [`EeProverDbMdbx`]:
 //!
 //! - [`EeProverTaskDbManager`] — impls `paas::TaskStore`. Shared across chunk + acct provers via
 //!   the kind-tagged task-key encoding (see `CHUNK_TASK_KEY_TAG` / `BATCH_TASK_KEY_TAG`).
@@ -23,7 +23,7 @@
 use std::sync::Arc;
 
 use alpen_ee_common::{BatchId, Proof, ProofId};
-use alpen_ee_database::EeProverDbSled;
+use alpen_ee_database::EeProverDbMdbx;
 use strata_db_types::{errors::DbError, prover_task::ProverTaskDatabase};
 use strata_paas::{
     ProverError, ProverResult, ReceiptStore, TaskRecord, TaskRecordData, TaskStatus, TaskStore,
@@ -45,11 +45,11 @@ fn db_err(e: DbError) -> ProverError {
 /// so entries from the two provers don't collide in the shared tree.
 #[derive(Debug, Clone)]
 pub(crate) struct EeProverTaskDbManager {
-    db: Arc<EeProverDbSled>,
+    db: Arc<EeProverDbMdbx>,
 }
 
 impl EeProverTaskDbManager {
-    pub(crate) fn new(db: Arc<EeProverDbSled>) -> Self {
+    pub(crate) fn new(db: Arc<EeProverDbMdbx>) -> Self {
         Self { db }
     }
 
@@ -125,11 +125,11 @@ impl TaskStore for EeProverTaskDbManager {
 /// reads via `collect_chunk_inputs_for_batch`.
 #[derive(Debug, Clone)]
 pub(crate) struct EeChunkReceiptStore {
-    db: Arc<EeProverDbSled>,
+    db: Arc<EeProverDbMdbx>,
 }
 
 impl EeChunkReceiptStore {
-    pub(crate) fn new(db: Arc<EeProverDbSled>) -> Self {
+    pub(crate) fn new(db: Arc<EeProverDbMdbx>) -> Self {
         Self { db }
     }
 }
@@ -153,11 +153,11 @@ impl ReceiptStore for EeChunkReceiptStore {
 /// serves OL submission from the secondary `ProofId → BatchId` index.
 #[derive(Debug, Clone)]
 pub(crate) struct EeBatchProofDbManager {
-    db: Arc<EeProverDbSled>,
+    db: Arc<EeProverDbMdbx>,
 }
 
 impl EeBatchProofDbManager {
-    pub(crate) fn new(db: Arc<EeProverDbSled>) -> Self {
+    pub(crate) fn new(db: Arc<EeProverDbMdbx>) -> Self {
         Self { db }
     }
 
