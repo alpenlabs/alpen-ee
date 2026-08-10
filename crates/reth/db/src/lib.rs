@@ -1,5 +1,6 @@
 //! Database for Reth.
 
+pub mod mdbx;
 pub mod sled;
 
 #[allow(
