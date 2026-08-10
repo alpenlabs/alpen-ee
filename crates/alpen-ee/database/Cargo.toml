@@ -7,6 +7,7 @@ version = "0.3.0-alpha.1"
 workspace = true
 
 [dependencies]
+alpen-db-store-mdbx.workspace = true
 alpen-ee-common.workspace = true
 alpen-ee-params.workspace = true
 alpen-reth-db.workspace = true
@@ -25,6 +26,7 @@ strata-storage-common.workspace = true
 zkaleido.workspace = true
 
 async-trait.workspace = true
+bincode.workspace = true
 borsh.workspace = true
 ciborium.workspace = true
 eyre.workspace = true
