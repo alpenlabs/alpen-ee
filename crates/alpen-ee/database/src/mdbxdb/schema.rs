@@ -1,7 +1,6 @@
 //! MDBX table definitions for the EE node database.
 //!
-//! Reuses the same `DB*` wrapper types and borsh encoding as the previous sled
-//! schema, one-for-one. Integer-keyed tables use
+//! Uses the `DB*` wrapper types and borsh encoding. Integer-keyed tables use
 //! big-endian keys so MDBX's lexicographic cursor order matches numeric order
 //! (relied on by `first`/`last`/range queries).
 

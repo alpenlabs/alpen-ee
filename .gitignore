@@ -231,8 +231,7 @@ cython_debug/
 
 # functional test folders
 _dd/
-sled/
-sled_prover/
+mdbx/
 
 # PyCharm
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can

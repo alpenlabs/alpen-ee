@@ -1,8 +1,7 @@
 //! Typed table schema and key/value codec traits.
 //!
-//! These mirror the shape of the `typed-sled` codec traits so that the same
-//! encoding conventions (borsh, `strata-codec`, big-endian integer keys) carry
-//! over to MDBX-backed tables. Values decode to owned types (copy-out of the
+//! These establish the encoding conventions (borsh, `strata-codec`, big-endian
+//! integer keys) for MDBX-backed tables. Values decode to owned types (copy-out of the
 //! transaction), which sidesteps the zero-copy lifetime hazards of holding a
 //! borrowed view across a transaction boundary.
 

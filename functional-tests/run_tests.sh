@@ -2,7 +2,7 @@
 set -e
 
 export RUST_BACKTRACE=1
-export RUST_LOG="debug,sled=warn,hyper=warn,h2=warn,soketto=warn,jsonrpsee-server=warn,mio=warn"
+export RUST_LOG="debug,hyper=warn,h2=warn,soketto=warn,jsonrpsee-server=warn,mio=warn"
 
 # Which EE prover backend the built alpen-client is exercised against.
 #   native (default): debug build, no real ZK proving. Fast iteration.

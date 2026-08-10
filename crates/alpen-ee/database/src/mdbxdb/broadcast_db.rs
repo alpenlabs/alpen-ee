@@ -1,6 +1,6 @@
 //! MDBX-backed implementation of [`L1BroadcastDatabase`].
 //!
-//! Mirrors the previous sled store one-for-one, keeping the same Borsh-encoded
+//! Keeps the same Borsh-encoded
 //! [`L1TxEntry`] values and the same index/txid table split. Because MDBX
 //! serializes writers, the check-and-allocate in [`put_tx_entry`] and the
 //! range delete in [`del_tx_entries_from_idx`] each run inside a single atomic
@@ -165,7 +165,7 @@ impl L1BroadcastDatabase for L1BroadcastDbMdbx {
 
     fn get_tx_entry(&self, idx: u64) -> DbResult<Option<L1TxEntry>> {
         // `Some(inner)` => the index maps to a txid (`inner` is its entry, if
-        // any); `None` => no index mapping, which is an error like the sled impl.
+        // any); `None` => no index mapping, which is an error.
         let resolved = self
             .env
             .view(|r| {
