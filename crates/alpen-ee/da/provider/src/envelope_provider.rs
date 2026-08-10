@@ -349,12 +349,18 @@ fn compute_wtxids_root(block: &Block) -> eyre::Result<WtxidsRoot> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
+    use std::{
+        env,
+        path::PathBuf,
+        process,
+        sync::{
+            atomic::{AtomicU64, AtomicUsize, Ordering},
+            Arc, OnceLock,
+        },
     };
 
     use alpen_ee_da_types::DaBlob;
+    use alpen_ee_database::{open_da_ops, BroadcastDbOps, ChunkedEnvelopeOps};
     use async_trait::async_trait;
     use bitcoin::{
         absolute::LockTime,
@@ -366,14 +372,28 @@ mod tests {
         TxOut, Witness,
     };
     use strata_btcio::writer::chunked_envelope::ChunkedEnvelopeHandle;
-    use strata_db_store_sled::test_utils::get_test_sled_backend;
-    use strata_db_types::{
-        backend::DatabaseBackend, chunked_envelope::RevealTxMeta, l1_broadcast::L1TxEntry,
-    };
+    use strata_db_types::{chunked_envelope::RevealTxMeta, l1_broadcast::L1TxEntry};
     use strata_l1_txfmt::MagicBytes;
-    use strata_storage::{ops::chunked_envelope::ChunkedEnvelopeOps, BroadcastDbOps};
+    use tokio::runtime::{Handle, Runtime};
 
     use super::*;
+
+    /// A process-wide tokio runtime handle for the DA-provider tests.
+    fn test_runtime_handle() -> Handle {
+        static RT: OnceLock<Runtime> = OnceLock::new();
+        RT.get_or_init(|| Runtime::new().expect("test: build runtime"))
+            .handle()
+            .clone()
+    }
+
+    /// A unique temp path for an isolated MDBX DA environment.
+    fn temp_da_dir() -> PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let mut path = env::temp_dir();
+        path.push(format!("ee-da-provider-test-{}-{n}", process::id()));
+        path
+    }
 
     struct NeverCalledBlobSource;
 
@@ -515,15 +535,9 @@ mod tests {
         Arc<ChunkedEnvelopeOps>,
         Arc<BroadcastDbOps>,
     )> {
-        let backend = get_test_sled_backend();
-        let chunked_ops = Arc::new(ChunkedEnvelopeOps::new(
-            strata_storage::test_runtime_handle(),
-            backend.chunked_envelope_db(),
-        ));
-        let broadcast_ops = Arc::new(BroadcastDbOps::new(
-            strata_storage::test_runtime_handle(),
-            backend.broadcast_db(),
-        ));
+        let (broadcast_ops, chunked_ops) = open_da_ops(&temp_da_dir(), test_runtime_handle())?;
+        let chunked_ops = Arc::new(chunked_ops);
+        let broadcast_ops = Arc::new(broadcast_ops);
         let provider = ChunkedEnvelopeDaProvider::new(
             blob_provider,
             Arc::new(ChunkedEnvelopeHandle::new(chunked_ops.clone())),
