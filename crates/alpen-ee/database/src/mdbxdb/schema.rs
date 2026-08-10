@@ -8,6 +8,8 @@
 use alpen_db_store_mdbx::{define_table_be_key, define_table_borsh, tables, TableSpec};
 use alpen_ee_common::AccessedStateRecord;
 use strata_acct_types::Hash;
+use strata_db_types::{chunked_envelope::ChunkedEnvelopeEntry, l1_broadcast::L1TxEntry};
+use strata_identifiers::Buf32;
 use strata_paas::TaskRecordData;
 use zkaleido::ProofReceiptWithMetadata;
 
@@ -110,6 +112,23 @@ define_table_borsh! {
     (AcctProofIdIndexSchema) Hash => DBBatchId
 }
 
+// --- DA-pipeline tables (L1 broadcast + chunked envelope) ---
+
+define_table_be_key! {
+    /// L1 broadcast: sequential index to transaction id.
+    (L1BroadcastTxIdSchema) u64 => Buf32
+}
+
+define_table_borsh! {
+    /// L1 broadcast: transaction id to its [`L1TxEntry`].
+    (L1BroadcastTxSchema) Buf32 => L1TxEntry
+}
+
+define_table_be_key! {
+    /// Chunked-envelope entry by sequential index.
+    (L1ChunkedEnvelopeSchema) u64 => ChunkedEnvelopeEntry
+}
+
 /// The full set of tables backing the EE node database, for
 /// [`MdbxEnv::open`](alpen_db_store_mdbx::MdbxEnv::open).
 pub(crate) fn node_tables() -> Vec<TableSpec> {
@@ -141,3 +160,12 @@ pub(crate) fn prover_tables() -> Vec<TableSpec> {
     ]
 }
 
+/// The full set of tables backing the EE DA pipeline (L1 broadcast + chunked
+/// envelope).
+pub(crate) fn da_tables() -> Vec<TableSpec> {
+    tables![
+        L1BroadcastTxIdSchema,
+        L1BroadcastTxSchema,
+        L1ChunkedEnvelopeSchema,
+    ]
+}

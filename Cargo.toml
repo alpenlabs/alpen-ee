@@ -113,7 +113,7 @@ strata-cli-common = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a4
 strata-common = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
 strata-config = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
 strata-da-framework = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
-strata-db-store-sled = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
+strata-db-tests = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
 strata-db-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
 strata-mpt = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
 strata-ol-bridge-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
@@ -125,7 +125,6 @@ strata-paas = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b
 strata-primitives = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
 strata-snark-acct-runtime = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
 strata-snark-acct-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
-strata-storage = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
 strata-storage-common = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
 strata-test-utils-btcio = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
 strata-test-utils-ssz = { git = "https://github.com/alpenlabs/alpen.git", rev = "3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257" }
@@ -182,7 +181,6 @@ strata-test-utils-btc = { git = "https://github.com/alpenlabs/asm", tag = "v0.3.
 strata-test-utils-checkpoint = { git = "https://github.com/alpenlabs/asm", tag = "v0.3.0-rc.2" }
 
 # sled wrapper
-typed-sled = { git = "https://github.com/alpenlabs/typed-sled" }
 
 # zkaleido
 zkaleido = { git = "https://github.com/alpenlabs/zkaleido", features = [
