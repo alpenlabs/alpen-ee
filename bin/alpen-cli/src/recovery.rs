@@ -8,6 +8,7 @@ use std::{
 };
 
 use aes_gcm_siv::{aead::AeadMutInPlace, Aes256GcmSiv, KeyInit, Nonce, Tag};
+use alpen_db_store_mdbx::{define_table_borsh, tables, DbError, MdbxConfig, MdbxEnv};
 use bdk_wallet::{
     bitcoin::{constants::ChainHash, Network},
     keys::{DescriptorPublicKey, DescriptorSecretKey},
@@ -22,12 +23,21 @@ use tokio::io::AsyncReadExt;
 
 use crate::seed::Seed;
 
+define_table_borsh! {
+    /// Encrypted descriptor-recovery records, keyed by
+    /// `recover_at (u32 big-endian) || sha256(descriptor)`.
+    (DescriptorRecoverySchema) Vec<u8> => Vec<u8>
+}
+
+/// Raw `(key, value)` records read out of the recovery table.
+type RawRecords = Vec<(Vec<u8>, Vec<u8>)>;
+
 #[expect(
     missing_debug_implementations,
     reason = "Struct contains sensitive cryptographic data that should not be debug printed"
 )]
 pub struct DescriptorRecovery {
-    db: sled::Db,
+    db: MdbxEnv,
     cipher: Aes256GcmSiv,
 }
 
@@ -117,18 +127,23 @@ impl DescriptorRecovery {
 
         bytes.extend_from_slice(nonce.as_ref());
 
-        self.db.insert(db_key, bytes)?;
-        self.db.flush_async().await?;
+        // One durable MDBX commit; no separate flush is needed.
+        self.db
+            .update(|w| w.put::<DescriptorRecoverySchema>(&db_key, &bytes))
+            .map_err(|e: DbError| io::Error::other(e.to_string()))?;
         Ok(())
     }
 
     pub async fn open(seed: &Seed, descriptor_db: &Path) -> io::Result<Self> {
         let key = seed.descriptor_recovery_key();
         let cipher = Aes256GcmSiv::new(&key.into());
-        Ok(Self {
-            db: sled::open(descriptor_db)?,
-            cipher,
-        })
+        let db = MdbxEnv::open(
+            descriptor_db,
+            &MdbxConfig::small(),
+            &tables![DescriptorRecoverySchema],
+        )
+        .map_err(|e| io::Error::other(e.to_string()))?;
+        Ok(Self { db, cipher })
     }
 
     pub async fn read_descs(
@@ -144,16 +159,29 @@ impl DescriptorRecovery {
             InvalidPublicKey,
             aes_gcm_siv::Error,
             io::Error,
-            sled::Error,
+            DbError,
             EntryTooShort,
         )>,
     > {
-        let after_height = self
+        // Collect the matching (key, value) records first, then decode outside
+        // the read transaction so it stays short-lived.
+        let bounds = BigEndianRangeBounds::from_u32_range(height_range);
+        let raw_entries: RawRecords = self
             .db
-            .range(BigEndianRangeBounds::from_u32_range(height_range));
+            .view(|r| -> Result<RawRecords, DbError> {
+                let mut out = Vec::new();
+                r.for_each::<DescriptorRecoverySchema>(|key, value| {
+                    if bounds.contains_key(&key) {
+                        out.push((key, value));
+                    }
+                    Ok(())
+                })?;
+                Ok(out)
+            })
+            .map_err(OneOf::new)?;
+
         let mut descs = vec![];
-        for desc_entry in after_height {
-            let (key, mut raw) = desc_entry.map_err(OneOf::new)?;
+        for (key, mut raw) in raw_entries {
             let key = DescriptorRecoveryKey::decode(&key).unwrap();
             if raw.len() <= 12 + 16 {
                 return Err(OneOf::new(EntryTooShort { length: raw.len() }));
@@ -226,8 +254,9 @@ impl DescriptorRecovery {
         Ok(descs)
     }
 
-    pub fn remove(&self, key: &DescriptorRecoveryKey) -> sled::Result<Option<sled::IVec>> {
-        self.db.remove(key.encode())
+    pub fn remove(&self, key: &DescriptorRecoveryKey) -> Result<bool, DbError> {
+        self.db
+            .update(|w| w.delete::<DescriptorRecoverySchema>(&key.encode().to_vec()))
     }
 }
 
@@ -300,8 +329,8 @@ impl DescriptorRecoveryKey {
     }
 }
 
-/// A helper so that we can pass ranges of block heights as u32s when reading descriptors,
-/// but the database actually needs to do the range via the big endian representation.
+/// A helper so that we can pass ranges of block heights as u32s when reading
+/// descriptors, but the range is applied over the big-endian key prefix.
 struct BigEndianRangeBounds {
     start: Bound<[u8; 4]>,
     end: Bound<[u8; 4]>,
@@ -323,22 +352,22 @@ impl BigEndianRangeBounds {
 
         Self { start, end }
     }
-}
 
-impl RangeBounds<[u8; 4]> for BigEndianRangeBounds {
-    fn start_bound(&self) -> Bound<&[u8; 4]> {
-        match &self.start {
-            Bound::Included(arr) => Bound::Included(arr),
-            Bound::Excluded(arr) => Bound::Excluded(arr),
-            Bound::Unbounded => Bound::Unbounded,
-        }
-    }
-
-    fn end_bound(&self) -> Bound<&[u8; 4]> {
-        match &self.end {
-            Bound::Included(arr) => Bound::Included(arr),
-            Bound::Excluded(arr) => Bound::Excluded(arr),
-            Bound::Unbounded => Bound::Unbounded,
-        }
+    /// Returns whether `key` falls within the range, comparing the full key
+    /// bytes against the 4-byte height bounds lexicographically. This matches
+    /// the semantics of the previous sled range: a longer key that shares the
+    /// bound's 4-byte prefix sorts after it.
+    fn contains_key(&self, key: &[u8]) -> bool {
+        let after_start = match &self.start {
+            Bound::Included(b) => key >= b.as_slice(),
+            Bound::Excluded(b) => key > b.as_slice(),
+            Bound::Unbounded => true,
+        };
+        let before_end = match &self.end {
+            Bound::Included(b) => key <= b.as_slice(),
+            Bound::Excluded(b) => key < b.as_slice(),
+            Bound::Unbounded => true,
+        };
+        after_start && before_end
     }
 }
