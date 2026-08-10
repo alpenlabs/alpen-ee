@@ -765,6 +765,13 @@ batch_sealing_block_count = 100
 beneficiary_address = "0x5400000000000000000000000000000000000010"
 blocktime_ms = 5000
 
+# Required. With backend = "native" the two fields become
+# chunk_signing_key_path and acct_signing_key_path instead.
+[sequencer.prover]
+backend = "sp1"
+chunk_elf_path = "/app/elfs/sp1/guest-alpen-chunk.elf"
+acct_elf_path = "/app/elfs/sp1/guest-alpen-acct.elf"
+
 [sequencer.bitcoind]
 rpc_url = "http://bitcoind:18443"
 rpc_user = "user"
