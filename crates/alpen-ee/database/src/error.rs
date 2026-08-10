@@ -110,6 +110,10 @@ pub enum DbError {
     #[error("sled txn: {0}")]
     SledTxn(String),
 
+    /// MDBX database error (engine or codec).
+    #[error("mdbx: {0}")]
+    Mdbx(String),
+
     /// Other unspecified database error.
     #[error("{0}")]
     Other(String),
@@ -142,6 +146,12 @@ impl From<TransactionError<SledError>> for DbError {
             TransactionError::Abort(tsled_err) => tsled_err.into(),
             err => DbError::SledTxn(err.to_string()),
         }
+    }
+}
+
+impl From<alpen_db_store_mdbx::DbError> for DbError {
+    fn from(err: alpen_db_store_mdbx::DbError) -> Self {
+        DbError::Mdbx(err.to_string())
     }
 }
 
