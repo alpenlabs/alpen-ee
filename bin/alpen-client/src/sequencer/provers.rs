@@ -83,13 +83,11 @@ where
             .receipt_hook(ChunkReceiptHook::new(chunk_storage_dyn.clone()))
             .retry(RetryConfig::default());
 
-    // NOTE: the account prover still assembles its batch-range
-    // witness via `RangeWitnessExtractor`, which reads the
-    // per-block accessed-state records the (now removed)
-    // `AccessedStateGenerator` exex used to write. Migrating this to
-    // the inline per-block witnesses is the remaining step to fully
-    // retire the exex + the deep range multiproof (see
-    // experimental/evgeniy/ee-proper-witness.md).
+    // TODO(STR-4157): the account prover still assembles its batch-range
+    // witness via `RangeWitnessExtractor`, which builds a deep range
+    // multiproof from per-block accessed-state records. Migrating to
+    // inline per-block witnesses would let us drop this extractor and
+    // the multiproof.
     let range_witness_extractor =
         Arc::new(RangeWitnessExtractor::new(node_provider, storage.clone()));
     let acct_range_witness_fn: Arc<AcctRangeWitnessFn> = {
