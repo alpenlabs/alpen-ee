@@ -67,8 +67,8 @@ rustdoc.all = "warn"
 
 [workspace.dependencies]
 alpen-chainspec = { path = "crates/reth/chainspec" }
-alpen-ee-block-assembly = { path = "crates/alpen-ee/block-assembly" }
 alpen-db-store-mdbx = { path = "crates/db/store-mdbx" }
+alpen-ee-block-assembly = { path = "crates/alpen-ee/block-assembly" }
 alpen-ee-common = { path = "crates/alpen-ee/common" }
 alpen-ee-da-provider = { path = "crates/alpen-ee/da/provider" }
 alpen-ee-da-runtime = { path = "crates/alpen-ee/da/runtime" }
@@ -372,7 +372,6 @@ sha2 = "0.10.8"
 shrex = { version = "1", features = ["serde"] }
 shrex_macros = "1"
 signet-libmdbx = "0.8.3"
-sled = "0.34.7"
 tempfile = "3.27.0"
 terrors = "0.3.0"
 thiserror = "2.0.11"
