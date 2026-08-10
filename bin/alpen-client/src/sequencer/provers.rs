@@ -11,7 +11,7 @@
 //! - `chunk_receipts` — chunk prover writes (via paas auto-store); acct `fetch_input` reads back.
 //! - `batch_proofs` — outer-proof store keyed by `BatchId`; outer hook writes, OL submission reads.
 //!
-//! All backed by `EeProverDbSled`; see `alpen_ee_database::sleddb::prover_db`
+//! All backed by `EeProverDbMdbx`; see `alpen_ee_database::mdbxdb`
 //! for schemas.
 
 use std::sync::Arc;

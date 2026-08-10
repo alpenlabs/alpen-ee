@@ -1,14 +1,6 @@
 //! Database for Reth.
 
 pub mod mdbx;
-pub mod sled;
-
-#[allow(
-    unused_extern_crates,
-    clippy::allow_attributes,
-    reason = "consuming dep"
-)]
-extern crate sled as _;
 
 use alpen_reth_statediff::BlockStateChanges;
 use revm_primitives::alloy_primitives::B256;

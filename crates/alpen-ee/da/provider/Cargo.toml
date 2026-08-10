@@ -28,6 +28,5 @@ strata-l1-txfmt.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-strata-db-store-sled.workspace = true
-strata-storage = { workspace = true, features = ["test-utils"] }
+alpen-ee-database = { workspace = true, features = ["test-utils"] }
 tokio.workspace = true

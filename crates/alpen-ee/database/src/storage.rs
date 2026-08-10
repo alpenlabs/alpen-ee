@@ -424,32 +424,6 @@ impl AccessedStateStore for EeNodeStorage {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use alpen_ee_common::{
-        batch_storage_tests, chunk_storage_tests, exec_block_storage_tests, storage_tests,
-    };
-    use strata_db_store_sled::SledDbConfig;
-    use typed_sled::SledDb;
-
-    use super::*;
-    use crate::sleddb::EeNodeDBSled;
-
-    fn setup_storage() -> EeNodeStorage {
-        // Create a temporary sled database
-        let db = sled::Config::new().temporary(true).open().unwrap();
-        let sled_db = SledDb::new(db).unwrap();
-        let config = SledDbConfig::test();
-
-        let ee_node_db = EeNodeDBSled::new(Arc::new(sled_db), config).unwrap();
-
-        EeNodeStorage::new(strata_storage::test_runtime_handle(), Arc::new(ee_node_db))
-    }
-
-    storage_tests!(setup_storage());
-    exec_block_storage_tests!(setup_storage());
-    batch_storage_tests!(setup_storage());
-    chunk_storage_tests!(setup_storage());
-}
+// The storage-layer acceptance suite (`storage_tests!`, `exec_block_storage_tests!`,
+// `batch_storage_tests!`, `chunk_storage_tests!`) runs against `EeNodeStorage`
+// over the MDBX-backed `EeNodeDbMdbx` in `crate::mdbxdb::db`.
