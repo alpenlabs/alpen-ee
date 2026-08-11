@@ -1,9 +1,9 @@
 //! Per-block account types.
 
 use alloy_primitives::U256;
+use alloy_trie::TrieAccount;
 use revm_primitives::{B256, KECCAK_EMPTY};
 use serde::{Deserialize, Serialize};
-use strata_mpt::StateAccount;
 
 /// Point-in-time snapshot of account state.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -23,8 +23,8 @@ impl Default for AccountSnapshot {
     }
 }
 
-impl From<&StateAccount> for AccountSnapshot {
-    fn from(acc: &StateAccount) -> Self {
+impl From<&TrieAccount> for AccountSnapshot {
+    fn from(acc: &TrieAccount) -> Self {
         Self {
             balance: acc.balance,
             nonce: acc.nonce,

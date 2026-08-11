@@ -592,6 +592,7 @@ version = "0.3.0-alpha.1"
 dependencies = [
  "alloy-genesis",
  "alloy-primitives",
+ "alloy-trie",
  "revm",
  "revm-primitives",
  "rsp-mpt",
@@ -599,7 +600,6 @@ dependencies = [
  "strata-codec",
  "strata-da-framework",
  "strata-identifiers",
- "strata-mpt",
  "thiserror 2.0.18",
 ]
 
@@ -4179,16 +4179,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rlp"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa24e92bb2a83198bb76d661a71df9f7076b8c420b8696e4d3d97d50d94479e3"
-dependencies = [
- "bytes",
- "rustc-hex",
-]
-
-[[package]]
 name = "rlsf"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4244,7 +4234,7 @@ dependencies = [
  "alloy-rpc-types",
  "alloy-rpc-types-debug",
  "reth-trie",
- "rlp 0.5.2",
+ "rlp",
  "serde",
  "thiserror 1.0.69",
 ]
@@ -4299,7 +4289,7 @@ dependencies = [
  "proptest",
  "rand 0.8.6",
  "rand 0.9.4",
- "rlp 0.5.2",
+ "rlp",
  "ruint-macro",
  "serde_core",
  "valuable",
@@ -5202,21 +5192,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tree_hash",
  "tree_hash_derive",
-]
-
-[[package]]
-name = "strata-mpt"
-version = "0.1.0"
-source = "git+https://github.com/alpenlabs/alpen.git?rev=3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257#3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257"
-dependencies = [
- "alloy-rlp",
- "alloy-rlp-derive",
- "alloy-rpc-types-eth",
- "anyhow",
- "revm-primitives",
- "rlp 0.6.1",
- "serde",
- "thiserror 2.0.18",
 ]
 
 [[package]]

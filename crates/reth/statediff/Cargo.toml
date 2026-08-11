@@ -9,6 +9,7 @@ workspace = true
 [dependencies]
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
+alloy-trie.workspace = true
 alpen-chainspec = { workspace = true, optional = true }
 eyre = { workspace = true, optional = true }
 revm.workspace = true
@@ -18,7 +19,6 @@ serde.workspace = true
 strata-codec.workspace = true
 strata-da-framework.workspace = true
 strata-identifiers.workspace = true
-strata-mpt.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

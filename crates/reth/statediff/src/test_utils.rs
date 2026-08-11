@@ -7,12 +7,14 @@
 use std::collections::BTreeMap;
 
 use alloy_primitives::Bytes;
-use revm_primitives::{Address, B256, U256};
-use strata_mpt::{keccak, MptNode, StateAccount, EMPTY_ROOT};
+use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
+use revm_primitives::{alloy_primitives::keccak256, Address, B256, U256};
+use rsp_mpt::EthereumState;
 
 use crate::{
     batch::{BatchBuilder, BatchStateDiff},
     block::{AccountSnapshot, BlockAccountChange, BlockStateChanges},
+    reconstruct::is_account_empty,
 };
 
 /// Canonical per-account storage view used by test oracles.
@@ -105,7 +107,7 @@ pub(crate) fn batch_diff(blocks: &[BlockStateChanges]) -> BatchStateDiff {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct CanonicalState {
     /// Final account records keyed by address.
-    pub(crate) accounts: BTreeMap<Address, StateAccount>,
+    pub(crate) accounts: BTreeMap<Address, TrieAccount>,
     /// Final storage contents keyed by address and slot.
     pub(crate) storage: BTreeMap<Address, AccountStorage>,
 }
@@ -117,7 +119,7 @@ impl CanonicalState {
     }
 
     /// Adds or replaces a canonical account entry.
-    pub(crate) fn with_account(mut self, address: Address, account: StateAccount) -> Self {
+    pub(crate) fn with_account(mut self, address: Address, account: TrieAccount) -> Self {
         self.accounts.insert(address, account);
         self
     }
@@ -148,68 +150,103 @@ impl CanonicalState {
     }
 }
 
-/// Builds a canonical `StateAccount` with an empty storage root placeholder.
-pub(crate) fn state_account(balance: u64, nonce: u64, code_hash: B256) -> StateAccount {
-    StateAccount {
+/// Builds a canonical `TrieAccount` with an empty storage root placeholder.
+pub(crate) fn state_account(balance: u64, nonce: u64, code_hash: B256) -> TrieAccount {
+    TrieAccount {
         nonce,
         balance: U256::from(balance),
-        storage_root: EMPTY_ROOT,
+        storage_root: EMPTY_ROOT_HASH,
         code_hash,
     }
 }
 
-/// Builds canonical storage tries for every account present in the state view.
-pub(crate) fn canonical_storage_tries(
+/// Builds the canonical [`EthereumState`] for the provided state view.
+///
+/// Storage tries are keyed by hashed address, matching the shape the
+/// reconstruction code expects. Accounts that are empty under EIP-161 are left
+/// out of the state trie.
+pub(crate) fn canonical_ethereum_state(
     state: &CanonicalState,
-) -> Result<BTreeMap<Address, MptNode>, strata_mpt::Error> {
-    let mut storage_tries = BTreeMap::new();
+) -> Result<EthereumState, rsp_mpt::Error> {
+    let mut ethereum_state = EthereumState {
+        state_trie: Default::default(),
+        storage_tries: Default::default(),
+    };
 
     for (address, storage) in &state.storage {
-        let mut storage_trie = MptNode::default();
+        let storage_trie = ethereum_state
+            .storage_tries
+            .entry(keccak256(address))
+            .or_default();
         for (slot_key, slot_value) in storage {
             if slot_value.is_zero() {
                 continue;
             }
 
-            let slot_trie_path = keccak(slot_key.to_be_bytes::<32>());
-            storage_trie.insert_rlp(&slot_trie_path, *slot_value)?;
+            let slot_trie_path = keccak256(slot_key.to_be_bytes::<32>());
+            storage_trie.insert_rlp(slot_trie_path.as_slice(), *slot_value)?;
         }
-        storage_tries.insert(*address, storage_trie);
     }
 
-    Ok(storage_tries)
+    for (address, account) in canonical_accounts(state)? {
+        if is_account_empty(&account) {
+            continue;
+        }
+        ethereum_state
+            .state_trie
+            .insert_rlp(keccak256(address).as_slice(), account)?;
+    }
+
+    Ok(ethereum_state)
 }
 
 /// Recomputes canonical accounts with storage roots derived from canonical storage.
 pub(crate) fn canonical_accounts(
     state: &CanonicalState,
-) -> Result<BTreeMap<Address, StateAccount>, strata_mpt::Error> {
-    let storage_tries = canonical_storage_tries(state)?;
+) -> Result<BTreeMap<Address, TrieAccount>, rsp_mpt::Error> {
+    let storage_roots = canonical_storage_roots(state)?;
     let mut accounts = BTreeMap::new();
 
     for (address, account) in &state.accounts {
-        let mut account = account.clone();
-        account.storage_root = storage_tries
+        let mut account = *account;
+        account.storage_root = storage_roots
             .get(address)
-            .map(MptNode::hash)
-            .unwrap_or(EMPTY_ROOT);
+            .copied()
+            .unwrap_or(EMPTY_ROOT_HASH);
         accounts.insert(*address, account);
     }
 
     Ok(accounts)
 }
 
-/// Computes the canonical global state root for the provided state view.
-pub(crate) fn canonical_state_root(state: &CanonicalState) -> Result<B256, strata_mpt::Error> {
-    let accounts = canonical_accounts(state)?;
-    let mut state_trie = MptNode::default();
+/// Computes the canonical storage root of every account present in the state view.
+fn canonical_storage_roots(
+    state: &CanonicalState,
+) -> Result<BTreeMap<Address, B256>, rsp_mpt::Error> {
+    let mut tries = EthereumState {
+        state_trie: Default::default(),
+        storage_tries: Default::default(),
+    };
+    let mut roots = BTreeMap::new();
 
-    for (address, account) in accounts {
-        if account.is_account_empty() {
-            continue;
+    for (address, storage) in &state.storage {
+        let hashed_addr = keccak256(address);
+        let storage_trie = tries.storage_tries.entry(hashed_addr).or_default();
+        for (slot_key, slot_value) in storage {
+            if slot_value.is_zero() {
+                continue;
+            }
+
+            let slot_trie_path = keccak256(slot_key.to_be_bytes::<32>());
+            storage_trie.insert_rlp(slot_trie_path.as_slice(), *slot_value)?;
         }
-        state_trie.insert_rlp(&keccak(address), account)?;
+        roots.insert(*address, storage_trie.hash());
     }
 
-    Ok(state_trie.hash())
+    Ok(roots)
+}
+
+/// Computes the canonical global state root for the provided state view.
+pub(crate) fn canonical_state_root(state: &CanonicalState) -> Result<B256, rsp_mpt::Error> {
+    Ok(canonical_ethereum_state(state)?.state_root())
 }
