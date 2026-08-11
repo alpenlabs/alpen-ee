@@ -118,11 +118,22 @@ where
         let gas_used = res.result.gas_used();
         let diff_size = calc_diff_size(&res.state);
 
-        let header = self
+        // Read the DA rate and base fee from the header of the block the transaction is
+        // simulated against (`at`), so a historical quote uses that block's committed fee
+        // parameters rather than the current head's. Falls back to the latest header when
+        // `at` does not resolve to a stored header (e.g. the pending tag).
+        let header = match self
             .provider()
-            .latest_header()
+            .sealed_header_by_id(at)
             .map_err(EthApiError::from_eth_err::<ProviderError>)?
-            .ok_or_else(|| EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
+        {
+            Some(header) => header,
+            None => self
+                .provider()
+                .latest_header()
+                .map_err(EthApiError::from_eth_err::<ProviderError>)?
+                .ok_or_else(|| EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?,
+        };
         let da_rate = da_rate_from_extra_data(header.extra_data());
         let base_fee = header.base_fee_per_gas().unwrap_or_default();
         let da_fee = quote_da_fee(da_rate, diff_size);
