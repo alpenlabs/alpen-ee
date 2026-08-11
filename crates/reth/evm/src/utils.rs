@@ -13,6 +13,7 @@ use thiserror::Error;
 
 use crate::constants::BRIDGEOUT_PRECOMPILE_ADDRESS;
 
+#[cfg(test)]
 pub(crate) const fn u256_from(val: u128) -> U256 {
     U256::from_limbs([(val & ((1 << 64) - 1)) as u64, (val >> 64) as u64, 0, 0])
 }
