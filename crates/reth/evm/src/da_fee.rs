@@ -141,10 +141,21 @@ pub fn da_rate_to_extra_data(da_rate: u64) -> Bytes {
     Bytes::copy_from_slice(&da_rate.to_be_bytes())
 }
 
-/// Wei per satoshi: the L2 gas token is BTC with 18 decimals, and 1 BTC = 10^8 sat,
-/// so 1 sat = 10^10 wei.
 /// SegWit witness discount: DA payload rides in witness data, weighted at 1/4 of a vByte.
 const SEGWIT_WITNESS_DIVISOR: u64 = 4;
+
+/// Default Bitcoin fee rate (sat/vByte) the live DA rate is seeded from when no explicit
+/// `ALPEN_DA_RATE_WEI_PER_BYTE` override is set.
+///
+/// 4 sat/vByte is a conservative normal-conditions rate; after the SegWit witness discount
+/// it is exactly 1 satoshi per DA byte. It is only a seed — the live rate is expected to
+/// track the sequencer's actual Bitcoin fee rate later (see [`btc_fee_rate_to_da_rate`]).
+pub const DEFAULT_DA_BTC_FEE_RATE_SAT_PER_VBYTE: u64 = 4;
+
+/// Default live DA rate (wei per DA byte): [`DEFAULT_DA_BTC_FEE_RATE_SAT_PER_VBYTE`] mapped
+/// through the SegWit witness discount (`WEI_PER_SAT` wei, i.e. 1 sat per DA byte).
+pub const DEFAULT_DA_RATE_WEI_PER_BYTE: u64 =
+    DEFAULT_DA_BTC_FEE_RATE_SAT_PER_VBYTE * WEI_PER_SAT / SEGWIT_WITNESS_DIVISOR;
 
 /// Converts a Bitcoin fee rate (satoshis per virtual byte) to the DA rate (wei per byte).
 ///

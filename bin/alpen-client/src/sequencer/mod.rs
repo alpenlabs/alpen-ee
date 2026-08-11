@@ -39,7 +39,7 @@ use alpen_ee_sequencer::{
     BatchBuilderEvent, BatchBuilderState, BatchLifecycleState, BlockBuilderConfig,
     OLChainTrackerState,
 };
-use alpen_reth_evm::evm::AlpenEvmFactory;
+use alpen_reth_evm::{da_fee::DEFAULT_DA_RATE_WEI_PER_BYTE, evm::AlpenEvmFactory};
 use alpen_reth_exex::{AccessedStateGenerator, StateDiffGenerator};
 use alpen_reth_node::{
     AlpenEngineTypes, AlpenEthereumNode, AlpenGossipProtocolHandler, AlpenGossipState,
@@ -243,7 +243,9 @@ pub(crate) async fn run(
     // Live DA rate (wei per byte) consumed by the payload builder, frozen per
     // block into the header `extra_data` and the in-EVM DA fee charge.
     //
-    // Seeded from `ALPEN_DA_RATE_WEI_PER_BYTE` (default 0 => DA charge dormant).
+    // Seeded from `ALPEN_DA_RATE_WEI_PER_BYTE`, defaulting to
+    // `DEFAULT_DA_RATE_WEI_PER_BYTE` (a sensible non-zero rate) so the DA charge is active
+    // out of the box; set the env var to 0 to keep it dormant.
     // TODO(fee-model): drive this dynamically from the sequencer's Bitcoin fee
     // rate (`btcio::writer::fees::resolve_fee_rate`, gossiped from the OL via the
     // fee config) instead of a static env seed, and decouple it from the
@@ -251,7 +253,7 @@ pub(crate) async fn run(
     let da_rate_seed = env::var("ALPEN_DA_RATE_WEI_PER_BYTE")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(0);
+        .unwrap_or(DEFAULT_DA_RATE_WEI_PER_BYTE);
     let live_da_rate = Arc::new(AtomicU64::new(da_rate_seed));
     let node = AlpenEthereumNode::new(evm_factory, AlpenNodeMode::sequencer(), live_da_rate);
 
