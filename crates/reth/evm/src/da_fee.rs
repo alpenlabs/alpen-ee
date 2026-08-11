@@ -19,6 +19,8 @@ use reth_evm::{eth::EthEvmContext, Database};
 use revm::state::EvmState;
 use revm_primitives::{Bytes, KECCAK_EMPTY, U256};
 
+use crate::utils::WEI_PER_SAT;
+
 /// Basis-points denominator for the ratio/discount constants below.
 const BPS_DENOM: u64 = 10_000;
 
@@ -141,8 +143,6 @@ pub fn da_rate_to_extra_data(da_rate: u64) -> Bytes {
 
 /// Wei per satoshi: the L2 gas token is BTC with 18 decimals, and 1 BTC = 10^8 sat,
 /// so 1 sat = 10^10 wei.
-const WEI_PER_SAT: u64 = 10_000_000_000;
-
 /// SegWit witness discount: DA payload rides in witness data, weighted at 1/4 of a vByte.
 const SEGWIT_WITNESS_DIVISOR: u64 = 4;
 

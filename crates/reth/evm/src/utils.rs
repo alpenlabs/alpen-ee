@@ -22,12 +22,12 @@ pub(crate) const fn u256_from(val: u128) -> U256 {
 pub(crate) const WEI_PER_BTC: u128 = 1_000_000_000_000_000_000u128;
 
 /// Number of wei per satoshi (1e10).
-pub(crate) const WEI_PER_SAT: U256 = u256_from(10_000_000_000u128);
+pub(crate) const WEI_PER_SAT: u64 = 10_000_000_000;
 
 /// Converts wei to satoshis.
 /// Returns a tuple of (satoshis, remainder_in_wei).
 pub(crate) fn wei_to_sats(wei: U256) -> (U256, U256) {
-    wei.div_rem(WEI_PER_SAT)
+    wei.div_rem(U256::from(WEI_PER_SAT))
 }
 
 /// Error returned when a bridge-out log cannot be decoded into a valid withdrawal intent.
