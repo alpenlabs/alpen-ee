@@ -14,6 +14,10 @@
 //! This routine is intended to be the single source of truth for DA sizing — the
 //! in-EVM charge and the fee-estimation RPCs must both call it, so a quote can never
 //! disagree with the charge.
+//!
+//! TODO(STR-4226): Refactor and move it to a separate crate outside of reth so that
+//! all the components (rpc, execution, guest) can access it without necessarily
+//! depending on heavy reth crates.
 
 use reth_evm::{eth::EthEvmContext, Database};
 use revm::state::EvmState;

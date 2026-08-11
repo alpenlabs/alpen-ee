@@ -55,14 +55,13 @@ where
             DiskFileBlobStoreConfig::default().with_max_cached_entries(blob_cache_size);
 
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), custom_config)?;
-        // TODO(fee-model): this stock eth validator rejects any tx whose gas_limit exceeds
-        // the current block gas limit, but the fee model (F.2) relaxes execution and
+        // TODO(STR-4227): this stock eth validator rejects any tx whose gas_limit exceeds
+        // the current block gas limit, but the fee model relaxes execution and
         // consensus to admit DA-inflated gas_limits up to 4x the block limit. So
         // `alpen_estimateFees` / `eth_estimateGas` can hand a wallet an effective_gas the
         // sequencer's own pool then refuses. Aligning the pool needs a custom
         // TransactionValidator with the same 4x cap (and a bounded-work admission policy,
-        // since a relaxed pool holds and gossips costlier-to-validate txs). Tracked in a
-        // follow-up ticket.
+        // since a relaxed pool holds and gossips costlier-to-validate txs).
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
             .no_eip4844()
             .with_head_timestamp(ctx.head().timestamp)
