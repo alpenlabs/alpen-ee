@@ -244,10 +244,10 @@ pub(crate) async fn run(
     // block into the header `extra_data` and the in-EVM DA fee charge.
     //
     // Seeded from `ALPEN_DA_RATE_WEI_PER_BYTE` (default 0 => DA charge dormant).
-    // NOTE(fee-model): drive this dynamically from the sequencer's Bitcoin fee
+    // TODO(fee-model): drive this dynamically from the sequencer's Bitcoin fee
     // rate (`btcio::writer::fees::resolve_fee_rate`, gossiped from the OL via the
     // fee config) instead of a static env seed, and decouple it from the
-    // publication rate.
+    // publication rate. Tracked in a follow-up ticket.
     let da_rate_seed = env::var("ALPEN_DA_RATE_WEI_PER_BYTE")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())

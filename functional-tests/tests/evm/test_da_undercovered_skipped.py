@@ -1,4 +1,4 @@
-"""Test that the sequencer skips DA-undercovered transactions (F.1 admission).
+"""Test that the sequencer skips DA-undercovered transactions.
 
 The DA fee is bounded by a transaction's unused authorized gas. A transaction signed with
 no gas headroom (gas_limit == gas_used) leaves nothing to cover its DA fee, so the in-EVM

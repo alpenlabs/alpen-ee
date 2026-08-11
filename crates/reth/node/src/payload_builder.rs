@@ -57,7 +57,13 @@ const MIN_TX_GAS_LIMIT: u64 = 21_000;
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
 pub struct AlpenPayloadBuilderBuilder {
-    /// Live DA rate (wei per byte) shared with the payload builder, updated out of band.
+    /// Live DA rate (wei per byte), shared with the payload builder.
+    ///
+    /// Shared and atomic — not because it changes *within* a block, but because the
+    /// sequencer updates it *between* blocks, out of band from the build task (from
+    /// its Bitcoin fee rate; see [`crate::payload_builder`]). The builder samples it
+    /// once and freezes that value into the block, so a single relaxed load/store on
+    /// an [`AtomicU64`] is all the synchronization the hand-off needs.
     pub live_da_rate: Arc<AtomicU64>,
 }
 
