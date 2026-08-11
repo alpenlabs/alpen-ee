@@ -41,7 +41,6 @@ class TestDaUndercoveredSkipped(AlpenClientTest):
         ctx.set_env(
             AlpenClientEnv(
                 fullnode_count=0,
-                enable_l1_da=True,
                 da_rate_wei_per_byte=DA_RATE_WEI_PER_BYTE,
             )
         )
