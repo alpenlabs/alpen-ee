@@ -17,7 +17,10 @@ use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_provider::ProviderError;
 use reth_rpc_convert::RpcTxReq;
-use reth_rpc_eth_api::{helpers::Call, EthApiTypes, FromEvmError, RpcConvert, RpcNodeCore};
+use reth_rpc_eth_api::{
+    helpers::{estimate::EstimateCall, Call},
+    EthApiTypes, FromEvmError, RpcConvert, RpcNodeCore,
+};
 use reth_rpc_eth_types::{error::FromEthApiError, EthApiError};
 use reth_storage_api::BlockReaderIdExt;
 use serde::{Deserialize, Serialize};
@@ -176,12 +179,19 @@ where
         state_override: Option<StateOverride>,
     ) -> RpcResult<FeeEstimate> {
         let block = block_number.unwrap_or_default();
-        let quote = self.da_fee_quote(request, block, state_override).await?;
+        let quote = self
+            .da_fee_quote(request.clone(), block, state_override.clone())
+            .await?;
 
-        // effective_gas folds the DA fee into the signed gas limit at the current base fee.
-        let effective_gas = quote
-            .gas_used
-            .saturating_add(da_fee_to_gas(quote.da_fee, quote.base_fee));
+        // effective_gas is the value a wallet signs as its gas limit, so it must be a safe
+        // gas *limit*, not the gas *used* by one roomy simulation: the two differ for txs
+        // whose minimum viable limit exceeds their consumption (EIP-150 63/64 forwarding,
+        // branching on `gasleft()`). Delegate to the same path as `eth_estimateGas`, which
+        // binary-searches the execution gas and already folds in the DA-fee headroom.
+        let effective_gas = self
+            .estimate_gas_at(request, block, state_override)
+            .await?
+            .saturating_to::<u64>();
         let total_fee =
             U256::from(quote.gas_used).saturating_mul(U256::from(quote.base_fee)) + quote.da_fee;
 
