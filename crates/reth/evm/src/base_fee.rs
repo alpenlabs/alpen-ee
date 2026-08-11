@@ -11,6 +11,16 @@
 //! called by both the host consensus validator and the proof guest so they stay in lockstep.
 //! The block builder applies the same floor to its freshly computed base fee via
 //! [`apply_base_fee_floor`].
+//!
+//! # Activation
+//!
+//! The floor applies to every post-London block; there is no separate fee-model activation
+//! height. Alpen runs with the floor in force from genesis, so no canonical pre-floor
+//! history exists for it to invalidate. This is deliberate for the initial deployment. If a
+//! network ever needs blocks that predate the floor to stay valid under a clean sync or
+//! historical proof, this rule must be gated behind a fee-model activation height/timestamp
+//! — retaining the standard recurrence before it — in both this host validator and the
+//! guest, since both read the rule from here.
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::eip1559::INITIAL_BASE_FEE;
