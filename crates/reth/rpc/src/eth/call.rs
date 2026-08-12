@@ -67,8 +67,13 @@ where
                 .await?;
 
             // Fold in the DA-fee headroom so the signed gas limit reserves enough to cover
-            // the separate DA charge.
-            let quote = self.da_fee_quote(request, at, state_override).await?;
+            // the separate DA charge. Quote against `resolved_at` — the concrete block the
+            // raw-gas simulation ran on — not the caller's `at`, so a block landing between
+            // the two awaits can't pair execution gas from one block with a DA diff, rate,
+            // and base fee from another.
+            let quote = self
+                .da_fee_quote(request, resolved_at, state_override)
+                .await?;
             let da_gas = da_fee_to_gas(quote.da_fee, quote.base_fee);
             Ok(raw_gas.saturating_add(U256::from(da_gas)))
         }
