@@ -250,10 +250,19 @@ pub(crate) async fn run(
     // rate (`btcio::writer::fees::resolve_fee_rate`, gossiped from the OL via the
     // fee config) instead of a static env seed, and decouple it from the
     // publication rate. Tracked in a follow-up ticket.
-    let da_rate_seed = env::var("ALPEN_DA_RATE_WEI_PER_BYTE")
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(DEFAULT_DA_RATE_WEI_PER_BYTE);
+    // A malformed value (typo, or out of `u64` range) is a consensus-visible
+    // misconfiguration — the sequencer would commit and charge an unintended DA fee — so
+    // fail loudly rather than silently falling back. The default applies only when the
+    // variable is genuinely absent.
+    let da_rate_seed = match env::var("ALPEN_DA_RATE_WEI_PER_BYTE") {
+        Ok(raw) => raw
+            .parse::<u64>()
+            .with_context(|| format!("invalid ALPEN_DA_RATE_WEI_PER_BYTE: {raw:?}"))?,
+        Err(env::VarError::NotPresent) => DEFAULT_DA_RATE_WEI_PER_BYTE,
+        Err(err @ env::VarError::NotUnicode(_)) => {
+            eyre::bail!("invalid ALPEN_DA_RATE_WEI_PER_BYTE: {err}");
+        }
+    };
     let live_da_rate = Arc::new(AtomicU64::new(da_rate_seed));
     let node = AlpenEthereumNode::new(evm_factory, AlpenNodeMode::sequencer(), live_da_rate);
 

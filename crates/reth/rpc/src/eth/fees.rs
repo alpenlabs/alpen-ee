@@ -149,6 +149,28 @@ where
             da_fee,
         })
     }
+
+    /// Pins `at` to a concrete block id so a whole fee estimate is computed against a single
+    /// snapshot.
+    ///
+    /// `latest`/number tags otherwise re-resolve independently on each downstream call (the
+    /// breakdown quote and the effective-gas estimate), and a block arriving between those
+    /// awaits would mix state, base fee, and DA rate from different heights. Concrete hashes
+    /// pass through unchanged; a tag that does not resolve to a stored header (e.g. the
+    /// `pending` tag) is left as-is.
+    fn pin_block_id(&self, at: BlockId) -> Result<BlockId, EthApiError> {
+        if matches!(at, BlockId::Hash(_)) {
+            return Ok(at);
+        }
+        match self
+            .provider()
+            .sealed_header_by_id(at)
+            .map_err(EthApiError::from_eth_err::<ProviderError>)?
+        {
+            Some(header) => Ok(header.hash().into()),
+            None => Ok(at),
+        }
+    }
 }
 
 /// Alpen fee-estimation RPC namespace.
@@ -178,7 +200,10 @@ where
         block_number: Option<BlockId>,
         state_override: Option<StateOverride>,
     ) -> RpcResult<FeeEstimate> {
-        let block = block_number.unwrap_or_default();
+        // Pin the requested block up front so the breakdown and the effective-gas estimate
+        // are derived from the same snapshot; `latest` would otherwise be re-resolved by
+        // each call below and could straddle a newly produced block.
+        let block = self.pin_block_id(block_number.unwrap_or_default())?;
         let quote = self
             .da_fee_quote(request.clone(), block, state_override.clone())
             .await?;

@@ -107,5 +107,5 @@ class TestDaFeeFullnodeParity(AlpenClientTest):
         da_fee = vault_after - vault_before
         assert da_fee > 0, "expected a positive DA fee so the parity check is meaningful"
 
-        logger.info(f"sequencer and full node agree on state at block {tx_block}; DA fee {da_fee} wei")
+        logger.info(f"sequencer and full node agree at block {tx_block}; DA fee {da_fee} wei")
         return True
