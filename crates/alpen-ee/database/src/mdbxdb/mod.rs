@@ -24,3 +24,10 @@ pub(crate) use schema::da_tables;
 fn to_db_error(err: MdbxError) -> DbError {
     DbError::Other(format!("mdbx: {err}"))
 }
+
+// Re-exported for the operator console (`console` feature), which reflects
+// these tables through the production codecs.
+#[cfg(feature = "console")]
+pub(crate) use schema::{
+    AcctProofIdIndexSchema, AcctProofReceiptSchema, ChunkProofReceiptSchema, ProverTaskSchema,
+};

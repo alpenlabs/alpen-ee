@@ -1,5 +1,7 @@
 //! Database implementation for Alpen execution environment.
 
+#[cfg(feature = "console")]
+pub mod console;
 pub mod database;
 pub mod error;
 mod init;

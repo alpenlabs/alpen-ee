@@ -98,6 +98,38 @@ impl MdbxEnv {
         Ok(Self { env })
     }
 
+    /// Opens an existing MDBX environment at `path` in **read-only** mode.
+    ///
+    /// Unlike [`MdbxEnv::open`], this never takes a write transaction, so it
+    /// can attach alongside a live writer (e.g. a running sequencer) without
+    /// contending for the environment write-lock — the attach posture the
+    /// operator console uses against a running node. Tables are not created;
+    /// they must already exist, and [`MdbxEnv::update`] will fail on the
+    /// resulting read-only environment.
+    pub fn open_readonly(path: &Path, config: &MdbxConfig) -> DbResult<Self> {
+        if !path.exists() {
+            return Err(DbError::Env(format!(
+                "read-only open of missing env {}",
+                path.display()
+            )));
+        }
+
+        let mut builder = Environment::builder();
+        builder
+            .set_max_dbs(config.max_dbs)
+            .set_max_readers(config.max_readers)
+            // A read-only environment cannot resize the map, so geometry is left
+            // to whatever the writer established; only the reader-slot and
+            // sub-database limits matter here.
+            .set_flags(EnvironmentFlags {
+                mode: Mode::ReadOnly,
+                ..Default::default()
+            });
+
+        let env = builder.open(path)?;
+        Ok(Self { env })
+    }
+
     /// Runs `f` inside a read-only transaction and returns its result. The
     /// transaction is aborted when the closure returns.
     ///
@@ -198,6 +230,14 @@ where
     Ok(())
 }
 
+fn count_in<S: Schema, K>(txn: &TxUnsync<K>) -> DbResult<usize>
+where
+    K: TransactionKind + SyncKind<Access = PtrUnsync>,
+{
+    let db = txn.open_db(Some(S::NAME))?;
+    Ok(txn.db_stat(&db)?.entries())
+}
+
 fn decode_entry<S: Schema>(
     (key_bytes, value_bytes): (Vec<u8>, Vec<u8>),
 ) -> DbResult<(S::Key, S::Value)> {
@@ -236,6 +276,11 @@ impl Reader<'_> {
     ) -> DbResult<()> {
         for_each_in::<S, _>(self.txn, f)
     }
+
+    /// Returns the number of entries in the table (O(1) via MDBX stat).
+    pub fn count<S: Schema>(&self) -> DbResult<usize> {
+        count_in::<S, _>(self.txn)
+    }
 }
 
 /// Read-write accessor handed to a [`MdbxEnv::update`] closure.
@@ -266,6 +311,11 @@ impl Writer<'_> {
         f: impl FnMut(S::Key, S::Value) -> DbResult<()>,
     ) -> DbResult<()> {
         for_each_in::<S, _>(self.txn, f)
+    }
+
+    /// Returns the number of entries in the table (O(1) via MDBX stat).
+    pub fn count<S: Schema>(&self) -> DbResult<usize> {
+        count_in::<S, _>(self.txn)
     }
 
     /// Inserts or overwrites the value for `key`.
