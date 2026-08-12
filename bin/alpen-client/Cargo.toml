@@ -34,6 +34,7 @@ sequencer = [
   "dep:strata-ee-chunk-runtime",
   "dep:strata-evm-ee",
   "dep:strata-paas",
+  "dep:strata-proofimpl-alpen-acct",
   "dep:strata-proofimpl-alpen-chunk",
   "dep:strata-snark-acct-runtime",
   "dep:thiserror",
@@ -100,7 +101,7 @@ strata-ol-rpc-types.workspace = true
 strata-paas = { workspace = true, optional = true }
 strata-predicate.workspace = true
 strata-primitives.workspace = true
-strata-proofimpl-alpen-acct.workspace = true
+strata-proofimpl-alpen-acct = { workspace = true, optional = true }
 strata-proofimpl-alpen-chunk = { workspace = true, optional = true }
 strata-service.workspace = true
 strata-snark-acct-runtime = { workspace = true, optional = true }
