@@ -30,7 +30,7 @@ use super::prover::{
     ChunkReceiptHook, ChunkSpec, EeBatchProofDbManager, EeChunkReceiptStore, EeProverBuilders,
     EeProverStores, EeProverTaskDbManager, PaasBatchProver,
 };
-use crate::service_executor::ServiceExecutor;
+use crate::{config::ProverBackendConfig, service_executor::ServiceExecutor};
 
 /// Everything [`launch`] needs to build and launch the EE chunk + acct
 /// provers.
@@ -38,8 +38,7 @@ pub(crate) struct EeProverInputs<P> {
     pub(crate) storage: Arc<EeNodeStorage>,
     pub(crate) node_provider: P,
     pub(crate) btc_client: Arc<BtcClient>,
-    pub(crate) dev_native_prover: bool,
-    pub(crate) sp1_deadline_secs: Option<u64>,
+    pub(crate) backend: ProverBackendConfig,
     pub(crate) params: Arc<AlpenParams>,
 }
 
@@ -59,8 +58,7 @@ where
         storage,
         node_provider,
         btc_client,
-        dev_native_prover,
-        sp1_deadline_secs,
+        backend,
         params,
     } = inputs;
 
@@ -79,13 +77,11 @@ where
             .receipt_hook(ChunkReceiptHook::new(chunk_storage_dyn.clone()))
             .retry(RetryConfig::default());
 
-    // NOTE: the account prover still assembles its batch-range
-    // witness via `RangeWitnessExtractor`, which reads the
-    // per-block accessed-state records the (now removed)
-    // `AccessedStateGenerator` exex used to write. Migrating this to
-    // the inline per-block witnesses is the remaining step to fully
-    // retire the exex + the deep range multiproof (see
-    // experimental/evgeniy/ee-proper-witness.md).
+    // TODO(STR-4157): the account prover still assembles its batch-range
+    // witness via `RangeWitnessExtractor`, which builds a deep range
+    // multiproof from per-block accessed-state records. Migrating to
+    // inline per-block witnesses would let us drop this extractor and
+    // the multiproof.
     let range_witness_extractor =
         Arc::new(RangeWitnessExtractor::new(node_provider, storage.clone()));
     let acct_range_witness_fn: Arc<AcctRangeWitnessFn> = {
@@ -122,8 +118,7 @@ where
             chunk_storage: chunk_storage_dyn,
             batch_proofs,
         },
-        dev_native_prover,
-        sp1_deadline_secs,
+        backend,
         params,
     )
     .await?;

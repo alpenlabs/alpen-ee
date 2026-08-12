@@ -4,16 +4,20 @@
 //! minimal valid responses. It's useful for testing EE-specific functionality
 //! in isolation without needing to run a full OL node.
 
-use alpen_ee_common::{
-    OLAccountStateView, OLBlockData, OLChainStatus, OLClient, OLClientError, SequencerOLClient,
-    SnarkAccountEpochSummary,
-};
+#[cfg(feature = "sequencer")]
+use alpen_ee_common::{OLAccountStateView, OLBlockData, SequencerOLClient};
+use alpen_ee_common::{OLChainStatus, OLClient, OLClientError, SnarkAccountEpochSummary};
 use async_trait::async_trait;
 use strata_acct_types::Hash;
-use strata_identifiers::{Buf32, Epoch, L1Height, OLBlockCommitment, OLTxId};
+use strata_identifiers::{Buf32, Epoch, OLBlockCommitment};
+#[cfg(feature = "sequencer")]
+use strata_identifiers::{L1Height, OLTxId};
+#[cfg(feature = "sequencer")]
 use strata_predicate::PredicateKey;
 use strata_primitives::EpochCommitment;
-use strata_proofimpl_predicate_keys::{NativeAlpenAcctPredicateKey, PredicateKeyProvider};
+#[cfg(feature = "sequencer")]
+use strata_proofimpl_alpen_acct::EeAcctProgram;
+#[cfg(feature = "sequencer")]
 use strata_snark_acct_types::{ProofState, Seqno, SnarkAccountUpdate};
 
 /// A dummy OL client that returns mock responses for testing.
@@ -77,6 +81,10 @@ impl OLClient for DummyOLClient {
     }
 }
 
+// Only the sequencer path drives this trait, and answering
+// `get_latest_account_update_vk` needs the account proof program. Gating the
+// impl keeps that proving dependency out of a full-node-only build.
+#[cfg(feature = "sequencer")]
 #[async_trait]
 impl SequencerOLClient for DummyOLClient {
     async fn chain_status(&self) -> Result<OLChainStatus, OLClientError> {
@@ -110,9 +118,7 @@ impl SequencerOLClient for DummyOLClient {
     }
 
     async fn get_latest_account_update_vk(&self) -> Result<PredicateKey, OLClientError> {
-        Ok(NativeAlpenAcctPredicateKey
-            .predicate_key()
-            .expect("native account predicate key must be available"))
+        Ok(EeAcctProgram::test_predicate_key())
     }
 
     async fn get_asm_manifest_commitment(

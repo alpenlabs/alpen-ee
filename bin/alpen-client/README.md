@@ -433,9 +433,9 @@ DA and proof failures are non-fatal; the task retries on each poll.
 - **Chunk proof** — proves a chunk's block execution; receipts are written to a shared store.
 - **Account (batch) proof** — consumes the batch's chunk receipts plus the prior batch's end state and a DA witness, producing the outer proof submitted to OL.
 
-**Backends**:
-- **SP1 remote** — production (`sp1` feature; deadline via `sequencer.sp1_proof_deadline_secs`)
-- **Native** — dev/test only (`sequencer.dev_native_prover`), skips real Groth16 proving and compiled guest ELFs
+**Backends**, selected by `sequencer.prover.backend`:
+- **`sp1`** — production (`sp1` feature); needs `chunk_elf_path` and `acct_elf_path`; deadline via `deadline_secs`
+- **`native`** — skips real Groth16 proving, signing proofs with a Schnorr key instead. Needs `chunk_signing_key_path` / `acct_signing_key_path` (paths to hex-encoded key files). The acct key must match whatever the OL genesis `update_vk` expects, or the account prover predicate validation at startup fails — see `crates/proof-impl/alpen-acct`'s `test_signing_key`
 
 Proofs and prover tasks live in a dedicated SledDB instance, separate from OL storage.
 
@@ -764,6 +764,13 @@ ol_submit_url = "ws://strata:8435"
 batch_sealing_block_count = 100
 beneficiary_address = "0x5400000000000000000000000000000000000010"
 blocktime_ms = 5000
+
+# Required. With backend = "native" the two fields become
+# chunk_signing_key_path and acct_signing_key_path instead.
+[sequencer.prover]
+backend = "sp1"
+chunk_elf_path = "/app/elfs/sp1/guest-alpen-chunk.elf"
+acct_elf_path = "/app/elfs/sp1/guest-alpen-acct.elf"
 
 [sequencer.bitcoind]
 rpc_url = "http://bitcoind:18443"

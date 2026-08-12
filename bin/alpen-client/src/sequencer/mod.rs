@@ -267,9 +267,9 @@ pub(crate) async fn run(
         // now produced inline during payload build (see the EE node's
         // `try_build_payload` / `AlpenRethPayloadEngine`); this exex
         // remains only to feed the ACCOUNT proof's batch-range witness
-        // (`RangeWitnessExtractor` reads `AccessedStateStore`). Retiring
-        // it is a separate acct-proof migration tracked as follow-up
-        // work to STR-3649.
+        // (`RangeWitnessExtractor` reads `AccessedStateStore`).
+        // TODO(STR-4157): retire this exex once the account proof's
+        // witness is assembled from inline per-block witnesses too.
         .install_exex("accessed_state", {
             let accessed_state_store = common.storage.clone();
             |ctx| async { Ok(AccessedStateGenerator::new(ctx, accessed_state_store).start()) }
@@ -491,8 +491,7 @@ where
             storage: storage.clone(),
             node_provider: node_provider.clone(),
             btc_client: da_pipeline.btc_client,
-            dev_native_prover: sequencer_config.dev_native_prover,
-            sp1_deadline_secs: sequencer_config.sp1_proof_deadline_secs,
+            backend: sequencer_config.prover.clone(),
             params: params.clone(),
         },
     )

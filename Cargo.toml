@@ -24,8 +24,6 @@ members = [
   "crates/evm-ee",
   "crates/proof-impl/alpen-chunk",
   "crates/proof-impl/alpen-acct",
-  "crates/proof-impl/predicate-keys",
-  "crates/zkvm/hosts",
   "crates/reth/chainspec",
   "crates/reth/db",
   "crates/reth/evm",
@@ -98,9 +96,7 @@ strata-ee-chunk-runtime = { path = "crates/ee-chunk-runtime" }
 strata-evm-ee = { path = "crates/evm-ee" }
 strata-proofimpl-alpen-acct = { path = "crates/proof-impl/alpen-acct" }
 strata-proofimpl-alpen-chunk = { path = "crates/proof-impl/alpen-chunk" }
-strata-proofimpl-predicate-keys = { path = "crates/proof-impl/predicate-keys" }
 strata-simple-ee = { path = "crates/simple-ee" }
-strata-zkvm-hosts = { path = "crates/zkvm/hosts" }
 
 # strata dependencies, pinned to the pre-split repo at its last main rev
 # before the alpen/strata repo split.

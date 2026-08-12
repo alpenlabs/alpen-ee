@@ -150,18 +150,35 @@ class AlpenL1FeePolicyConfig:
 
 
 @dataclass
+class AlpenProverConfig:
+    """``[sequencer.prover]`` table, tagged on ``backend``.
+
+    Only the fields belonging to the selected backend may be set; the Rust
+    side rejects the others as unknown.
+    """
+
+    backend: str = field(default="native")  # "native" | "sp1"
+    # backend = "native"
+    chunk_signing_key_path: str | None = field(default=None)
+    acct_signing_key_path: str | None = field(default=None)
+    # backend = "sp1"
+    chunk_elf_path: str | None = field(default=None)
+    acct_elf_path: str | None = field(default=None)
+    deadline_secs: int | None = field(default=None)
+
+
+@dataclass
 class AlpenSequencerConfig:
     """``[sequencer]`` table; present iff ``mode = "sequencer"``."""
 
     bitcoind: BitcoindConfig
+    prover: AlpenProverConfig
     ol_submit_url: str | None = field(default=None)
     beneficiary_address: str | None = field(default=None)
     blocktime_ms: int = field(default=5_000)
     batch_sealing_block_count: int = field(default=100)
     chunk_sealing_block_count: int | None = field(default=None)
     chunk_sealing_gas_limit: int | None = field(default=None)
-    dev_native_prover: bool = field(default=False)
-    sp1_proof_deadline_secs: int | None = field(default=None)
     l1_fee_policy: AlpenL1FeePolicyConfig = field(default_factory=AlpenL1FeePolicyConfig)
 
 

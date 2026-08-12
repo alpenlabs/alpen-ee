@@ -7,6 +7,7 @@ from common.config.config import (
     AlpenFullNodeConfig,
     AlpenL1FeePolicyConfig,
     AlpenOlConfig,
+    AlpenProverConfig,
     AlpenSequencerConfig,
     BitcoindConfig,
     BroadcasterConfig,
@@ -60,6 +61,7 @@ __all__ = [
     "AlpenClientConfig",
     "AlpenOlConfig",
     "AlpenFullNodeConfig",
+    "AlpenProverConfig",
     "AlpenSequencerConfig",
     "AlpenL1FeePolicyConfig",
     # constants.py

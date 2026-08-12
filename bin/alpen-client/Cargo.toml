@@ -22,6 +22,7 @@ sequencer = [
   "dep:alpen-reth-exex",
   "dep:alpen-reth-witness",
   "dep:bitcoind-async-client",
+  "dep:k256",
   "dep:reth-payload-builder",
   "dep:reth-primitives-traits",
   "dep:strata-btcio",
@@ -38,6 +39,7 @@ sequencer = [
   "dep:strata-snark-acct-runtime",
   "dep:thiserror",
   "dep:zkaleido",
+  "dep:zkaleido-native-adapter",
 ]
 # SP1 remote proving for the EE chunk + acct provers. Required for
 # production; native-only test builds can drop this feature. Only
@@ -45,11 +47,10 @@ sequencer = [
 # sequencer-only prover), so it pulls that feature in too.
 sp1 = [
   "sequencer",
-  "dep:strata-zkvm-hosts",
+  "dep:sp1-verifier",
+  "dep:zkaleido-sp1-groth16-verifier",
   "dep:zkaleido-sp1-host",
   "strata-paas/remote",
-  "strata-proofimpl-predicate-keys/sp1",
-  "strata-zkvm-hosts?/sp1",
 ]
 
 [[bin]]
@@ -80,6 +81,7 @@ alpen-reth-exex = { workspace = true, optional = true }
 alpen-reth-node.workspace = true
 alpen-reth-witness = { workspace = true, optional = true }
 bitcoind-async-client = { workspace = true, optional = true }
+k256 = { workspace = true, optional = true }
 ssz.workspace = true
 strata-acct-types.workspace = true
 strata-btcio = { workspace = true, optional = true }
@@ -101,12 +103,11 @@ strata-predicate.workspace = true
 strata-primitives.workspace = true
 strata-proofimpl-alpen-acct = { workspace = true, optional = true }
 strata-proofimpl-alpen-chunk = { workspace = true, optional = true }
-strata-proofimpl-predicate-keys.workspace = true
 strata-service.workspace = true
 strata-snark-acct-runtime = { workspace = true, optional = true }
 strata-snark-acct-types.workspace = true
-strata-zkvm-hosts = { workspace = true, optional = true }
 zkaleido = { workspace = true, optional = true }
+zkaleido-native-adapter = { workspace = true, optional = true }
 zkaleido-sp1-host = { workspace = true, optional = true }
 
 
@@ -134,10 +135,12 @@ reth-provider.workspace = true
 reth-tasks.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sp1-verifier = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 tokio.workspace = true
 toml.workspace = true
 tracing.workspace = true
+zkaleido-sp1-groth16-verifier = { workspace = true, optional = true }
 
 [dev-dependencies]
 proptest.workspace = true

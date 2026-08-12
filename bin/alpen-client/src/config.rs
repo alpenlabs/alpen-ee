@@ -7,7 +7,10 @@
 //! entry point between the two; [`AlpenClientConfigFile`] never leaves this
 //! module.
 
-use std::num::{NonZeroU64, NonZeroUsize};
+use std::{
+    num::{NonZeroU64, NonZeroUsize},
+    path::PathBuf,
+};
 
 use alloy_primitives::{address, Address};
 use alpen_ee_ol_tracker::EpochTrackingMode;
@@ -204,6 +207,13 @@ pub(crate) struct AlpenClientConfig {
     pub(crate) mode: NodeMode,
 }
 
+#[cfg_attr(
+    feature = "sequencer",
+    expect(
+        clippy::large_enum_variant,
+        reason = "one long-lived config value; size difference does not matter"
+    )
+)]
 #[derive(Debug)]
 pub(crate) enum NodeMode {
     FullNode(FullNodeConfig),
@@ -225,6 +235,40 @@ pub(crate) struct SequencerMode {
     pub(crate) config: SequencerConfig,
     pub(crate) l1_reorg_safe_depth: u32,
     pub(crate) genesis_l1_height: L1Height,
+}
+
+/// `[sequencer.prover]` — which EE chunk/acct prover backend to run.
+///
+/// Tagged on `backend`, so each backend names only the fields it needs and
+/// serde rejects a config that omits one. That replaces the old bool plus
+/// separately-optional paths, where "these paths are required unless
+/// native" was a rule every layer had to re-check.
+///
+/// Holds paths rather than file contents: reading is left to whoever
+/// actually builds the backend.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "backend", rename_all = "snake_case")]
+pub(crate) enum ProverBackendConfig {
+    /// zkaleido `NativeHost`, signing chunk/acct proofs with the keys read
+    /// from the given files instead of doing real ZK proving.
+    ///
+    /// The account key has to match whatever the OL genesis `update_vk`
+    /// expects, or the predicate-key check at startup fails.
+    Native {
+        chunk_signing_key_path: PathBuf,
+        acct_signing_key_path: PathBuf,
+    },
+    /// SP1 remote host. Needs the `sp1` feature compiled in.
+    Sp1 {
+        /// Falls back to `DEFAULT_SP1_DEADLINE_SECS` when unset, so nothing
+        /// is resolved here.
+        deadline_secs: Option<u64>,
+        /// Paths to the compiled SP1 guest ELFs. Explicit so one
+        /// `alpen-client` build can run against different guest ELFs
+        /// without a rebuild.
+        chunk_elf_path: PathBuf,
+        acct_elf_path: PathBuf,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -275,12 +319,6 @@ pub(crate) struct SequencerConfig {
     /// Non-zero because `mpsc::channel` panics on a zero-capacity buffer.
     #[serde(default = "default_batch_event_channel_capacity")]
     pub(crate) batch_event_channel_capacity: NonZeroUsize,
-    #[serde(default)]
-    pub(crate) dev_native_prover: bool,
-    /// Read only when `dev_native_prover` is false, which is when proving
-    /// runs on the remote SP1 backend. `None` leaves the prover to apply its
-    /// own deadline, so nothing is resolved here.
-    pub(crate) sp1_proof_deadline_secs: Option<u64>,
     /// URL of the authenticated OL transaction submission RPC.
     ///
     /// Required, and checked by [`AlpenClientConfig`]. The [`Option`] covers
@@ -294,6 +332,8 @@ pub(crate) struct SequencerConfig {
     /// The bearer token that authenticates submission is a secret, so it is
     /// read from `STRATA_SUBMIT_RPC_TOKEN` rather than being a field here.
     pub(crate) ol_submit_url: Option<String>,
+    /// `[sequencer.prover]` — the EE chunk/acct prover backend.
+    pub(crate) prover: ProverBackendConfig,
     /// `[sequencer.bitcoind]` — reused verbatim from `strata_config`.
     // TODO(STR-4177): stop configuring `rpc_user`/`rpc_password` as plaintext TOML fields.
     pub(crate) bitcoind: BitcoindConfig,
@@ -530,6 +570,10 @@ mod tests {
             [full_node]
             sequencer_pubkey = "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f"
             [sequencer]
+            [sequencer.prover]
+            backend = "native"
+            chunk_signing_key_path = "/tmp/chunk.key"
+            acct_signing_key_path = "/tmp/acct.key"
             [sequencer.bitcoind]
             rpc_url = "http://bitcoind:18443"
             rpc_user = "user"
@@ -548,6 +592,10 @@ mod tests {
             [full_node]
             sequencer_pubkey = "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f"
             [sequencer]
+            [sequencer.prover]
+            backend = "native"
+            chunk_signing_key_path = "/tmp/chunk.key"
+            acct_signing_key_path = "/tmp/acct.key"
             [sequencer.bitcoind]
             rpc_url = "http://bitcoind:18443"
             rpc_user = "user"
@@ -597,6 +645,84 @@ mod tests {
         assert_eq!(seq.config.chunk_sealing_block_count(), 100);
     }
 
+    /// Each backend names only its own fields, so serde rejects a config
+    /// that omits one rather than the failure surfacing at prover startup.
+    #[cfg(feature = "sequencer")]
+    #[test]
+    fn prover_backend_table_is_tagged_on_the_backend() {
+        fn sequencer_toml(prover: &str) -> String {
+            format!(
+                r#"
+                mode = "sequencer"
+                [ol]
+                source = "dummy"
+                [sequencer]
+                [sequencer.prover]
+                {prover}
+                [sequencer.bitcoind]
+                rpc_url = "http://bitcoind:18443"
+                rpc_user = "user"
+                rpc_password = "pass"
+                network = "regtest"
+                [sequencer.l1_fee_policy]
+                fee_policy = "bitcoind"
+            "#
+            )
+        }
+
+        fn prover_backend(prover: &str) -> eyre::Result<ProverBackendConfig> {
+            let config = AlpenClientConfig::from_toml_str(&sequencer_toml(prover))?;
+            let NodeMode::Sequencer(seq) = config.mode else {
+                panic!("expected sequencer mode");
+            };
+            Ok(seq.config.prover)
+        }
+
+        let native = prover_backend(
+            r#"
+            backend = "native"
+            chunk_signing_key_path = "/tmp/chunk.key"
+            acct_signing_key_path = "/tmp/acct.key"
+            "#,
+        )
+        .unwrap();
+        let ProverBackendConfig::Native {
+            chunk_signing_key_path,
+            acct_signing_key_path,
+        } = native
+        else {
+            panic!("expected the native backend");
+        };
+        assert_eq!(chunk_signing_key_path, PathBuf::from("/tmp/chunk.key"));
+        assert_eq!(acct_signing_key_path, PathBuf::from("/tmp/acct.key"));
+
+        let err = prover_backend(
+            r#"
+            backend = "sp1"
+            acct_elf_path = "/tmp/acct.elf"
+            "#,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("chunk_elf_path"), "{err}");
+
+        // A native key path means nothing to the sp1 backend, so it reads as
+        // the unknown field it is rather than being dropped.
+        let err = prover_backend(
+            r#"
+            backend = "sp1"
+            chunk_elf_path = "/tmp/chunk.elf"
+            acct_elf_path = "/tmp/acct.elf"
+            acct_signing_key_path = "/tmp/acct.key"
+            "#,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("sequencer.prover.acct_signing_key_path"),
+            "{err}"
+        );
+    }
+
     #[test]
     fn ol_client_url_required_unless_dummy() {
         let toml = r#"
@@ -619,6 +745,10 @@ mod tests {
             source = "rpc"
             client_url = "ws://strata:8432"
             [sequencer]
+            [sequencer.prover]
+            backend = "native"
+            chunk_signing_key_path = "/tmp/chunk.key"
+            acct_signing_key_path = "/tmp/acct.key"
             [sequencer.bitcoind]
             rpc_url = "http://bitcoind:18443"
             rpc_user = "user"
@@ -668,6 +798,10 @@ mod tests {
                 source = "dummy"
                 [sequencer]
                 {field}
+                [sequencer.prover]
+                backend = "native"
+                chunk_signing_key_path = "/tmp/chunk.key"
+                acct_signing_key_path = "/tmp/acct.key"
                 [sequencer.bitcoind]
                 rpc_url = "http://bitcoind:18443"
                 rpc_user = "user"
@@ -693,6 +827,10 @@ mod tests {
             [ol]
             source = "dummy"
             [sequencer]
+            [sequencer.prover]
+            backend = "native"
+            chunk_signing_key_path = "/tmp/chunk.key"
+            acct_signing_key_path = "/tmp/acct.key"
             [sequencer.bitcoind]
             rpc_url = "http://bitcoind:18443"
             rpc_user = "user"

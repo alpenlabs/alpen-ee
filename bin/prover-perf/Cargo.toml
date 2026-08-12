@@ -30,7 +30,6 @@ strata-identifiers.workspace = true
 strata-l1-txfmt.workspace = true
 strata-snark-acct-runtime.workspace = true
 strata-snark-acct-types.workspace = true
-strata-zkvm-hosts.workspace = true
 
 reth-chainspec.workspace = true
 reth-primitives-traits.workspace = true
@@ -57,7 +56,6 @@ strata-predicate.workspace = true
 default = ["sp1"]
 sp1 = [
   "zkaleido-sp1-host/perf",
-  "strata-zkvm-hosts/sp1-builder",
   "dep:zkaleido-sp1-host",
   "dep:strata-sp1-guest-builder",
 ]

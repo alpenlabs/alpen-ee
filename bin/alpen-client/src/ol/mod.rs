@@ -3,13 +3,16 @@
 mod dummy;
 mod rpc;
 
-use alpen_ee_common::{
-    OLAccountStateView, OLBlockData, OLChainStatus, OLClient, OLClientError, SequencerOLClient,
-    SnarkAccountEpochSummary,
-};
+#[cfg(feature = "sequencer")]
+use alpen_ee_common::{OLAccountStateView, OLBlockData, SequencerOLClient};
+use alpen_ee_common::{OLChainStatus, OLClient, OLClientError, SnarkAccountEpochSummary};
 use async_trait::async_trait;
-use strata_identifiers::{Epoch, EpochCommitment, Hash, L1Height, OLTxId};
+use strata_identifiers::{Epoch, EpochCommitment};
+#[cfg(feature = "sequencer")]
+use strata_identifiers::{Hash, L1Height, OLTxId};
+#[cfg(feature = "sequencer")]
 use strata_predicate::PredicateKey;
+#[cfg(feature = "sequencer")]
 use strata_snark_acct_types::SnarkAccountUpdate;
 
 pub(crate) use self::{dummy::DummyOLClient, rpc::RpcOLClient};
@@ -50,6 +53,8 @@ impl OLClient for OLClientKind {
     }
 }
 
+// Gated because the dummy arm is: only the sequencer path calls this trait.
+#[cfg(feature = "sequencer")]
 #[async_trait]
 impl SequencerOLClient for OLClientKind {
     async fn chain_status(&self) -> Result<OLChainStatus, OLClientError> {

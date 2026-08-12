@@ -12,10 +12,6 @@ use zkaleido_native_adapter::NativeHost;
 
 use crate::process_ee_chunk;
 
-fn test_signing_key() -> SigningKey {
-    SigningKey::from_bytes(&[0x03u8; 32]).expect("valid test signing key")
-}
-
 /// Host-side input for the EE chunk proof.
 #[derive(Debug)]
 pub struct EeChunkProofInput {
@@ -72,21 +68,28 @@ impl ZkVmProgram for EeChunkProgram {
 }
 
 impl EeChunkProgram {
+    /// Deterministic Schnorr signing key backing [`Self::test_predicate_key`] and
+    /// [`Self::native_host`].
+    pub fn test_signing_key() -> SigningKey {
+        SigningKey::from_bytes(&[0x03u8; 32]).expect("valid test signing key")
+    }
+
+    /// Native host that can be used for testing.
     pub fn native_host(&self) -> NativeHost {
         let params = self.params.clone();
-        NativeHost::new(test_signing_key(), move |zkvm| {
+        NativeHost::new(Self::test_signing_key(), move |zkvm| {
             process_ee_chunk(zkvm, &params)
         })
     }
 
-    /// Predicate key matching the signing key the native host uses, for wiring into
-    /// functional-test params so the resulting witness verifies under `Bip340Schnorr`.
+    /// Predicate key matching [`Self::test_signing_key`], for wiring into functional-test
+    /// params so the resulting witness verifies under `Bip340Schnorr`.
     pub fn test_predicate_key() -> PredicateKey {
-        let pk = test_signing_key().verifying_key().to_bytes().to_vec();
+        let pk = Self::test_signing_key().verifying_key().to_bytes().to_vec();
         PredicateKey::new(PredicateTypeId::Bip340Schnorr, pk)
     }
 
-    /// Executes the chunk proof program using the native host for testing.
+    /// Executes the chunk proof program using the native host, for testing.
     pub fn execute(
         &self,
         input: &<Self as ZkVmProgram>::Input,

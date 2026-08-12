@@ -1067,6 +1067,7 @@ dependencies = [
  "eyre",
  "http 1.4.0",
  "jsonrpsee",
+ "k256",
  "proptest",
  "reth-chainspec",
  "reth-cli-commands",
@@ -1083,6 +1084,7 @@ dependencies = [
  "reth-tasks",
  "serde",
  "serde_json",
+ "sp1-verifier",
  "ssz",
  "strata-acct-types",
  "strata-btcio",
@@ -1104,16 +1106,16 @@ dependencies = [
  "strata-primitives",
  "strata-proofimpl-alpen-acct",
  "strata-proofimpl-alpen-chunk",
- "strata-proofimpl-predicate-keys",
  "strata-service",
  "strata-snark-acct-runtime",
  "strata-snark-acct-types",
- "strata-zkvm-hosts",
  "thiserror 2.0.18",
  "tokio",
  "toml 0.5.11",
  "tracing",
  "zkaleido",
+ "zkaleido-native-adapter",
+ "zkaleido-sp1-groth16-verifier",
  "zkaleido-sp1-host",
 ]
 
@@ -15518,19 +15520,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "strata-proofimpl-predicate-keys"
-version = "0.1.0"
-dependencies = [
- "hex",
- "sp1-verifier",
- "strata-predicate",
- "strata-proofimpl-alpen-acct",
- "strata-proofimpl-alpen-chunk",
- "thiserror 2.0.18",
- "zkaleido-sp1-groth16-verifier",
-]
-
-[[package]]
 name = "strata-prover-core"
 version = "0.1.0"
 source = "git+https://github.com/alpenlabs/alpen.git?rev=3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257#3a44a2e4b1f9ec8a2e8fd1a52912d6d8c4398257"
@@ -15580,7 +15569,6 @@ dependencies = [
  "strata-snark-acct-runtime",
  "strata-snark-acct-types",
  "strata-sp1-guest-builder",
- "strata-zkvm-hosts",
  "tokio",
  "tracing",
  "zkaleido",
@@ -15784,15 +15772,6 @@ dependencies = [
  "proptest",
  "ssz",
  "tree_hash 0.16.0",
-]
-
-[[package]]
-name = "strata-zkvm-hosts"
-version = "0.3.0-alpha.1"
-dependencies = [
- "strata-sp1-guest-builder",
- "tokio",
- "zkaleido-sp1-host",
 ]
 
 [[package]]
