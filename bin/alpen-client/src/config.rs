@@ -207,13 +207,18 @@ pub(crate) struct AlpenClientConfig {
     pub(crate) mode: NodeMode,
 }
 
+#[cfg_attr(
+    feature = "sequencer",
+    expect(
+        clippy::large_enum_variant,
+        reason = "one long-lived config value; size difference does not matter"
+    )
+)]
 #[derive(Debug)]
 pub(crate) enum NodeMode {
     FullNode(FullNodeConfig),
-    // Boxed because the sequencer side is several times the size of the
-    // full-node one, and every full node would otherwise carry that.
     #[cfg(feature = "sequencer")]
-    Sequencer(Box<SequencerMode>),
+    Sequencer(SequencerMode),
 }
 
 /// Everything the sequencer path reads out of config.
@@ -411,11 +416,11 @@ impl TryFrom<AlpenClientConfigFile> for AlpenClientConfig {
                     let seq = raw.sequencer.ok_or_else(|| {
                         eyre::eyre!("[sequencer] table required when mode = \"sequencer\"")
                     })?;
-                    NodeMode::Sequencer(Box::new(SequencerMode {
+                    NodeMode::Sequencer(SequencerMode {
                         config: seq,
                         l1_reorg_safe_depth: raw.l1_reorg_safe_depth,
                         genesis_l1_height: raw.genesis_l1_height,
-                    }))
+                    })
                 }
             }
         };
