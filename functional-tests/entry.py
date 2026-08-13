@@ -298,7 +298,7 @@ def main(argv: list[str]) -> int:
             batch_sealing_block_count=5,
         ),
         "alpen_ee_discovery": AlpenClientEnv(enable_discovery=True, pure_discovery=True),
-        "alpen_ee_multi": AlpenClientEnv(fullnode_count=3),
+        "alpen_ee_multi": AlpenClientEnv(fullnode_count=3, forward_tx=False),
         "alpen_ee_mesh": AlpenClientEnv(
             fullnode_count=5,
             enable_discovery=True,
