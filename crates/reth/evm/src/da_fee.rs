@@ -25,9 +25,6 @@ use revm_primitives::{Bytes, KECCAK_EMPTY, U256};
 
 use crate::utils::WEI_PER_SAT;
 
-/// Basis-points denominator for the ratio/discount constants below.
-const BPS_DENOM: u64 = 10_000;
-
 /// Byte cost attributed to the key (address) of a changed account.
 const ACCOUNT_KEY_BYTES: u64 = 20;
 
@@ -50,28 +47,6 @@ const SLOT_KEY_BYTES: u64 = 32;
 /// Byte cost attributed to the value of a changed storage slot (trimmed; typical).
 const SLOT_VALUE_BYTES: u64 = 8;
 
-/// Discount applied to account-info contributions (basis points).
-///
-/// Per-transaction sizing over-counts relative to the merged batch diff (several txs
-/// touching the same account each "create" its diff, but the batch stores it once).
-/// The discount makes the sum of per-tx charges approximate the realized batch DA.
-const ACCOUNT_DISCOUNT_BPS: u64 = 3_200;
-
-/// Discount applied to storage-slot contributions (basis points). See
-/// [`ACCOUNT_DISCOUNT_BPS`].
-const STORAGE_DISCOUNT_BPS: u64 = 6_600;
-
-/// Estimated compressed-to-uncompressed ratio (basis points).
-///
-/// Real DA is compressed over the whole batch (non-linear, not per-tx attributable), so
-/// an empirically-measured average ratio is applied as a flat scalar rather than
-/// compressing per transaction.
-const COMPRESSION_RATIO_BPS: u64 = 4_800;
-
-/// Flat per-transaction additive for DA bytes outside the account/storage diff
-/// (block metadata and other state written to DA).
-const DA_FIXED_OVERHEAD: u64 = 2;
-
 /// DA-coverage report values written by the charge handler into the shared report cell
 /// and read by the sequencer's payload builder for tx admission.
 ///
@@ -90,14 +65,12 @@ pub const DA_COVERAGE_CAPPED: u64 = 2;
 /// Computes the DA `diff_size` (in bytes) for a single transaction's state change-set.
 ///
 /// `state` is the post-execution [`EvmState`] for the transaction. Every touched
-/// account and every changed storage slot contributes a fixed byte cost; the account
-/// and storage totals are discounted (to approximate batch-level dedup), summed,
-/// scaled by the compression ratio, and offset by a fixed overhead.
+/// account and every changed storage slot contributes a fixed byte cost, summed
+/// directly — no discount, compression, or fixed-overhead adjustment is applied.
 ///
 /// The result is deterministic and independent of map iteration order.
 pub fn calc_diff_size(state: &EvmState) -> u64 {
-    let mut account_raw: u64 = 0;
-    let mut storage_raw: u64 = 0;
+    let mut diff_size: u64 = 0;
 
     for account in state.values() {
         // Only accounts that were actually touched enter the state diff.
@@ -110,20 +83,16 @@ pub fn calc_diff_size(state: &EvmState) -> u64 {
         } else {
             ACCOUNT_INFO_EOA_BYTES
         };
-        account_raw = account_raw.saturating_add(ACCOUNT_KEY_BYTES + account_info_bytes);
+        diff_size = diff_size.saturating_add(ACCOUNT_KEY_BYTES + account_info_bytes);
 
         for slot in account.storage.values() {
             if slot.is_changed() {
-                storage_raw = storage_raw.saturating_add(SLOT_KEY_BYTES + SLOT_VALUE_BYTES);
+                diff_size = diff_size.saturating_add(SLOT_KEY_BYTES + SLOT_VALUE_BYTES);
             }
         }
     }
 
-    let account_discounted = account_raw.saturating_mul(ACCOUNT_DISCOUNT_BPS) / BPS_DENOM;
-    let storage_discounted = storage_raw.saturating_mul(STORAGE_DISCOUNT_BPS) / BPS_DENOM;
-    let uncompressed = account_discounted.saturating_add(storage_discounted);
-
-    uncompressed.saturating_mul(COMPRESSION_RATIO_BPS) / BPS_DENOM + DA_FIXED_OVERHEAD
+    diff_size
 }
 
 /// Decodes the per-block DA rate (wei per byte) from the EVM header `extra_data`.
@@ -252,18 +221,15 @@ mod tests {
         state
     }
 
-    /// Expected `diff_size` for the given raw account/storage byte totals, mirroring
-    /// [`calc_diff_size`]'s arithmetic so the tests pin the exact formula.
+    /// Expected `diff_size` for the given account/storage byte totals: the raw sum,
+    /// with no discount, compression, or overhead applied.
     fn expected(account_raw: u64, storage_raw: u64) -> u64 {
-        let account_discounted = account_raw * ACCOUNT_DISCOUNT_BPS / BPS_DENOM;
-        let storage_discounted = storage_raw * STORAGE_DISCOUNT_BPS / BPS_DENOM;
-        (account_discounted + storage_discounted) * COMPRESSION_RATIO_BPS / BPS_DENOM
-            + DA_FIXED_OVERHEAD
+        account_raw + storage_raw
     }
 
     #[test]
-    fn empty_state_is_only_overhead() {
-        assert_eq!(calc_diff_size(&EvmState::default()), DA_FIXED_OVERHEAD);
+    fn empty_state_is_zero() {
+        assert_eq!(calc_diff_size(&EvmState::default()), 0);
     }
 
     #[test]
@@ -273,7 +239,7 @@ mod tests {
             Address::repeat_byte(1),
             Account::from(AccountInfo::default()),
         )]);
-        assert_eq!(calc_diff_size(&state), DA_FIXED_OVERHEAD);
+        assert_eq!(calc_diff_size(&state), 0);
     }
 
     #[test]
