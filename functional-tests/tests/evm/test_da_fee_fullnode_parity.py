@@ -19,8 +19,8 @@ from envconfigs.alpen_client import AlpenClientEnv
 
 logger = logging.getLogger(__name__)
 
-# The DA fee vault predeploy (see alpen-reth-evm constants::DA_FEE_VAULT_ADDRESS).
-DA_FEE_VAULT = "0x5400000000000000000000000000000000000003"
+# A fresh beneficiary with no genesis balance; DA fees (and gas fees) are credited here.
+CUSTOM_BENEFICIARY = "0x1000000000000000000000000000000000000002"
 
 # Non-zero DA rate (wei per byte) so the charge is active for this env only.
 DA_RATE_WEI_PER_BYTE = 1000
@@ -38,6 +38,7 @@ class TestDaFeeFullnodeParity(AlpenClientTest):
             AlpenClientEnv(
                 fullnode_count=1,
                 da_rate_wei_per_byte=DA_RATE_WEI_PER_BYTE,
+                beneficiary_address=CUSTOM_BENEFICIARY,
             )
         )
 
@@ -90,7 +91,7 @@ class TestDaFeeFullnodeParity(AlpenClientTest):
         # Each node, from its own RPC, must report the same account balances at that block.
         block_tag = hex(tx_block)
         for addr, label in (
-            (DA_FEE_VAULT, "vault"),
+            (CUSTOM_BENEFICIARY, "beneficiary"),
             (dev_account.address, "sender"),
             (recipient, "recipient"),
         ):
@@ -102,9 +103,13 @@ class TestDaFeeFullnodeParity(AlpenClientTest):
             )
 
         # And the agreed-upon DA fee is non-trivial, so the parity check is not "both zero".
-        vault_before = get_balance(fn_rpc, DA_FEE_VAULT, hex(tx_block - 1))
-        vault_after = get_balance(fn_rpc, DA_FEE_VAULT, block_tag)
-        da_fee = vault_after - vault_before
+        # The beneficiary receives the gas fee plus the DA fee, so back out the gas portion.
+        gas_used = int(receipt["gasUsed"], 16)
+        effective_gas_price = int(receipt["effectiveGasPrice"], 16)
+        execution_fee = gas_used * effective_gas_price
+        beneficiary_before = get_balance(fn_rpc, CUSTOM_BENEFICIARY, hex(tx_block - 1))
+        beneficiary_after = get_balance(fn_rpc, CUSTOM_BENEFICIARY, block_tag)
+        da_fee = (beneficiary_after - beneficiary_before) - execution_fee
         assert da_fee > 0, "expected a positive DA fee so the parity check is meaningful"
 
         logger.info(f"sequencer and full node agree at block {tx_block}; DA fee {da_fee} wei")

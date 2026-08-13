@@ -22,7 +22,6 @@ use revm_primitives::U256;
 
 use crate::{
     apis::validation,
-    constants::DA_FEE_VAULT_ADDRESS,
     da_fee::{
         calc_diff_size, DaStateAccess, DA_COVERAGE_CAPPED, DA_COVERAGE_OK, DA_COVERAGE_UNKNOWN,
     },
@@ -120,6 +119,7 @@ where
         if self.da_rate != U256::ZERO {
             let context = evm.ctx();
             let caller = context.tx().caller();
+            let beneficiary = context.block().beneficiary();
             let basefee = context.block().basefee() as u128;
             let effective_gas_price = context.tx().effective_gas_price(basefee);
 
@@ -146,16 +146,18 @@ where
                 self.da_report.store(coverage, Ordering::Relaxed);
 
                 if da_fee != U256::ZERO {
-                    // Debit caller and credit the vault via the journal so both accounts
-                    // are loaded/journaled (a direct state-map insert panics bundle
-                    // assembly). Done before the default handler commits the transaction.
+                    // Debit caller and credit the block beneficiary (the fee recipient,
+                    // same address the gas fees are paid to) via the journal so both
+                    // accounts are loaded/journaled (a direct state-map insert panics
+                    // bundle assembly). Done before the default handler commits the
+                    // transaction.
                     context
                         .journal_mut()
                         .load_account_mut(caller)?
                         .decr_balance(da_fee);
                     context
                         .journal_mut()
-                        .load_account_mut(DA_FEE_VAULT_ADDRESS)?
+                        .load_account_mut(beneficiary)?
                         .incr_balance(da_fee);
                 }
             }

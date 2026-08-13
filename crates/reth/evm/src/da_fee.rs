@@ -162,7 +162,7 @@ pub fn btc_fee_rate_to_da_rate(sat_per_vbyte: u64) -> u64 {
 /// the committed rate moves per block, so the shortfall is rare and small. It is *not*
 /// turned into an out-of-gas failure: DA is a byte-priced charge, not gas-metered, so a
 /// clean OOG would require reverting a fully-executed transaction post-execution (and the
-/// forfeited value would go to the coinbase, not the DA vault).
+/// forfeited value would go to the coinbase regardless).
 ///
 /// NOTE(fee-model): reduce the subsidy without failing — quote `effective_gas` at
 /// `da_rate * (1 + margin)` in the fee RPC (safety margin), and/or add a per-block
