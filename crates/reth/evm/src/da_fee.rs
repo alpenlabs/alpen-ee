@@ -8,8 +8,8 @@
 //! Determinism is the core requirement: the sequencer, a re-executing full node, and
 //! the chunk proof must all compute the identical `diff_size` (and therefore the
 //! identical post-charge balances / state root). [`calc_diff_size`] is a pure,
-//! order-independent integer sum over the change-set using only compile-time constants,
-//! so it reproduces exactly across all three.
+//! order-independent integer sum over the change-set — fixed per-field byte costs plus the
+//! length of any deployed bytecode — so it reproduces exactly across all three.
 //!
 //! This routine is intended to be the single source of truth for DA sizing — the
 //! in-EVM charge and the fee-estimation RPCs must both call it, so a quote can never
@@ -25,27 +25,42 @@ use revm_primitives::{Bytes, KECCAK_EMPTY, U256};
 
 use crate::utils::WEI_PER_SAT;
 
-/// Byte cost attributed to the key (address) of a changed account.
+// The constants below are deliberate **upper bounds** on the DA-encoded size of each
+// field (`statediff` `AccountDiff` / `StorageDiff` and their codecs). The DA charge must
+// never *underestimate* the bytes a transaction pushes to L1 — undercharging means the
+// protocol silently subsidizes DA — so every field is charged its worst case regardless of
+// the actual (often smaller, trimmed) encoding. Overcharging is the accepted trade-off.
+
+/// Worst-case byte cost of an account/slot address key in a DA map: the fixed 20-byte
+/// address (`CodecAddress`).
 const ACCOUNT_KEY_BYTES: u64 = 20;
 
-/// Byte cost attributed to the account-info change of a changed EOA.
+/// Worst-case byte cost of a touched account's info delta in `AccountDiff`.
 ///
-/// Alpen's DA encoding stores account info as trimmed deltas (balance delta, nonce
-/// varint, unset code-hash), so an EOA change is small. Conservative typical estimate.
-const ACCOUNT_INFO_EOA_BYTES: u64 = 12;
+/// A 1-byte compound header, plus (when changed) a signed balance delta and a signed nonce
+/// delta. Upper bounds from the codecs: balance `SignedU256Delta` = 1 tag + 1 length + 32
+/// value = 34; nonce `SignedVarInt` over `u64` = 10 (`MAX_VARINT_BYTES`); header = 1. The
+/// code-hash register is *not* included here — it is unset except on creation
+/// ([`CODE_HASH_BYTES`]) — so a merely-called contract costs exactly an EOA.
+const ACCOUNT_INFO_BYTES: u64 = 1 + 34 + 10;
 
-/// Byte cost attributed to the account-info change of a changed contract account.
-///
-/// Adds the 33-byte code-hash register that a contract carries over an EOA. Deployed
-/// bytecode itself is deduplicated by hash at the batch level and is not attributed
-/// per transaction here (future: attribute deploy bytecode once per unique deployment).
-const ACCOUNT_INFO_CONTRACT_BYTES: u64 = 44;
+/// Worst-case byte cost of the code-hash register, written to DA only when a contract is
+/// *created*: the fixed 32-byte `CodecB256`. Added together with the deployed bytecode
+/// length (see [`calc_diff_size`]) on creation only, never on a plain contract call.
+const CODE_HASH_BYTES: u64 = 32;
 
-/// Byte cost attributed to the key of a changed storage slot (untrimmed 32-byte hash).
+/// Worst-case byte cost of a changed storage slot's key: the fixed 32-byte big-endian slot
+/// key (stored untrimmed).
 const SLOT_KEY_BYTES: u64 = 32;
 
-/// Byte cost attributed to the value of a changed storage slot (trimmed; typical).
-const SLOT_VALUE_BYTES: u64 = 8;
+/// Worst-case byte cost of a changed storage slot's value: `TrimmedStorageValue` = 1
+/// length byte + up to 32 value bytes.
+const SLOT_VALUE_BYTES: u64 = 1 + 32;
+
+/// Worst-case per-account framing for accounts that change storage. Storage lives in a
+/// second, address-keyed map (`StorageDiff`), so the account re-encodes its 20-byte
+/// address there, plus that entry's slot-count prefix (`u32`, at most 5 bytes).
+const STORAGE_ACCOUNT_OVERHEAD_BYTES: u64 = ACCOUNT_KEY_BYTES + 5;
 
 /// DA-coverage report values written by the charge handler into the shared report cell
 /// and read by the sequencer's payload builder for tx admission.
@@ -64,9 +79,12 @@ pub const DA_COVERAGE_CAPPED: u64 = 2;
 
 /// Computes the DA `diff_size` (in bytes) for a single transaction's state change-set.
 ///
-/// `state` is the post-execution [`EvmState`] for the transaction. Every touched
-/// account and every changed storage slot contributes a fixed byte cost, summed
-/// directly — no discount, compression, or fixed-overhead adjustment is applied.
+/// `state` is the post-execution [`EvmState`] for the transaction. Every touched account
+/// contributes its key and its trimmed balance/nonce delta; a contract *created* in the
+/// transaction additionally contributes the code-hash register and the full length of its
+/// deployed bytecode (both written to L1 DA on creation); and every changed storage slot
+/// contributes a fixed key/value cost. The costs are summed directly — no discount,
+/// compression, or fixed-overhead adjustment is applied.
 ///
 /// The result is deterministic and independent of map iteration order.
 pub fn calc_diff_size(state: &EvmState) -> u64 {
@@ -78,17 +96,29 @@ pub fn calc_diff_size(state: &EvmState) -> u64 {
             continue;
         }
 
-        let account_info_bytes = if account.info.code_hash != KECCAK_EMPTY {
-            ACCOUNT_INFO_CONTRACT_BYTES
-        } else {
-            ACCOUNT_INFO_EOA_BYTES
-        };
-        diff_size = diff_size.saturating_add(ACCOUNT_KEY_BYTES + account_info_bytes);
+        // Balance + nonce deltas, encoded the same way for every touched account.
+        diff_size = diff_size.saturating_add(ACCOUNT_KEY_BYTES + ACCOUNT_INFO_BYTES);
 
-        for slot in account.storage.values() {
-            if slot.is_changed() {
-                diff_size = diff_size.saturating_add(SLOT_KEY_BYTES + SLOT_VALUE_BYTES);
+        // Contract creation additionally writes the code-hash register and the full
+        // deployed bytecode to L1 DA; a plain contract call writes neither.
+        if account.is_created() && account.info.code_hash != KECCAK_EMPTY {
+            diff_size = diff_size.saturating_add(CODE_HASH_BYTES);
+            if let Some(code) = &account.info.code {
+                diff_size = diff_size.saturating_add(code.original_byte_slice().len() as u64);
             }
+        }
+
+        // Changed storage slots live in a second, address-keyed map, so an account with any
+        // changed slot pays the storage-map framing once plus each slot's key/value.
+        let changed_slots = account
+            .storage
+            .values()
+            .filter(|slot| slot.is_changed())
+            .count() as u64;
+        if changed_slots > 0 {
+            diff_size = diff_size.saturating_add(STORAGE_ACCOUNT_OVERHEAD_BYTES);
+            diff_size = diff_size
+                .saturating_add(changed_slots.saturating_mul(SLOT_KEY_BYTES + SLOT_VALUE_BYTES));
         }
     }
 
@@ -192,7 +222,7 @@ impl<DB: Database> DaStateAccess for EthEvmContext<DB> {
 
 #[cfg(test)]
 mod tests {
-    use revm::state::{Account, AccountInfo, EvmStorageSlot};
+    use revm::state::{Account, AccountInfo, Bytecode, EvmStorageSlot};
     use revm_primitives::{Address, B256, U256};
 
     use super::*;
@@ -213,6 +243,20 @@ mod tests {
         account
     }
 
+    /// A contract created in this transaction, carrying `code` as its deployed bytecode.
+    fn created_contract(code: &[u8]) -> Account {
+        let bytecode = Bytecode::new_raw(Bytes::copy_from_slice(code));
+        let info = AccountInfo {
+            code_hash: bytecode.hash_slow(),
+            code: Some(bytecode),
+            ..AccountInfo::default()
+        };
+        let mut account = Account::from(info);
+        account.mark_touch();
+        account.mark_created();
+        account
+    }
+
     fn state_of(accounts: impl IntoIterator<Item = (Address, Account)>) -> EvmState {
         let mut state = EvmState::default();
         for (addr, account) in accounts {
@@ -221,11 +265,9 @@ mod tests {
         state
     }
 
-    /// Expected `diff_size` for the given account/storage byte totals: the raw sum,
-    /// with no discount, compression, or overhead applied.
-    fn expected(account_raw: u64, storage_raw: u64) -> u64 {
-        account_raw + storage_raw
-    }
+    /// The worst-case bytes charged for a single touched account with no storage,
+    /// creation, or code: address key + account-info delta.
+    const ACCOUNT_BASE: u64 = ACCOUNT_KEY_BYTES + ACCOUNT_INFO_BYTES;
 
     #[test]
     fn empty_state_is_zero() {
@@ -245,17 +287,28 @@ mod tests {
     #[test]
     fn single_eoa() {
         let state = state_of([(Address::repeat_byte(1), touched_eoa())]);
-        assert_eq!(
-            calc_diff_size(&state),
-            expected(ACCOUNT_KEY_BYTES + ACCOUNT_INFO_EOA_BYTES, 0)
-        );
+        assert_eq!(calc_diff_size(&state), ACCOUNT_BASE);
     }
 
     #[test]
-    fn contract_costs_more_than_eoa() {
+    fn touched_contract_costs_same_as_eoa() {
+        // A contract merely called (touched, not created) re-encodes only its balance and
+        // nonce deltas — the code-hash register is unset — so it costs exactly an EOA.
         let eoa = state_of([(Address::repeat_byte(1), touched_eoa())]);
         let contract = state_of([(Address::repeat_byte(1), touched_contract())]);
-        assert!(calc_diff_size(&contract) > calc_diff_size(&eoa));
+        assert_eq!(calc_diff_size(&contract), calc_diff_size(&eoa));
+        assert_eq!(calc_diff_size(&contract), ACCOUNT_BASE);
+    }
+
+    #[test]
+    fn created_contract_charges_code_hash_and_bytecode() {
+        let code = [0xabu8; 100];
+        let state = state_of([(Address::repeat_byte(1), created_contract(&code))]);
+        // Account entry + the code-hash register + every byte of the deployed bytecode.
+        assert_eq!(
+            calc_diff_size(&state),
+            ACCOUNT_BASE + CODE_HASH_BYTES + code.len() as u64
+        );
     }
 
     #[test]
@@ -272,12 +325,33 @@ mod tests {
             .insert(U256::from(2), EvmStorageSlot::new(U256::from(7), 0));
 
         let state = state_of([(Address::repeat_byte(1), account)]);
+        // Account base + the storage-map framing + one changed slot's key/value.
         assert_eq!(
             calc_diff_size(&state),
-            expected(
-                ACCOUNT_KEY_BYTES + ACCOUNT_INFO_EOA_BYTES,
-                SLOT_KEY_BYTES + SLOT_VALUE_BYTES
-            )
+            ACCOUNT_BASE + STORAGE_ACCOUNT_OVERHEAD_BYTES + (SLOT_KEY_BYTES + SLOT_VALUE_BYTES)
+        );
+    }
+
+    #[test]
+    fn storage_value_is_charged_at_full_word_worst_case() {
+        // A full 32-byte storage value must not be charged less than the constant: the
+        // charge is value-independent, so it never underestimates a large slot value.
+        let mut small = touched_eoa();
+        small.storage.insert(
+            U256::from(1),
+            EvmStorageSlot::new_changed(U256::ZERO, U256::from(1), 0),
+        );
+        let mut full = touched_eoa();
+        full.storage.insert(
+            U256::from(1),
+            EvmStorageSlot::new_changed(U256::ZERO, U256::MAX, 0),
+        );
+        let small_state = state_of([(Address::repeat_byte(1), small)]);
+        let full_state = state_of([(Address::repeat_byte(1), full)]);
+        assert_eq!(calc_diff_size(&small_state), calc_diff_size(&full_state));
+        assert_eq!(
+            calc_diff_size(&full_state),
+            ACCOUNT_BASE + STORAGE_ACCOUNT_OVERHEAD_BYTES + (SLOT_KEY_BYTES + SLOT_VALUE_BYTES)
         );
     }
 
