@@ -1,5 +1,6 @@
 use core::future::Future;
 
+use alloy_network::TransactionBuilder;
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::{state::StateOverride, BlockId};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
@@ -10,6 +11,14 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::EthApiError;
 
 use crate::{eth::fees::da_fee_to_gas, AlpenEthApi};
+
+/// Cap on the DA-gas fixpoint iterations in [`AlpenEthApi::estimate_gas_at`].
+///
+/// The signed gas limit is `raw_gas + da_gas`, and the DA gas depends (for `gasleft()`- or
+/// EIP-150-sensitive contracts) on the limit the diff is measured at, so the two are solved
+/// by iteration. The DA gas is a small, weakly-dependent addend that settles in a step or
+/// two; this bounds the worst case for a pathological contract that never converges.
+const DA_GAS_FIXPOINT_ITERS: usize = 3;
 
 impl<N, Rpc> EthCall for AlpenEthApi<N, Rpc>
 where
@@ -69,13 +78,34 @@ where
             // Fold in the DA-fee headroom so the signed gas limit reserves enough to cover
             // the separate DA charge. Quote against `resolved_at` — the concrete block the
             // raw-gas simulation ran on — not the caller's `at`, so a block landing between
-            // the two awaits can't pair execution gas from one block with a DA diff, rate,
-            // and base fee from another.
-            let quote = self
-                .da_fee_quote(request, resolved_at, state_override)
-                .await?;
-            let da_gas = da_fee_to_gas(quote.da_fee, quote.base_fee);
-            Ok(raw_gas.saturating_add(U256::from(da_gas)))
+            // the awaits can't pair execution gas from one block with a DA diff, rate, and
+            // base fee from another.
+            //
+            // The DA fee is sized from the transaction's state diff, which for `gasleft()`-
+            // or EIP-150-sensitive contracts can depend on the gas limit. So the quote must
+            // simulate at the same limit the wallet will ultimately sign (`raw_gas +
+            // da_gas`), not a roomy default — otherwise a contract that branches on remaining
+            // gas could produce a different diff (and DA fee) at inclusion than was quoted.
+            // The signed limit itself depends on the DA gas, so iterate to a (capped)
+            // fixpoint.
+            let mut effective_gas = raw_gas;
+            let mut last_da_gas: Option<u64> = None;
+            for _ in 0..DA_GAS_FIXPOINT_ITERS {
+                let mut quote_request = request.clone();
+                quote_request
+                    .as_mut()
+                    .set_gas_limit(effective_gas.saturating_to::<u64>());
+                let quote = self
+                    .da_fee_quote(quote_request, resolved_at, state_override.clone())
+                    .await?;
+                let da_gas = da_fee_to_gas(quote.da_fee, quote.base_fee);
+                effective_gas = raw_gas.saturating_add(U256::from(da_gas));
+                if last_da_gas == Some(da_gas) {
+                    break;
+                }
+                last_da_gas = Some(da_gas);
+            }
+            Ok(effective_gas)
         }
     }
 }

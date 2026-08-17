@@ -38,6 +38,13 @@ class TestEstimateFees(AlpenClientTest):
 
     def main(self, ctx):
         ee_sequencer = self.get_service(ServiceType.AlpenSequencer)
+
+        # The configured DA rate is only committed into the `extra_data` of blocks the
+        # sequencer produces; genesis carries none (decodes to 0). The quote reads its DA
+        # rate from the header of `latest`, so wait for the first produced block before
+        # quoting — otherwise `latest` is still genesis and the rate reads back as 0.
+        ee_sequencer.wait_for_block(1)
+
         rpc = ee_sequencer.create_rpc()
 
         dev_account = get_dev_account(rpc)
