@@ -7,6 +7,7 @@
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_json_rpc::RpcObject;
+use alloy_network::TransactionBuilder;
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::{
     state::{EvmOverrides, StateOverride},
@@ -92,7 +93,8 @@ pub struct FeeEstimate {
     pub da_fee: U256,
     /// Gas limit a standard wallet should sign: folds the DA fee into gas at `base_fee`.
     pub effective_gas: u64,
-    /// Execution fee (base fee * gas) + DA fee (wei); excludes the priority tip.
+    /// Total fee (wei) the sender pays: execution fee (effective gas price * gas, i.e. base
+    /// fee plus the priority tip) + DA fee.
     pub total_fee: U256,
 }
 
@@ -213,12 +215,28 @@ where
         // whose minimum viable limit exceeds their consumption (EIP-150 63/64 forwarding,
         // branching on `gasleft()`). Delegate to the same path as `eth_estimateGas`, which
         // binary-searches the execution gas and already folds in the DA-fee headroom.
+        // The execution fee is paid at the transaction's *effective* gas price, which the
+        // beneficiary receives in full (base fee + priority tip) — so the total must use it,
+        // not the base fee alone. Read the fee fields before `request` is consumed below.
+        let effective_gas_price = {
+            let tx = request.as_ref();
+            if let Some(gas_price) = tx.gas_price() {
+                // Legacy / EIP-2930: the gas price already includes any tip.
+                gas_price
+            } else {
+                // EIP-1559: base fee plus the tip, capped by the fee ceiling.
+                let tip = tx.max_priority_fee_per_gas().unwrap_or(0);
+                let max_fee = tx.max_fee_per_gas().unwrap_or(u128::MAX);
+                (quote.base_fee as u128).saturating_add(tip).min(max_fee)
+            }
+        };
+
         let effective_gas = self
             .estimate_gas_at(request, block, state_override)
             .await?
             .saturating_to::<u64>();
-        let total_fee =
-            U256::from(quote.gas_used).saturating_mul(U256::from(quote.base_fee)) + quote.da_fee;
+        let total_fee = U256::from(quote.gas_used).saturating_mul(U256::from(effective_gas_price))
+            + quote.da_fee;
 
         Ok(FeeEstimate {
             gas_used: quote.gas_used,

@@ -87,6 +87,29 @@ class TestEstimateFees(AlpenClientTest):
             f"total_fee {total_fee} != gas_used*base_fee + da_fee"
         )
 
+        # A transaction that sets a gas price above the base fee pays that price (base fee +
+        # tip) to the beneficiary, so total_fee must reflect the effective price, not just
+        # the base fee.
+        gas_price = base_fee + 3_000_000_000  # base fee + 3 gwei tip
+        priced_request = {
+            "from": dev_account.address,
+            "to": recipient,
+            "value": hex(TRANSFER_AMOUNT_WEI),
+            "gasPrice": hex(gas_price),
+        }
+        priced = rpc.alpen_estimateFees(priced_request)
+        priced_gas_used = priced["gasUsed"]
+        priced_da_fee = int(priced["daFee"], 16)
+        priced_total = int(priced["totalFee"], 16)
+        assert priced_total == priced_gas_used * gas_price + priced_da_fee, (
+            f"total_fee {priced_total} != gas_used*gas_price + da_fee "
+            f"(gas_price {gas_price} carries a tip above base fee {base_fee})"
+        )
+        # The tip must make the total strictly larger than a base-fee-only total.
+        assert priced_total > priced_gas_used * base_fee + priced_da_fee, (
+            "total_fee did not grow when a gas price above the base fee was set"
+        )
+
         # Standard `eth_estimateGas` must return the SAME effective gas, so an unmodified
         # EVM wallet automatically reserves enough gas to cover the DA fee.
         est_gas = int(rpc.eth_estimateGas(request), 16)
