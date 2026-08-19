@@ -6,9 +6,7 @@
 use std::sync::Arc;
 
 use alloy_consensus::Block as AlloyBlock;
-use alpen_reth_evm::{
-    config::AlpenEvmConfig, evm::AlpenEvmFactory, extract_withdrawal_intents,
-};
+use alpen_reth_evm::{config::AlpenEvmConfig, evm::AlpenEvmFactory, extract_withdrawal_intents};
 use reth_chainspec::ChainSpec;
 use reth_consensus_common::validation::validate_body_against_header;
 use reth_evm::{
