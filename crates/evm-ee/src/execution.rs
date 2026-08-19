@@ -7,8 +7,7 @@ use std::sync::Arc;
 
 use alloy_consensus::Block as AlloyBlock;
 use alpen_reth_evm::{
-    base_fee::expected_floored_base_fee, config::AlpenEvmConfig, evm::AlpenEvmFactory,
-    extract_withdrawal_intents,
+    config::AlpenEvmConfig, evm::AlpenEvmFactory, extract_withdrawal_intents,
 };
 use reth_chainspec::ChainSpec;
 use reth_consensus_common::validation::validate_body_against_header;
@@ -84,7 +83,6 @@ impl EvmExecutionEnvironment {
 
     fn validate_execution_inputs(
         &self,
-        pre_state: &EvmPartialState,
         block: &RecoveredBlock<AlloyBlock<TransactionSigned>>,
         inputs: &ExecInputs,
     ) -> EnvResult<()> {
@@ -95,34 +93,6 @@ impl EvmExecutionEnvironment {
         .map_err(|_| EnvError::InvalidBlock)?;
         validate_body_against_header(block.body(), block.header())
             .map_err(|_| EnvError::InvalidBlock)?;
-
-        // Base-fee validation: the header base fee must equal the protocol's
-        // floored EIP-1559 expectation computed from the parent — the SAME rule the host
-        // consensus (`AlpenConsensus`) enforces, via the shared `expected_floored_base_fee`.
-        // This is the full recurrence, not just the floor: it prevents a sequencer from
-        // committing any base fee ≥ floor that doesn't match the recurrence.
-        //
-        // The parent header is available in the partial state's ancestor set: the range
-        // witness always includes the chunk's parent (its ancestor range covers `start-1`),
-        // and intra-chunk parents are inserted by `update_partial_state_after_block` before
-        // the next block runs. A missing parent fails validation — it must never silently
-        // downgrade the check (that would let a prover omit the parent to dodge the rule).
-        let header = block.header();
-        let parent = pre_state
-            .ancestor_headers()
-            .get(&header.number.saturating_sub(1))
-            .ok_or(EnvError::InvalidBlock)?;
-        if let Some(expected) = expected_floored_base_fee(
-            header,
-            parent.inner(),
-            self.evm_config.chain_spec().as_ref(),
-        ) {
-            let committed = header.base_fee_per_gas.unwrap_or_default();
-            if committed != expected {
-                return Err(EnvError::InvalidBlock);
-            }
-        }
-
         validate_deposits_against_block(block, inputs)
     }
 
@@ -162,7 +132,7 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
 
         // Step 2: Validate execution inputs against the synthesized execution header.
         // The full block header is checked separately by `verify_outputs_against_header`.
-        self.validate_execution_inputs(pre_state, &block, inputs)?;
+        self.validate_execution_inputs(&block, inputs)?;
 
         // Step 3: Execute the block.
         let execution_output = self.execute_recovered_block(&block, pre_state)?;
