@@ -88,8 +88,17 @@ where
             // gas could produce a different diff (and DA fee) at inclusion than was quoted.
             // The signed limit itself depends on the DA gas, so iterate to a (capped)
             // fixpoint.
+            // Track the largest DA headroom seen across the probed limits. A well-behaved
+            // contract reaches a fixpoint (the quote taken *at* `effective_gas` reproduces
+            // it) within a couple of passes; a pathological one whose diff size oscillates
+            // with the gas limit may not. If the loop exits without a verified fixpoint we
+            // fall back to `raw_gas + max_da_gas` — an upper bound over every limit probed —
+            // so the returned envelope is never smaller than any single pass required.
+            // Over-reserving only enlarges the signed gas *limit* (unused gas is refunded),
+            // whereas under-reserving would get the tx skipped as DA-undercovered at build.
             let mut effective_gas = raw_gas;
-            let mut last_da_gas: Option<u64> = None;
+            let mut max_da_gas = 0u64;
+            let mut converged = false;
             for _ in 0..DA_GAS_FIXPOINT_ITERS {
                 let mut quote_request = request.clone();
                 quote_request
@@ -99,11 +108,18 @@ where
                     .da_fee_quote(quote_request, resolved_at, state_override.clone())
                     .await?;
                 let da_gas = da_fee_to_gas(quote.da_fee, quote.base_fee);
-                effective_gas = raw_gas.saturating_add(U256::from(da_gas));
-                if last_da_gas == Some(da_gas) {
+                max_da_gas = max_da_gas.max(da_gas);
+                let next = raw_gas.saturating_add(U256::from(da_gas));
+                // Fixpoint verified: the DA headroom quoted *at* `effective_gas` folds back
+                // to exactly `effective_gas`, so the signed limit covers its own diff.
+                if next == effective_gas {
+                    converged = true;
                     break;
                 }
-                last_da_gas = Some(da_gas);
+                effective_gas = next;
+            }
+            if !converged {
+                effective_gas = raw_gas.saturating_add(U256::from(max_da_gas));
             }
             Ok(effective_gas)
         }

@@ -40,13 +40,14 @@ const ACCOUNT_KEY_BYTES: u64 = 20;
 /// A 1-byte compound header, plus (when changed) a signed balance delta and a signed nonce
 /// delta. Upper bounds from the codecs: balance `SignedU256Delta` = 1 tag + 1 length + 32
 /// value = 34; nonce `SignedVarInt` over `u64` = 10 (`MAX_VARINT_BYTES`); header = 1. The
-/// code-hash register is *not* included here — it is unset except on creation
-/// ([`CODE_HASH_BYTES`]) — so a merely-called contract costs exactly an EOA.
+/// code-hash register is *not* included here — it is added separately only when the code
+/// changes ([`CODE_HASH_BYTES`]) — so a merely-called contract costs exactly an EOA.
 const ACCOUNT_INFO_BYTES: u64 = 1 + 34 + 10;
 
-/// Worst-case byte cost of the code-hash register, written to DA only when a contract is
-/// *created*: the fixed 32-byte `CodecB256`. Added together with the deployed bytecode
-/// length (see [`calc_diff_size`]) on creation only, never on a plain contract call.
+/// Worst-case byte cost of the code-hash register, written to DA whenever a transaction
+/// changes an account's code — contract *creation* or an EIP-7702 delegation: the fixed
+/// 32-byte `CodecB256`. Added together with the written bytecode length (see
+/// [`calc_diff_size`]); never charged for a plain contract call, which leaves code unchanged.
 const CODE_HASH_BYTES: u64 = 32;
 
 /// Worst-case byte cost of a changed storage slot's key: the fixed 32-byte big-endian slot
@@ -80,10 +81,10 @@ pub const DA_COVERAGE_CAPPED: u64 = 2;
 /// Computes the DA `diff_size` (in bytes) for a single transaction's state change-set.
 ///
 /// `state` is the post-execution [`EvmState`] for the transaction. Every touched account
-/// contributes its key and its trimmed balance/nonce delta; a contract *created* in the
-/// transaction additionally contributes the code-hash register and the full length of its
-/// deployed bytecode (both written to L1 DA on creation); and every changed storage slot
-/// contributes a fixed key/value cost. The costs are summed directly — no discount,
+/// contributes its key and its trimmed balance/nonce delta; a transaction that changes an
+/// account's code — contract *creation* or an EIP-7702 delegation — additionally contributes
+/// the code-hash register and the length of the written bytecode; and every changed storage
+/// slot contributes a fixed key/value cost. The costs are summed directly — no discount,
 /// compression, or fixed-overhead adjustment is applied.
 ///
 /// The result is deterministic and independent of map iteration order.
@@ -99,9 +100,26 @@ pub fn calc_diff_size(state: &EvmState) -> u64 {
         // Balance + nonce deltas, encoded the same way for every touched account.
         diff_size = diff_size.saturating_add(ACCOUNT_KEY_BYTES + ACCOUNT_INFO_BYTES);
 
-        // Contract creation additionally writes the code-hash register and the full
-        // deployed bytecode to L1 DA; a plain contract call writes neither.
-        if account.is_created() && account.info.code_hash != KECCAK_EMPTY {
+        // The code-hash register and deployed bytecode reach L1 DA whenever a transaction
+        // changes an account's code. Two cases produce that in one transaction:
+        //   * contract *creation* (`is_created`), which writes freshly deployed bytecode;
+        //   * an EIP-7702 authorization, which installs a delegation designator on an existing
+        //     (non-created) account — revm records it as a touched account whose code is an
+        //     `Eip7702` bytecode, so `is_created` is NOT set. Alpen enables Prague at genesis and
+        //     accepts type-4 txs, so this path is live.
+        // Charge both so a type-4 authorization is never under-sized; a plain call to an
+        // existing contract leaves the code unchanged and is charged for neither.
+        //
+        // This sizes on the *presence* of created / delegation code, not a diff against the
+        // pre-transaction hash — the per-transaction change-set does not carry the original
+        // hash. It therefore over-charges only the rare tx sent from an already-delegated
+        // account whose delegation is unchanged (a bounded `CODE_HASH_BYTES` + 23 designator
+        // bytes) and never under-charges. Overcharging is the accepted trade-off.
+        let code_written = match &account.info.code {
+            Some(code) if code.is_eip7702() => true,
+            Some(_) | None => account.is_created() && account.info.code_hash != KECCAK_EMPTY,
+        };
+        if code_written {
             diff_size = diff_size.saturating_add(CODE_HASH_BYTES);
             if let Some(code) = &account.info.code {
                 diff_size = diff_size.saturating_add(code.original_byte_slice().len() as u64);
@@ -257,6 +275,21 @@ mod tests {
         account
     }
 
+    /// An existing account that received an EIP-7702 delegation designator this
+    /// transaction: touched (nonce/balance changed) but NOT created, carrying `Eip7702`
+    /// code — the shape revm produces for a type-4 authorization on a live account.
+    fn delegated_eoa() -> Account {
+        let code = Bytecode::new_eip7702(Address::repeat_byte(0x42));
+        let info = AccountInfo {
+            code_hash: code.hash_slow(),
+            code: Some(code),
+            ..AccountInfo::default()
+        };
+        let mut account = Account::from(info);
+        account.mark_touch();
+        account
+    }
+
     fn state_of(accounts: impl IntoIterator<Item = (Address, Account)>) -> EvmState {
         let mut state = EvmState::default();
         for (addr, account) in accounts {
@@ -309,6 +342,23 @@ mod tests {
             calc_diff_size(&state),
             ACCOUNT_BASE + CODE_HASH_BYTES + code.len() as u64
         );
+    }
+
+    #[test]
+    fn eip7702_delegation_charges_code_hash_and_designator() {
+        // A type-4 authorization installs a delegation designator on an existing account
+        // without marking it created; it must still be charged the code-hash register plus
+        // the designator bytes (regression against the old `is_created`-only gate, which
+        // charged this account nothing and so under-sized the DA).
+        let state = state_of([(Address::repeat_byte(1), delegated_eoa())]);
+        let designator_len = Bytecode::new_eip7702(Address::repeat_byte(0x42))
+            .original_byte_slice()
+            .len() as u64;
+        assert_eq!(
+            calc_diff_size(&state),
+            ACCOUNT_BASE + CODE_HASH_BYTES + designator_len
+        );
+        assert!(calc_diff_size(&state) > ACCOUNT_BASE);
     }
 
     #[test]
