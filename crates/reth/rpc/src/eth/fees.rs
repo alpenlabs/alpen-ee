@@ -202,22 +202,35 @@ where
         block_number: Option<BlockId>,
         state_override: Option<StateOverride>,
     ) -> RpcResult<FeeEstimate> {
-        // Pin the requested block up front so the breakdown and the effective-gas estimate
-        // are derived from the same snapshot; `latest` would otherwise be re-resolved by
+        // Pin the requested block up front so the effective-gas estimate and the breakdown
+        // quote are derived from the same snapshot; `latest` would otherwise be re-resolved by
         // each call below and could straddle a newly produced block.
         let block = self.pin_block_id(block_number.unwrap_or_default())?;
+
+        // Resolve the signed gas limit first. `effective_gas` is the value a wallet signs as
+        // its gas limit, so it must be a safe gas *limit*, not the gas *used* by one roomy
+        // simulation: the two differ for txs whose minimum viable limit exceeds their
+        // consumption (EIP-150 63/64 forwarding, branching on `gasleft()`). Delegate to the
+        // same path as `eth_estimateGas`, which binary-searches the execution gas and folds in
+        // the DA-fee headroom.
+        let effective_gas = self
+            .estimate_gas_at(request.clone(), block, state_override.clone())
+            .await?
+            .saturating_to::<u64>();
+
+        // Quote the breakdown *at that signed limit* so `gas_used`, `diff_size`, `da_fee`, and
+        // `base_fee` describe the transaction as it will execute at inclusion — a roomy quote
+        // could report a different gas/diff (and thus DA fee) for a `gasleft()`- or EIP-150-
+        // sensitive contract than the one the wallet ultimately signs.
+        let mut quote_request = request.clone();
+        quote_request.as_mut().set_gas_limit(effective_gas);
         let quote = self
-            .da_fee_quote(request.clone(), block, state_override.clone())
+            .da_fee_quote(quote_request, block, state_override)
             .await?;
 
-        // effective_gas is the value a wallet signs as its gas limit, so it must be a safe
-        // gas *limit*, not the gas *used* by one roomy simulation: the two differ for txs
-        // whose minimum viable limit exceeds their consumption (EIP-150 63/64 forwarding,
-        // branching on `gasleft()`). Delegate to the same path as `eth_estimateGas`, which
-        // binary-searches the execution gas and already folds in the DA-fee headroom.
         // The execution fee is paid at the transaction's *effective* gas price, which the
         // beneficiary receives in full (base fee + priority tip) — so the total must use it,
-        // not the base fee alone. Read the fee fields before `request` is consumed below.
+        // not the base fee alone.
         let effective_gas_price = {
             let tx = request.as_ref();
             if let Some(gas_price) = tx.gas_price() {
@@ -231,10 +244,6 @@ where
             }
         };
 
-        let effective_gas = self
-            .estimate_gas_at(request, block, state_override)
-            .await?
-            .saturating_to::<u64>();
         let total_fee = U256::from(quote.gas_used).saturating_mul(U256::from(effective_gas_price))
             + quote.da_fee;
 
