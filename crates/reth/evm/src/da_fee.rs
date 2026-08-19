@@ -30,6 +30,12 @@ use crate::utils::WEI_PER_SAT;
 // never *underestimate* the bytes a transaction pushes to L1 — undercharging means the
 // protocol silently subsidizes DA — so every field is charged its worst case regardless of
 // the actual (often smaller, trimmed) encoding. Overcharging is the accepted trade-off.
+//
+// KNOWN EXCEPTION — contract creations / code writes are currently *under*-counted, so
+// `calc_diff_size` is not a strict upper bound for them. The separate `deployed_bytecodes`
+// map-entry framing and the per-account `AccountChange` discriminant are not charged; see
+// the code-write branch in [`calc_diff_size`] for the exact missing bytes and rationale.
+// This leaves a small, bounded DA subsidy on deployments, deliberately deferred for now.
 
 /// Worst-case byte cost of an account/slot address key in a DA map: the fixed 20-byte
 /// address (`CodecAddress`).
@@ -124,6 +130,17 @@ pub fn calc_diff_size(state: &EvmState) -> u64 {
             if let Some(code) = &account.info.code {
                 diff_size = diff_size.saturating_add(code.original_byte_slice().len() as u64);
             }
+
+            // KNOWN UNDERCOUNT (deliberate, deferred): this charges the account's code-hash
+            // register and the raw bytecode length, but NOT the framing of the separate
+            // `deployed_bytecodes` map entry that also carries the bytecode to L1 — a second
+            // 32-byte `CodecB256` code-hash key plus its `u32` (4-byte) length prefix. Nor is
+            // the 1-byte `AccountChange` discriminant on every account entry counted. So for a
+            // creation with a large balance delta — where the `ACCOUNT_INFO_BYTES` worst-case
+            // slack can't absorb the omission — the estimate falls a few dozen bytes short of
+            // the bytes actually posted, i.e. a small, bounded DA subsidy on deployments.
+            // Left uncharged for now to keep the per-tx estimate simple; revisit alongside the
+            // sizing refactor (see the module `TODO(STR-4226)`).
         }
 
         // Changed storage slots live in a second, address-keyed map, so an account with any
