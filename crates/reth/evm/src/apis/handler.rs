@@ -95,11 +95,13 @@ where
         let gas = exec_result.gas();
         let gas_used = (gas.spent() - gas.refunded() as u64) as u128;
 
-        // Credit all gas fees to the beneficiary (base fee + priority fee).
+        // Credit all gas fees to the beneficiary (base fee + priority fee). Multiply in
+        // U256: both operands are u128, so `effective_gas_price * gas_used` can exceed
+        // u128::MAX (wrapping in release, panicking in debug) before the conversion.
         context
             .journal_mut()
             .load_account_mut(beneficiary)?
-            .incr_balance(U256::from(effective_gas_price * gas_used));
+            .incr_balance(U256::from(effective_gas_price) * U256::from(gas_used));
 
         Ok(())
     }
