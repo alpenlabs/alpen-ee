@@ -39,7 +39,7 @@ class TestTransactionMempoolPropagation(AlpenClientTest):
         # Wait for chain to be active
         ee_sequencer.wait_for_block(5, timeout=60)
         # wait for canonical chain to advance and avoid tx gossip dead window.
-        ee_fullnodes[0].wait_for_block(5)
+        ee_fullnodes[0].wait_for_block(5, timeout=60)
 
         seq_rpc = ee_sequencer.create_rpc()
         fn_rpc = ee_fullnodes[0].create_rpc()
