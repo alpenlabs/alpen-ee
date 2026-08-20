@@ -16,14 +16,12 @@
 //! variant for must fail rather than run under stale rules. Two inputs are
 //! exempt, both standing for "no stamp was ever written":
 //!
-//! - Empty `extra_data` decodes as [`AlpenSpecId::V0`] with a zero DA rate.
-//!   V0 is the pre-stamp state of the chain, so an unstamped header is a V0
-//!   header. Only a genuinely empty field qualifies — a short but non-empty
-//!   one is a truncated or corrupt stamp and is rejected, since reading it
-//!   as V0 would run a malformed block under default rules.
-//! - The genesis header, whose `extra_data` is authored by the genesis
-//!   document and predates the layout, is fixed at [`AlpenSpecId::V0`]
-//!   whatever it holds.
+//! - Empty `extra_data` decodes as [`AlpenSpecId::V0`] with a zero DA rate. V0 is the pre-stamp
+//!   state of the chain, so an unstamped header is a V0 header. Only a genuinely empty field
+//!   qualifies — a short but non-empty one is a truncated or corrupt stamp and is rejected, since
+//!   reading it as V0 would run a malformed block under default rules.
+//! - The genesis header, whose `extra_data` is authored by the genesis document and predates the
+//!   layout, is fixed at [`AlpenSpecId::V0`] whatever it holds.
 
 use std::mem::size_of;
 
@@ -313,5 +311,32 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(header_spec_version(&genesis), Ok(AlpenSpecId::V0));
+    }
+
+    /// Headers produced before the layout existed carry empty `extra_data` (the
+    /// repo's block 1-4 witnesses are exactly this). They must resolve to v0, or
+    /// upgrading an existing datadir breaks historical sync and re-execution.
+    #[test]
+    fn legacy_unstamped_headers_resolve_to_v0() {
+        // Non-genesis headers with empty extra_data.
+        for number in 1..=4u64 {
+            let h = Header {
+                number,
+                extra_data: Default::default(),
+                ..Default::default()
+            };
+            assert_eq!(
+                header_spec_version(&h),
+                Ok(AlpenSpecId::V0),
+                "block {number}"
+            );
+        }
+        // Genesis "SC" still exempt.
+        assert_eq!(spec_version_for_block(0, b"SC"), Ok(AlpenSpecId::V0));
+        // And the full parse agrees, so consensus validate_header passes too.
+        assert_eq!(
+            HeaderExtra::decode(&[]),
+            Ok(HeaderExtra::new(AlpenSpecId::V0, 0))
+        );
     }
 }

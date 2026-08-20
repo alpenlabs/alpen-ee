@@ -352,10 +352,9 @@ mod tests {
     fn the_base_fee_floor_applies_under_every_version() {
         // London must be active for the base-fee-against-parent rule to run
         // at all; the empty genesis document never activates it.
-        let evm_spec: EvmSpec = serde_json::from_str(
-            r#"{"config":{"chainId":2892,"londonBlock":0,"shanghaiTime":0}}"#,
-        )
-        .expect("genesis document parses");
+        let evm_spec: EvmSpec =
+            serde_json::from_str(r#"{"config":{"chainId":2892,"londonBlock":0,"shanghaiTime":0}}"#)
+                .expect("genesis document parses");
         let consensus = AlpenConsensus::new(&evm_spec);
 
         for version in [AlpenSpecId::V0, AlpenSpecId::V1] {

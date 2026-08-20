@@ -35,8 +35,7 @@ use alpen_ee_params::{
 };
 use alpen_reth_evm::{
     config::{
-        AlpenBlockAssembler as DaBlockAssembler,
-        AlpenBlockExecutionCtx as DaBlockExecutionCtx,
+        AlpenBlockAssembler as DaBlockAssembler, AlpenBlockExecutionCtx as DaBlockExecutionCtx,
         AlpenBlockExecutorFactory as DaBlockExecutorFactory, AlpenEvmConfig as DaEvmConfig,
     },
     evm::AlpenEvmFactory,
@@ -266,7 +265,9 @@ impl BlockAssembler<AlpenBlockExecutorFactory> for AlpenBlockAssembler {
         // the block: the version that selected its rules, and the DA rate its
         // execution charged. Taking them from anywhere else would let the
         // header disagree with what actually ran.
-        block.header.extra_data = HeaderExtra::new(spec_version, da_rate.saturating_to()).encode().into();
+        block.header.extra_data = HeaderExtra::new(spec_version, da_rate.saturating_to())
+            .encode()
+            .into();
         Ok(block)
     }
 }
@@ -400,9 +401,7 @@ mod tests {
     use reth_storage_api::noop::NoopProvider;
     use revm::{database::State, primitives::hardfork::SpecId};
 
-    use super::{
-        infallible, AlpenBlockExecutionCtx, AlpenEvmConfig, DaBlockExecutionCtx, U256,
-    };
+    use super::{infallible, AlpenBlockExecutionCtx, AlpenEvmConfig, DaBlockExecutionCtx, U256};
 
     /// A non-zero DA rate, so the tests catch a stamp that silently drops it.
     const DA_RATE: u64 = 1_500_000_000;
@@ -455,7 +454,9 @@ mod tests {
             number: 1,
             ..Default::default()
         };
-        let env = config.evm_env(&unstamped).expect("unstamped resolves to v0");
+        let env = config
+            .evm_env(&unstamped)
+            .expect("unstamped resolves to v0");
         assert_eq!(env.cfg_env.spec, SpecId::PRAGUE);
     }
 

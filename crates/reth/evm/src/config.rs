@@ -360,8 +360,10 @@ impl AlpenEvmConfig {
 
     /// Sets the `extra_data` stamped into blocks assembled by this config.
     ///
-    /// The sequencer's payload builder commits the per-block DA rate here; re-execution reads
-    /// it back when building the execution context.
+    /// Unused by the Alpen payload builder: the version-aware assembler
+    /// ([`alpen_reth_node`]'s `AlpenBlockAssembler`) stamps `extra_data` per block instead,
+    /// deriving both the spec version and the DA rate from the execution context that ran
+    /// the block. Setting a static value here would be overwritten by that stamp.
     pub fn with_extra_data(mut self, extra_data: Bytes) -> Self {
         self.block_assembler.inner.extra_data = extra_data;
         self

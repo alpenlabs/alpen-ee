@@ -177,11 +177,6 @@ pub fn da_rate_from_extra_data(extra_data: &Bytes) -> u64 {
         .unwrap_or(0)
 }
 
-/// Encodes a block's spec version and DA rate into `extra_data` bytes.
-pub fn da_rate_to_extra_data(spec_version: AlpenSpecId, da_rate: u64) -> Bytes {
-    Bytes::from(HeaderExtra::new(spec_version, da_rate).encode())
-}
-
 /// SegWit witness discount: DA payload rides in witness data, weighted at 1/4 of a vByte.
 const SEGWIT_WITNESS_DIVISOR: u64 = 4;
 
@@ -438,11 +433,8 @@ mod tests {
     fn da_rate_extra_data_roundtrips() {
         let rate = 2_500_000_000_u64;
         for version in [AlpenSpecId::V0, AlpenSpecId::V1] {
-            assert_eq!(
-                da_rate_from_extra_data(&da_rate_to_extra_data(version, rate)),
-                rate,
-                "{version:?}"
-            );
+            let extra_data = Bytes::from(HeaderExtra::new(version, rate).encode());
+            assert_eq!(da_rate_from_extra_data(&extra_data), rate, "{version:?}");
         }
     }
 
@@ -451,7 +443,10 @@ mod tests {
         // Genesis label / empty field / truncated stamp => no rate => charge is dormant.
         assert_eq!(da_rate_from_extra_data(&Bytes::from_static(b"SC")), 0);
         assert_eq!(da_rate_from_extra_data(&Bytes::new()), 0);
-        assert_eq!(da_rate_from_extra_data(&Bytes::from_static(&[0x00, 0x00])), 0);
+        assert_eq!(
+            da_rate_from_extra_data(&Bytes::from_static(&[0x00, 0x00])),
+            0
+        );
     }
 
     #[test]
