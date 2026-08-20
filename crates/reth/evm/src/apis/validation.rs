@@ -162,11 +162,15 @@ pub fn validate_tx_env<CTX: ContextTr, Error>(
         }
     };
 
-    // Check if gas_limit is more than block_gas_limit
-    if !context.cfg().is_block_gas_limit_disabled() && tx.gas_limit() > context.block().gas_limit()
-    {
-        return Err(InvalidTransaction::CallerGasLimitMoreThanBlock);
-    }
+    // Gas-limit / block-space decoupling. We do NOT reject on the signed
+    // `gas_limit` here: under the fee model it is the DA-inflated *authorized* envelope
+    // (execution gas + DA-fee headroom), not execution work — DA is a separate balance debit,
+    // not metered gas — so a storage-heavy tx can carry a `gas_limit` above the block gas
+    // limit while its real execution fits. Block space is bounded on ACTUAL `gas_used`
+    // instead (builder stops on real gas; consensus rejects `header.gas_used > gas_limit`).
+    // The companion executor-level check is dropped in `config::AlpenBlockExecutor`. Applied
+    // identically host↔guest (this file runs in both), so the relaxation stays in lockstep.
+    // See `AlpenBlockExecutor` for the residual (balance-bounded) DoS hardening note.
 
     // EIP-3860: Limit and meter initcode. Still valid with EIP-7907 and increase of initcode size.
     if spec_id.is_enabled_in(SpecId::SHANGHAI)

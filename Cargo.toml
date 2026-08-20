@@ -202,6 +202,7 @@ alloy = { version = "1.0.41", features = [
 alloy-consensus = { version = "1.0.41", default-features = false }
 alloy-eips = { version = "1.0.41", default-features = false }
 alloy-genesis = { version = "1.0.41", default-features = false }
+alloy-json-rpc = { version = "1.0.41", default-features = false }
 alloy-network = { version = "1.0.41", default-features = false }
 alloy-primitives = { version = "1.4.1", default-features = false, features = [
   "sha3-keccak",
@@ -236,6 +237,7 @@ reth-cli = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
 reth-cli-commands = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
 reth-cli-runner = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
 reth-cli-util = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
+reth-consensus = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1", default-features = false }
 reth-consensus-common = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
 reth-db = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
 reth-engine-local = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
@@ -248,6 +250,7 @@ reth-ethereum-payload-builder = { git = "https://github.com/paradigmxyz/reth", t
 reth-ethereum-primitives = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
 reth-evm = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
 reth-evm-ethereum = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
+reth-execution-types = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
 reth-exex = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
 reth-ipc = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
 reth-network = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
@@ -268,6 +271,7 @@ reth-provider = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
 reth-revm = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
 reth-rpc = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
 reth-rpc-api = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
+reth-rpc-convert = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
 reth-rpc-eth-api = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
 reth-rpc-eth-types = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1", default-features = false }
 reth-rpc-layer = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }

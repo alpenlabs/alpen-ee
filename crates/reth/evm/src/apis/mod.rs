@@ -1,5 +1,8 @@
 use core::mem;
-use std::ops::{Deref, DerefMut};
+use std::{
+    ops::{Deref, DerefMut},
+    sync::{atomic::AtomicU64, Arc},
+};
 
 use reth_evm::{eth::EthEvmContext, precompiles::PrecompilesMap, Database, Evm, EvmEnv};
 use revm::{
@@ -35,6 +38,11 @@ pub struct AlpenAlloyEvm<DB: Database, I> {
         EthFrame,
     >,
     inspect: bool,
+    /// Per-block DA rate (wei per byte) used by the in-EVM DA fee charge.
+    da_rate: U256,
+    /// Per-transaction DA-coverage report cell, written by the handler after each charge and
+    /// read by the sequencer's payload builder via [`Self::da_report_handle`].
+    da_report: Arc<AtomicU64>,
 }
 
 impl<DB: Database, I> AlpenAlloyEvm<DB, I> {
@@ -51,11 +59,43 @@ impl<DB: Database, I> AlpenAlloyEvm<DB, I> {
             EthFrame,
         >,
         inspect: bool,
+        da_rate: U256,
+        da_report: Arc<AtomicU64>,
     ) -> Self {
         Self {
             inner: evm,
             inspect,
+            da_rate,
+            da_report,
         }
+    }
+
+    /// Returns the per-block DA rate (wei per byte) configured for this EVM instance.
+    pub const fn da_rate(&self) -> U256 {
+        self.da_rate
+    }
+
+    /// Sets the per-block DA rate (wei per byte) used by the in-EVM DA fee charge.
+    ///
+    /// The DA rate is a per-block execution parameter stamped onto the EVM instance by
+    /// [`crate::config::AlpenEvmConfig`] (from the block's committed `extra_data` on
+    /// re-execution, or from the pending rate on block building) at the point block
+    /// execution begins, so a single EVM instance always charges exactly one block's rate.
+    /// The value rides the per-execution EVM rather than shared factory state, so concurrent
+    /// executions cannot race.
+    pub fn set_da_rate(&mut self, da_rate: U256) {
+        self.da_rate = da_rate;
+    }
+
+    /// Returns a shared handle to this EVM's per-transaction DA-coverage report cell.
+    ///
+    /// The in-EVM DA charge writes coverage (`OK`/`CAPPED`/`UNKNOWN`) here after each
+    /// transaction; the sequencer's payload builder reads it to skip DA-undercovered
+    /// transactions. The cell is owned by this per-block EVM instance — not shared factory
+    /// state — so separate builds cannot clobber each other's coverage. Re-execution never
+    /// reads it, keeping it determinism-neutral.
+    pub fn da_report_handle(&self) -> Arc<AtomicU64> {
+        self.da_report.clone()
     }
 
     /// Consumes self and return the inner EVM instance.

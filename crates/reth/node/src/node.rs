@@ -1,3 +1,5 @@
+use std::sync::{atomic::AtomicU64, Arc};
+
 use alpen_reth_evm::evm::AlpenEvmFactory;
 use alpen_reth_rpc::{eth::AlpenEthApiBuilder, SequencerClient};
 use reth_chainspec::ChainSpec;
@@ -13,15 +15,16 @@ use reth_node_builder::{
     },
     Node, NodeAdapter, NodeComponentsBuilder,
 };
-use reth_node_ethereum::node::{EthereumConsensusBuilder, EthereumNetworkBuilder};
+use reth_node_ethereum::node::EthereumNetworkBuilder;
 use reth_primitives::EthPrimitives;
 use reth_provider::EthStorage;
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use revm::context::TxEnv;
 
 use crate::{
-    engine::AlpenEngineValidatorBuilder, evm::AlpenExecutorBuilder,
-    payload_builder::AlpenPayloadBuilderBuilder, pool::AlpenEthereumPoolBuilder, AlpenEngineTypes,
+    consensus::AlpenConsensusBuilder, engine::AlpenEngineValidatorBuilder,
+    evm::AlpenExecutorBuilder, payload_builder::AlpenPayloadBuilderBuilder,
+    pool::AlpenEthereumPoolBuilder, AlpenEngineTypes,
 };
 
 /// Which role the node plays on the network.
@@ -77,11 +80,24 @@ pub struct AlpenEthereumNode {
     /// executes one way on the node and another way in its proof.
     evm_factory: AlpenEvmFactory,
     mode: AlpenNodeMode,
+    /// Live DA rate (wei per byte) shared into the payload builder; sampled and
+    /// frozen per block into the header `extra_data` and the in-EVM DA fee
+    /// charge. Only the sequencer's build path reads it; full nodes recover the
+    /// per-block rate from each block's `extra_data`.
+    live_da_rate: Arc<AtomicU64>,
 }
 
 impl AlpenEthereumNode {
-    pub fn new(evm_factory: AlpenEvmFactory, mode: AlpenNodeMode) -> Self {
-        Self { evm_factory, mode }
+    pub fn new(
+        evm_factory: AlpenEvmFactory,
+        mode: AlpenNodeMode,
+        live_da_rate: Arc<AtomicU64>,
+    ) -> Self {
+        Self {
+            evm_factory,
+            mode,
+            live_da_rate,
+        }
     }
 }
 
@@ -109,7 +125,7 @@ where
         BasicPayloadServiceBuilder<AlpenPayloadBuilderBuilder>,
         EthereumNetworkBuilder,
         AlpenExecutorBuilder,
-        EthereumConsensusBuilder,
+        AlpenConsensusBuilder,
     >;
 
     type AddOns = AlpenRethNodeAddOns<
@@ -123,9 +139,13 @@ where
             .node_types::<N>()
             .pool(AlpenEthereumPoolBuilder::default())
             .executor(AlpenExecutorBuilder::new(self.evm_factory.clone()))
-            .payload(BasicPayloadServiceBuilder::default())
+            .payload(BasicPayloadServiceBuilder::new(
+                AlpenPayloadBuilderBuilder {
+                    live_da_rate: self.live_da_rate.clone(),
+                },
+            ))
             .network(EthereumNetworkBuilder::default())
-            .consensus(EthereumConsensusBuilder::default())
+            .consensus(AlpenConsensusBuilder::default())
     }
 
     fn add_ons(&self) -> Self::AddOns {

@@ -6,7 +6,7 @@
 //! genesis work beyond what [`crate::node`] already did, no ExExes, and no
 //! services past the two every node runs.
 
-use std::sync::Arc;
+use std::sync::{atomic::AtomicU64, Arc};
 
 use alpen_ee_common::BlockNumHash;
 use alpen_ee_rpc_server::{AlpenEeRpcServer, EeRpcServer};
@@ -14,6 +14,7 @@ use alpen_reth_evm::evm::AlpenEvmFactory;
 use alpen_reth_node::{
     AlpenEthereumNode, AlpenGossipProtocolHandler, AlpenGossipState, AlpenNodeMode,
 };
+use alpen_reth_rpc::AlpenFeeApiServer;
 use reth_chainspec::ChainSpec;
 use reth_network::{protocol::IntoRlpxSubProtocol, NetworkProtocols};
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
@@ -32,9 +33,14 @@ pub(crate) async fn run(
     config: &FullNodeConfig,
 ) -> eyre::Result<()> {
     let evm_factory = AlpenEvmFactory::from_bridge_params(common.params.bridge_params());
+    // A full node never builds blocks, so its live DA rate is never sampled: it
+    // recovers each block's frozen rate from the header `extra_data` instead.
+    // The handle exists only to satisfy the shared node type.
+    let live_da_rate = Arc::new(AtomicU64::new(0));
     let node = AlpenEthereumNode::new(
         evm_factory,
         AlpenNodeMode::full_node(config.sequencer_http_url.clone()),
+        live_da_rate,
     );
 
     let consensus_watcher = common.ol_tracker.consensus_watcher();
@@ -73,6 +79,12 @@ pub(crate) async fn run(
                     storage.clone(),
                 );
                 ctx.modules.merge_configured(ee_rpc_server.into_rpc())?;
+
+                // Register `alpen_estimateFees` (execution + DA fee quote) on the
+                // configured eth API, which carries the simulation + state access.
+                let fee_api = ctx.registry.eth_api().clone();
+                ctx.modules
+                    .merge_configured(AlpenFeeApiServer::into_rpc(fee_api))?;
                 Ok(())
             }
         })

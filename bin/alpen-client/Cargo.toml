@@ -79,6 +79,7 @@ alpen-reth-db = { workspace = true, optional = true }
 alpen-reth-evm.workspace = true
 alpen-reth-exex = { workspace = true, optional = true }
 alpen-reth-node.workspace = true
+alpen-reth-rpc.workspace = true
 alpen-reth-witness = { workspace = true, optional = true }
 bitcoind-async-client = { workspace = true, optional = true }
 k256 = { workspace = true, optional = true }

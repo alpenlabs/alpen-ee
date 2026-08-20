@@ -16,7 +16,10 @@ mod prover;
 mod provers;
 mod services;
 
-use std::sync::Arc;
+use std::{
+    env,
+    sync::{atomic::AtomicU64, Arc},
+};
 
 use alpen_ee_common::{require_latest_batch, BlockNumHash, SequencerOLClient};
 use alpen_ee_database::{EeDb, EeNodeStorage, SequencerDatabases};
@@ -36,12 +39,13 @@ use alpen_ee_sequencer::{
     BatchBuilderEvent, BatchBuilderState, BatchLifecycleState, BlockBuilderConfig,
     OLChainTrackerState,
 };
-use alpen_reth_evm::evm::AlpenEvmFactory;
+use alpen_reth_evm::{da_fee::DEFAULT_DA_RATE_WEI_PER_BYTE, evm::AlpenEvmFactory};
 use alpen_reth_exex::{AccessedStateGenerator, StateDiffGenerator};
 use alpen_reth_node::{
     AlpenEngineTypes, AlpenEthereumNode, AlpenGossipProtocolHandler, AlpenGossipState,
     AlpenNodeMode,
 };
+use alpen_reth_rpc::AlpenFeeApiServer;
 use bitcoind_async_client::corepc_types::bitcoin::{
     key::Keypair,
     secp256k1::{Secp256k1, SecretKey},
@@ -236,7 +240,31 @@ pub(crate) async fn run(
     let initial_preconf_head = initial_preconf_head(common.storage.as_ref()).await?;
 
     let evm_factory = AlpenEvmFactory::from_bridge_params(common.params.bridge_params());
-    let node = AlpenEthereumNode::new(evm_factory, AlpenNodeMode::sequencer());
+    // Live DA rate (wei per byte) consumed by the payload builder, frozen per
+    // block into the header `extra_data` and the in-EVM DA fee charge.
+    //
+    // Seeded from `ALPEN_DA_RATE_WEI_PER_BYTE`, defaulting to
+    // `DEFAULT_DA_RATE_WEI_PER_BYTE` (a sensible non-zero rate) so the DA charge is active
+    // out of the box; set the env var to 0 to keep it dormant.
+    // TODO(STR-4225): drive this dynamically from the sequencer's Bitcoin fee
+    // rate (`btcio::writer::fees::resolve_fee_rate`, gossiped from the OL via the
+    // fee config) instead of a static env seed, and decouple it from the
+    // publication rate. Tracked in a follow-up ticket.
+    // A malformed value (typo, or out of `u64` range) is a consensus-visible
+    // misconfiguration — the sequencer would commit and charge an unintended DA fee — so
+    // fail loudly rather than silently falling back. The default applies only when the
+    // variable is genuinely absent.
+    let da_rate_seed = match env::var("ALPEN_DA_RATE_WEI_PER_BYTE") {
+        Ok(raw) => raw
+            .parse::<u64>()
+            .with_context(|| format!("invalid ALPEN_DA_RATE_WEI_PER_BYTE: {raw:?}"))?,
+        Err(env::VarError::NotPresent) => DEFAULT_DA_RATE_WEI_PER_BYTE,
+        Err(err @ env::VarError::NotUnicode(_)) => {
+            eyre::bail!("invalid ALPEN_DA_RATE_WEI_PER_BYTE: {err}");
+        }
+    };
+    let live_da_rate = Arc::new(AtomicU64::new(da_rate_seed));
+    let node = AlpenEthereumNode::new(evm_factory, AlpenNodeMode::sequencer(), live_da_rate);
 
     let consensus_watcher = common.ol_tracker.consensus_watcher();
 
@@ -286,6 +314,12 @@ pub(crate) async fn run(
                     storage.clone(),
                 );
                 ctx.modules.merge_configured(ee_rpc_server.into_rpc())?;
+
+                // Register `alpen_estimateFees` (execution + DA fee quote) on the
+                // configured eth API, which carries the simulation + state access.
+                let fee_api = ctx.registry.eth_api().clone();
+                ctx.modules
+                    .merge_configured(AlpenFeeApiServer::into_rpc(fee_api))?;
                 Ok(())
             }
         })

@@ -1,8 +1,19 @@
-use std::{io, sync::Arc};
+use std::{
+    cell::Cell,
+    io,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 
 use alloy_consensus::{Header, Transaction};
 use alpen_reth_evm::{
-    constants::BRIDGEOUT_PRECOMPILE_ADDRESS, evm::AlpenEvmFactory, extract_withdrawal_intents,
+    base_fee::apply_base_fee_floor,
+    config::AlpenEvmConfig,
+    constants::BRIDGEOUT_PRECOMPILE_ADDRESS,
+    da_fee::{da_rate_to_extra_data, DA_COVERAGE_CAPPED, DA_COVERAGE_UNKNOWN},
+    extract_withdrawal_intents,
 };
 use alpen_reth_primitives::WithdrawalIntent;
 use reth_basic_payload_builder::*;
@@ -11,10 +22,10 @@ use reth_errors::{BlockExecutionError, BlockValidationError};
 use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::{
+    block::CommitChanges,
     execute::{BlockBuilder, BlockBuilderOutcome},
     Evm, NextBlockEnvAttributes,
 };
-use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::{ConfigureEvm, FullNodeTypes, NodeTypes, PayloadBuilderAttributes};
 use reth_node_builder::{components::PayloadBuilderBuilder, BuilderContext, PayloadBuilderConfig};
 use reth_payload_builder::{BlobSidecars, EthBuiltPayload, PayloadBuilderError};
@@ -35,13 +46,28 @@ use crate::{
     payload::{AlpenBuiltPayload, AlpenPayloadBuilderAttributes},
 };
 
+/// Intrinsic gas floor of the cheapest possible transaction (a plain value transfer).
+///
+/// Used to stop filling a block once the remaining gas can't fit even a minimal tx.
+/// Block space is accounted on actual `gas_used`, so we do not pre-reject on the
+/// DA-inflated signed `gas_limit`; the precise per-tx fit is checked post-execution.
+const MIN_TX_GAS_LIMIT: u64 = 21_000;
+
 /// A custom payload service builder that supports the custom engine types
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
-pub struct AlpenPayloadBuilderBuilder;
+pub struct AlpenPayloadBuilderBuilder {
+    /// Live DA rate (wei per byte), shared with the payload builder.
+    ///
+    /// Shared and atomic — not because it changes *within* a block, but because the
+    /// sequencer updates it *between* blocks, out of band from the build task (from
+    /// its Bitcoin fee rate; see [`crate::payload_builder`]). The builder samples it
+    /// once and freezes that value into the block, so a single relaxed load/store on
+    /// an [`AtomicU64`] is all the synchronization the hand-off needs.
+    pub live_da_rate: Arc<AtomicU64>,
+}
 
-impl<Node, Pool> PayloadBuilderBuilder<Node, Pool, EthEvmConfig<ChainSpec, AlpenEvmFactory>>
-    for AlpenPayloadBuilderBuilder
+impl<Node, Pool> PayloadBuilderBuilder<Node, Pool, AlpenEvmConfig> for AlpenPayloadBuilderBuilder
 where
     Node: FullNodeTypes<
         Types: NodeTypes<
@@ -60,7 +86,7 @@ where
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-        evm_config: EthEvmConfig<ChainSpec, AlpenEvmFactory>,
+        evm_config: AlpenEvmConfig,
     ) -> eyre::Result<Self::PayloadBuilder> {
         let conf = ctx.payload_builder_config();
         let chain = ctx.chain_spec().chain();
@@ -71,6 +97,7 @@ where
             pool,
             evm_config,
             EthereumBuilderConfig::new().with_gas_limit(gas_limit),
+            self.live_da_rate,
         ))
     }
 }
@@ -84,9 +111,11 @@ pub struct AlpenPayloadBuilder<Pool, Client> {
     /// Transaction pool.
     pool: Pool,
     /// The type responsible for creating the evm.
-    evm_config: EthEvmConfig<ChainSpec, AlpenEvmFactory>,
+    evm_config: AlpenEvmConfig,
     /// Payload builder configuration.
     builder_config: EthereumBuilderConfig,
+    /// Live DA rate (wei per byte) sampled and frozen per block.
+    live_da_rate: Arc<AtomicU64>,
 }
 
 impl<Pool, Client> AlpenPayloadBuilder<Pool, Client> {
@@ -94,14 +123,16 @@ impl<Pool, Client> AlpenPayloadBuilder<Pool, Client> {
     pub fn new(
         client: Client,
         pool: Pool,
-        evm_config: EthEvmConfig<ChainSpec, AlpenEvmFactory>,
+        evm_config: AlpenEvmConfig,
         builder_config: EthereumBuilderConfig,
+        live_da_rate: Arc<AtomicU64>,
     ) -> Self {
         Self {
             client,
             pool,
             evm_config,
             builder_config,
+            live_da_rate,
         }
     }
 }
@@ -123,6 +154,7 @@ where
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
         try_build_payload(
             self.evm_config.clone(),
+            self.live_da_rate.clone(),
             self.client.clone(),
             self.pool.clone(),
             self.builder_config.clone(),
@@ -138,6 +170,7 @@ where
         let args = BuildArguments::new(Default::default(), config, Default::default(), None);
         try_build_payload(
             self.evm_config.clone(),
+            self.live_da_rate.clone(),
             self.client.clone(),
             self.pool.clone(),
             self.builder_config.clone(),
@@ -163,7 +196,8 @@ type BestTransactionsIter<Pool> = Box<
 /// [default_ethereum_payload](reth_ethereum_payload_builder::default_ethereum_payload)
 #[inline]
 fn try_build_payload<Pool, Client, F>(
-    evm_config: EthEvmConfig<ChainSpec, AlpenEvmFactory>,
+    evm_config: AlpenEvmConfig,
+    live_da_rate: Arc<AtomicU64>,
     client: Client,
     _pool: Pool,
     builder_config: EthereumBuilderConfig,
@@ -177,6 +211,22 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
 {
+    // Freeze the per-block DA rate: sample the live rate once and use it both as the
+    // in-EVM charge rate for this build and as the value committed into the block
+    // `extra_data`. Freezing per block keeps the charge and the committed rate identical, so
+    // the block re-executes to the same state root on full nodes/provers.
+    //
+    // NOTE: `live_da_rate` currently mirrors the sequencer's Bitcoin publication fee rate
+    // (`btcio::writer::fees::resolve_fee_rate`, gossiped from the OL). It should later be
+    // decoupled from the publication rate and smoothed/cached for the fee model.
+    let da_rate = live_da_rate.load(Ordering::Relaxed);
+    // Pin the per-block DA rate as the config's pending rate (the in-EVM charge reads it via
+    // `context_for_next_block` when the block builder's executor is created) and commit the
+    // same value into the block `extra_data`, so the block re-executes to the same state root.
+    let evm_config = evm_config
+        .with_extra_data(da_rate_to_extra_data(da_rate))
+        .with_pending_da_rate(U256::from(da_rate));
+
     let BuildArguments {
         mut cached_reads,
         config,
@@ -197,20 +247,38 @@ where
         .with_bundle_update()
         .build();
 
-    let mut builder = evm_config
-        .builder_for_next_block(
-            &mut db,
-            &parent_header,
-            NextBlockEnvAttributes {
-                timestamp: attributes.timestamp(),
-                suggested_fee_recipient: attributes.suggested_fee_recipient(),
-                prev_randao: attributes.prev_randao(),
-                gas_limit: builder_config.gas_limit(parent_header.gas_limit),
-                parent_beacon_block_root: attributes.parent_beacon_block_root(),
-                withdrawals: Some(attributes.withdrawals().clone()),
-            },
-        )
+    let next_block_attrs = NextBlockEnvAttributes {
+        timestamp: attributes.timestamp(),
+        suggested_fee_recipient: attributes.suggested_fee_recipient(),
+        prev_randao: attributes.prev_randao(),
+        gas_limit: builder_config.gas_limit(parent_header.gas_limit),
+        parent_beacon_block_root: attributes.parent_beacon_block_root(),
+        withdrawals: Some(attributes.withdrawals().clone()),
+    };
+
+    // Build the next block's EVM env and apply the base-fee floor. `next_evm_env`
+    // computes the pure EIP-1559 base fee; clamp it to `max(BASE_FEE_FLOOR, .)`. The sealed
+    // header takes its base fee from this env, so flooring here keeps the header and the
+    // executed base fee consistent, and matches the host consensus + guest, which recompute
+    // the same floored value from the parent. This inlines `builder_for_next_block` so the
+    // floor can be inserted between `next_evm_env` and block-builder construction, keeping the
+    // floor logic in the builder rather than inside `AlpenEvmConfig`.
+    let mut evm_env = evm_config
+        .next_evm_env(&parent_header, &next_block_attrs)
         .map_err(PayloadBuilderError::other)?;
+    evm_env.block_env.basefee = apply_base_fee_floor(evm_env.block_env.basefee);
+
+    let evm = evm_config.evm_with_env(&mut db, evm_env);
+    let block_ctx = evm_config
+        .context_for_next_block(&parent_header, next_block_attrs)
+        .map_err(PayloadBuilderError::other)?;
+    let mut builder = evm_config.create_block_builder(evm, &parent_header, block_ctx);
+
+    // Shared handle to *this build EVM's* DA-coverage cell: the in-EVM charge writes it per
+    // transaction (`CAPPED` means the DA fee was capped by the tx's unused authorized gas —
+    // under-covered / would be subsidized), and the tx loop reads it to skip such txs (see
+    // the sequencer-admission skip below). Owned by the EVM, not shared factory state.
+    let da_report = builder.evm().da_report_handle();
 
     let chain_spec = client.chain_spec();
 
@@ -235,12 +303,41 @@ where
         PayloadBuilderError::Internal(err.into())
     })?;
 
+    // Bound on the speculative execution the DA-inflated-limit design permits per build.
+    //
+    // A transaction's signed `gas_limit` is its execution gas plus the DA-fee headroom the
+    // wallet reserves (`eth_estimateGas` folds it in). That headroom is a spend-authorization
+    // envelope — the DA fee is a separate in-EVM balance debit drawn from the caller's unused
+    // gas value, not metered execution — and for a storage-heavy transaction it can be large.
+    // So a tx whose signed limit exceeds the remaining budget may still *execute* within it
+    // and belongs in the block; its real execution gas is only known by running it, so it is
+    // run *speculatively* rather than pre-rejected on the signed limit.
+    //
+    // That gamble is the attack surface: a tx executed at its full signed limit that then
+    // doesn't fit on actual gas, or whose DA fee is under-covered, does full EVM work without
+    // committing or paying. `speculative_gas_used` sums the gas burned by *every* such
+    // uncommitted execution (both buckets — see the no-commit arms below); once it reaches a
+    // block's worth, further *oversized* txs are rejected before execution, so a flood of them
+    // can't force unbounded work. The loop keeps going — txs that fit their signed limit are
+    // still committed — so this can't be used to truncate the block. (A fitting tx that is
+    // merely DA-undercovered is a separate, pool-validation concern; it can't be pre-detected
+    // here without executing.)
+    let speculative_gas_budget = block_gas_limit;
+    let mut speculative_gas_used: u64 = 0;
+
     while let Some(pool_tx) = best_txs.next() {
-        // ensure we still have capacity for this transaction
-        if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
-            // we can't fit this transaction into the block, so we need to mark it as invalid
-            // which also removes all dependent transaction from the iterator before we can
-            // continue
+        // Stop once even a minimal transaction can no longer fit the remaining budget.
+        if cumulative_gas_used + MIN_TX_GAS_LIMIT > block_gas_limit {
+            break;
+        }
+
+        // Once this build has burned a block's worth of gas on uncommitted executions, stop
+        // gambling on oversized txs: reject a tx whose signed limit exceeds the remaining
+        // budget before executing it. Txs that fit their signed limit are unaffected and the
+        // build continues, so this bounds speculative work without truncating the block.
+        let remaining_gas = block_gas_limit.saturating_sub(cumulative_gas_used);
+        if pool_tx.gas_limit() > remaining_gas && speculative_gas_used >= speculative_gas_budget {
+            trace!(target: "payload_builder", gas_limit = pool_tx.gas_limit(), remaining_gas, "rejecting oversized transaction: speculative execution budget exhausted");
             best_txs.mark_invalid(
                 &pool_tx,
                 InvalidPoolTransactionError::ExceedsGasLimit(pool_tx.gas_limit(), block_gas_limit),
@@ -256,8 +353,66 @@ where
         // convert tx to a signed transaction
         let tx = pool_tx.to_consensus();
 
-        let gas_used = match builder.execute_transaction(tx.clone()) {
-            Ok(gas_used) => gas_used,
+        // Execute at the tx's full signed gas limit — never a reduced cap — so `gasleft()`-
+        // and EIP-150-sensitive contracts run identically to a full-node/guest re-execution
+        // (a lower cap would change `gasleft` and diverge the state root) and the in-EVM DA
+        // charge sees the full authorized-but-unused gas it draws the DA fee from.
+        //
+        // Commit only if (a) the tx's *actual* execution gas fits the remaining block budget
+        // — checked here, not on the DA-inflated signed limit, so a tx that fits despite an
+        // oversized limit is kept — and (b) its DA fee is fully covered by its unused
+        // authorized gas.
+        //
+        // Reset the shared coverage cell to `UNKNOWN` first so a stale value from a prior tx
+        // (or a tx that skips the charge, e.g. zero-fee) can never be read as covered; the
+        // in-EVM charge overwrites it with `OK`/`CAPPED` during execution (before this closure
+        // runs). A `CAPPED` charge means the tx under-provisioned and the protocol would
+        // subsidize its DA cost, so we skip it (coverage only matters when `da_rate != 0`).
+        da_report.store(DA_COVERAGE_UNKNOWN, Ordering::Relaxed);
+        // Captures the execution gas and reason of a tx the commit condition rejects, so the
+        // skip arms can charge the burned gas against the speculative budget and pick the
+        // right invalidation reason (the no-commit path returns neither).
+        let does_not_fit = Cell::new(false);
+        let rejected_gas = Cell::new(0u64);
+        let exec_outcome = builder.execute_transaction_with_commit_condition(tx.clone(), |res| {
+            // (a) Fit on actual executed gas, not the DA-inflated signed limit.
+            if cumulative_gas_used + res.gas_used() > block_gas_limit {
+                does_not_fit.set(true);
+                rejected_gas.set(res.gas_used());
+                return CommitChanges::No;
+            }
+            // (b) DA coverage: skip under-covered txs the protocol would subsidize.
+            if da_rate != 0 && da_report.load(Ordering::Relaxed) == DA_COVERAGE_CAPPED {
+                rejected_gas.set(res.gas_used());
+                return CommitChanges::No;
+            }
+            CommitChanges::Yes
+        });
+
+        let gas_used = match exec_outcome {
+            Ok(Some(gas_used)) => gas_used,
+            Ok(None) => {
+                // Executed but not committed — it either didn't fit on actual gas or its DA
+                // fee was under-covered. Either way it did full EVM work without paying, so
+                // charge that work to the speculative budget (bounding how much uncommitted
+                // execution a flood can force per build; see the loop-top break), then skip it
+                // and its descendants. The sender's nonce is untouched, so it can resubmit.
+                speculative_gas_used = speculative_gas_used.saturating_add(rejected_gas.get());
+                if does_not_fit.get() {
+                    trace!(target: "payload_builder", ?tx, "skipping transaction that exceeds remaining block gas");
+                    best_txs.mark_invalid(
+                        &pool_tx,
+                        InvalidPoolTransactionError::ExceedsGasLimit(
+                            pool_tx.gas_limit(),
+                            block_gas_limit,
+                        ),
+                    );
+                } else {
+                    trace!(target: "payload_builder", ?tx, "skipping DA-undercovered transaction");
+                    best_txs.mark_invalid(&pool_tx, InvalidPoolTransactionError::Underpriced);
+                }
+                continue;
+            }
             Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
                 error, ..
             })) => {

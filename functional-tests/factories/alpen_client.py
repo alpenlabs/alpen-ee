@@ -106,6 +106,7 @@ class AlpenClientFactory(flexitest.Factory):
         bridge_denomination: int = 100_000_000,
         max_withdrawal_amount: int | None = 1_000_000_000,
         beneficiary_address: str | None = None,
+        da_rate_wei_per_byte: int = 0,
         **kwargs,
     ) -> AlpenClientService:
         """
@@ -246,6 +247,8 @@ class AlpenClientFactory(flexitest.Factory):
         # Set environment variable for sequencer private key
         env = os.environ.copy()
         env["SEQUENCER_PRIVATE_KEY"] = sequencer_privkey
+        # DA fee rate (wei per byte). 0 keeps the in-EVM DA fee charge dormant.
+        env["ALPEN_DA_RATE_WEI_PER_BYTE"] = str(da_rate_wei_per_byte)
         if ol_submit_token:
             env["STRATA_SUBMIT_RPC_TOKEN"] = ol_submit_token
 
