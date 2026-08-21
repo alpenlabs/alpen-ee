@@ -180,6 +180,7 @@ fn test_evm_block_body_codec_roundtrip() {
     let witness = load_witness_test_data();
 
     use reth_primitives_traits::Block;
+
     let block_body = witness.current_block.body().clone();
     let body = EvmBlockBody::from_alloy_body(block_body.clone());
 
@@ -203,6 +204,7 @@ fn test_evm_block_codec_roundtrip() {
     let witness = load_witness_test_data();
 
     use reth_primitives_traits::Block;
+
     let header = witness.current_block.header().clone();
     let evm_header = EvmHeader::new(header.clone());
 

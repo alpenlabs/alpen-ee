@@ -19,6 +19,7 @@ use alloy_primitives::{keccak256, Bytes, B256};
 use reth_provider::{HeaderProvider, StateProofProvider};
 use reth_revm::{db::State, witness::ExecutionWitnessRecord, Database};
 use reth_trie::TrieInput;
+use revm::state::AccountInfo;
 use serde::{Deserialize, Serialize};
 
 /// Persisted per-block proof-witness, keyed by execution block hash.
@@ -136,9 +137,11 @@ where
 /// via its account's `info.code` — a warm load that never issued a by-hash
 /// fetch — is silently left out.
 ///
-/// This starts from reth's `record_codes` and adds the code of every accessed
-/// account that carries one, so the result is complete regardless of how each
-/// contract's code was loaded.
+/// This starts from reth's `record_codes`, then adds bytecode from both the
+/// pre-execution account values retained in the bundle and the final cache.
+/// The bundle is required for EIP-7702: a one-block payload-read cache can
+/// supply an account with `info.code` already attached, and a transaction can
+/// replace that code before this post-execution capture runs.
 fn collect_accessed_codes<DB>(
     executed_state: &State<DB>,
     record_codes: Vec<Bytes>,
@@ -151,31 +154,22 @@ where
         .map(|code| (keccak256(&code), code))
         .collect();
 
+    // `bundle_state` preserves the pre-block value for changed accounts. This
+    // is the only remaining source for bytecode served from Reth's one-block
+    // `CachedReads` pre-warm cache when the same block clears or replaces it.
+    for account in executed_state.bundle_state.state().values() {
+        if let Some(original_info) = account.original_info.as_ref() {
+            add_account_bytecode(&mut codes_by_hash, original_info)?;
+        }
+    }
+
+    // The final cache covers code attached to accounts that was not replaced
+    // during the block.
     for account in executed_state.cache.accounts.values() {
         let Some(plain) = &account.account else {
             continue;
         };
-        if plain.info.is_empty_code_hash() {
-            continue;
-        }
-        let Some(code) = &plain.info.code else {
-            continue;
-        };
-
-        // The guest content-addresses code by `keccak256(bytes)`, so code stored
-        // under a hash that disagrees with its bytes would be unreachable there.
-        // Surface the inconsistency as a build failure now, not a guest panic.
-        let actual_hash = code.hash_slow();
-        if actual_hash != plain.info.code_hash {
-            eyre::bail!(
-                "accessed account bytecode hash mismatch: expected_code_hash={}, actual_hash={actual_hash}",
-                plain.info.code_hash,
-            );
-        }
-
-        codes_by_hash
-            .entry(plain.info.code_hash)
-            .or_insert_with(|| code.original_bytes());
+        add_account_bytecode(&mut codes_by_hash, &plain.info)?;
     }
 
     Ok(codes_by_hash
@@ -184,10 +178,43 @@ where
         .collect())
 }
 
+/// Adds account-attached code to the witness map after verifying its hash.
+fn add_account_bytecode(
+    codes_by_hash: &mut BTreeMap<B256, Bytes>,
+    account_info: &AccountInfo,
+) -> eyre::Result<()> {
+    if account_info.is_empty_code_hash() {
+        return Ok(());
+    }
+    let Some(code) = &account_info.code else {
+        return Ok(());
+    };
+
+    // The guest content-addresses code by `keccak256(bytes)`, so code stored
+    // under a hash that disagrees with its bytes would be unreachable there.
+    // Surface the inconsistency as a build failure now, not a guest panic.
+    let actual_hash = code.hash_slow();
+    if actual_hash != account_info.code_hash {
+        eyre::bail!(
+            "accessed account bytecode hash mismatch: expected_code_hash={}, actual_hash={actual_hash}",
+            account_info.code_hash,
+        );
+    }
+
+    codes_by_hash
+        .entry(account_info.code_hash)
+        .or_insert_with(|| code.original_bytes());
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use alloy_primitives::{Address, U256};
-    use reth_revm::db::{states::cache_account::CacheAccount, EmptyDB, State};
+    use reth_revm::db::{
+        states::{cache_account::CacheAccount, BundleBuilder},
+        EmptyDB, State,
+    };
     use revm::state::{AccountInfo, Bytecode};
 
     use super::*;
@@ -276,6 +303,53 @@ mod tests {
         assert!(
             codes.iter().any(|code| keccak256(code) == code_hash),
             "block witness codes must include every accessed account info.code"
+        );
+    }
+
+    /// An EIP-7702 authorization can read a pre-warmed delegation bytecode and
+    /// replace it in the same block. The final cache then contains only the
+    /// replacement, but guest replay still needs the original code while
+    /// validating the authorization.
+    #[test]
+    fn captures_pre_execution_code_replaced_during_block() {
+        let old_code = Bytecode::new_raw(Bytes::from_static(&[
+            0xef, 0x01, 0x00, // EIP-7702 delegation designator prefix
+            0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42,
+            0x42, 0x42, 0x42, 0x42, 0x42, 0x42,
+        ]));
+        let old_code_hash = old_code.hash_slow();
+        let address = Address::repeat_byte(0x77);
+        let original_info = AccountInfo {
+            balance: U256::ZERO,
+            nonce: 1,
+            code_hash: old_code_hash,
+            code: Some(old_code),
+        };
+
+        let mut state = State::builder().with_database(EmptyDB::default()).build();
+        state.cache.accounts.insert(
+            address,
+            CacheAccount::new_changed(AccountInfo::default(), Default::default()),
+        );
+        state.bundle_state = BundleBuilder::default()
+            .state_original_account_info(address, original_info)
+            .state_present_account_info(address, AccountInfo::default())
+            .build();
+
+        let mut record = ExecutionWitnessRecord::default();
+        record.record_executed_state(&state);
+        assert!(
+            !record
+                .codes
+                .iter()
+                .any(|code| keccak256(code) == old_code_hash),
+            "raw reth record must not hide the warm-code regression"
+        );
+
+        let codes = collect_accessed_codes(&state, record.codes).expect("collect witness code");
+        assert!(
+            codes.iter().any(|code| keccak256(code) == old_code_hash),
+            "witness must retain bytecode from the pre-execution account value"
         );
     }
 
