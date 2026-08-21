@@ -41,6 +41,7 @@ class AlpenClientEnvParams:
     epoch_tracking_mode: str = "confirmed"
     beneficiary_address: str | None = None
     da_rate_wei_per_byte: int = 0
+    forward_tx: bool = True
 
 
 class AlpenClientEnv(flexitest.EnvConfig):
@@ -71,6 +72,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
         batch_sealing_block_count: int = 5,
         beneficiary_address: str | None = None,
         da_rate_wei_per_byte: int = 0,
+        forward_tx: bool = True,
     ):
         self.env_params = AlpenClientEnvParams(
             fullnode_count=fullnode_count,
@@ -82,6 +84,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
             batch_sealing_block_count=batch_sealing_block_count,
             beneficiary_address=beneficiary_address,
             da_rate_wei_per_byte=da_rate_wei_per_byte,
+            forward_tx=forward_tx,
         )
         if pure_discovery and not enable_discovery:
             raise ValueError("pure_discovery requires enable_discovery=True")
@@ -188,7 +191,8 @@ class AlpenClientEnv(flexitest.EnvConfig):
                 bootnodes=bootnodes,
                 enable_discovery=envparams.enable_discovery,
                 instance_id=i,
-                sequencer_http=seq_http_url,  # Forward transactions to sequencer
+                # Forward transactions to sequencer
+                sequencer_http=seq_http_url if envparams.forward_tx else None,
                 ol_endpoint=ol_endpoint,
                 ee_params_path=ee_params_path,
             )
