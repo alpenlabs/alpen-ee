@@ -361,7 +361,7 @@ impl AlpenEvmConfig {
     /// Sets the `extra_data` stamped into blocks assembled by this config.
     ///
     /// Unused by the Alpen payload builder: the version-aware assembler
-    /// ([`alpen_reth_node`]'s `AlpenBlockAssembler`) stamps `extra_data` per block instead,
+    /// (`alpen-reth-node`'s `AlpenBlockAssembler`) stamps `extra_data` per block instead,
     /// deriving both the spec version and the DA rate from the execution context that ran
     /// the block. Setting a static value here would be overwritten by that stamp.
     pub fn with_extra_data(mut self, extra_data: Bytes) -> Self {

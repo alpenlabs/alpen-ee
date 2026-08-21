@@ -19,7 +19,7 @@
 //! all the components (rpc, execution, guest) can access it without necessarily
 //! depending on heavy reth crates.
 
-use alpen_ee_params::{AlpenSpecId, HeaderExtra};
+use alpen_ee_params::HeaderExtra;
 use reth_evm::{eth::EthEvmContext, Database};
 use revm::state::EvmState;
 use revm_primitives::{Bytes, KECCAK_EMPTY, U256};
@@ -255,6 +255,7 @@ impl<DB: Database> DaStateAccess for EthEvmContext<DB> {
 
 #[cfg(test)]
 mod tests {
+    use alpen_ee_params::AlpenSpecId;
     use revm::state::{Account, AccountInfo, Bytecode, EvmStorageSlot};
     use revm_primitives::{Address, B256, U256};
 
