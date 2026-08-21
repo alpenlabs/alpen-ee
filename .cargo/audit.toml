@@ -5,4 +5,37 @@ ignore = [
   # Upgrade blocked until upstream bumps tracing-subscriber >= 0.3.20.
   # Low risk: affects ANSI escape sequences in logs only.
   "RUSTSEC-2025-0055",
+
+  # Everything below is blocked on the reth v1.9.1 pin in the root Cargo.toml.
+  # reth-mdbx-sys declares `cc = "=1.2.15"` as an exact pin. Newer rustls needs
+  # newer aws-lc-rs, which needs a newer cc than that pin allows, so cargo
+  # cannot resolve any of the rustls upgrades below. Revisit all of these when
+  # the reth tag moves; most should clear on their own.
+  # Tracked in STR-4308.
+
+  # rustls-webpki 0.103.4 (patched in 0.103.10 / 0.103.12 / 0.103.13).
+  # Reached through rustls 0.23 -> reqwest.
+  "RUSTSEC-2026-0049", # CRL distribution point matching logic
+  "RUSTSEC-2026-0098", # name constraints wrongly accepted for URI names
+  "RUSTSEC-2026-0099", # name constraints accepted for wildcard certs
+  "RUSTSEC-2026-0104", # reachable panic parsing CRLs
+  # The same four also hit rustls-webpki 0.101.7 via the legacy rustls 0.21
+  # stack under bitreq. bitreq 0.3.7 already requires the patched
+  # rustls-webpki >= 0.103.13, but bumping it pulls newer rustls and hits the
+  # same cc pin above.
+
+  # aws-lc-sys 0.30.0 (patched in 0.38.0 / 0.39.0), pinned by aws-lc-rs ^0.30.0.
+  # Reached through the AWS SDK under sp1-sdk.
+  "RUSTSEC-2026-0045", # timing side channel in AES-CCM tag verification
+  "RUSTSEC-2026-0046", # PKCS7_verify chain validation bypass
+  "RUSTSEC-2026-0047", # PKCS7_verify signature validation bypass
+  "RUSTSEC-2026-0048", # CRL distribution point scope check
+
+  # hickory-proto 0.25.2, pinned by hickory-resolver ^0.25 (reth-dns-discovery).
+  "RUSTSEC-2026-0118", # NSEC3 unbounded loop; no patched release yet
+  "RUSTSEC-2026-0119", # O(n^2) name compression; patched in 0.26.1
+
+  # h2 0.3.27 (patched in 0.4.16, a semver-major bump).
+  # Only reachable through the legacy hyper 0.14 / reqwest 0.11 stack.
+  "RUSTSEC-2026-0258", # unbounded empty DATA frames
 ]
