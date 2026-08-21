@@ -7,7 +7,7 @@
 use std::{fs, path::PathBuf, sync::Arc};
 
 use alpen_ee_params::{
-    AlpenParams, AlpenSpecSchedule, BlobSpec, EvmSpec, DEFAULT_ALPEN_EE_ACCOUNT_ID,
+    AlpenParams, AlpenSpecId, AlpenSpecSchedule, BlobSpec, EvmSpec, DEFAULT_ALPEN_EE_ACCOUNT_ID,
 };
 use alpen_reth_evm::evm::AlpenEvmFactory;
 use reth_primitives_traits::Block as _;
@@ -95,8 +95,10 @@ pub(super) fn prepare_input() -> EeChunkProofInput {
     let tip_exec_header_summary = block.get_header().get_exec_header_summary();
 
     let params = perf_alpen_params();
+    // TODO(STR-4002): pin to v0 until per-chunk version resolution is
+    // threaded through the proof guests.
     let chain_spec: Arc<reth_chainspec::ChainSpec> =
-        Arc::new(params.evm_spec().chain_spec().clone());
+        params.evm_spec().chain_spec(AlpenSpecId::V0).clone();
     let ee = EvmExecutionEnvironment::new(chain_spec, AlpenEvmFactory::default());
     let header_intrinsics = block.get_header().get_intrinsics();
     let exec_payload = ExecPayload::new(&header_intrinsics, block.get_body());

@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use alpen_ee_params::AlpenParams;
+use alpen_ee_params::{AlpenParams, AlpenSpecId};
 use alpen_reth_evm::evm::AlpenEvmFactory;
 use reth_chainspec::ChainSpec;
 use rkyv::rancor::Error as RkyvError;
@@ -26,7 +26,9 @@ pub use program::{EeChunkProgram, EeChunkProofInput};
 /// `provers/sp1/guest-alpen-chunk/src/main.rs` for the guest-side
 /// construction path.
 pub fn process_ee_chunk(zkvm: &impl ZkVmEnvSerde, params: &AlpenParams) {
-    let chain_spec: Arc<ChainSpec> = Arc::new(params.evm_spec().chain_spec().clone());
+    // TODO(STR-4002): pin to v0 until per-chunk version resolution is
+    // threaded through the proof guests.
+    let chain_spec: Arc<ChainSpec> = params.evm_spec().chain_spec(AlpenSpecId::V0).clone();
     let evm_factory = AlpenEvmFactory::from_bridge_params(params.bridge_params());
     let ee = EvmExecutionEnvironment::new(chain_spec, evm_factory);
 

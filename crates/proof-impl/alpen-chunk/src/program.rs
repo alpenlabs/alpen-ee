@@ -104,7 +104,9 @@ impl EeChunkProgram {
 mod tests {
     use std::{fs, path::PathBuf, sync::Arc};
 
-    use alpen_ee_params::{AlpenSpecSchedule, BlobSpec, DEFAULT_ALPEN_EE_ACCOUNT_ID, EvmSpec};
+    use alpen_ee_params::{
+        AlpenSpecId, AlpenSpecSchedule, BlobSpec, DEFAULT_ALPEN_EE_ACCOUNT_ID, EvmSpec,
+    };
     use alpen_reth_evm::evm::AlpenEvmFactory;
     use reth_primitives_traits::Block as _;
     use rsp_client_executor::io::EthClientExecutorInput;
@@ -189,8 +191,10 @@ mod tests {
 
         // Execute the block to get outputs, against the same params `params`
         // will hand to `process_ee_chunk` below.
+        // TODO(STR-4002): pin to v0 until per-chunk version resolution is
+        // threaded through the proof guests.
         let chain_spec: Arc<reth_chainspec::ChainSpec> =
-            Arc::new(params.evm_spec().chain_spec().clone());
+            params.evm_spec().chain_spec(AlpenSpecId::V0).clone();
         let ee = EvmExecutionEnvironment::new(chain_spec, AlpenEvmFactory::default());
         let header_intrinsics = block.get_header().get_intrinsics();
         let exec_payload = ExecPayload::new(&header_intrinsics, block.get_body());

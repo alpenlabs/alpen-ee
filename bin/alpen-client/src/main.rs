@@ -24,6 +24,7 @@ mod services;
 use std::{env, process, sync::Arc};
 
 use alpen_chainspec::AlpenChainSpecParser;
+use alpen_ee_params::AlpenSpecId;
 use clap::Parser;
 use reth_chainspec::ChainSpec;
 use reth_cli_commands::{launcher::FnLauncher, node::NodeCommand};
@@ -51,7 +52,12 @@ fn main() {
     let mut command = NodeCommand::<AlpenChainSpecParser, AdditionalConfig>::parse();
 
     // use the EVM chain spec embedded in the Alpen params artifact
-    command.chain = Arc::new(command.ext.alpen_params.chain_spec().clone());
+    // The boot spec pins v0; the fork-sensitive components (executor,
+    // consensus, engine validator, payload builder) resolve the governing
+    // version per block from the header-stamped spec version instead.
+    // TODO(STR-4158): pool tx validation (tip policy) is still
+    // version-blind, resolving against the pinned v0 spec.
+    command.chain = command.ext.alpen_params.chain_spec(AlpenSpecId::V0).clone();
     // enable engine api v4
     command.engine.accept_execution_requests_hash = true;
     // allow chain fork blocks to be created
