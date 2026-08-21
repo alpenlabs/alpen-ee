@@ -144,7 +144,11 @@ class AlpenClientFactory(flexitest.Factory):
         chunk_signing_key_path, acct_signing_key_path = _write_native_signing_key_files(datadir)
 
         if ee_params_path is None:
-            ee_params_path = generate_ee_params(datadir)
+            ee_params_path = generate_ee_params(
+                datadir,
+                bridge_denomination_sats=bridge_denomination,
+                max_withdrawal_amount_sats=max_withdrawal_amount,
+            )
         alpen_params_path = compose_alpen_params(
             datadir,
             ee_params_path,
@@ -330,7 +334,11 @@ class AlpenClientFactory(flexitest.Factory):
             else AlpenOlConfig(source="dummy")
         )
         if ee_params_path is None:
-            ee_params_path = generate_ee_params(datadir)
+            ee_params_path = generate_ee_params(
+                datadir,
+                bridge_denomination_sats=bridge_denomination,
+                max_withdrawal_amount_sats=max_withdrawal_amount,
+            )
         alpen_params_path = compose_alpen_params(
             datadir,
             ee_params_path,

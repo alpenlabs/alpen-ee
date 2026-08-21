@@ -111,6 +111,7 @@ fn test_single_deposit_with_chunk() {
     // Create a matching chunk using the builder's state
     let deposit = match &builder.remaining_pending_inputs()[0] {
         strata_ee_acct_types::PendingInputEntry::Deposit(d) => d.clone(),
+        other => panic!("expected a deposit, got {other:?}"),
     };
     let parent = builder.cur_tip_blkid();
     let tip = Hash::new([0xAA; 32]);
@@ -159,6 +160,7 @@ fn test_chunk_output_does_not_change_inner_tracked_balance() {
 
     let deposit = match &builder.remaining_pending_inputs()[0] {
         strata_ee_acct_types::PendingInputEntry::Deposit(d) => d.clone(),
+        other => panic!("expected a deposit, got {other:?}"),
     };
 
     let mut outputs = ExecOutputs::new_empty();
@@ -215,6 +217,7 @@ fn test_multiple_deposits_multiple_chunks() {
     // First chunk: consume first deposit
     let d1 = match &builder.remaining_pending_inputs()[0] {
         strata_ee_acct_types::PendingInputEntry::Deposit(d) => d.clone(),
+        other => panic!("expected a deposit, got {other:?}"),
     };
     let tip1 = Hash::new([0xBB; 32]);
     let chunk1 = simple_chunk(
@@ -235,6 +238,7 @@ fn test_multiple_deposits_multiple_chunks() {
     // Second chunk: consume second deposit
     let d2 = match &builder.remaining_pending_inputs()[0] {
         strata_ee_acct_types::PendingInputEntry::Deposit(d) => d.clone(),
+        other => panic!("expected a deposit, got {other:?}"),
     };
     let tip2 = Hash::new([0xCC; 32]);
     let chunk2 = simple_chunk(

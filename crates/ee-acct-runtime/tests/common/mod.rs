@@ -182,18 +182,45 @@ pub(crate) fn create_deposit_message(
     source: AccountId,
     incl_epoch: u32,
 ) -> MessageEntry {
-    use strata_ee_acct_types::{DEPOSIT_MSG_TYPE, DepositMsgData};
+    use strata_ee_acct_types::{DEPOSIT_MSG_TYPE_ID, DepositMsgData};
     use strata_msg_fmt::OwnedMsg;
 
     let deposit_data = DepositMsgData::new(dest);
     let body = encode_to_vec(&deposit_data).expect("encode deposit data");
 
-    let msg = OwnedMsg::new(DEPOSIT_MSG_TYPE, body).expect("create message");
+    let msg = OwnedMsg::new(DEPOSIT_MSG_TYPE_ID, body).expect("create message");
     let payload_data = msg.to_vec();
 
     let payload = MsgPayload::from_bytes(value, payload_data)
         .expect("message payload bytes must fit within SSZ max length");
     MessageEntry::new(source, incl_epoch, payload)
+}
+
+/// Helper to create an admin-sourced predicate-rotation message entry, staged
+/// the way the OL STF builds it: SPS-52 type `0x20` with the raw SSZ encoding
+/// of the new key as body.
+pub(crate) fn create_predicate_update_message(
+    new_key: &PredicateKey,
+    incl_epoch: u32,
+) -> MessageEntry {
+    use strata_acct_types::ADMIN_MSG_ACCT_ID;
+    use strata_codec::VarVec;
+    use strata_ee_acct_types::{MAX_PREDICATE_KEY_BYTES, PREDICATE_UPDATE_MSG_TYPE_ID};
+    use strata_msg_fmt::OwnedMsg;
+
+    // The body is a strata-codec-encoded VarVec of the new key's raw
+    // serialized bytes, matching the OL STF's PredicateUpdateMsgData wire
+    // format.
+    let key_bytes =
+        VarVec::<u8, { MAX_PREDICATE_KEY_BYTES }>::from_vec(new_key.as_buf_ref().to_bytes())
+            .expect("key bytes fit");
+    let body = encode_to_vec(&key_bytes).expect("encoding should succeed");
+    let msg = OwnedMsg::new(PREDICATE_UPDATE_MSG_TYPE_ID, body).expect("create message");
+    let payload_data = msg.to_vec();
+
+    let payload = MsgPayload::from_bytes(BitcoinAmount::ZERO, payload_data)
+        .expect("message payload bytes must fit within SSZ max length");
+    MessageEntry::new(ADMIN_MSG_ACCT_ID, incl_epoch, payload)
 }
 
 /// Helper to build an update operation using the chunk-aware UpdateBuilder.

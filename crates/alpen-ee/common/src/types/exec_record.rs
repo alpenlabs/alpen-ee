@@ -1,3 +1,4 @@
+use alpen_ee_params::AlpenSpecId;
 use strata_acct_types::{Hash, MessageEntry};
 use strata_ee_acct_types::EeAccountState;
 use strata_ee_chain_types::ExecBlockPackage;
@@ -6,8 +7,16 @@ use strata_identifiers::OLBlockCommitment;
 use crate::BlockNumHash;
 
 /// Additional metadata associated with the block.
-/// Most of these can be derived from data in package or account_state, but are cached
-/// here for ease of access.
+///
+/// Two different kinds of field live here. `blocknum`, `parent_blockhash`,
+/// `timestamp_ms`, and `ol_block` are facts about *this* block; most of them
+/// are derivable from `package`/`account_state` and are cached here for ease
+/// of access. `next_inbox_msg_idx`, `next_deposit_idx`, and
+/// `next_spec_version` are a different kind of thing entirely: block-builder
+/// resumption cursors, not properties of this block. Each describes what
+/// governs the block built *after* this one, and is stored here — rather
+/// than recomputed — so the block builder can resume purely from
+/// `ExecBlockRecord` (e.g. after a restart) without replaying history.
 #[derive(Debug, Clone)]
 struct ExecPackageMetadata {
     /// Blocknumber of the exec chain block.
@@ -23,10 +32,18 @@ struct ExecPackageMetadata {
     /// 2. This does not uniquely identify a package or exec block. One `ol_block` can be linked
     ///    with multiple records.
     ol_block: OLBlockCommitment,
+
     /// Next inbox message index at this ol_block.
     next_inbox_msg_idx: u64,
     /// Monotonically incrementing index for next deposit to use.
     next_deposit_idx: u64,
+    /// Alpen spec version governing the block built *after* this record's
+    /// block.
+    ///
+    /// The block that *consumes* a queued predicate rotation ends with this
+    /// already bumped to the successor, even though that same block was
+    /// itself still built under the predecessor version.
+    next_spec_version: AlpenSpecId,
 }
 
 /// `ExecBlockPackage` with additional block metadata
@@ -53,6 +70,7 @@ impl ExecBlockRecord {
         parent_blockhash: Hash,
         next_inbox_msg_idx: u64,
         next_deposit_idx: u64,
+        next_spec_version: AlpenSpecId,
         messages: Vec<MessageEntry>,
     ) -> Self {
         Self {
@@ -66,6 +84,7 @@ impl ExecBlockRecord {
                 parent_blockhash,
                 next_inbox_msg_idx,
                 next_deposit_idx,
+                next_spec_version,
             },
         }
     }
@@ -108,6 +127,10 @@ impl ExecBlockRecord {
 
     pub fn next_deposit_idx(&self) -> u64 {
         self.metadata.next_deposit_idx
+    }
+
+    pub fn next_spec_version(&self) -> AlpenSpecId {
+        self.metadata.next_spec_version
     }
 
     pub fn messages(&self) -> &[MessageEntry] {

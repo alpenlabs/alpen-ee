@@ -32,17 +32,16 @@ pub struct AlpenPayloadAttributes {
 }
 
 impl AlpenPayloadAttributes {
-    pub fn new_from_eth(payload_attributes: EthPayloadAttributes) -> Self {
+    /// Wraps Ethereum payload attributes, stamping the Alpen spec version that
+    /// governs the block.
+    pub fn new_from_eth(
+        payload_attributes: EthPayloadAttributes,
+        spec_version: AlpenSpecId,
+    ) -> Self {
         Self {
             inner: payload_attributes,
-            spec_version: 0,
+            spec_version: u16::from(spec_version),
         }
-    }
-
-    /// Sets the Alpen spec version governing the block.
-    pub fn with_spec_version(mut self, spec_version: u16) -> Self {
-        self.spec_version = spec_version;
-        self
     }
 }
 
