@@ -1128,6 +1128,8 @@ dependencies = [
  "alpen-ee-common",
  "alpen-ee-params",
  "alpen-reth-evm",
+ "alpen-reth-primitives",
+ "async-trait",
  "bitcoin-bosd",
  "eyre",
  "strata-acct-types",
@@ -1139,6 +1141,7 @@ dependencies = [
  "strata-ol-bridge-types",
  "strata-ol-msg-types",
  "strata-predicate",
+ "tokio",
  "tracing",
 ]
 

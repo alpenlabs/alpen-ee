@@ -80,7 +80,8 @@ pub(crate) fn build_block_outputs<TPayload: EnginePayload>(
 /// Builds the block package based on execution inputs and results.
 ///
 /// `new_predicate` is the rotation this block drained, as resolved by
-/// `extract_consumed_inputs`.
+/// `extract_consumed_inputs` — the same value that decided the next block's
+/// spec version.
 pub(crate) fn build_block_package<TPayload: EnginePayload>(
     bridge_gateway_account_id: AccountId,
     pending_inputs: Vec<PendingInputEntry>,

@@ -18,8 +18,9 @@ pub(crate) struct ConsumedInputs {
     /// The predicate rotation the block drains, if it reached one.
     ///
     /// A rotation ends the block, so it is always the last drained entry.
-    /// This is the only place a consumed rotation is determined, so everything
-    /// that depends on one reads it from here and they cannot disagree.
+    /// This is the only place a consumed rotation is determined: both the
+    /// spec-version bump and the key the package declares read it, so they
+    /// cannot disagree about whether a rotation was consumed.
     pub(crate) new_predicate: Option<PredicateKey>,
 }
 
@@ -237,7 +238,7 @@ mod tests {
 
         assert_eq!(consumed.deposits.len(), 2);
         assert_eq!(consumed.processed, 2);
-        // The rotation stays queued, so this block doesn't consume it.
+        // The rotation stays queued, so this block doesn't bump the version.
         assert_eq!(consumed.new_predicate, None);
 
         // With room to spare the same queue does reach it.
