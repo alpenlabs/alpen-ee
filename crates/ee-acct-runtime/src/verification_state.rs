@@ -182,10 +182,11 @@ impl<'a, E: ExecutionEnvironment> EeVerificationState<'a, E> {
             )
             .map_err(|_| EnvError::OutputOverflow)?;
 
-        // Propagate a predicate rotation this block consumed. At most one
-        // chunk in the update can declare this (block assembly stops
-        // extracting past a rotation, and batch/chunk sealing terminates
-        // right after the block that consumes one).
+        // Propagate a predicate rotation this transition consumed. This
+        // overwrites rather than accumulates, which is only safe because
+        // `process_decoded_transition` rejects any transition that follows a
+        // rotation — so an update holds at most one, and there is never a
+        // previous key here to clobber.
         if let Some(new_key) = outputs.new_predicate() {
             self.accumulated_outputs
                 .set_new_predicate(Some(new_key.clone()));
@@ -203,6 +204,16 @@ impl<'a, E: ExecutionEnvironment> EeVerificationState<'a, E> {
         transition: &ChunkTransition,
         pending_inp_tracker: &mut SequenceTracker<'_, PendingInputEntry>,
     ) -> EnvResult<()> {
+        // A consumed rotation ends the update. The sequencer seals the batch
+        // right after the rotating block, but that's only host behavior —
+        // without this check a proof could chain further transitions onto the
+        // rotation, and those blocks would be authorized by the predecessor
+        // predicate. `accumulated_outputs` is the latch: `merge_new_outputs`
+        // sets the key below and nothing ever clears it.
+        if self.accumulated_outputs.new_predicate().is_some() {
+            return Err(EnvError::NonTerminalRotation);
+        }
+
         // Chain linkage: parent must match current verified tip.
         if transition.parent_exec_blkid() != self.cur_verified_exec_blkid {
             return Err(EnvError::MismatchedChainSegment);
