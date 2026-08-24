@@ -13,8 +13,6 @@ use tracing::{debug, info};
 pub(crate) struct ConsumedInputs {
     /// Deposits to mint in the block, with their assigned indices.
     pub(crate) deposits: Vec<DepositInfo>,
-    /// How many pending entries the block drains, counting a rotation.
-    pub(crate) processed: usize,
     /// The predicate rotation the block drains, if it reached one.
     ///
     /// A rotation ends the block, so it is always the last drained entry.
@@ -22,6 +20,13 @@ pub(crate) struct ConsumedInputs {
     /// spec-version bump and the key the package declares read it, so they
     /// cannot disagree about whether a rotation was consumed.
     pub(crate) new_predicate: Option<PredicateKey>,
+}
+
+impl ConsumedInputs {
+    /// How many pending entries the block drains, counting a rotation.
+    pub(crate) fn processed(&self) -> usize {
+        self.deposits.len() + usize::from(self.new_predicate.is_some())
+    }
 }
 
 /// Walks the pending queue in order and returns what the next block consumes.
@@ -34,7 +39,6 @@ pub(crate) fn extract_consumed_inputs(
     next_deposit_idx: u64,
 ) -> ConsumedInputs {
     let mut deposits = Vec::new();
-    let mut processed = 0usize;
     let mut new_predicate = None;
 
     for entry in pending_inputs {
@@ -48,10 +52,8 @@ pub(crate) fn extract_consumed_inputs(
                     subject_to_address_unchecked(&data.dest()),
                     data.value(),
                 ));
-                processed += 1;
             }
             PendingInputEntry::PredicateRotation(key) => {
-                processed += 1;
                 new_predicate = Some(key.clone());
                 break;
             }
@@ -60,7 +62,6 @@ pub(crate) fn extract_consumed_inputs(
 
     ConsumedInputs {
         deposits,
-        processed,
         new_predicate,
     }
 }
@@ -150,14 +151,12 @@ mod tests {
         let next_deposit_idx = 5;
 
         let inputs = vec![make_deposit(subject_bytes, 1000)];
-        let ConsumedInputs {
-            deposits,
-            processed,
-            ..
-        } = extract_consumed_inputs(&inputs, NonZero::new(10).unwrap(), next_deposit_idx);
+        let consumed =
+            extract_consumed_inputs(&inputs, NonZero::new(10).unwrap(), next_deposit_idx);
+        let deposits = &consumed.deposits;
 
         assert_eq!(deposits.len(), 1);
-        assert_eq!(processed, 1);
+        assert_eq!(consumed.processed(), 1);
         assert_eq!(deposits[0].address(), Address::from([0xaa; 20]));
         assert_eq!(deposits[0].idx(), 5);
     }
@@ -186,14 +185,11 @@ mod tests {
         let max = NonZero::new(3).unwrap();
         let next_deposit_idx = 9;
 
-        let ConsumedInputs {
-            deposits,
-            processed,
-            ..
-        } = extract_consumed_inputs(&inputs, max, next_deposit_idx);
+        let consumed = extract_consumed_inputs(&inputs, max, next_deposit_idx);
+        let deposits = &consumed.deposits;
 
         assert_eq!(deposits.len(), 3);
-        assert_eq!(processed, 3);
+        assert_eq!(consumed.processed(), 3);
         // Verify order is preserved (first 3)
         assert_eq!(deposits[0].amount(), BitcoinAmount::from_sat(1000));
         assert_eq!(deposits[0].idx(), 9);
@@ -221,7 +217,7 @@ mod tests {
         assert_eq!(consumed.deposits.len(), 1);
         assert_eq!(consumed.deposits[0].amount(), BitcoinAmount::from_sat(1000));
         // But the rotation itself is drained alongside the deposit before it.
-        assert_eq!(consumed.processed, 2);
+        assert_eq!(consumed.processed(), 2);
         assert_eq!(consumed.new_predicate, Some(PredicateKey::always_accept()));
     }
 
@@ -237,7 +233,7 @@ mod tests {
         let consumed = extract_consumed_inputs(&inputs, NonZero::new(2).unwrap(), 0);
 
         assert_eq!(consumed.deposits.len(), 2);
-        assert_eq!(consumed.processed, 2);
+        assert_eq!(consumed.processed(), 2);
         // The rotation stays queued, so this block doesn't bump the version.
         assert_eq!(consumed.new_predicate, None);
 

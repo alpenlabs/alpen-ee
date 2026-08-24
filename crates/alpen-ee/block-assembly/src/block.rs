@@ -78,15 +78,16 @@ pub async fn build_next_exec_block<E: PayloadBuilderEngine>(
     // This is the one place a consumed rotation is determined. Both users of
     // that fact read it from here: the spec-version bump below and the key the
     // package declares in step 5. Deriving it twice would let them disagree.
-    let ConsumedInputs {
-        deposits,
-        processed,
-        new_predicate,
-    } = extract_consumed_inputs(
+    let consumed = extract_consumed_inputs(
         account_state.pending_inputs(),
         max_deposits_per_block,
         next_deposit_idx,
     );
+    let processed = consumed.processed();
+    let ConsumedInputs {
+        deposits,
+        new_predicate,
+    } = consumed;
 
     // 3. resolve the version the *next* block runs under
     //
