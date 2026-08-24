@@ -99,27 +99,27 @@ strata-simple-ee = { path = "crates/simple-ee" }
 # strata dependencies, pinned to the pre-split repo's main so the EE stays in
 # lockstep with the OL side. The strata-common, asm, and zkaleido pins below
 # match what that alpen revision itself uses.
-strata-acct-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
-strata-bridge-params = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
-strata-btcio = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
-strata-cli-common = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
-strata-common = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
-strata-config = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
-strata-da-framework = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
-strata-db-tests = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
-strata-db-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
-strata-ol-bridge-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
-strata-ol-msg-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
-strata-ol-rpc-api = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
-strata-ol-rpc-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
-strata-open-rpc = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
-strata-paas = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
-strata-primitives = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
-strata-snark-acct-runtime = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
-strata-snark-acct-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
-strata-storage-common = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
-strata-test-utils-btcio = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
-strata-test-utils-ssz = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
+strata-acct-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "13bc3205a2bc31e4120fb360153c665e00453c02" }
+strata-bridge-params = { git = "https://github.com/alpenlabs/alpen.git", rev = "13bc3205a2bc31e4120fb360153c665e00453c02" }
+strata-btcio = { git = "https://github.com/alpenlabs/alpen.git", rev = "13bc3205a2bc31e4120fb360153c665e00453c02" }
+strata-cli-common = { git = "https://github.com/alpenlabs/alpen.git", rev = "13bc3205a2bc31e4120fb360153c665e00453c02" }
+strata-common = { git = "https://github.com/alpenlabs/alpen.git", rev = "13bc3205a2bc31e4120fb360153c665e00453c02" }
+strata-config = { git = "https://github.com/alpenlabs/alpen.git", rev = "13bc3205a2bc31e4120fb360153c665e00453c02" }
+strata-da-framework = { git = "https://github.com/alpenlabs/alpen.git", rev = "13bc3205a2bc31e4120fb360153c665e00453c02" }
+strata-db-tests = { git = "https://github.com/alpenlabs/alpen.git", rev = "13bc3205a2bc31e4120fb360153c665e00453c02" }
+strata-db-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "13bc3205a2bc31e4120fb360153c665e00453c02" }
+strata-ol-bridge-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "13bc3205a2bc31e4120fb360153c665e00453c02" }
+strata-ol-msg-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "13bc3205a2bc31e4120fb360153c665e00453c02" }
+strata-ol-rpc-api = { git = "https://github.com/alpenlabs/alpen.git", rev = "13bc3205a2bc31e4120fb360153c665e00453c02" }
+strata-ol-rpc-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "13bc3205a2bc31e4120fb360153c665e00453c02" }
+strata-open-rpc = { git = "https://github.com/alpenlabs/alpen.git", rev = "13bc3205a2bc31e4120fb360153c665e00453c02" }
+strata-paas = { git = "https://github.com/alpenlabs/alpen.git", rev = "13bc3205a2bc31e4120fb360153c665e00453c02" }
+strata-primitives = { git = "https://github.com/alpenlabs/alpen.git", rev = "13bc3205a2bc31e4120fb360153c665e00453c02" }
+strata-snark-acct-runtime = { git = "https://github.com/alpenlabs/alpen.git", rev = "13bc3205a2bc31e4120fb360153c665e00453c02" }
+strata-snark-acct-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "13bc3205a2bc31e4120fb360153c665e00453c02" }
+strata-storage-common = { git = "https://github.com/alpenlabs/alpen.git", rev = "13bc3205a2bc31e4120fb360153c665e00453c02" }
+strata-test-utils-btcio = { git = "https://github.com/alpenlabs/alpen.git", rev = "13bc3205a2bc31e4120fb360153c665e00453c02" }
+strata-test-utils-ssz = { git = "https://github.com/alpenlabs/alpen.git", rev = "13bc3205a2bc31e4120fb360153c665e00453c02" }
 
 # strata-common
 strata-btc-types = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.4.0-rc.2" }
@@ -298,11 +298,7 @@ bitcoin = { version = "0.32.6", features = ["serde"] }
 bitcoin-bosd = { git = "https://github.com/alpenlabs/bitcoin-bosd", version = "0.12.0", tag = "v0.12.0", features = [
   "ssz",
 ] }
-# 0.10.10 added a required `options` argument to `send_raw_transaction` in a
-# patch release. strata-btcio, which comes from the pinned alpen rev, still
-# calls the one-argument form, so anything from 0.10.10 up fails to build.
-# Drop the upper bound once alpen moves to the new signature.
-bitcoind-async-client = { version = ">=0.10.8, <0.10.10", default-features = false, features = [
+bitcoind-async-client = { version = "0.15.0", default-features = false, features = [
   "30_2",
   "raw_rpc",
 ] }
