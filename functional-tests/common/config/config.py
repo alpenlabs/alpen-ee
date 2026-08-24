@@ -51,6 +51,7 @@ class WriterConfig:
 @dataclass
 class BroadcasterConfig:
     poll_interval_ms: int = field(default=200)
+    max_fee_rate_sat_vb: int = field(default=1_000)
 
 
 @dataclass
@@ -180,6 +181,7 @@ class AlpenSequencerConfig:
     chunk_sealing_block_count: int | None = field(default=None)
     chunk_sealing_gas_limit: int | None = field(default=None)
     l1_fee_policy: AlpenL1FeePolicyConfig = field(default_factory=AlpenL1FeePolicyConfig)
+    broadcaster: BroadcasterConfig = field(default_factory=BroadcasterConfig)
 
 
 @dataclass

@@ -38,6 +38,7 @@ const DEFAULT_BTCIO_RETRY_INTERVAL_MS: u64 = 1_000;
 /// Everything [`start`] needs to bring up the DA pipeline.
 pub(crate) struct DaPipelineInputs<'a, P> {
     pub(crate) bitcoind: &'a BitcoindConfig,
+    pub(crate) broadcaster: &'a BroadcasterConfig,
     /// Rollup-to-L1 facts, not sequencer config — see `AlpenClientConfig`'s
     /// doc comment for why these come from outside `SequencerConfig`.
     pub(crate) l1_reorg_safe_depth: u32,
@@ -71,6 +72,7 @@ where
 {
     let DaPipelineInputs {
         bitcoind,
+        broadcaster,
         l1_reorg_safe_depth,
         genesis_l1_height,
         dbs,
@@ -133,16 +135,14 @@ where
     let envelope_ops = Arc::new(dbs.chunked_envelope_ops(db_handle));
 
     // Launch broadcaster service and create chunked envelope task.
-    let broadcast_poll_interval = 5_000;
-
     let broadcast_handle = Arc::new(
         BroadcasterBuilder::new(
             btc_client.clone(),
             broadcast_ops.clone(),
             btcio_params,
-            BroadcasterConfig::default().max_fee_rate(),
+            broadcaster.max_fee_rate(),
         )
-        .with_broadcast_poll_interval_ms(broadcast_poll_interval)
+        .with_broadcast_poll_interval_ms(broadcaster.poll_interval_ms)
         .launch(service_executor)
         .await
         .map_err(|e| eyre::eyre!("starting broadcaster service: {e}"))?,

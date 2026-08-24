@@ -17,7 +17,10 @@ use alpen_ee_ol_tracker::EpochTrackingMode;
 #[cfg(feature = "sequencer")]
 use alpen_ee_params::AlpenParams;
 use serde::{de::Error as DeError, Deserialize, Deserializer, Serialize};
-use strata_config::{btcio::L1FeePolicyConfig, BitcoindConfig};
+use strata_config::{
+    btcio::{BroadcasterConfig, L1FeePolicyConfig},
+    BitcoindConfig,
+};
 use strata_primitives::{buf::Buf32, L1Height};
 
 // Applied when the matching TOML field is omitted.
@@ -339,6 +342,9 @@ pub(crate) struct SequencerConfig {
     pub(crate) bitcoind: BitcoindConfig,
     /// `[sequencer.l1_fee_policy]` — reused verbatim from `strata_config::btcio`.
     pub(crate) l1_fee_policy: L1FeePolicyConfig,
+    /// `[sequencer.broadcaster]` — L1 transaction broadcast policy.
+    #[serde(default)]
+    pub(crate) broadcaster: BroadcasterConfig,
 }
 
 // Only the sequencer path calls these, so they can be gated even though the
@@ -415,6 +421,9 @@ impl TryFrom<AlpenClientConfigFile> for AlpenClientConfig {
                 {
                     let seq = raw.sequencer.ok_or_else(|| {
                         eyre::eyre!("[sequencer] table required when mode = \"sequencer\"")
+                    })?;
+                    seq.broadcaster.validate().map_err(|error| {
+                        eyre::eyre!("invalid sequencer.broadcaster config: {error}")
                     })?;
                     NodeMode::Sequencer(SequencerMode {
                         config: seq,
@@ -643,6 +652,20 @@ mod tests {
         assert_eq!(seq.config.blocktime_ms.get(), 5_000);
         assert_eq!(seq.config.batch_sealing_block_count, 100);
         assert_eq!(seq.config.chunk_sealing_block_count(), 100);
+        assert_eq!(seq.config.broadcaster.max_fee_rate_sat_vb.get(), 1_000);
+    }
+
+    #[cfg(feature = "sequencer")]
+    #[test]
+    fn sequencer_accepts_custom_broadcast_max_fee_rate() {
+        let toml =
+            SEQUENCER_TOML.replace("max_fee_rate_sat_vb = 1000", "max_fee_rate_sat_vb = 250");
+        let config = AlpenClientConfig::from_toml_str(&toml).unwrap();
+        let NodeMode::Sequencer(seq) = &config.mode else {
+            panic!("expected sequencer mode");
+        };
+
+        assert_eq!(seq.config.broadcaster.max_fee_rate_sat_vb.get(), 250);
     }
 
     /// Each backend names only its own fields, so serde rejects a config

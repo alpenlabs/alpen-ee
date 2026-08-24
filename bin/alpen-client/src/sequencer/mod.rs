@@ -436,10 +436,15 @@ where
     let genesis_blocknumhash =
         BlockNumHash::new(genesis_info.blockhash().0.into(), genesis_info.blocknum());
 
-    let writer_config = Arc::new(WriterConfig {
+    let mut writer_config = WriterConfig {
         l1_fee_policy_config: sequencer_config.l1_fee_policy.clone(),
         ..Default::default()
-    });
+    };
+    // The broadcast ceiling is also the fee-bumping ceiling so the writer never creates a
+    // replacement that the broadcaster is configured to reject.
+    writer_config.fee_bumping.max_fee_rate_sat_vb =
+        sequencer_config.broadcaster.max_fee_rate_sat_vb;
+    let writer_config = Arc::new(writer_config);
     log_writer_config(&writer_config);
 
     let block_builder_config =
@@ -523,6 +528,7 @@ where
         task_executor,
         da_pipeline::DaPipelineInputs {
             bitcoind: &sequencer_config.bitcoind,
+            broadcaster: &sequencer_config.broadcaster,
             l1_reorg_safe_depth: mode.l1_reorg_safe_depth,
             genesis_l1_height: mode.genesis_l1_height,
             dbs: sequencer_dbs,

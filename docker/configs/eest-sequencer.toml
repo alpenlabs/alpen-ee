@@ -34,3 +34,7 @@ network = "regtest"
 
 [sequencer.l1_fee_policy]
 fee_policy = "bitcoind"
+
+[sequencer.broadcaster]
+poll_interval_ms = 5000
+max_fee_rate_sat_vb = 1000
