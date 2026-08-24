@@ -781,6 +781,10 @@ network = "regtest"     # cross-checked against the connected bitcoind at startu
 [sequencer.l1_fee_policy]
 fee_policy = "fixed"
 fixed_fee_rate = 1.0
+
+[sequencer.broadcaster]
+poll_interval_ms = 5000
+max_fee_rate_sat_vb = 1000  # per-transaction Bitcoin Core guardrail
 ```
 
 Two secrets are read from the environment instead of the config file, both sequencer only:
