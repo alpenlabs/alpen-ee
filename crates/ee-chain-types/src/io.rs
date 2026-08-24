@@ -196,7 +196,7 @@ mod tests {
             (any::<[u8; 32]>(), any::<u64>()).prop_map(|(dest, sats)| {
                 SubjectDepositData {
                     dest: SubjectId::new(dest),
-                    value: BitcoinAmount::from_sat(sats),
+                    value: BitcoinAmount::try_from(sats).expect("valid bitcoin amount"),
                 }
             })
         );
@@ -204,7 +204,7 @@ mod tests {
         #[test]
         fn test_new() {
             let dest = SubjectId::new([0xcc; 32]);
-            let value = BitcoinAmount::from_sat(1000);
+            let value = BitcoinAmount::try_from(1000).expect("valid bitcoin amount");
             let deposit = SubjectDepositData::new(dest, value);
 
             assert_eq!(deposit.dest(), dest);
@@ -221,7 +221,7 @@ mod tests {
                 (any::<[u8; 32]>(), any::<u64>()).prop_map(|(dest, sats)| {
                     SubjectDepositData {
                         dest: SubjectId::new(dest),
-                        value: BitcoinAmount::from_sat(sats),
+                        value: BitcoinAmount::try_from(sats).expect("valid bitcoin amount"),
                     }
                 }),
                 0..10
@@ -242,8 +242,10 @@ mod tests {
         #[test]
         fn test_add_subject_deposit() {
             let mut inputs = ExecInputs::new_empty();
-            let deposit =
-                SubjectDepositData::new(SubjectId::new([0xdd; 32]), BitcoinAmount::from_sat(500));
+            let deposit = SubjectDepositData::new(
+                SubjectId::new([0xdd; 32]),
+                BitcoinAmount::try_from(500).expect("valid bitcoin amount"),
+            );
 
             inputs.add_subject_deposit(deposit);
             assert_eq!(inputs.total_inputs(), 1);
@@ -258,7 +260,7 @@ mod tests {
             (any::<[u8; 32]>(), any::<u64>()).prop_map(|(dest, sats)| {
                 OutputTransfer {
                     dest: AccountId::new(dest),
-                    value: BitcoinAmount::from_sat(sats),
+                    value: BitcoinAmount::try_from(sats).expect("valid bitcoin amount"),
                 }
             })
         );
@@ -266,7 +268,7 @@ mod tests {
         #[test]
         fn test_new() {
             let dest = AccountId::new([0xee; 32]);
-            let value = BitcoinAmount::from_sat(2000);
+            let value = BitcoinAmount::try_from(2000).expect("valid bitcoin amount");
             let transfer = OutputTransfer::new(dest, value);
 
             assert_eq!(transfer.dest(), dest);
@@ -291,7 +293,7 @@ mod tests {
                     (any::<[u8; 32]>(), any::<u64>()).prop_map(|(dest, sats)| {
                         OutputTransfer {
                             dest: AccountId::new(dest),
-                            value: BitcoinAmount::from_sat(sats),
+                            value: BitcoinAmount::try_from(sats).expect("valid bitcoin amount"),
                         }
                     }),
                     0..10
@@ -306,7 +308,7 @@ mod tests {
                             OutputMessage::new(
                                 AccountId::new(dest),
                                 strata_acct_types::MsgPayload::from_bytes(
-                                    BitcoinAmount::from_sat(sats),
+                                    BitcoinAmount::try_from(sats).expect("valid bitcoin amount"),
                                     data,
                                 )
                                 .expect("message payload bytes must fit within SSZ max length"),

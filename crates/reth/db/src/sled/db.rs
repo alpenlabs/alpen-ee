@@ -38,7 +38,10 @@ impl WitnessDB {
 
 impl StateDiffProvider for WitnessDB {
     fn get_state_diff_by_hash(&self, block_hash: B256) -> DbResult<Option<BlockStateChanges>> {
-        let raw = self.state_diff_tree.get(&block_hash)?;
+        let raw = self
+            .state_diff_tree
+            .get(&block_hash)
+            .map_err(|err| DbError::Other(err.to_string()))?;
 
         let parsed: Option<BlockStateChanges> = raw
             .map(|bytes| bincode::deserialize(&bytes))
@@ -89,7 +92,10 @@ impl StateDiffStore for WitnessDB {
     }
 
     fn del_state_diff(&self, block_hash: B256) -> DbResult<()> {
-        Ok(self.state_diff_tree.remove(&block_hash)?)
+        self.state_diff_tree
+            .remove(&block_hash)
+            .map_err(|err| DbError::Other(err.to_string()))?;
+        Ok(())
     }
 }
 

@@ -362,8 +362,11 @@ pub mod exec_block_storage_test_fns {
     /// Helper to create a test MessageEntry
     pub fn create_message_entry(source_id: u8, epoch: u32, data: Vec<u8>) -> MessageEntry {
         let source = AccountId::from([source_id; 32]);
-        let payload = MsgPayload::from_bytes(BitcoinAmount::ZERO, data)
-            .expect("message payload bytes must fit within SSZ max length");
+        let payload = MsgPayload::from_bytes(
+            BitcoinAmount::try_from(0).expect("valid bitcoin amount"),
+            data,
+        )
+        .expect("message payload bytes must fit within SSZ max length");
         MessageEntry::new(source, epoch, payload)
     }
 

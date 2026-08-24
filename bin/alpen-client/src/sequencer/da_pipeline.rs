@@ -18,7 +18,10 @@ use strata_btcio::{
     broadcaster::BroadcasterBuilder, writer::chunked_envelope::create_chunked_envelope_task,
     BtcioParams,
 };
-use strata_config::{btcio::WriterConfig, BitcoindConfig};
+use strata_config::{
+    btcio::{BroadcasterConfig, WriterConfig},
+    BitcoindConfig,
+};
 use strata_primitives::L1Height;
 use tokio::runtime::Handle;
 use tracing::{info, info_span, Instrument};
@@ -133,11 +136,16 @@ where
     let broadcast_poll_interval = 5_000;
 
     let broadcast_handle = Arc::new(
-        BroadcasterBuilder::new(btc_client.clone(), broadcast_ops.clone(), btcio_params)
-            .with_broadcast_poll_interval_ms(broadcast_poll_interval)
-            .launch(service_executor)
-            .await
-            .map_err(|e| eyre::eyre!("starting broadcaster service: {e}"))?,
+        BroadcasterBuilder::new(
+            btc_client.clone(),
+            broadcast_ops.clone(),
+            btcio_params,
+            BroadcasterConfig::default().max_fee_rate(),
+        )
+        .with_broadcast_poll_interval_ms(broadcast_poll_interval)
+        .launch(service_executor)
+        .await
+        .map_err(|e| eyre::eyre!("starting broadcaster service: {e}"))?,
     );
 
     let (envelope_handle, envelope_watcher_task) = create_chunked_envelope_task(

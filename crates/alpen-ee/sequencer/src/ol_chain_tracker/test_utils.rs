@@ -28,8 +28,11 @@ pub(crate) fn make_message(value: u64) -> MessageEntry {
     MessageEntry::new(
         AccountId::new([0u8; 32]),
         0,
-        MsgPayload::from_bytes(BitcoinAmount::from_sat(value), vec![])
-            .expect("message payload bytes must fit within SSZ max length"),
+        MsgPayload::from_bytes(
+            BitcoinAmount::try_from(value).expect("valid bitcoin amount"),
+            vec![],
+        )
+        .expect("message payload bytes must fit within SSZ max length"),
     )
 }
 

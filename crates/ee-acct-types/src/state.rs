@@ -174,7 +174,7 @@ mod tests {
     fn subject_deposit_data_strategy() -> impl Strategy<Value = SubjectDepositData> {
         (any::<[u8; 32]>(), any::<u64>()).prop_map(|(dest_bytes, value)| SubjectDepositData {
             dest: SubjectId::from(dest_bytes),
-            value: BitcoinAmount::from_sat(value),
+            value: BitcoinAmount::try_from(value).expect("valid bitcoin amount"),
         })
     }
 

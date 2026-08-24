@@ -1,8 +1,7 @@
 use alpen_ee_common::AccessedStateRecord;
 use strata_acct_types::Hash;
 use strata_db_store_sled::{
-    define_table_with_default_codec, define_table_without_codec, /* impl_bincode_key_codec, */
-    impl_borsh_value_codec,
+    define_table_without_codec, impl_cbor_value_codec, impl_raw_bytes_key_codec,
 };
 use strata_paas::TaskRecordData;
 use zkaleido::ProofReceiptWithMetadata;
@@ -11,6 +10,65 @@ use crate::serialization_types::{
     DBAccountStateAtEpoch, DBBatchId, DBBatchWithStatus, DBChunkId, DBChunkWithStatus,
     DBExecBlockRecord, DBOLBlockId,
 };
+
+// The shared sled crate no longer exports its legacy Borsh codec macros. EE persistence still
+// uses Borsh-specific mirror types, so keep that codec policy local until those mirrors are
+// replaced (STR-3421).
+macro_rules! impl_borsh_value_codec {
+    ($table_name:ident, $value:ty) => {
+        impl typed_sled::codec::ValueCodec<$table_name> for $value {
+            type Decoded = Self;
+
+            fn encode_value(&self) -> Result<Vec<u8>, typed_sled::codec::CodecError> {
+                borsh::to_vec(self).map_err(|error| {
+                    typed_sled::codec::CodecError::SerializationFailed {
+                        schema: stringify!($table_name),
+                        source: error.into(),
+                    }
+                })
+            }
+
+            fn decode_value(
+                data: sled::IVec,
+            ) -> Result<Self::Decoded, typed_sled::codec::CodecError> {
+                borsh::BorshDeserialize::deserialize_reader(&mut data.as_ref()).map_err(|error| {
+                    typed_sled::codec::CodecError::DeserializationFailed {
+                        schema: stringify!($table_name),
+                        source: error.into(),
+                    }
+                })
+            }
+        }
+    };
+}
+
+macro_rules! define_table_with_default_codec {
+    ($(#[$docs:meta])+ ($table_name:ident) $key:ty => $value:ty) => {
+        define_table_without_codec!($(#[$docs])+ ($table_name) $key => $value);
+
+        impl typed_sled::codec::KeyCodec<$table_name> for $key {
+            fn encode_key(&self) -> Result<Vec<u8>, typed_sled::codec::CodecError> {
+                borsh::to_vec(self).map_err(|error| {
+                    typed_sled::codec::CodecError::SerializationFailed {
+                        schema: stringify!($table_name),
+                        source: error.into(),
+                    }
+                })
+            }
+
+            fn decode_key(data: &[u8]) -> Result<Self, typed_sled::codec::CodecError> {
+                borsh::BorshDeserialize::deserialize_reader(&mut &data[..]).map_err(|error| {
+                    typed_sled::codec::CodecError::DeserializationFailed {
+                        schema: stringify!($table_name),
+                        source: error.into(),
+                    }
+                })
+            }
+        }
+
+        impl_borsh_value_codec!($table_name, $value);
+    };
+}
 
 define_table_without_codec!(
     /// store canonical final OL block id at OL epoch
@@ -112,13 +170,15 @@ define_table_with_default_codec!(
 // index from `ProofId` (= batch's `last_block`) back to the batch, so
 // `BatchProver::get_proof(proof_id)` is an O(1) lookup.
 
-define_table_with_default_codec!(
+define_table_without_codec!(
     /// Shared prover task store for chunk + acct provers.
     ///
     /// Keyed by the serialized `ProofSpec::Task` bytes; tag-prefixed on
     /// the caller side (`ChunkTask` / `BatchTask`).
     (ProverTaskSchema) Vec<u8> => TaskRecordData
 );
+impl_raw_bytes_key_codec!(ProverTaskSchema, Vec<u8>);
+impl_cbor_value_codec!(ProverTaskSchema, TaskRecordData);
 
 define_table_with_default_codec!(
     /// Chunk proof receipts, keyed by chunk task bytes.

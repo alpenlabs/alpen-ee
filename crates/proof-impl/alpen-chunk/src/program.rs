@@ -86,7 +86,8 @@ impl EeChunkProgram {
     /// params so the resulting witness verifies under `Bip340Schnorr`.
     pub fn test_predicate_key() -> PredicateKey {
         let pk = Self::test_signing_key().verifying_key().to_bytes().to_vec();
-        PredicateKey::new(PredicateTypeId::Bip340Schnorr, pk)
+        PredicateKey::try_new(PredicateTypeId::Bip340Schnorr, pk)
+            .expect("BIP340 public key must be a valid predicate condition")
     }
 
     /// Executes the chunk proof program using the native host, for testing.

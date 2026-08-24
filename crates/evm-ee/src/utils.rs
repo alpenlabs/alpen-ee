@@ -154,7 +154,10 @@ mod tests {
 
         // Create matching deposit input
         let mut inputs = ExecInputs::new_empty();
-        let deposit = SubjectDepositData::new(subject_id, BitcoinAmount::from_sat(10));
+        let deposit = SubjectDepositData::new(
+            subject_id,
+            BitcoinAmount::try_from(10).expect("valid bitcoin amount"),
+        );
         inputs.add_subject_deposit(deposit);
 
         // Should succeed - perfect match
@@ -190,7 +193,10 @@ mod tests {
 
         // Create deposit with different address
         let mut inputs = ExecInputs::new_empty();
-        let deposit = SubjectDepositData::new(subject_id, BitcoinAmount::from_sat(10));
+        let deposit = SubjectDepositData::new(
+            subject_id,
+            BitcoinAmount::try_from(10).expect("valid bitcoin amount"),
+        );
         inputs.add_subject_deposit(deposit);
 
         // Should fail - address mismatch
@@ -224,7 +230,10 @@ mod tests {
 
         // Create deposit with invalid subject ID
         let mut inputs = ExecInputs::new_empty();
-        let deposit = SubjectDepositData::new(subject_id, BitcoinAmount::from_sat(10));
+        let deposit = SubjectDepositData::new(
+            subject_id,
+            BitcoinAmount::try_from(10).expect("valid bitcoin amount"),
+        );
         inputs.add_subject_deposit(deposit);
 
         // Should fail - invalid subject ID
@@ -260,7 +269,10 @@ mod tests {
 
         // Create deposit with different amount
         let mut inputs = ExecInputs::new_empty();
-        let deposit = SubjectDepositData::new(subject_id, BitcoinAmount::from_sat(10)); // 10 sats = 100 gwei
+        let deposit = SubjectDepositData::new(
+            subject_id,
+            BitcoinAmount::try_from(10).expect("valid bitcoin amount"),
+        ); // 10 sats = 100 gwei
         inputs.add_subject_deposit(deposit);
 
         // Should fail - amount mismatch

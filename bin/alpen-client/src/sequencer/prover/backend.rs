@@ -202,10 +202,11 @@ fn parse_native_schnorr_signing_key(hex: &str) -> eyre::Result<SigningKey> {
 
 /// Derives the `Bip340Schnorr` predicate key that verifies proofs signed by `signing_key`.
 fn schnorr_predicate_key(signing_key: &SigningKey) -> PredicateKey {
-    PredicateKey::new(
+    PredicateKey::try_new(
         PredicateTypeId::Bip340Schnorr,
         signing_key.verifying_key().to_bytes().to_vec(),
     )
+    .expect("BIP340 public key must be a valid predicate condition")
 }
 
 /// Derives the `Sp1Groth16` predicate key that verifies proofs from the SP1 program
@@ -220,10 +221,11 @@ fn sp1_groth16_predicate_key(program_id: [u8; 32]) -> eyre::Result<PredicateKey>
     )
     .map_err(|e| eyre::eyre!("failed to load SP1 Groth16 verifier: {e}"))?;
 
-    Ok(PredicateKey::new(
+    PredicateKey::try_new(
         PredicateTypeId::Sp1Groth16,
         sp1_verifier.to_uncompressed_bytes(),
-    ))
+    )
+    .map_err(|error| eyre::eyre!("invalid SP1 Groth16 predicate condition: {error}"))
 }
 
 async fn launch_ee_prover_services(

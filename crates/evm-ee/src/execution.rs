@@ -64,8 +64,11 @@ fn convert_withdrawal_intents_to_messages(
         let msg_data = msg.to_vec();
 
         // Create message to bridge gateway with withdrawal amount and encoded data
-        let payload = MsgPayload::from_bytes(BitcoinAmount::from_sat(intent.amt), msg_data)
-            .expect("withdrawal message payload bytes must fit within SSZ max length");
+        let payload = MsgPayload::from_bytes(
+            BitcoinAmount::try_from(intent.amt).expect("valid bitcoin amount"),
+            msg_data,
+        )
+        .expect("withdrawal message payload bytes must fit within SSZ max length");
         let message = OutputMessage::new(BRIDGE_GATEWAY_ACCT_ID, payload);
         outputs.add_message(message);
     }
@@ -257,7 +260,7 @@ mod tests {
         assert_eq!(message.dest(), BRIDGE_GATEWAY_ACCT_ID);
         assert_eq!(
             message.payload().value(),
-            BitcoinAmount::from_sat(withdrawal_sats)
+            BitcoinAmount::try_from(withdrawal_sats).expect("valid bitcoin amount")
         );
 
         let msg = MsgRef::try_from(message.payload().data()).expect("message envelope");

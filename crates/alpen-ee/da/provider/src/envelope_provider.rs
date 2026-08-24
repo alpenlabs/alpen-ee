@@ -161,7 +161,7 @@ impl BatchDaProvider for ChunkedEnvelopeDaProvider {
         ensure!(!chunks.is_empty(), "prepare_da_chunks returned empty");
 
         let entry = ChunkedEnvelopeEntry::new_unsigned(chunks, self.magic_bytes, DA_BLOB_VERSION);
-        let chunk_count = entry.chunk_data.len();
+        let chunk_count = entry.chunk_data().len();
 
         let idx = self
             .envelope_handle

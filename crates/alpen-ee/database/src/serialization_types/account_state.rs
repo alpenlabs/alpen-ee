@@ -65,7 +65,7 @@ struct DBBitcoinAmount(u64);
 
 impl From<DBBitcoinAmount> for BitcoinAmount {
     fn from(value: DBBitcoinAmount) -> Self {
-        Self::from_sat(value.0)
+        Self::try_from(value.0).expect("persisted bitcoin amount must be valid")
     }
 }
 

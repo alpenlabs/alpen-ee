@@ -104,7 +104,7 @@ impl From<DBMessageEntry> for MessageEntry {
             value.source.into(),
             value.incl_epoch,
             MsgPayload::from_bytes(
-                BitcoinAmount::from_sat(value.payload_value_sats),
+                BitcoinAmount::try_from(value.payload_value_sats).expect("valid bitcoin amount"),
                 value.payload_data,
             )
             .expect("database message payload bytes must fit within SSZ max length"),
