@@ -237,10 +237,18 @@ async fn seal_chunk<P: AccumulationPolicy>(
     state: &mut ChunkBuilderState<P>,
     chunk_storage: &impl ChunkStorage,
 ) -> Result<()> {
-    let prev_block = state.prev_chunk_end();
-    let (inner_blocks, last_block) = state.accumulator_mut().drain();
-    let inner_block_hashes: Vec<Hash> = inner_blocks.into_iter().map(|b| b.hash()).collect();
+    // Read the accumulated blocks without releasing them, so a failed
+    // `save_next_chunk` below leaves them for the next seal. This state isn't
+    // persisted and the caller only propagates the error, so blocks released
+    // before the write would never reach any chunk.
+    let (last_block, inner_block_hashes) = {
+        let Some((last, inner)) = state.accumulator().blocks().split_last() else {
+            return Ok(());
+        };
+        (*last, inner.iter().map(|b| b.hash()).collect::<Vec<Hash>>())
+    };
 
+    let prev_block = state.prev_chunk_end();
     let chunk_idx = state.next_chunk_idx();
     let chunk = Chunk::new(
         chunk_idx,
@@ -264,6 +272,9 @@ async fn seal_chunk<P: AccumulationPolicy>(
         .await
         .map_err(|e| eyre!("save_next_chunk: {e}"))?;
 
+    // The chunk is durable, so the blocks it covers can go. `advance_chunk`
+    // doesn't touch the accumulator, unlike its batch-level counterpart.
+    state.accumulator_mut().reset();
     state.push_batch_chunk(chunk_id);
     state.advance_chunk(last_block);
 

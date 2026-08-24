@@ -75,14 +75,20 @@ async fn seal_batch<P: AccumulationPolicy>(
     state: &mut BatchBuilderState<P>,
     storage: &impl BatchStorage,
 ) -> Result<Option<BatchId>> {
-    if state.accumulator().is_empty() {
-        return Ok(None);
-    }
+    // Read the accumulated blocks without releasing them. `save_next_batch`
+    // below can fail, and this state is never persisted: the task only logs
+    // the error and keeps polling, so blocks released before the write would
+    // never reach any batch. `prev_batch_end` would still sit before them, so
+    // the next seal would write a batch covering a range its `inner_blocks`
+    // doesn't list.
+    let (last_block, inner_blocks) = {
+        let Some((last, inner)) = state.accumulator().blocks().split_last() else {
+            return Ok(None);
+        };
+        (*last, inner.iter().map(|b| b.hash()).collect::<Vec<Hash>>())
+    };
 
     let prev_block = state.prev_batch_end();
-    let (inner_blocks, last_block) = state.accumulator_mut().drain();
-    let inner_blocks: Vec<Hash> = inner_blocks.into_iter().map(|b| b.hash()).collect();
-
     let batch_idx = state.next_batch_idx();
     let batch = Batch::new(
         batch_idx,
@@ -102,6 +108,9 @@ async fn seal_batch<P: AccumulationPolicy>(
     );
 
     storage.save_next_batch(batch).await?;
+
+    // The batch is durable, so the blocks it covers can go.
+    // `advance_batch` resets the accumulator.
     state.advance_batch(last_block);
 
     Ok(Some(batch_id))
@@ -268,10 +277,9 @@ where
             break;
         };
 
-        // Data is ready, remove from pending queue
-        state.pop_pending_block();
-
-        // Check if adding this block would exceed threshold
+        // Check if adding this block would exceed threshold. The write happens
+        // before the block leaves the queue, so a failed seal leaves it at the
+        // front for the next poll to retry.
         if !state.accumulator().is_empty()
             && state
                 .accumulator()
@@ -284,7 +292,8 @@ where
             }
         }
 
-        // Add block to accumulator
+        // Data is ready, remove from pending queue and accumulate it
+        state.pop_pending_block();
         state.accumulator_mut().add_block(block, &block_data);
         emit_event(
             &ctx.event_tx,
@@ -325,5 +334,54 @@ async fn emit_event(tx: &Option<mpsc::Sender<BatchBuilderEvent>>, event: BatchBu
         if let Err(e) = tx.send(event).await {
             warn!(error = %e, "batch event channel closed; event dropped");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alpen_ee_common::{MockBatchStorage, StorageError};
+
+    use super::*;
+    use crate::{
+        batch_builder::BatchBuilderState,
+        sealing_policy::block_count_policy::{BlockCountData, BlockCountPolicy},
+        test_utils::*,
+    };
+
+    /// A failed batch write must leave the accumulated blocks alone. Releasing
+    /// them before the write loses them for good: this state isn't persisted,
+    /// the task only logs the error and keeps polling, and `prev_batch_end`
+    /// still sits before them — so the next seal would write a batch covering
+    /// a range its `inner_blocks` doesn't list.
+    #[tokio::test]
+    async fn failed_batch_write_keeps_the_accumulated_blocks() {
+        let genesis = test_blocknumhash(0);
+        let block1 = test_blocknumhash(1);
+        let block2 = test_blocknumhash(2);
+
+        let mut state: BatchBuilderState<BlockCountPolicy> =
+            BatchBuilderState::from_last_batch(0, genesis);
+        state.accumulator_mut().add_block(block1, &BlockCountData);
+        state.accumulator_mut().add_block(block2, &BlockCountData);
+
+        let mut batch_storage = MockBatchStorage::new();
+        batch_storage
+            .expect_save_next_batch()
+            .returning(|_| Err(StorageError::Database("transient".to_string())));
+
+        let result = seal_batch(&mut state, &batch_storage).await;
+
+        assert!(result.is_err(), "a failed batch write must surface");
+        assert_eq!(
+            state.accumulator().blocks(),
+            [block1, block2],
+            "the blocks must stay accumulated so the next seal still covers them"
+        );
+        assert_eq!(state.prev_batch_end(), genesis, "no batch was sealed");
+        assert_eq!(
+            state.next_batch_idx(),
+            1,
+            "the batch index must not advance"
+        );
     }
 }

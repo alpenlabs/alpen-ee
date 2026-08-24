@@ -1,6 +1,6 @@
 use alpen_ee_common::{
     exec_block_storage_test_fns::create_exec_block, Batch, BatchId, BatchStorage, BlockNumHash,
-    Chunk, ChunkStorage, InMemoryStorage, MockExecBlockStorage,
+    Chunk, ChunkStorage, InMemoryStorage, MockChunkStorage, MockExecBlockStorage, StorageError,
 };
 use strata_acct_types::Hash;
 
@@ -1020,4 +1020,43 @@ async fn full_startup_sequence() {
     }
     assert_eq!(block_count, 3);
     assert_eq!(boundary_count, 1);
+}
+
+/// A failed chunk write must leave the accumulated blocks alone. Releasing
+/// them before the write drops them from every chunk: this state isn't
+/// persisted, and `prev_chunk_end` still sits before them.
+#[tokio::test]
+async fn failed_chunk_write_keeps_the_accumulated_blocks() {
+    let genesis = test_block(0);
+    let mut state = new_state(genesis);
+
+    let mut chunk_storage = MockChunkStorage::new();
+    chunk_storage
+        .expect_get_batch_chunks()
+        .returning(|_| Ok(None));
+    chunk_storage
+        .expect_save_next_chunk()
+        .returning(|_| Err(StorageError::Database("transient".to_string())));
+
+    // A cap high enough that only the batch boundary can seal.
+    let policy = FixedBlockCountSealing::new(10);
+    state.push_pending(block(1, 1));
+    state.push_pending(boundary(0, 1));
+
+    let result =
+        process_pending::<BlockCountPolicy, FixedBlockCountSealing, BlockCountDataProvider>(
+            &mut state,
+            &chunk_storage,
+            &policy,
+            &BlockCountDataProvider,
+        )
+        .await;
+
+    assert!(result.is_err(), "a failed chunk write must surface");
+    assert_eq!(
+        state.accumulator().blocks(),
+        [test_block(1)],
+        "the block must stay accumulated so the next seal still covers it"
+    );
+    assert_eq!(state.prev_chunk_end(), genesis, "no chunk was sealed");
 }

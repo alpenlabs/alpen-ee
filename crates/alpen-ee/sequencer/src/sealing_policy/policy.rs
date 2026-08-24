@@ -140,6 +140,11 @@ impl<P: AccumulationPolicy> Accumulator<P> {
     /// Returns `(inner_blocks, last_block)` where `inner_blocks` excludes
     /// `last_block`.
     ///
+    /// Never call this before a fallible write. The blocks are gone once it
+    /// returns, and none of this state is persisted, so a write that fails
+    /// afterwards loses them. Read them with [`Self::blocks`], write, then
+    /// release them.
+    ///
     /// # Panics
     ///
     /// Panics if the accumulator is empty.
