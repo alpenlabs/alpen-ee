@@ -92,10 +92,8 @@ fn main() {
     write_chunk_predicate_const(&sp1_predicate(ALPEN_CHUNK));
     build_guest(ALPEN_ACCT);
 
-    // The acct guest's own predicate, unlike the chunk one above, is not
-    // consumed by any guest. It is what the OL checks account proofs
-    // against: the OL holds it as the account's `update_vk` and rejects any
-    // update whose proof does not verify under it.
+    // The acct guest's own predicate is not consumed by any guest. It is what
+    // the OL holds as the account's `update_vk` to check account proofs.
     write_acct_predicate_file(&sp1_predicate(ALPEN_ACCT));
 }
 
@@ -136,12 +134,9 @@ fn sp1_predicate(program: &str) -> Vec<u8> {
 }
 
 /// Writes the acct guest's own predicate to `<generated>/alpen-acct.predicate`
-/// as a plain `Sp1Groth16:<hex>` string — the same `"{TypeName}:{hex}"`
-/// format `strata-predicate`'s serde impl parses, so it drops straight into
-/// an OL params document. A text file rather than a generated Rust constant
-/// because its consumers are outside the Rust build: the functional-test
-/// harness reads it to configure genesis, and it is the value an operator
-/// needs when standing up a chain against these ELFs.
+/// in the `"{TypeName}:{hex}"` format `strata-predicate`'s serde impl parses,
+/// so it drops straight into an OL params document. A text file rather than a
+/// generated constant because its consumers are outside the Rust build.
 fn write_acct_predicate_file(condition: &[u8]) {
     let hex = condition
         .iter()

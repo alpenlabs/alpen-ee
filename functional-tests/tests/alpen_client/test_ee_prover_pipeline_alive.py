@@ -53,6 +53,7 @@ from common.evm import (
     send_eth_transfer,
 )
 from common.evm_utils import wait_for_receipt
+from common.prover_backend import resolve_prover_backend
 from common.services.alpen_client import AlpenClientService
 from common.services.bitcoin import BitcoinService
 from common.wait import wait_until_with_value
@@ -140,7 +141,11 @@ def _wait_for_log_signal(
 @flexitest.register
 class TestEeProverPipelineAlive(BaseTest):
     """Verify the EE chunk + acct prover pipeline runs end-to-end under
-    realistic, varied EVM transaction load, in native dev-prover mode."""
+    realistic, varied EVM transaction load.
+
+    Nothing asserted here is backend-specific, so the same test covers both
+    the native dev prover and, under `EE_PROVER_BACKEND=sp1`, the real
+    Sp1Groth16 path."""
 
     # Tighter than the shared `el_ol` env's default (10): smaller batches
     # mean more chunk/acct proofs per unit of EVM activity, which keeps
@@ -158,6 +163,7 @@ class TestEeProverPipelineAlive(BaseTest):
                 fullnode_count=0,
                 pre_generate_blocks=110,
                 batch_sealing_block_count=self.BATCH_SEALING_BLOCK_COUNT,
+                prover=resolve_prover_backend(),
             )
         )
 
