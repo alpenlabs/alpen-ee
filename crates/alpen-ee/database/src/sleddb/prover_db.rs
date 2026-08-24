@@ -195,7 +195,10 @@ impl ProverTaskDatabase for EeProverDbSled {
         let mut out = Vec::new();
         for item in self.prover_task_tree.iter() {
             let (key, record) = item.map_err(conv_sled_err)?;
-            if record.status().is_retriable()
+            // `wants_rescan`, not `is_retriable`: blocked tasks are waiting on a
+            // dependency rather than failing, and the scanner has to re-spawn
+            // them too or they park forever.
+            if record.status().wants_rescan()
                 && record.retry_after_secs().is_some_and(|t| t <= now_secs)
             {
                 out.push((key, record));
