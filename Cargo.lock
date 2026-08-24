@@ -1429,6 +1429,7 @@ dependencies = [
  "strata-ee-acct-types",
  "strata-ee-chain-types",
  "strata-identifiers",
+ "strata-predicate",
  "strata-service",
  "strata-snark-acct-types",
  "thiserror 2.0.18",
