@@ -6,23 +6,27 @@ ignore = [
   # Low risk: affects ANSI escape sequences in logs only.
   "RUSTSEC-2025-0055",
 
-  # Everything below is blocked on the reth v1.9.1 pin in the root Cargo.toml.
-  # reth-mdbx-sys declares `cc = "=1.2.15"` as an exact pin. Newer rustls needs
-  # newer aws-lc-rs, which needs a newer cc than that pin allows, so cargo
-  # cannot resolve any of the rustls upgrades below. Revisit all of these when
-  # the reth tag moves; most should clear on their own.
+  # The rustls-webpki, aws-lc-sys and hickory-proto entries below are blocked on
+  # the reth v1.9.1 pin in the root Cargo.toml. reth-mdbx-sys declares
+  # `cc = "=1.2.15"` as an exact pin. Newer rustls needs newer aws-lc-rs, which
+  # needs a newer cc than that pin allows, so cargo cannot resolve any of the
+  # rustls upgrades. Revisit when the reth tag moves; most should clear then.
   # Tracked in STR-4308.
 
-  # rustls-webpki 0.103.4 (patched in 0.103.10 / 0.103.12 / 0.103.13).
-  # Reached through rustls 0.23 -> reqwest.
+  # rustls-webpki, patched in 0.103.10 / 0.103.12 / 0.103.13.
+  # Two carriers, both unfixable here:
+  #   0.103.4  via rustls 0.23 -> reqwest 0.12, blocked by the cc pin above.
+  #   0.101.7  via rustls 0.21 -> reqwest 0.11 -> esplora-client -> bdk_esplora
+  #            (alpen-cli), and via bitreq -> bitcoind-async-client.
+  # The bdk_esplora carrier is a live TLS path: alpen-cli talks to a configurable
+  # https:// Esplora endpoint, so rustls-webpki 0.101.7 is its real certificate
+  # verifier. Escaping it needs bdk_esplora 0.21+, which forces bdk_core 0.5+,
+  # for which no bdk_wallet release exists -- so the whole bdk stack has to move
+  # to the bdk_core 0.6 tier at once. Scoped in STR-4313.
   "RUSTSEC-2026-0049", # CRL distribution point matching logic
   "RUSTSEC-2026-0098", # name constraints wrongly accepted for URI names
   "RUSTSEC-2026-0099", # name constraints accepted for wildcard certs
   "RUSTSEC-2026-0104", # reachable panic parsing CRLs
-  # The same four also hit rustls-webpki 0.101.7 via the legacy rustls 0.21
-  # stack under bitreq. bitreq 0.3.7 already requires the patched
-  # rustls-webpki >= 0.103.13, but bumping it pulls newer rustls and hits the
-  # same cc pin above.
 
   # aws-lc-sys 0.30.0 (patched in 0.38.0 / 0.39.0), pinned by aws-lc-rs ^0.30.0.
   # Reached through the AWS SDK under sp1-sdk.
@@ -36,6 +40,9 @@ ignore = [
   "RUSTSEC-2026-0119", # O(n^2) name compression; patched in 0.26.1
 
   # h2 0.3.27 (patched in 0.4.16, a semver-major bump).
-  # Only reachable through the legacy hyper 0.14 / reqwest 0.11 stack.
+  # Reached through reqwest 0.11 -> esplora-client -> bdk_esplora (alpen-cli),
+  # so a hostile HTTP/2 Esplora endpoint can stall wallet sync. Not blocked on
+  # the reth pin: the bdk_esplora bump described above drops reqwest 0.11 and
+  # this advisory with it. Scoped in STR-4313.
   "RUSTSEC-2026-0258", # unbounded empty DATA frames
 ]
