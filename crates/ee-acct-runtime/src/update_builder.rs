@@ -6,7 +6,7 @@
 
 use strata_acct_types::{Hash, MessageEntry};
 use strata_ee_acct_types::{
-    EeAccountState, ExecutionEnvironment, PendingInputEntry, UpdateExtraData,
+    EeAccountState, EnvError, ExecutionEnvironment, PendingInputEntry, UpdateExtraData,
 };
 use strata_ee_chain_types::ChunkTransition;
 use strata_snark_acct_runtime::{PrivateInput, UpdateBuilder as GenericUpdateBuilder};
@@ -168,7 +168,19 @@ impl<'i, E: ExecutionEnvironment> UpdateBuilder<'i, E> {
     ///
     /// On success, advances the chain tip, accumulates outputs, and tracks
     /// consumed input count.
+    ///
+    /// Once a transition consumes a predicate rotation the update is closed,
+    /// so any further transition is rejected.
     pub fn accept_chunk_transition(&mut self, transition: &ChunkTransition) -> BuilderResult<()> {
+        // A consumed rotation ends the update, so refuse to chain anything
+        // onto it. The verifier enforces the same rule
+        // (`EeVerificationState::process_decoded_transition`); failing here
+        // means an honest sequencer finds out while building instead of
+        // producing an update that can never be proven.
+        if self.inner.outputs().new_predicate().is_some() {
+            return Err(BuilderError::Env(EnvError::NonTerminalRotation));
+        }
+
         // 1. Validate chain linkage.
         if transition.parent_exec_blkid() != self.cur_tip_blkid {
             return Err(BuilderError::ChainLinkage {
@@ -198,6 +210,22 @@ impl<'i, E: ExecutionEnvironment> UpdateBuilder<'i, E> {
             }
         }
 
+        // A declared predicate rotation must be the next queued entry after
+        // this transition's deposits.
+        let mut inputs_consumed_by_transition = deposits.len();
+        if let Some(new_key) = transition.outputs().new_predicate() {
+            match remaining.get(deposits.len()) {
+                Some(PendingInputEntry::PredicateRotation(expected)) if new_key == expected => {
+                    inputs_consumed_by_transition += 1;
+                }
+                _ => {
+                    return Err(BuilderError::InputMismatch {
+                        position: self.inputs_consumed + deposits.len(),
+                    });
+                }
+            }
+        }
+
         // 3. Merge outputs.
         let outputs = transition.outputs();
 
@@ -221,10 +249,18 @@ impl<'i, E: ExecutionEnvironment> UpdateBuilder<'i, E> {
             )
             .map_err(|_| BuilderError::OutputOverflow)?;
 
+        // The guard at the top means this is the update's only rotation, so
+        // this never overwrites a previously accumulated key.
+        if let Some(new_key) = outputs.new_predicate() {
+            self.inner
+                .outputs_mut()
+                .set_new_predicate(Some(new_key.clone()));
+        }
+
         // 4. Advance tip data and consumed count.
         self.cur_tip_blkid = transition.tip_exec_blkid();
         self.cur_tip_state_root = transition.tip_state_root();
-        self.inputs_consumed += deposits.len();
+        self.inputs_consumed += inputs_consumed_by_transition;
 
         Ok(())
     }

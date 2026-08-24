@@ -72,6 +72,10 @@ where
     ) -> bool {
         self.a.would_exceed(&value.0, &block_data.0) || self.b.would_exceed(&value.1, &block_data.1)
     }
+
+    fn must_seal(&self, value: &(A::AccumulatedValue, B::AccumulatedValue)) -> bool {
+        self.a.must_seal(&value.0) || self.b.must_seal(&value.1)
+    }
 }
 
 /// Composed data provider that fetches block data from two inner providers.

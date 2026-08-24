@@ -182,6 +182,16 @@ impl<'a, E: ExecutionEnvironment> EeVerificationState<'a, E> {
             )
             .map_err(|_| EnvError::OutputOverflow)?;
 
+        // Propagate a predicate rotation this transition consumed. This
+        // overwrites rather than accumulates, which is only safe because
+        // `process_decoded_transition` rejects any transition that follows a
+        // rotation — so an update holds at most one, and there is never a
+        // previous key here to clobber.
+        if let Some(new_key) = outputs.new_predicate() {
+            self.accumulated_outputs
+                .set_new_predicate(Some(new_key.clone()));
+        }
+
         Ok(())
     }
 
@@ -194,6 +204,16 @@ impl<'a, E: ExecutionEnvironment> EeVerificationState<'a, E> {
         transition: &ChunkTransition,
         pending_inp_tracker: &mut SequenceTracker<'_, PendingInputEntry>,
     ) -> EnvResult<()> {
+        // A consumed rotation ends the update. The sequencer seals the batch
+        // right after the rotating block, but that's only host behavior —
+        // without this check a proof could chain further transitions onto the
+        // rotation, and those blocks would be authorized by the predecessor
+        // predicate. `accumulated_outputs` is the latch: `merge_new_outputs`
+        // sets the key below and nothing ever clears it.
+        if self.accumulated_outputs.new_predicate().is_some() {
+            return Err(EnvError::NonTerminalRotation);
+        }
+
         // Chain linkage: parent must match current verified tip.
         if transition.parent_exec_blkid() != self.cur_verified_exec_blkid {
             return Err(EnvError::MismatchedChainSegment);
@@ -210,6 +230,19 @@ impl<'a, E: ExecutionEnvironment> EeVerificationState<'a, E> {
                     matches!(
                         pending,
                         PendingInputEntry::Deposit(expected) if deposit == expected,
+                    )
+                })
+                .map_err(|_| EnvError::InconsistentChunkIo)?;
+        }
+
+        // A declared predicate rotation must be the next queued entry after
+        // this transition's deposits — consume it too.
+        if let Some(new_key) = transition.outputs().new_predicate() {
+            pending_inp_tracker
+                .consume_input_with(|pending| {
+                    matches!(
+                        pending,
+                        PendingInputEntry::PredicateRotation(queued) if queued == new_key,
                     )
                 })
                 .map_err(|_| EnvError::InconsistentChunkIo)?;
@@ -261,6 +294,12 @@ impl<'a, E: ExecutionEnvironment> EeVerificationState<'a, E> {
 
     /// Final checks to see if there's anything in the verification state that
     /// were supposed to have been dealt with but weren't.
+    ///
+    /// Predicate rotations: the OL applies whatever predicate an update
+    /// declares, without restriction — declaring only the queued key is this
+    /// EE's own policy, enforced here since `expected_outputs` (declared)
+    /// must equal `accumulated_outputs` (accumulated from processing the
+    /// admin message via `merge_new_outputs`).
     pub(crate) fn check_obligations(&self) -> EnvResult<()> {
         // Check that the expected outputs match the ones we accumulated.
         if self.expected_outputs != self.accumulated_outputs {

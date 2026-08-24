@@ -10,9 +10,13 @@ pub const DEFAULT_FINALITY_DEPTH: u32 = 6;
 
 pub const RECOVERY_DESC_CLEANUP_DELAY: u32 = 100;
 
-pub use strata_bridge_params::{
-    DEFAULT_MAX_WITHDRAWAL_DESCRIPTOR_LEN, DEFAULT_MAX_WITHDRAWAL_SATS,
-};
+pub use strata_bridge_params::DEFAULT_MAX_WITHDRAWAL_DESCRIPTOR_LEN;
+
+/// Default withdrawal cap (10 BTC in sats) applied when an operator's config
+/// doesn't set `max_withdrawal_amount_sats`. Mirrors the constant of the same
+/// name `strata_bridge_params` carried before it dropped built-in defaults in
+/// favor of always-explicit construction.
+pub const DEFAULT_MAX_WITHDRAWAL_SATS: u64 = 1_000_000_000;
 
 /// Fee to cover the mining fees for creating the deposit transaction from the deposit request
 /// transaction. This includes the cost for the bridge to spend the deposit request output into the

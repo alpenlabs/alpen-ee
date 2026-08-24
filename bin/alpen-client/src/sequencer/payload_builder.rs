@@ -127,15 +127,18 @@ impl AlpenRethPayloadEngine {
                 "prepared deposit mint for payload attributes",
             );
         }
-        let payload_attrs = AlpenPayloadAttributes::new_from_eth(PayloadAttributes {
-            timestamp: build_attrs.timestamp(),
-            // IMPORTANT: post cancun payload build will fail without
-            // parent_beacon_block_root
-            parent_beacon_block_root: Some(B256::ZERO),
-            prev_randao: B256::ZERO,
-            suggested_fee_recipient: self.beneficiary_address,
-            withdrawals: Some(withdrawals),
-        });
+        let payload_attrs = AlpenPayloadAttributes::new_from_eth(
+            PayloadAttributes {
+                timestamp: build_attrs.timestamp(),
+                // IMPORTANT: post cancun payload build will fail without
+                // parent_beacon_block_root
+                parent_beacon_block_root: Some(B256::ZERO),
+                prev_randao: B256::ZERO,
+                suggested_fee_recipient: self.beneficiary_address,
+                withdrawals: Some(withdrawals),
+            },
+            build_attrs.spec_version(),
+        );
 
         let payload_builder_attrs =
             AlpenPayloadBuilderAttributes::try_new(parent, payload_attrs, 0)?;
@@ -300,6 +303,7 @@ impl PayloadBuilderEngine for AlpenRethPayloadEngine {
             parent = %build_attrs.parent(),
             timestamp = build_attrs.timestamp(),
             deposit_count = build_attrs.deposits().len(),
+            spec_version = %build_attrs.spec_version(),
         );
         self.build_payload_inner(build_attrs).instrument(span).await
     }

@@ -8,7 +8,11 @@ fn main() {
 
     let entry_points = ["state.ssz"];
     let base_dir = "ssz";
-    let crates = ["strata_acct_types", "strata_ee_chain_types"];
+    let crates = [
+        "strata_acct_types",
+        "strata_ee_chain_types",
+        "strata_predicate",
+    ];
 
     build_ssz_files(
         &entry_points,

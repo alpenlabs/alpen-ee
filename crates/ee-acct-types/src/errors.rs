@@ -63,6 +63,14 @@ pub enum EnvError {
     #[error("blocks in a chunk did not match the chunk's attested io")]
     InconsistentChunkIo,
 
+    /// Execution continued after a predicate rotation was consumed.
+    ///
+    /// A rotation has to be the last thing in its chunk and in its update.
+    /// Anything after it would still be authorized by the predecessor
+    /// predicate, which is exactly what the rotation is meant to stop.
+    #[error("execution continued past a consumed predicate rotation")]
+    NonTerminalRotation,
+
     /// Accumulated output transfers or messages exceeded protocol capacity.
     #[error("output overflow")]
     OutputOverflow,

@@ -26,6 +26,9 @@ const MAX_ENTRIES_PER_TICK: usize = 10;
 ///
 /// Stops at the first block whose data is not ready, or after processing
 /// [`MAX_ENTRIES_PER_TICK`] entries.
+///
+/// Every fallible write runs before the state that feeds it is released, so a
+/// failed entry stays at the front of the queue for the next tick.
 pub(crate) async fn process_pending<P, S, D>(
     state: &mut ChunkBuilderState<P>,
     chunk_storage: &impl ChunkStorage,
@@ -46,10 +49,9 @@ where
 
         match entry {
             PendingEntry::BatchBoundary(batch_id) => {
-                state.pop_pending();
-
                 // Skip if this batch is already processed (recovery or duplicate).
                 if chunk_storage.get_batch_chunks(batch_id).await?.is_some() {
+                    state.pop_pending();
                     debug!(%batch_id, "skipping already-linked batch boundary");
                     processed += 1;
                     continue;
@@ -66,6 +68,7 @@ where
                     .map(|b| b.hash())
                     .unwrap_or(state.prev_chunk_end().hash());
                 if expected_last != batch_id.last_block() {
+                    state.pop_pending();
                     return Err(eyre!(
                         "batch boundary mismatch: chunk builder position={expected_last}, \
                          batch last_block={}",
@@ -73,7 +76,13 @@ where
                     ));
                 }
 
+                // The boundary leaves the queue only once its writes are
+                // durable, so a failed one is still at the front for the next
+                // tick. Popping first would drop it: this state isn't
+                // persisted, and `current_batch_idx` would never advance, so
+                // every later block would fail the batch_idx check.
                 handle_batch_boundary(state, chunk_storage, batch_id).await?;
+                state.pop_pending();
             }
             PendingEntry::Block { block, batch_idx } => {
                 let next_expected = state.last_known_blocknum() + 1;
@@ -146,14 +155,18 @@ async fn handle_batch_boundary<P: AccumulationPolicy>(
         seal_chunk(state, chunk_storage).await?;
     }
 
-    let chunk_ids = state.take_batch_chunks();
+    // Read the chunk IDs without clearing them, so a failed `set_batch_chunks`
+    // leaves them for the next attempt. This state isn't persisted, so a list
+    // taken before the write is gone if the write fails.
+    let chunk_ids = state.current_batch_chunks().to_vec();
     chunk_storage
         .set_batch_chunks(batch_id, chunk_ids)
         .await
         .map_err(|e| eyre!("set_batch_chunks: {e}"))?;
     debug!(%batch_id, "linked chunks to batch");
 
-    // Advance to the next batch.
+    // The linkage is durable, so the chunk IDs can go and the batch is done.
+    let _ = state.take_batch_chunks();
     state.set_current_batch_idx(state.current_batch_idx() + 1);
 
     Ok(())
@@ -237,10 +250,18 @@ async fn seal_chunk<P: AccumulationPolicy>(
     state: &mut ChunkBuilderState<P>,
     chunk_storage: &impl ChunkStorage,
 ) -> Result<()> {
-    let prev_block = state.prev_chunk_end();
-    let (inner_blocks, last_block) = state.accumulator_mut().drain();
-    let inner_block_hashes: Vec<Hash> = inner_blocks.into_iter().map(|b| b.hash()).collect();
+    // Read the accumulated blocks without releasing them, so a failed
+    // `save_next_chunk` below leaves them for the next seal. This state isn't
+    // persisted and the caller only propagates the error, so blocks released
+    // before the write would never reach any chunk.
+    let (last_block, inner_block_hashes) = {
+        let Some((last, inner)) = state.accumulator().blocks().split_last() else {
+            return Ok(());
+        };
+        (*last, inner.iter().map(|b| b.hash()).collect::<Vec<Hash>>())
+    };
 
+    let prev_block = state.prev_chunk_end();
     let chunk_idx = state.next_chunk_idx();
     let chunk = Chunk::new(
         chunk_idx,
@@ -264,6 +285,9 @@ async fn seal_chunk<P: AccumulationPolicy>(
         .await
         .map_err(|e| eyre!("save_next_chunk: {e}"))?;
 
+    // The chunk is durable, so the blocks it covers can go. `advance_chunk`
+    // doesn't touch the accumulator, unlike its batch-level counterpart.
+    state.accumulator_mut().reset();
     state.push_batch_chunk(chunk_id);
     state.advance_chunk(last_block);
 

@@ -34,7 +34,8 @@ use alpen_ee_sequencer::{
     sealing_policy::{
         block_count_policy::{BlockCountDataProvider, BlockCountPolicy, FixedBlockCountSealing},
         gas_limit_policy::MaxGasSealing,
-        or_policy::OrSealing,
+        or_policy::{ComposedDataProvider, ComposedPolicy, OrSealing},
+        rotation_policy::{RotationDataProvider, RotationPolicy, SealOnRotation},
     },
     BatchBuilderEvent, BatchBuilderState, BatchLifecycleState, BlockBuilderConfig,
     OLChainTrackerState,
@@ -88,13 +89,17 @@ pub(crate) struct BootstrapResources {
     pub(crate) genesis_epoch: EpochCommitment,
 }
 
+/// Batch sealing pairs the configured block-count cadence with the protocol
+/// rule that a predicate rotation ends its batch.
+type BatchPolicy = ComposedPolicy<BlockCountPolicy, RotationPolicy>;
+
 /// Startup state that only the EE sequencer needs: the OL chain tracker,
 /// exec chain, batch builder, and batch lifecycle states loaded from
 /// storage once the node is up.
 struct SequencerBootState {
     ol_chain_tracker: OLChainTrackerState,
     exec_chain: ExecChainState,
-    batch_builder: BatchBuilderState<BlockCountPolicy>,
+    batch_builder: BatchBuilderState<BatchPolicy>,
     batch_lifecycle: BatchLifecycleState,
 }
 
@@ -478,9 +483,17 @@ where
         .instrument(info_span!("require_latest_batch", component = "alpen"))
         .await?;
 
-    let batch_sealing_policy =
-        FixedBlockCountSealing::new(sequencer_config.batch_sealing_block_count);
-    let block_data_provider = Arc::new(BlockCountDataProvider);
+    // A rotation-consuming block must end its batch, so the block-count
+    // cadence is OR'd with the rotation rule rather than special-cased in the
+    // batch builder.
+    let batch_sealing_policy = OrSealing::new(
+        FixedBlockCountSealing::new(sequencer_config.batch_sealing_block_count),
+        SealOnRotation,
+    );
+    let block_data_provider = Arc::new(ComposedDataProvider::new(
+        BlockCountDataProvider,
+        RotationDataProvider::new(storage.clone()),
+    ));
 
     // Per-block proof witnesses are captured inline during payload
     // build and persisted by `AlpenRethPayloadEngine`, and the

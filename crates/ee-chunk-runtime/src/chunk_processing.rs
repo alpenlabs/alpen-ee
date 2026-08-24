@@ -6,6 +6,7 @@ use strata_ee_chain_types::{
     ChunkTransition, ExecInputs, ExecOutputs, OutputMessage, OutputTransfer, SequenceTracker,
     SubjectDepositData,
 };
+use strata_predicate::PredicateKey;
 
 use crate::chunk::{Chunk, ChunkBlock};
 
@@ -28,8 +29,18 @@ pub fn process_block<E: ExecutionEnvironment>(
     let exec_outp = ee.execute_block_body(state, &epl, block.inputs())?;
     ee.verify_outputs_against_header(eb.get_header(), &exec_outp)?;
 
-    // Check that the outputs match the chunk block.
-    if exec_outp.outputs() != block.outputs() {
+    // Check that the EVM-derivable outputs match the chunk block.
+    //
+    // `new_predicate` is deliberately left out of this comparison: it's an
+    // account-level fact drawn from the pending-input queue, not something
+    // `execute_block_body` can derive from EVM execution alone (see `evm-ee`'s
+    // `execute_block_body`, which only ever sets output messages/transfers and
+    // always leaves `new_predicate` empty). Chunk-level verification of a
+    // declared rotation against real block execution belongs to a
+    // cross-check over the chunk's blocks, not this per-block comparison.
+    if exec_outp.outputs().output_transfers() != block.outputs().output_transfers()
+        || exec_outp.outputs().output_messages() != block.outputs().output_messages()
+    {
         return Err(EnvError::InvalidBlock);
     }
 
@@ -48,6 +59,12 @@ struct IoTracker<'c> {
     deposits_tracker: SequenceTracker<'c, SubjectDepositData>,
     out_msg_tracker: SequenceTracker<'c, OutputMessage>,
     out_xfr_tracker: SequenceTracker<'c, OutputTransfer>,
+    /// Predicate rotation the chunk-level outputs claim, if any.
+    expected_new_predicate: Option<&'c PredicateKey>,
+    /// Predicate rotation actually observed among the chunk's per-block
+    /// outputs, if any. Once set, `check_update` refuses to accept another
+    /// block, so the rotating block is always the chunk's last one.
+    observed_new_predicate: Option<PredicateKey>,
 }
 
 impl<'c> IoTracker<'c> {
@@ -56,11 +73,21 @@ impl<'c> IoTracker<'c> {
             deposits_tracker: SequenceTracker::new(expected_inputs.subject_deposits()),
             out_msg_tracker: SequenceTracker::new(expected_outputs.output_messages()),
             out_xfr_tracker: SequenceTracker::new(expected_outputs.output_transfers()),
+            expected_new_predicate: expected_outputs.new_predicate(),
+            observed_new_predicate: None,
         }
     }
 
     /// Processes a pair of inputs and outputs, verifying they're all correct.
     fn check_update(&mut self, inps: &ExecInputs, outps: &ExecOutputs) -> EnvResult<()> {
+        // A rotation ends the chunk. The sequencer stops assembling at one and
+        // seals right after it, but that's only host behavior — without this
+        // check a proof could carry blocks that ran after the rotation, and
+        // they'd be authorized by the predecessor predicate.
+        if self.observed_new_predicate.is_some() {
+            return Err(EnvError::NonTerminalRotation);
+        }
+
         // Check them first.
         self.deposits_tracker
             .check_inputs(inps.subject_deposits())
@@ -80,6 +107,12 @@ impl<'c> IoTracker<'c> {
         self.out_xfr_tracker
             .advance_unchecked(outps.output_transfers().len());
 
+        // Track any predicate rotation this block declares. The guard above
+        // makes this block the last one we accept for the chunk.
+        if let Some(key) = outps.new_predicate() {
+            self.observed_new_predicate = Some(key.clone());
+        }
+
         Ok(())
     }
 
@@ -90,11 +123,14 @@ impl<'c> IoTracker<'c> {
     }
 
     fn verify_all_consumed(&self) -> EnvResult<()> {
-        if self.is_all_consumed() {
-            Ok(())
-        } else {
-            Err(EnvError::InconsistentChunkIo)
+        if !self.is_all_consumed() {
+            return Err(EnvError::InconsistentChunkIo);
         }
+        // The chunk-level claim must equal exactly what its blocks produced.
+        if self.expected_new_predicate != self.observed_new_predicate.as_ref() {
+            return Err(EnvError::InconsistentChunkIo);
+        }
+        Ok(())
     }
 }
 
@@ -393,6 +429,140 @@ mod tests {
         )
         .expect_err("forged intermediate state root must be rejected");
         assert!(matches!(err, EnvError::InvalidBlock));
+    }
+
+    /// A chunk whose rotating block is followed by an ordinary block must be
+    /// rejected: those later blocks would still be authorized by the
+    /// predecessor predicate. Host-side sealing keeps this from happening,
+    /// but a malicious prover isn't bound by host behavior.
+    #[test]
+    fn process_chunk_blocks_rejects_block_after_a_rotation() {
+        let ee = SimpleExecutionEnvironment;
+
+        let mut accounts = BTreeMap::new();
+        accounts.insert(alice(), 1000);
+        let initial_state = SimplePartialState::new(accounts);
+
+        let genesis_header = SimpleHeader::genesis();
+        let genesis_blkid = genesis_header.compute_block_id();
+
+        // Block 1 consumes the rotation.
+        let (block1, inp1, mut out1, state1) = build_block(
+            &ee,
+            &initial_state,
+            genesis_blkid,
+            1,
+            SimpleBlockBody::new(vec![SimpleTransaction::Transfer {
+                from: alice(),
+                to: bob(),
+                value: 200,
+            }]),
+            ExecInputs::new_empty(),
+        );
+        let new_key = PredicateKey::always_accept();
+        out1.set_new_predicate(Some(new_key.clone()));
+        let blkid1 = block1.get_header().compute_block_id();
+
+        // Block 2 rides along after it in the same chunk.
+        let (block2, inp2, out2, _state2) = build_block(
+            &ee,
+            &state1,
+            blkid1,
+            2,
+            SimpleBlockBody::new(vec![SimpleTransaction::Transfer {
+                from: alice(),
+                to: bob(),
+                value: 300,
+            }]),
+            ExecInputs::new_empty(),
+        );
+
+        // The chunk declares exactly the rotation its blocks produced, so the
+        // only thing wrong here is that the rotation isn't terminal.
+        let mut chunk_outputs = ExecOutputs::new_empty();
+        chunk_outputs.set_new_predicate(Some(new_key));
+
+        let chunk = Chunk::new(vec![
+            ChunkBlock::new(&inp1, &out1, block1),
+            ChunkBlock::new(&inp2, &out2, block2),
+        ]);
+        let mut state = initial_state;
+
+        let err = process_chunk_blocks(
+            &ee,
+            &mut state,
+            &chunk,
+            genesis_blkid,
+            &ExecInputs::new_empty(),
+            &chunk_outputs,
+        )
+        .expect_err("a block after a rotation must be rejected");
+        assert!(matches!(err, EnvError::NonTerminalRotation));
+    }
+
+    /// The mirror of the case above: a rotation on the chunk's last block is
+    /// the shape the sequencer actually produces and must still pass.
+    #[test]
+    fn process_chunk_blocks_accepts_a_rotation_on_the_last_block() {
+        let ee = SimpleExecutionEnvironment;
+
+        let mut accounts = BTreeMap::new();
+        accounts.insert(alice(), 1000);
+        let initial_state = SimplePartialState::new(accounts);
+
+        let genesis_header = SimpleHeader::genesis();
+        let genesis_blkid = genesis_header.compute_block_id();
+
+        let (block1, inp1, out1, state1) = build_block(
+            &ee,
+            &initial_state,
+            genesis_blkid,
+            1,
+            SimpleBlockBody::new(vec![SimpleTransaction::Transfer {
+                from: alice(),
+                to: bob(),
+                value: 200,
+            }]),
+            ExecInputs::new_empty(),
+        );
+        let blkid1 = block1.get_header().compute_block_id();
+
+        let (block2, inp2, mut out2, _state2) = build_block(
+            &ee,
+            &state1,
+            blkid1,
+            2,
+            SimpleBlockBody::new(vec![SimpleTransaction::Transfer {
+                from: alice(),
+                to: bob(),
+                value: 300,
+            }]),
+            ExecInputs::new_empty(),
+        );
+        let new_key = PredicateKey::always_accept();
+        out2.set_new_predicate(Some(new_key.clone()));
+
+        let mut chunk_outputs = ExecOutputs::new_empty();
+        chunk_outputs.set_new_predicate(Some(new_key));
+
+        let chunk = Chunk::new(vec![
+            ChunkBlock::new(&inp1, &out1, block1),
+            ChunkBlock::new(&inp2, &out2, block2),
+        ]);
+        let mut state = initial_state;
+
+        process_chunk_blocks(
+            &ee,
+            &mut state,
+            &chunk,
+            genesis_blkid,
+            &ExecInputs::new_empty(),
+            &chunk_outputs,
+        )
+        .expect("a rotation on the last block should process successfully");
+
+        assert_eq!(state.accounts().get(&alice()), Some(&500));
+        assert_eq!(state.accounts().get(&bob()), Some(&500));
     }
 
     #[test]

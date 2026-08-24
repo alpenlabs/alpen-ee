@@ -1,5 +1,6 @@
 import strata_acct_types
 import strata_ee_chain_types
+import strata_predicate
 
 MAX_PENDING_INPUTS = 1 << 16
 MAX_PENDING_FINCLS = 1 << 16
@@ -10,6 +11,12 @@ class PendingInputEntry(Union):
     ### Pending deposit
     #~# external_kind: container
     Deposit: strata_ee_chain_types.SubjectDepositData
+
+    ### A queued predicate-key rotation, in true inbox order relative to
+    ### deposits. Consuming it (draining it from the front of the queue)
+    ### rotates the account's update predicate key.
+    #~# external_kind: container
+    PredicateRotation: strata_predicate.PredicateKey
 
 ### A pending forced inclusion that's been accepted by the EE account but not included in a block yet
 class PendingFinclEntry(Container):

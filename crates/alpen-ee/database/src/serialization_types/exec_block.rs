@@ -1,4 +1,5 @@
 use alpen_ee_common::ExecBlockRecord;
+use alpen_ee_params::AlpenSpecId;
 use borsh::{BorshDeserialize, BorshSerialize};
 use ssz::{Decode, Encode};
 use strata_acct_types::{BitcoinAmount, Hash, MessageEntry, MsgPayload};
@@ -19,6 +20,9 @@ pub(crate) struct DBExecBlockRecord {
     account_state: DBEeAccountState,
     next_inbox_msg_idx: u64,
     next_deposit_idx: u64,
+    /// Raw `AlpenSpecId` discriminant; `alpen-ee-params` doesn't derive Borsh, so this is
+    /// stored as its primitive form and converted at the `ExecBlockRecord` boundary.
+    next_spec_version: u16,
     messages: Vec<DBMessageEntry>,
 }
 
@@ -30,6 +34,7 @@ impl From<ExecBlockRecord> for DBExecBlockRecord {
         let ol_block = *value.ol_block();
         let next_inbox_msg_idx = value.next_inbox_msg_idx();
         let next_deposit_idx = value.next_deposit_idx();
+        let next_spec_version = u16::from(value.next_spec_version());
         let (package, account_state, messages) = value.into_parts();
         let package_ssz = package.as_ssz_bytes();
         let account_state = account_state.into();
@@ -44,6 +49,7 @@ impl From<ExecBlockRecord> for DBExecBlockRecord {
             account_state,
             next_inbox_msg_idx,
             next_deposit_idx,
+            next_spec_version,
             messages,
         }
     }
@@ -55,6 +61,8 @@ impl TryFrom<DBExecBlockRecord> for ExecBlockRecord {
     fn try_from(value: DBExecBlockRecord) -> Result<Self, Self::Error> {
         let package = ExecBlockPackage::from_ssz_bytes(&value.package_ssz)?;
         let account_state: EeAccountState = value.account_state.into();
+        let next_spec_version = AlpenSpecId::try_from(value.next_spec_version)
+            .expect("stored spec version must have a known AlpenSpecId variant");
 
         Ok(ExecBlockRecord::new(
             package,
@@ -65,6 +73,7 @@ impl TryFrom<DBExecBlockRecord> for ExecBlockRecord {
             value.parent_blockhash,
             value.next_inbox_msg_idx,
             value.next_deposit_idx,
+            next_spec_version,
             value.messages.into_iter().map(Into::into).collect(),
         ))
     }

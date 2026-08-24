@@ -1,4 +1,5 @@
 use alloy_primitives::{Address, B256};
+use alpen_ee_params::AlpenSpecId;
 use strata_acct_types::BitcoinAmount;
 
 /// Inputs to control evm block builder.
@@ -10,14 +11,22 @@ pub struct PayloadBuildAttributes {
     timestamp: u64,
     /// deposits to be included in the new block.
     deposits: Vec<DepositInfo>,
+    /// Alpen spec version governing the new block.
+    spec_version: AlpenSpecId,
 }
 
 impl PayloadBuildAttributes {
-    pub fn new(parent: B256, timestamp: u64, deposits: Vec<DepositInfo>) -> Self {
+    pub fn new(
+        parent: B256,
+        timestamp: u64,
+        deposits: Vec<DepositInfo>,
+        spec_version: AlpenSpecId,
+    ) -> Self {
         Self {
             parent,
             timestamp,
             deposits,
+            spec_version,
         }
     }
 
@@ -31,6 +40,10 @@ impl PayloadBuildAttributes {
 
     pub fn deposits(&self) -> &[DepositInfo] {
         &self.deposits
+    }
+
+    pub fn spec_version(&self) -> AlpenSpecId {
+        self.spec_version
     }
 }
 

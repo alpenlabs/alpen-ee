@@ -47,6 +47,22 @@ pub trait SealingPolicy<P: AccumulationPolicy>: Send + Sync {
     /// * `value` - The accumulated policy-specific value
     /// * `block_data` - Data for the block about to be added
     fn would_exceed(&self, value: &P::AccumulatedValue, block_data: &P::BlockData) -> bool;
+
+    /// Check if the group must be sealed as it stands.
+    ///
+    /// The counterpart to [`Self::would_exceed`]: that one seals *before* a
+    /// block because of what the group has accumulated, this one seals *after*
+    /// a block because of what that block was. Some blocks have to be the last
+    /// in their group no matter how much room is left.
+    ///
+    /// Because the answer is read off the accumulated value, it lasts as long
+    /// as those blocks do. A seal whose write fails is still required on the
+    /// next pass, rather than being lost with the step that decided it.
+    ///
+    /// Defaults to `false`, for policies where only a threshold seals.
+    fn must_seal(&self, _value: &P::AccumulatedValue) -> bool {
+        false
+    }
 }
 
 /// Trait to fetch processed block data for sealing decisions.
@@ -129,6 +145,13 @@ impl<P: AccumulationPolicy> Accumulator<P> {
         policy.would_exceed(self.value(), block_data)
     }
 
+    /// Check if the accumulated blocks must be sealed as they stand.
+    ///
+    /// Always false while empty: there is nothing to seal.
+    pub fn must_seal(&self, policy: &impl SealingPolicy<P>) -> bool {
+        !self.is_empty() && policy.must_seal(self.value())
+    }
+
     /// Reset accumulator for a new batch.
     pub fn reset(&mut self) {
         self.blocks.clear();
@@ -139,6 +162,11 @@ impl<P: AccumulationPolicy> Accumulator<P> {
     ///
     /// Returns `(inner_blocks, last_block)` where `inner_blocks` excludes
     /// `last_block`.
+    ///
+    /// Never call this before a fallible write. The blocks are gone once it
+    /// returns, and none of this state is persisted, so a write that fails
+    /// afterwards loses them. Read them with [`Self::blocks`], write, then
+    /// release them.
     ///
     /// # Panics
     ///

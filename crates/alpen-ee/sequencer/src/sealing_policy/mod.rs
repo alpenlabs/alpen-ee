@@ -17,10 +17,12 @@
 //! | [`block_count_policy`] | Block count reaches a threshold |
 //! | [`gas_limit_policy`] | Cumulative gas exceeds a limit |
 //! | [`or_policy`] | Either of two composed policies triggers |
+//! | [`rotation_policy`] | The group's last block consumed a predicate rotation |
 
 pub mod block_count_policy;
 pub mod gas_limit_policy;
 pub mod or_policy;
 mod policy;
+pub mod rotation_policy;
 
 pub use policy::{AccumulationPolicy, Accumulator, BlockDataProvider, SealingPolicy};

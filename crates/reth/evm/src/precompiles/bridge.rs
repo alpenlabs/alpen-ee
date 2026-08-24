@@ -399,11 +399,11 @@ mod tests {
     // --- withdrawal amount validation tests ---
 
     fn bridge_params() -> BridgeParams {
-        BridgeParams::default()
+        BridgeParams::new_with_descriptor_limit(100_000_000, Some(1_000_000_000), 81).unwrap()
     }
 
     fn bridge_params_without_cap() -> BridgeParams {
-        BridgeParams::new(100_000_000, None).unwrap()
+        BridgeParams::new_with_descriptor_limit(100_000_000, None, 81).unwrap()
     }
 
     fn valid_bridgeout_calldata() -> Vec<u8> {
