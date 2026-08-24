@@ -26,7 +26,7 @@ fn test_deposit_then_rotation_single_chunk() {
     let ee = SimpleExecutionEnvironment;
 
     let dest = SubjectId::from([1u8; 32]);
-    let value = BitcoinAmount::from(1000u64);
+    let value = BitcoinAmount::try_from(1000u64).unwrap();
     let source = AccountId::from([2u8; 32]);
     let deposit_msg = create_deposit_message(dest, value, source, 1);
 
@@ -111,7 +111,8 @@ fn test_declared_rotation_without_queued_entry_fails() {
 /// Distinct rotation keys, so tests can tell which one an update ended up
 /// declaring.
 fn rotation_key(tag: u8) -> PredicateKey {
-    PredicateKey::new(PredicateTypeId::AlwaysAccept, vec![tag])
+    PredicateKey::try_new(PredicateTypeId::AlwaysAccept, vec![tag])
+        .expect("condition fits within the length limit")
 }
 
 /// A rotation ends the update. Chaining another transition onto it would put

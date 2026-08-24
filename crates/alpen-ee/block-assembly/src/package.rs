@@ -51,9 +51,16 @@ pub(crate) fn build_block_outputs<TPayload: EnginePayload>(
     }
     for withdrawal_intent in withdrawal_intents {
         let dest_desc_len = withdrawal_intent.destination.to_bytes().len();
+        let Ok(amount) = BitcoinAmount::try_from(withdrawal_intent.amt) else {
+            warn!(
+                amount_sat = withdrawal_intent.amt,
+                "skipping withdrawal: amount exceeds the bitcoin money supply",
+            );
+            continue;
+        };
         let Some(msg_payload) = create_withdrawal_init_message_payload(
             withdrawal_intent.destination.clone(),
-            BitcoinAmount::from_sat(withdrawal_intent.amt),
+            amount,
             withdrawal_intent.selected_operator,
         ) else {
             warn!(
@@ -131,7 +138,7 @@ mod tests {
     fn make_deposit(dest_bytes: [u8; 32], sats: u64) -> PendingInputEntry {
         PendingInputEntry::Deposit(SubjectDepositData::new(
             SubjectId::new(dest_bytes),
-            BitcoinAmount::from_sat(sats),
+            BitcoinAmount::try_from(sats).unwrap(),
         ))
     }
 
@@ -162,11 +169,11 @@ mod tests {
         assert_eq!(block_inputs.total_inputs(), 3);
         let deposits = block_inputs.subject_deposits();
         assert_eq!(deposits[0].dest(), SubjectId::new([0x01; 32]));
-        assert_eq!(deposits[0].value(), BitcoinAmount::from_sat(1000));
+        assert_eq!(deposits[0].value(), BitcoinAmount::try_from(1000).unwrap());
         assert_eq!(deposits[1].dest(), SubjectId::new([0x02; 32]));
-        assert_eq!(deposits[1].value(), BitcoinAmount::from_sat(2000));
+        assert_eq!(deposits[1].value(), BitcoinAmount::try_from(2000).unwrap());
         assert_eq!(deposits[2].dest(), SubjectId::new([0x03; 32]));
-        assert_eq!(deposits[2].value(), BitcoinAmount::from_sat(3000));
+        assert_eq!(deposits[2].value(), BitcoinAmount::try_from(3000).unwrap());
     }
 
     #[test]
@@ -184,7 +191,7 @@ mod tests {
         assert_eq!(block_inputs.total_inputs(), 1);
         assert_eq!(
             block_inputs.subject_deposits()[0].value(),
-            BitcoinAmount::from_sat(12345)
+            BitcoinAmount::try_from(12345).unwrap()
         );
     }
 }

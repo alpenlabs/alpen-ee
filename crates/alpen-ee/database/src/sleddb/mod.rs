@@ -1,5 +1,6 @@
 mod db;
 mod init;
+mod macros;
 mod prover_db;
 mod schema;
 

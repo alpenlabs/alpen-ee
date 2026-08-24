@@ -161,7 +161,7 @@ impl BatchDaProvider for ChunkedEnvelopeDaProvider {
         ensure!(!chunks.is_empty(), "prepare_da_chunks returned empty");
 
         let entry = ChunkedEnvelopeEntry::new_unsigned(chunks, self.magic_bytes, DA_BLOB_VERSION);
-        let chunk_count = entry.chunk_data.len();
+        let chunk_count = entry.chunk_count();
 
         let idx = self
             .envelope_handle
@@ -548,7 +548,7 @@ mod tests {
     }
 
     fn finalized_tx_entry(height: u32) -> L1TxEntry {
-        let mut entry = L1TxEntry::from_tx(&make_test_tx());
+        let mut entry = L1TxEntry::new_unpublished(btc_serialize(&make_test_tx()));
         entry.status = L1TxStatus::Finalized {
             confirmations: 6,
             block_hash: Buf32::from([height as u8; 32]),

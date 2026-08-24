@@ -172,15 +172,19 @@ mod tests {
     use crate::ssz_generated::ssz::state::{EeAccountState, PendingFinclEntry, PendingInputEntry};
 
     fn subject_deposit_data_strategy() -> impl Strategy<Value = SubjectDepositData> {
-        (any::<[u8; 32]>(), any::<u64>()).prop_map(|(dest_bytes, value)| SubjectDepositData {
-            dest: SubjectId::from(dest_bytes),
-            value: BitcoinAmount::from_sat(value),
+        (any::<[u8; 32]>(), 0..=21_000_000u64 * 100_000_000).prop_map(|(dest_bytes, value)| {
+            SubjectDepositData {
+                dest: SubjectId::from(dest_bytes),
+                value: BitcoinAmount::try_from(value).unwrap(),
+            }
         })
     }
 
     fn predicate_key_strategy() -> impl Strategy<Value = PredicateKey> {
-        prop::collection::vec(any::<u8>(), 0..64)
-            .prop_map(|condition| PredicateKey::new(PredicateTypeId::AlwaysAccept, condition))
+        prop::collection::vec(any::<u8>(), 0..64).prop_map(|condition| {
+            PredicateKey::try_new(PredicateTypeId::AlwaysAccept, condition)
+                .expect("condition fits within the key length limit")
+        })
     }
 
     fn pending_input_entry_strategy() -> impl Strategy<Value = PendingInputEntry> {

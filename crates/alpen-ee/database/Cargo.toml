@@ -26,6 +26,7 @@ zkaleido.workspace = true
 
 async-trait.workspace = true
 borsh.workspace = true
+ciborium.workspace = true
 eyre.workspace = true
 sled.workspace = true
 ssz.workspace = true

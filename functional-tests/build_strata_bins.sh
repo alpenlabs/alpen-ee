@@ -52,15 +52,14 @@ if [ "${CARGO_RELEASE:-}" = 1 ]; then
     PROFILE_ARGS="--release"
 fi
 
-# Same binaries and features the pre-split functional-test build used, minus
-# alpen-client which is built from this workspace. Keep the strata build in
-# its own target dir so it never clashes with the workspace target dir.
+# alpen-client is not built here; it comes from this workspace. Keep the strata
+# build in its own target dir so it never clashes with the workspace target dir.
 # shellcheck disable=SC2086 # PROFILE_ARGS is intentionally word-split
 CARGO_TARGET_DIR="$SRC_DIR/target" cargo build \
     --manifest-path "$SRC_DIR/Cargo.toml" \
     --locked \
     $PROFILE_ARGS \
-    -F sequencer -F debug-utils -F test-mode -F debug-asm -F prover \
+    -F sequencer -F debug-utils -F prover \
     --bin strata \
     --bin strata-signer \
     --bin strata-datatool \

@@ -31,7 +31,7 @@ use reth_cli_commands::{launcher::FnLauncher, node::NodeCommand};
 use reth_cli_runner::{tokio_runtime, CliRunner};
 use reth_cli_util::sigsegv_handler;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
-use strata_logging::{init_logging_from_config, LoggingInitConfig};
+use strata_logging::{init_logging_from_config, LoggingInitConfigRef};
 #[cfg(feature = "sequencer")]
 use tracing::error;
 use tracing::info;
@@ -121,7 +121,7 @@ where
             extra_filter_directives.push(verbosity_filter);
         }
 
-        init_logging_from_config(LoggingInitConfig {
+        init_logging_from_config(LoggingInitConfigRef {
             service_base_name: "alpen-client",
             service_label: command.ext.display.service_label.as_deref(),
             otlp_url: command.ext.display.otlp_url.as_deref(),

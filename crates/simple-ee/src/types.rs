@@ -334,7 +334,9 @@ impl SimpleTransaction {
 
                 // Emit output
                 use strata_ee_chain_types::OutputTransfer;
-                outputs.add_transfer(OutputTransfer::new(*dest, BitcoinAmount::from(*value)));
+                let value =
+                    BitcoinAmount::try_from(*value).map_err(|_| EnvError::InvalidBlockTx)?;
+                outputs.add_transfer(OutputTransfer::new(*dest, value));
             }
             SimpleTransaction::EmitMessage {
                 from,
@@ -355,7 +357,9 @@ impl SimpleTransaction {
                 msg_data.extend_from_slice(data);
 
                 // Emit message output
-                let payload = MsgPayload::from_bytes(BitcoinAmount::from(*value), msg_data)
+                let value =
+                    BitcoinAmount::try_from(*value).map_err(|_| EnvError::InvalidBlockTx)?;
+                let payload = MsgPayload::from_bytes(value, msg_data)
                     .map_err(|_| EnvError::InvalidBlockTx)?;
                 let message = OutputMessage::new(*dest_account, payload);
                 outputs.add_message(message);
