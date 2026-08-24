@@ -1,11 +1,26 @@
+import json
 import shutil
 import subprocess
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from common.config.config import BitcoindConfig
+from common.config.params import GenesisAccountData
 
 DEFAULT_OL_BLOCK_TIME_MS = 5_000
+
+# Matches DEFAULT_ALPEN_EE_ACCOUNT_ID in alpen-ee-params.
+ALPEN_EE_ACCOUNT_ID = "01" * 32
+
+# Genesis inner state root of the EE account per chain spec. Keep in sync with
+# GENESIS_INNER_STATE_ROOTS in crates/alpen-ee/genesis/src/utils.rs, which
+# pins the same values against the real computation.
+GENESIS_INNER_STATE_ROOTS = {
+    "dev": "a0a5f13344251d480f42dc85cabe0ca6dffa168e67ad32a9224970383baa63be",
+    "devnet": "185eea4e22a815a87a512843c279e42f87f9b57432d29abfe35b4ccfc0da1a1e",
+    "testnet": "2a82d8daab762ffd91786783f47ca123d7d2206982533748697413e21c05f4b2",
+    "testnet3": "87da9f8fd94022e63d24f05207dffd8a513136d1b07d68c0a350c47190085036",
+}
 
 
 def run_datatool(
@@ -151,57 +166,77 @@ def generate_ol_params(
     datadir: Path,
     bconfig: BitcoindConfig,
     genesis_l1_height: int,
-    ee_params_path: Path | None = None,
+    chain: str = "dev",
+    bridge_denomination_sats: int = 100_000_000,
+    max_withdrawal_amount_sats: int | None = 1_000_000_000,
+    max_withdrawal_descriptor_len: int = 81,
 ) -> Path:
-    """Generates OL params via ``strata-datatool gen-ol-params``."""
+    """Generates OL params via ``strata-datatool gen-ol-params``.
+
+    The EE account is pre-registered through ``--genesis-accounts``: strata
+    only stores the entry, it cannot derive one, since the inner state root
+    belongs to the EE.
+    """
     params_path = datadir / "ol-params.json"
 
     args = [
         "gen-ol-params",
-        "--alpen-predicate",
-        "bip340-schnorr-test",
         "--genesis-l1-height",
         str(genesis_l1_height),
+        "--bridge-denomination-sats",
+        str(bridge_denomination_sats),
+        "--max-withdrawal-descriptor-len",
+        str(max_withdrawal_descriptor_len),
+        "--genesis-accounts",
+        str(write_genesis_accounts(datadir, chain)),
         "-o",
         str(params_path),
     ]
-    if ee_params_path is not None:
-        args.extend(["--ee-params", str(ee_params_path)])
+    if max_withdrawal_amount_sats is not None:
+        args.extend(["--max-withdrawal-amount-sats", str(max_withdrawal_amount_sats)])
 
     run_datatool(args, bconfig)
     return params_path
 
 
+def write_genesis_accounts(datadir: Path, chain: str = "dev") -> Path:
+    """Writes the genesis snark account entry for the EE and returns its path.
+
+    The inner state root is the SSZ tree hash of the EE genesis account state,
+    so it cannot be computed here. ``alpen-ee-genesis`` pins the same values in
+    ``genesis_inner_state_roots_are_stable`` and fails if EE genesis moves.
+    """
+    accounts_path = datadir / "genesis-accounts.json"
+    account = GenesisAccountData(inner_state=GENESIS_INNER_STATE_ROOTS[chain])
+    accounts_path.write_text(json.dumps({ALPEN_EE_ACCOUNT_ID: asdict(account)}, indent=2))
+    return accounts_path
+
+
 def generate_ee_params(
     datadir: Path,
-    alpen_chain_config: str | None = None,
     bridge_denomination_sats: int = 100_000_000,
     max_withdrawal_amount_sats: int | None = 1_000_000_000,
     max_withdrawal_descriptor_len: int = 81,
 ) -> Path:
-    """Generates EE params via ``strata-datatool gen-ee-params``.
+    """Writes ``ee-params.json`` into ``datadir`` and returns its path.
+
+    Written here rather than by datatool: strata dropped ``gen-ee-params``
+    when it dropped the EE stack, and the artifact is plain data.
 
     The bridge params defaults mirror ``compose_alpen_params``'s defaults so
     the ee-params.json embedded bridge params (used for OL/ASM genesis) agree
     with the alpen-params.json bridge params (used by the EE node at runtime).
     """
     params_path = datadir / "ee-params.json"
-
-    args = [
-        "gen-ee-params",
-        "-o",
-        str(params_path),
-        "--bridge-denomination-sats",
-        str(bridge_denomination_sats),
-        "--max-withdrawal-descriptor-len",
-        str(max_withdrawal_descriptor_len),
-    ]
-    if alpen_chain_config is not None:
-        args.extend(["--alpen-chain-config", alpen_chain_config])
-    if max_withdrawal_amount_sats is not None:
-        args.extend(["--max-withdrawal-amount-sats", str(max_withdrawal_amount_sats)])
-
-    run_datatool(args)
+    params = {
+        "account_id": ALPEN_EE_ACCOUNT_ID,
+        "bridge_params": {
+            "denomination": bridge_denomination_sats,
+            "max_withdrawal_amount": max_withdrawal_amount_sats,
+            "max_withdrawal_descriptor_len": max_withdrawal_descriptor_len,
+        },
+    }
+    params_path.write_text(json.dumps(params, indent=2))
     return params_path
 
 

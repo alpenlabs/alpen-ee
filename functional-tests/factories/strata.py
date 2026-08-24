@@ -188,7 +188,6 @@ class StrataFactory(flexitest.Factory):
                     datadir,
                     bconfig,
                     genesis_l1_height,
-                    ee_params_path=ee_params_path,
                 )
 
             # Generate ASM params via datatool (computes correct genesis_ol_blkid from OL params).

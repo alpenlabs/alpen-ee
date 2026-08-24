@@ -1330,6 +1330,8 @@ dependencies = [
  "alpen-ee-common",
  "alpen-ee-params",
  "eyre",
+ "hex",
+ "serde_json",
  "strata-acct-types",
  "strata-ee-acct-types",
  "strata-ee-chain-types",
