@@ -39,6 +39,7 @@ class AlpenClientEnvParams:
     da_magic_bytes: bytes = b"ALPN"
     l1_reorg_safe_depth: int = 2
     batch_sealing_block_count: int = 10
+    chunk_sealing_block_count: int | None = None
     epoch_tracking_mode: str = "confirmed"
     beneficiary_address: str | None = None
     prover: ProverBackend = NATIVE_BACKEND
@@ -166,6 +167,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
             ee_params_path=ee_params_path,
             da_config=da_config,
             batch_sealing_block_count=envparams.batch_sealing_block_count,
+            chunk_sealing_block_count=envparams.chunk_sealing_block_count,
             epoch_tracking_mode=envparams.epoch_tracking_mode,
             beneficiary_address=envparams.beneficiary_address,
             prover=envparams.prover,
