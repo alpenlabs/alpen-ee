@@ -1,3 +1,8 @@
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc, Mutex,
+};
+
 use alpen_ee_common::{
     exec_block_storage_test_fns::create_exec_block, Batch, BatchId, BatchStorage, BlockNumHash,
     Chunk, ChunkStorage, InMemoryStorage, MockChunkStorage, MockExecBlockStorage, StorageError,
@@ -1059,4 +1064,133 @@ async fn failed_chunk_write_keeps_the_accumulated_blocks() {
         "the block must stay accumulated so the next seal still covers it"
     );
     assert_eq!(state.prev_chunk_end(), genesis, "no chunk was sealed");
+}
+
+/// A failed batch-chunk linkage must leave the boundary queued and the sealed
+/// chunk IDs in state. Taking either before the write loses it: this state
+/// isn't persisted, and `current_batch_idx` would never advance, so every
+/// later block would fail the batch_idx check.
+#[tokio::test]
+async fn failed_batch_linkage_keeps_the_boundary_queued() {
+    let genesis = test_block(0);
+    let mut state = new_state(genesis);
+
+    let mut chunk_storage = MockChunkStorage::new();
+    chunk_storage
+        .expect_get_batch_chunks()
+        .returning(|_| Ok(None));
+    chunk_storage.expect_save_next_chunk().returning(|_| Ok(()));
+    chunk_storage
+        .expect_set_batch_chunks()
+        .returning(|_, _| Err(StorageError::Database("transient".to_string())));
+
+    // A cap high enough that only the batch boundary can seal.
+    let policy = FixedBlockCountSealing::new(10);
+    state.push_pending(block(1, 1));
+    state.push_pending(boundary(0, 1));
+
+    let result =
+        process_pending::<BlockCountPolicy, FixedBlockCountSealing, BlockCountDataProvider>(
+            &mut state,
+            &chunk_storage,
+            &policy,
+            &BlockCountDataProvider,
+        )
+        .await;
+
+    assert!(result.is_err(), "a failed linkage write must surface");
+    assert!(
+        matches!(state.peek_pending(), Some(PendingEntry::BatchBoundary(id)) if *id
+            == test_batch_id(0, 1)),
+        "the boundary must stay at the front of the queue for the next tick"
+    );
+    assert_eq!(
+        state.current_batch_chunks().len(),
+        1,
+        "the sealed chunk must stay listed so the retry links it"
+    );
+    assert_eq!(
+        state.current_batch_idx(),
+        1,
+        "the batch must not be counted as done"
+    );
+}
+
+/// Retrying a boundary after a failed linkage write must link the chunk the
+/// first attempt already sealed, and not seal a second one.
+#[tokio::test]
+async fn retried_batch_boundary_links_the_already_sealed_chunk() {
+    let genesis = test_block(0);
+    let mut state = new_state(genesis);
+
+    let saved_chunks = Arc::new(AtomicUsize::new(0));
+    let linked = Arc::new(Mutex::new(Vec::new()));
+    let attempts = Arc::new(AtomicUsize::new(0));
+
+    let mut chunk_storage = MockChunkStorage::new();
+    chunk_storage
+        .expect_get_batch_chunks()
+        .returning(|_| Ok(None));
+    let saved = saved_chunks.clone();
+    chunk_storage.expect_save_next_chunk().returning(move |_| {
+        saved.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    });
+    let linked_writes = linked.clone();
+    let attempt_count = attempts.clone();
+    chunk_storage
+        .expect_set_batch_chunks()
+        .returning(move |_, chunks| {
+            // Fail the first attempt only.
+            if attempt_count.fetch_add(1, Ordering::SeqCst) == 0 {
+                return Err(StorageError::Database("transient".to_string()));
+            }
+            linked_writes.lock().unwrap().push(chunks);
+            Ok(())
+        });
+
+    let policy = FixedBlockCountSealing::new(10);
+    state.push_pending(block(1, 1));
+    state.push_pending(boundary(0, 1));
+
+    let first =
+        process_pending::<BlockCountPolicy, FixedBlockCountSealing, BlockCountDataProvider>(
+            &mut state,
+            &chunk_storage,
+            &policy,
+            &BlockCountDataProvider,
+        )
+        .await;
+    assert!(first.is_err(), "the first linkage write must fail");
+
+    process_pending::<BlockCountPolicy, FixedBlockCountSealing, BlockCountDataProvider>(
+        &mut state,
+        &chunk_storage,
+        &policy,
+        &BlockCountDataProvider,
+    )
+    .await
+    .expect("the retry must succeed");
+
+    assert_eq!(
+        saved_chunks.load(Ordering::SeqCst),
+        1,
+        "the retry must not seal a second chunk"
+    );
+    assert_eq!(
+        linked.lock().unwrap().as_slice().len(),
+        1,
+        "exactly one linkage write must land"
+    );
+    assert_eq!(
+        linked.lock().unwrap()[0].len(),
+        1,
+        "the linkage must cover the chunk the first attempt sealed"
+    );
+    assert!(!state.has_pending(), "the boundary must be consumed");
+    assert!(
+        state.current_batch_chunks().is_empty(),
+        "the chunk IDs must be released once the linkage is durable"
+    );
+    assert_eq!(state.current_batch_idx(), 2, "the batch must be done");
 }
