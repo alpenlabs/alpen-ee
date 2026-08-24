@@ -18,6 +18,13 @@ case "$EE_PROVER_BACKEND" in
 esac
 export EE_PROVER_BACKEND
 
+# Real proving takes minutes, not the near-instant native signing, so Reth's
+# chatty engine/trie debug logs pile up enough to drown the service log.
+if [ "$EE_PROVER_BACKEND" = sp1 ]; then
+  RUST_LOG="$RUST_LOG,engine::tree=info,trie=info,payload_builder=info"
+  export RUST_LOG
+fi
+
 # Sets up PATH for built binaries.
 setup_path() {
     if [ "$CARGO_RELEASE" = 1 ] || [ "$EE_PROVER_BACKEND" = sp1 ]; then
