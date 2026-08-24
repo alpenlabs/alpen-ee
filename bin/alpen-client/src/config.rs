@@ -8,6 +8,7 @@
 //! module.
 
 use std::{
+    collections::BTreeSet,
     num::{NonZeroU64, NonZeroUsize},
     path::PathBuf,
 };
@@ -16,6 +17,7 @@ use alloy_primitives::{address, Address};
 use alpen_ee_ol_tracker::EpochTrackingMode;
 #[cfg(feature = "sequencer")]
 use alpen_ee_params::AlpenParams;
+use alpen_ee_params::AlpenSpecId;
 use serde::{de::Error as DeError, Deserialize, Deserializer, Serialize};
 use strata_config::{btcio::L1FeePolicyConfig, BitcoindConfig};
 use strata_primitives::{buf::Buf32, L1Height};
@@ -237,6 +239,23 @@ pub(crate) struct SequencerMode {
     pub(crate) genesis_l1_height: L1Height,
 }
 
+/// One `[[sequencer.prover.programs]]` entry: the spec version a program is
+/// built for, plus its chunk + acct path pair (ELF paths under the `sp1`
+/// backend, signing-key file paths under `native`). Kept as one table so the
+/// three can't be mismatched by being configured as separate lists.
+///
+/// The operator declares `spec_version` explicitly rather than it being
+/// derived: the process resolves all resident programs into a
+/// version-indexed set at startup (see `sequencer::prover::backend`), and
+/// routes each batch's proof request to whichever program's declared version
+/// matches that batch's own governing `AlpenSpecId`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct ProverProgramPaths {
+    pub(crate) spec_version: AlpenSpecId,
+    pub(crate) chunk_path: PathBuf,
+    pub(crate) acct_path: PathBuf,
+}
+
 /// `[sequencer.prover]` — which EE chunk/acct prover backend to run.
 ///
 /// Tagged on `backend`, so each backend names only the fields it needs and
@@ -246,29 +265,70 @@ pub(crate) struct SequencerMode {
 ///
 /// Holds paths rather than file contents: reading is left to whoever
 /// actually builds the backend.
+///
+/// `programs` holds one or more resident programs (see
+/// [`ProverProgramPaths`]). An operator straddling a VK rotation configures
+/// both the currently-active and the not-yet-active program ahead of time,
+/// so the sequencer keeps proving correctly across the rotation without a
+/// restart.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "backend", rename_all = "snake_case")]
 pub(crate) enum ProverBackendConfig {
-    /// zkaleido `NativeHost`, signing chunk/acct proofs with the keys read
-    /// from the given files instead of doing real ZK proving.
+    /// zkaleido `NativeHost`s, signing chunk/acct proofs with the keys read
+    /// from each program's files instead of doing real ZK proving.
     ///
-    /// The account key has to match whatever the OL genesis `update_vk`
-    /// expects, or the predicate-key check at startup fails.
-    Native {
-        chunk_signing_key_path: PathBuf,
-        acct_signing_key_path: PathBuf,
-    },
-    /// SP1 remote host. Needs the `sp1` feature compiled in.
+    /// One program's account key has to match whatever the OL `update_vk`
+    /// expects right now, or the predicate-key check at startup fails.
+    Native { programs: Vec<ProverProgramPaths> },
+    /// SP1 remote hosts. Needs the `sp1` feature compiled in.
+    ///
+    /// Each program's paths are the compiled SP1 guest ELFs. Explicit so one
+    /// `alpen-client` build can run against different guest ELFs without a
+    /// rebuild.
     Sp1 {
         /// Falls back to `DEFAULT_SP1_DEADLINE_SECS` when unset, so nothing
         /// is resolved here.
         deadline_secs: Option<u64>,
-        /// Paths to the compiled SP1 guest ELFs. Explicit so one
-        /// `alpen-client` build can run against different guest ELFs
-        /// without a rebuild.
-        chunk_elf_path: PathBuf,
-        acct_elf_path: PathBuf,
+        programs: Vec<ProverProgramPaths>,
     },
+}
+
+impl ProverBackendConfig {
+    /// The resident programs, whichever backend was selected.
+    pub(crate) fn programs(&self) -> &[ProverProgramPaths] {
+        match self {
+            Self::Native { programs } | Self::Sp1 { programs, .. } => programs,
+        }
+    }
+
+    /// Rejects a program list that can't be routed: empty, or declaring the
+    /// same spec version twice.
+    ///
+    /// Checked here rather than at prover startup so a bad config fails
+    /// before any node, DB, or DA work begins. Only the version keys are
+    /// checked, not that the paths exist or parse — reading them is left to
+    /// whoever actually builds the backend.
+    fn validate(&self) -> eyre::Result<()> {
+        let programs = self.programs();
+        if programs.is_empty() {
+            return Err(eyre::eyre!(
+                "sequencer.prover needs at least one [[sequencer.prover.programs]] entry"
+            ));
+        }
+
+        let mut seen = BTreeSet::new();
+        for program in programs {
+            if !seen.insert(program.spec_version) {
+                return Err(eyre::eyre!(
+                    "multiple [[sequencer.prover.programs]] entries declare spec version {}; \
+                     each resident version may have exactly one program",
+                    program.spec_version
+                ));
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -416,6 +476,7 @@ impl TryFrom<AlpenClientConfigFile> for AlpenClientConfig {
                     let seq = raw.sequencer.ok_or_else(|| {
                         eyre::eyre!("[sequencer] table required when mode = \"sequencer\"")
                     })?;
+                    seq.prover.validate()?;
                     NodeMode::Sequencer(SequencerMode {
                         config: seq,
                         l1_reorg_safe_depth: raw.l1_reorg_safe_depth,
@@ -572,8 +633,10 @@ mod tests {
             [sequencer]
             [sequencer.prover]
             backend = "native"
-            chunk_signing_key_path = "/tmp/chunk.key"
-            acct_signing_key_path = "/tmp/acct.key"
+            [[sequencer.prover.programs]]
+            spec_version = "v0"
+            chunk_path = "/tmp/chunk.key"
+            acct_path = "/tmp/acct.key"
             [sequencer.bitcoind]
             rpc_url = "http://bitcoind:18443"
             rpc_user = "user"
@@ -594,8 +657,10 @@ mod tests {
             [sequencer]
             [sequencer.prover]
             backend = "native"
-            chunk_signing_key_path = "/tmp/chunk.key"
-            acct_signing_key_path = "/tmp/acct.key"
+            [[sequencer.prover.programs]]
+            spec_version = "v0"
+            chunk_path = "/tmp/chunk.key"
+            acct_path = "/tmp/acct.key"
             [sequencer.bitcoind]
             rpc_url = "http://bitcoind:18443"
             rpc_user = "user"
@@ -681,46 +746,111 @@ mod tests {
         let native = prover_backend(
             r#"
             backend = "native"
-            chunk_signing_key_path = "/tmp/chunk.key"
-            acct_signing_key_path = "/tmp/acct.key"
+            [[sequencer.prover.programs]]
+            spec_version = "v0"
+            chunk_path = "/tmp/chunk.key"
+            acct_path = "/tmp/acct.key"
             "#,
         )
         .unwrap();
-        let ProverBackendConfig::Native {
-            chunk_signing_key_path,
-            acct_signing_key_path,
-        } = native
-        else {
+        let ProverBackendConfig::Native { programs } = native else {
             panic!("expected the native backend");
         };
-        assert_eq!(chunk_signing_key_path, PathBuf::from("/tmp/chunk.key"));
-        assert_eq!(acct_signing_key_path, PathBuf::from("/tmp/acct.key"));
+        assert_eq!(
+            programs,
+            [ProverProgramPaths {
+                spec_version: AlpenSpecId::V0,
+                chunk_path: PathBuf::from("/tmp/chunk.key"),
+                acct_path: PathBuf::from("/tmp/acct.key"),
+            }]
+        );
 
         let err = prover_backend(
             r#"
             backend = "sp1"
-            acct_elf_path = "/tmp/acct.elf"
             "#,
         )
         .unwrap_err();
-        assert!(err.to_string().contains("chunk_elf_path"), "{err}");
+        assert!(err.to_string().contains("programs"), "{err}");
 
-        // A native key path means nothing to the sp1 backend, so it reads as
-        // the unknown field it is rather than being dropped.
+        // The old flat per-backend path keys mean nothing now, so they read
+        // as the unknown fields they are rather than being dropped.
         let err = prover_backend(
             r#"
             backend = "sp1"
-            chunk_elf_path = "/tmp/chunk.elf"
             acct_elf_path = "/tmp/acct.elf"
-            acct_signing_key_path = "/tmp/acct.key"
+            [[sequencer.prover.programs]]
+            spec_version = "v0"
+            chunk_path = "/tmp/chunk.elf"
+            acct_path = "/tmp/acct.elf"
             "#,
         )
         .unwrap_err();
         assert!(
-            err.to_string()
-                .contains("sequencer.prover.acct_signing_key_path"),
+            err.to_string().contains("sequencer.prover.acct_elf_path"),
             "{err}"
         );
+    }
+
+    /// A program list that can't route a batch is rejected when the config is
+    /// parsed, not later at prover startup.
+    #[cfg(feature = "sequencer")]
+    #[test]
+    fn prover_programs_must_be_non_empty_and_uniquely_versioned() {
+        fn sequencer_toml(programs: &str) -> String {
+            format!(
+                r#"
+                mode = "sequencer"
+                [ol]
+                source = "dummy"
+                [sequencer]
+                [sequencer.prover]
+                backend = "native"
+                {programs}
+                [sequencer.bitcoind]
+                rpc_url = "http://bitcoind:18443"
+                rpc_user = "user"
+                rpc_password = "pass"
+                network = "regtest"
+                [sequencer.l1_fee_policy]
+                fee_policy = "bitcoind"
+            "#
+            )
+        }
+
+        let err = AlpenClientConfig::from_toml_str(&sequencer_toml("programs = []")).unwrap_err();
+        assert!(err.to_string().contains("at least one"), "{err}");
+
+        let err = AlpenClientConfig::from_toml_str(&sequencer_toml(
+            r#"
+            [[sequencer.prover.programs]]
+            spec_version = "v0"
+            chunk_path = "/tmp/chunk-a.key"
+            acct_path = "/tmp/acct-a.key"
+            [[sequencer.prover.programs]]
+            spec_version = "v0"
+            chunk_path = "/tmp/chunk-b.key"
+            acct_path = "/tmp/acct-b.key"
+            "#,
+        ))
+        .unwrap_err();
+        assert!(err.to_string().contains("declare spec version v0"), "{err}");
+
+        // Two versions resident at once is the point: it's what lets the
+        // sequencer keep proving across a rotation without a restart.
+        AlpenClientConfig::from_toml_str(&sequencer_toml(
+            r#"
+            [[sequencer.prover.programs]]
+            spec_version = "v0"
+            chunk_path = "/tmp/chunk-v0.key"
+            acct_path = "/tmp/acct-v0.key"
+            [[sequencer.prover.programs]]
+            spec_version = "v1"
+            chunk_path = "/tmp/chunk-v1.key"
+            acct_path = "/tmp/acct-v1.key"
+            "#,
+        ))
+        .unwrap();
     }
 
     #[test]
@@ -747,8 +877,10 @@ mod tests {
             [sequencer]
             [sequencer.prover]
             backend = "native"
-            chunk_signing_key_path = "/tmp/chunk.key"
-            acct_signing_key_path = "/tmp/acct.key"
+            [[sequencer.prover.programs]]
+            spec_version = "v0"
+            chunk_path = "/tmp/chunk.key"
+            acct_path = "/tmp/acct.key"
             [sequencer.bitcoind]
             rpc_url = "http://bitcoind:18443"
             rpc_user = "user"
@@ -800,8 +932,10 @@ mod tests {
                 {field}
                 [sequencer.prover]
                 backend = "native"
-                chunk_signing_key_path = "/tmp/chunk.key"
-                acct_signing_key_path = "/tmp/acct.key"
+                [[sequencer.prover.programs]]
+                spec_version = "v0"
+                chunk_path = "/tmp/chunk.key"
+                acct_path = "/tmp/acct.key"
                 [sequencer.bitcoind]
                 rpc_url = "http://bitcoind:18443"
                 rpc_user = "user"
@@ -829,8 +963,10 @@ mod tests {
             [sequencer]
             [sequencer.prover]
             backend = "native"
-            chunk_signing_key_path = "/tmp/chunk.key"
-            acct_signing_key_path = "/tmp/acct.key"
+            [[sequencer.prover.programs]]
+            spec_version = "v0"
+            chunk_path = "/tmp/chunk.key"
+            acct_path = "/tmp/acct.key"
             [sequencer.bitcoind]
             rpc_url = "http://bitcoind:18443"
             rpc_user = "user"

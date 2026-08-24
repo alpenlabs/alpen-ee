@@ -24,6 +24,7 @@ use std::sync::Arc;
 
 use alpen_ee_common::{BatchId, Proof, ProofId};
 use alpen_ee_database::EeProverDbSled;
+use alpen_ee_params::AlpenSpecId;
 use strata_db_types::{errors::DbError, prover_task::ProverTaskDatabase};
 use strata_paas::{
     ProverError, ProverResult, ReceiptStore, TaskRecord, TaskRecordData, TaskStatus, TaskStore,
@@ -115,6 +116,108 @@ impl TaskStore for EeProverTaskDbManager {
 
     fn count(&self) -> ProverResult<usize> {
         self.db.count_tasks().map_err(db_err)
+    }
+}
+
+/// Scopes a shared [`TaskStore`] to the tasks submitted for one resident
+/// spec version.
+///
+/// Chunk and acct tasks for every resident `--prover-program` candidate
+/// share one physical sled tree ([`EeProverTaskDbManager`]'s doc comment).
+/// That's fine for `get`/`insert`/`update_status`, which are always called
+/// with a specific key. But `Prover::tick`/`recover` (in `strata-paas`)
+/// re-spawn work by scanning the *entire* task store for retriable/
+/// unfinished records, with no notion of which resident version's `Prover`
+/// submitted a given task. If two versions' `Prover<H>` instances shared
+/// that store directly, either one's background poll loop could claim and
+/// sign a task meant for the other -- proving it with the wrong VK. This
+/// wrapper prefixes every physical key with the version's discriminant
+/// before touching the shared store, and strips the prefix back off before
+/// handing records to paas, so `decode_task_key::<H>` still sees exactly
+/// the bytes `H::Task::into()` produced: each version's `tick`/`recover`
+/// only ever observes its own tasks.
+#[derive(Clone)]
+pub(crate) struct VersionedTaskStore {
+    inner: Arc<dyn TaskStore>,
+    prefix: [u8; 2],
+}
+
+impl VersionedTaskStore {
+    pub(crate) fn new(inner: Arc<dyn TaskStore>, version: AlpenSpecId) -> Self {
+        Self {
+            inner,
+            prefix: u16::from(version).to_be_bytes(),
+        }
+    }
+
+    fn prefixed(&self, key: &[u8]) -> Vec<u8> {
+        let mut prefixed = Vec::with_capacity(self.prefix.len() + key.len());
+        prefixed.extend_from_slice(&self.prefix);
+        prefixed.extend_from_slice(key);
+        prefixed
+    }
+
+    /// Strips this instance's prefix off a record fetched from the shared
+    /// store, or `None` if the record belongs to a different version.
+    fn strip_prefix(&self, record: TaskRecord) -> Option<TaskRecord> {
+        let stripped = record.key().strip_prefix(self.prefix.as_slice())?.to_vec();
+        Some(TaskRecord::from_parts(stripped, record.data().clone()))
+    }
+}
+
+impl TaskStore for VersionedTaskStore {
+    fn get(&self, key: &[u8]) -> ProverResult<Option<TaskRecord>> {
+        Ok(self
+            .inner
+            .get(&self.prefixed(key))?
+            .map(|record| TaskRecord::from_parts(key.to_vec(), record.data().clone())))
+    }
+
+    fn insert(&self, record: TaskRecord) -> ProverResult<()> {
+        let prefixed_key = self.prefixed(record.key());
+        self.inner
+            .insert(TaskRecord::from_parts(prefixed_key, record.data().clone()))
+    }
+
+    fn update_status(&self, key: &[u8], status: TaskStatus) -> ProverResult<()> {
+        self.inner.update_status(&self.prefixed(key), status)
+    }
+
+    fn set_retry_after(&self, key: &[u8], when_secs: u64) -> ProverResult<()> {
+        self.inner.set_retry_after(&self.prefixed(key), when_secs)
+    }
+
+    fn set_metadata(&self, key: &[u8], data: Vec<u8>) -> ProverResult<()> {
+        self.inner.set_metadata(&self.prefixed(key), data)
+    }
+
+    fn clear_metadata(&self, key: &[u8]) -> ProverResult<()> {
+        self.inner.clear_metadata(&self.prefixed(key))
+    }
+
+    fn list_retriable(&self, now_secs: u64) -> ProverResult<Vec<TaskRecord>> {
+        Ok(self
+            .inner
+            .list_retriable(now_secs)?
+            .into_iter()
+            .filter_map(|record| self.strip_prefix(record))
+            .collect())
+    }
+
+    fn list_unfinished(&self) -> ProverResult<Vec<TaskRecord>> {
+        Ok(self
+            .inner
+            .list_unfinished()?
+            .into_iter()
+            .filter_map(|record| self.strip_prefix(record))
+            .collect())
+    }
+
+    /// Approximate: counts only this version's *unfinished* tasks, since the
+    /// shared store exposes no prefix-scoped total count. Diagnostic-only
+    /// today (nothing in this codebase calls `TaskStore::count`).
+    fn count(&self) -> ProverResult<usize> {
+        Ok(self.list_unfinished()?.len())
     }
 }
 
