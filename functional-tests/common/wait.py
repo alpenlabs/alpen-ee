@@ -120,7 +120,7 @@ def wait_until_with_value(
 def wait_for_account_update_seq(
     rpc,
     account_id_hex: str,
-    min_next_seq_no: int,
+    min_seq_no: int,
     start_epoch: int,
     btc_rpc,
     miner_addr: str,
@@ -128,7 +128,12 @@ def wait_for_account_update_seq(
     blocks_per_step: int = 4,
     poll: float = 1.0,
 ) -> int:
-    """Wait until OL terminal epoch summaries include the submitted update."""
+    """Wait until OL terminal epoch summaries include the submitted update.
+
+    `min_seq_no` is an operation sequence number, matching what epoch
+    summaries report under `update_inputs[].seq_no`. Returns the epoch
+    whose summary carried the match.
+    """
     deadline = time.time() + timeout
     last_terminal_epoch = start_epoch
     last_seen_seq_no = -1
@@ -147,9 +152,9 @@ def wait_for_account_update_seq(
             for update in updates:
                 seq_no = int(update.get("seq_no", -1))
                 last_seen_seq_no = max(last_seen_seq_no, seq_no)
-                if seq_no >= min_next_seq_no:
+                if seq_no >= min_seq_no:
                     return epoch
     raise AssertionError(
-        f"account update seq_no >= {min_next_seq_no} not found from epoch {start_epoch}; "
+        f"account update seq_no >= {min_seq_no} not found from epoch {start_epoch}; "
         f"last_terminal_epoch={last_terminal_epoch}, last_seen_seq_no={last_seen_seq_no}"
     )

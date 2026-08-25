@@ -252,13 +252,16 @@ class TestEeProverPipelineAlive(BaseTest):
 
         # Same reasoning as the log baseline, for the OL side: updates may
         # already have landed during the env warm-up, so stage 4 has to
-        # require an update past where the account stands *now*, and only
-        # scan epochs from here forward.
+        # require an update from where the account stands *now*, and only
+        # scan epochs from here forward. The account state's `seq_no` is
+        # the *next* operation number the OL will accept, so it is itself
+        # the number the next update carries.
         baseline_state = strata_rpc.strata_getSnarkAccountStateByTag(ALPEN_ACCOUNT_ID, "latest")
         baseline_seq_no = int(baseline_state["seq_no"]) if baseline_state else 0
         start_terminal_epoch = int(strata_rpc.strata_getChainStatus()["latest"]["epoch"])
         logger.info(
-            f"OL baseline anchored at account seq_no={baseline_seq_no} epoch={start_terminal_epoch}"
+            f"OL baseline anchored at next account seq_no={baseline_seq_no} "
+            f"epoch={start_terminal_epoch}"
         )
 
         # (a) Transfer recipient balance moved by exactly the expected amount.
@@ -373,14 +376,14 @@ class TestEeProverPipelineAlive(BaseTest):
         saw_update_at_epoch = wait_for_account_update_seq(
             strata_rpc,
             ALPEN_ACCOUNT_ID,
-            min_next_seq_no=baseline_seq_no + 1,
+            min_seq_no=baseline_seq_no,
             start_epoch=start_terminal_epoch,
             btc_rpc=btc_rpc,
             miner_addr=miner_addr,
             timeout=SIGNAL_TIMEOUT_SECS,
         )
         logger.info(
-            f"OL accepted an update past seq_no={baseline_seq_no} at epoch {saw_update_at_epoch}"
+            f"OL accepted an update at seq_no>={baseline_seq_no} in epoch {saw_update_at_epoch}"
         )
 
         # Negative check: no permanent failure in the post-baseline window.
