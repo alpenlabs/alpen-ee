@@ -56,7 +56,7 @@ from common.evm import (
     send_eth_transfer,
 )
 from common.evm_utils import wait_for_receipt
-from common.prover_backend import resolve_prover_backend
+from common.prover_backend import ProverBackend, resolve_prover_backend
 from common.services.alpen_client import AlpenClientService
 from common.services.bitcoin import BitcoinService
 from common.services.strata import StrataService
@@ -84,6 +84,25 @@ SIGNAL_TIMEOUT_SECS = 180
 
 # Service logs include tracing ANSI colour codes even when written to file.
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+# EE blocks per sealed batch. Each sealed batch costs one chunk proof
+# plus one acct proof.
+#
+# Native proofs are signatures, so they are free. Seal often and the test
+# reaches its log signals sooner.
+#
+# SP1 proofs are real: each costs money and takes about a minute. Sealing
+# often does not make the test finish sooner, because it only needs one
+# batch to get through the pipeline. So seal rarely and buy fewer proofs.
+NATIVE_BATCH_SEALING_BLOCK_COUNT = 3
+SP1_BATCH_SEALING_BLOCK_COUNT = 10
+
+
+def batch_sealing_block_count(prover: ProverBackend) -> int:
+    """EE blocks per sealed batch for `prover`."""
+    if prover.backend == "sp1":
+        return SP1_BATCH_SEALING_BLOCK_COUNT
+    return NATIVE_BATCH_SEALING_BLOCK_COUNT
 
 
 def _ee_log_path(alpen_service: AlpenClientService) -> Path:
@@ -151,12 +170,8 @@ class TestEeProverPipelineAlive(BaseTest):
     the native dev prover and, under `EE_PROVER_BACKEND=sp1`, the real
     Sp1Groth16 path."""
 
-    # Tighter than the shared `el_ol` env's default (10): smaller batches
-    # mean more chunk/acct proofs per unit of EVM activity, which keeps
-    # the test fast while still exercising the full pipeline multiple times.
-    BATCH_SEALING_BLOCK_COUNT = 3
-
     def __init__(self, ctx: flexitest.InitContext):
+        prover = resolve_prover_backend()
         # Inline env instance — flexitest gives this test its own private
         # alpen-client + strata + bitcoin trio rather than reusing a
         # shared instance. We need the log file to ourselves so we can
@@ -166,8 +181,8 @@ class TestEeProverPipelineAlive(BaseTest):
             EeOLEnv(
                 fullnode_count=0,
                 pre_generate_blocks=110,
-                batch_sealing_block_count=self.BATCH_SEALING_BLOCK_COUNT,
-                prover=resolve_prover_backend(),
+                batch_sealing_block_count=batch_sealing_block_count(prover),
+                prover=prover,
             )
         )
 
