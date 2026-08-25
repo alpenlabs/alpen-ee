@@ -4,7 +4,7 @@ Drives a non-trivial *mix* of EVM activity through the EE — plain ETH
 transfers, storage-writing contract deployments, and large-runtime
 contract deployments — then verifies (a) every transaction's on-chain
 effect is correct and (b) the produced blocks roll through chunk-seal,
-chunk proof, acct proof, and OL submission in native dev-prover mode.
+chunk proof, acct proof, OL submission, and OL acceptance.
 
 The mix matters: it exercises different code paths in the chunk witness
 extraction:
@@ -29,6 +29,9 @@ zk proof generation itself is bypassed. So this test exercises:
   - The `EeChunkProgram` guest (per-block state transition checks, MPT validation)
   - The `EeAcctProgram` guest (update aggregation, pub-params construction)
   - The paas service framework (task lifecycle, receipt hooks, OL submission)
+  - The OL's own acceptance of the resulting update: the account's
+    `seq_no` only advances once the OL STF has verified the update proof
+    against the registered `update_vk`
 
 The test asserts via the service.log signals the rest of the codebase
 already produces — no storage poking, no new RPC surface. Each
@@ -45,7 +48,7 @@ from pathlib import Path
 import flexitest
 
 from common.base_test import BaseTest
-from common.config.constants import ServiceType
+from common.config.constants import ALPEN_ACCOUNT_ID, ServiceType
 from common.evm import (
     DEV_ACCOUNT_ADDRESS,
     deploy_large_runtime_contract,
@@ -56,7 +59,8 @@ from common.evm_utils import wait_for_receipt
 from common.prover_backend import resolve_prover_backend
 from common.services.alpen_client import AlpenClientService
 from common.services.bitcoin import BitcoinService
-from common.wait import wait_until_with_value
+from common.services.strata import StrataService
+from common.wait import wait_for_account_update_seq, wait_until_with_value
 from envconfigs.el_ol import EeOLEnv
 
 logger = logging.getLogger(__name__)
@@ -170,8 +174,10 @@ class TestEeProverPipelineAlive(BaseTest):
     def main(self, ctx):
         alpen_seq: AlpenClientService = self.get_service(ServiceType.AlpenSequencer)
         bitcoin: BitcoinService = self.get_service(ServiceType.Bitcoin)
+        strata_seq: StrataService = self.get_service(ServiceType.Strata)
         rpc = alpen_seq.create_rpc()
         btc_rpc = bitcoin.create_rpc()
+        strata_rpc = strata_seq.wait_for_rpc_ready(timeout=30)
         miner_addr = btc_rpc.proxy.getnewaddress()
         log_path = _ee_log_path(alpen_seq)
 
@@ -244,6 +250,17 @@ class TestEeProverPipelineAlive(BaseTest):
             f"log baseline anchored at offset={log_offset} after final tx block={final_block}"
         )
 
+        # Same reasoning as the log baseline, for the OL side: updates may
+        # already have landed during the env warm-up, so stage 4 has to
+        # require an update past where the account stands *now*, and only
+        # scan epochs from here forward.
+        baseline_state = strata_rpc.strata_getSnarkAccountStateByTag(ALPEN_ACCOUNT_ID, "latest")
+        baseline_seq_no = int(baseline_state["seq_no"]) if baseline_state else 0
+        start_terminal_epoch = int(strata_rpc.strata_getChainStatus()["latest"]["epoch"])
+        logger.info(
+            f"OL baseline anchored at account seq_no={baseline_seq_no} epoch={start_terminal_epoch}"
+        )
+
         # (a) Transfer recipient balance moved by exactly the expected amount.
         recipient_balance_after = int(rpc.eth_getBalance(TRANSFER_RECIPIENT, "latest"), 16)
         expected_balance = recipient_balance_before + TRANSFER_COUNT * TRANSFER_AMOUNT_WEI
@@ -300,7 +317,7 @@ class TestEeProverPipelineAlive(BaseTest):
             f"the same {LARGE_RUNTIME_SIZE}-byte runtime"
         )
 
-        # --- Stage 3: walk the four prover-pipeline stages ---
+        # --- Stage 3: walk the four prover-pipeline log signals ---
         #
         # Each signal must appear in the post-baseline log fragment.
         # Polling drives bitcoin block production so the batch DA window
@@ -346,6 +363,26 @@ class TestEeProverPipelineAlive(BaseTest):
             miner_addr=miner_addr,
         )
 
+        # --- Stage 4: the OL accepted the update ---
+        #
+        # The log signals above only prove the EE sent an update to the
+        # OL mempool. They say nothing about whether the OL took it.
+        # An update shows up in a terminal epoch summary only after the
+        # OL STF checked its proof against the account's registered
+        # `update_vk`, so that is what we wait on here.
+        saw_update_at_epoch = wait_for_account_update_seq(
+            strata_rpc,
+            ALPEN_ACCOUNT_ID,
+            min_next_seq_no=baseline_seq_no + 1,
+            start_epoch=start_terminal_epoch,
+            btc_rpc=btc_rpc,
+            miner_addr=miner_addr,
+            timeout=SIGNAL_TIMEOUT_SECS,
+        )
+        logger.info(
+            f"OL accepted an update past seq_no={baseline_seq_no} at epoch {saw_update_at_epoch}"
+        )
+
         # Negative check: no permanent failure in the post-baseline window.
         perm_fail_count = _count_log_matches(
             log_path,
@@ -359,7 +396,7 @@ class TestEeProverPipelineAlive(BaseTest):
 
         logger.info(
             "EE prover pipeline alive: %d varied EVM txs validated on-chain, "
-            "chunk + acct proofs landed end-to-end",
+            "chunk + acct proofs landed end-to-end and the OL accepted the update",
             total_tx,
         )
         return True
