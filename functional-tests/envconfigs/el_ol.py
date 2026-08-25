@@ -6,6 +6,7 @@ import flexitest
 
 from common.config.config import EpochSealingConfig
 from common.config.constants import ServiceType
+from common.prover_backend import NATIVE_BACKEND, ProverBackend
 from common.services.bitcoin import BitcoinService
 from common.services.strata import StrataService
 from envconfigs.alpen_client import AlpenClientEnv, AlpenClientEnvParams
@@ -41,6 +42,7 @@ class EeOLEnv(flexitest.EnvConfig):
         ol_block_time_ms: int | None = None,
         epoch_tracking_mode: str = "confirmed",
         batch_sealing_block_count: int = 10,
+        prover: ProverBackend = NATIVE_BACKEND,
     ):
         epoch_seal_config = (
             EpochSealingConfig.new_fixed_slot(seal_epoch_slots)
@@ -54,6 +56,7 @@ class EeOLEnv(flexitest.EnvConfig):
             pure_discovery=pure_discovery,
             mesh_bootnodes=mesh_bootnodes,
             batch_sealing_block_count=batch_sealing_block_count,
+            prover=prover,
             epoch_tracking_mode=epoch_tracking_mode,
         )
         self.strata_config = StrataEnvConfig(
@@ -62,6 +65,7 @@ class EeOLEnv(flexitest.EnvConfig):
             fund_test_cli_wallet=fund_test_cli_wallet,
             admin_confirmation_depth=admin_confirmation_depth,
             ol_block_time_ms=ol_block_time_ms,
+            prover=prover,
         )
 
         if pure_discovery and not enable_discovery:

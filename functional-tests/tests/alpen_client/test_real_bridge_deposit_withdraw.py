@@ -37,11 +37,10 @@ from common.base_test import BaseTest
 from common.bridge import submit_real_bridge_deposit
 from common.config.constants import ALPEN_ACCOUNT_ID, ServiceType
 from common.precompile import PRECOMPILE_BRIDGEOUT_ADDRESS, wait_for_receipt
-from common.rpc import RpcError
 from common.services.alpen_client import AlpenClientService
 from common.services.bitcoin import BitcoinProps, BitcoinService
 from common.services.strata import StrataService
-from common.wait import wait_until_with_value
+from common.wait import wait_for_account_update_seq, wait_until_with_value
 
 logger = logging.getLogger(__name__)
 
@@ -282,44 +281,6 @@ def wait_for_output_snark_update(
         time.sleep(poll)
     raise AssertionError(
         f"no alpen-client output SnarkAccountUpdate in {log_path} within {timeout}s"
-    )
-
-
-def wait_for_account_update_seq(
-    rpc,
-    account_id_hex: str,
-    min_next_seq_no: int,
-    start_epoch: int,
-    btc_rpc,
-    miner_addr: str,
-    timeout: int = 600,
-    blocks_per_step: int = 4,
-    poll: float = 1.0,
-) -> int:
-    """Wait until OL terminal epoch summaries include the submitted update."""
-    deadline = time.time() + timeout
-    last_terminal_epoch = start_epoch
-    last_seen_seq_no = -1
-    while time.time() < deadline:
-        btc_rpc.proxy.generatetoaddress(blocks_per_step, miner_addr)
-        time.sleep(poll)
-        status = rpc.strata_getChainStatus()
-        latest = status["latest"]
-        last_terminal_epoch = int(latest["epoch"])
-        for epoch in range(start_epoch, last_terminal_epoch + 1):
-            try:
-                summary = rpc.strata_getAccountEpochSummary(account_id_hex, epoch)
-            except RpcError:
-                continue
-            updates = (summary.get("update_inputs") or []) if summary else []
-            for update in updates:
-                seq_no = int(update.get("seq_no", -1))
-                last_seen_seq_no = max(last_seen_seq_no, seq_no)
-                if seq_no >= min_next_seq_no:
-                    return epoch
-    raise AssertionError(
-        f"account update seq_no >= {min_next_seq_no} not found from epoch {start_epoch}; "
-        f"last_terminal_epoch={last_terminal_epoch}, last_seen_seq_no={last_seen_seq_no}"
     )
 
 
@@ -586,7 +547,7 @@ class TestRealBridgeDepositWithdraw(BaseTest):
         saw_update_at_epoch = wait_for_account_update_seq(
             strata_rpc,
             ALPEN_ACCOUNT_ID,
-            min_next_seq_no=submitted_seq_no,
+            min_seq_no=submitted_seq_no,
             start_epoch=start_terminal_epoch,
             btc_rpc=btc_rpc,
             miner_addr=miner_addr,

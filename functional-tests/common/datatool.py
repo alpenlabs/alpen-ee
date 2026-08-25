@@ -166,6 +166,7 @@ def generate_ol_params(
     datadir: Path,
     bconfig: BitcoindConfig,
     genesis_l1_height: int,
+    alpen_predicate: str,
     chain: str = "dev",
     bridge_denomination_sats: int = 100_000_000,
     max_withdrawal_amount_sats: int | None = 1_000_000_000,
@@ -176,6 +177,10 @@ def generate_ol_params(
     The EE account is pre-registered through ``--genesis-accounts``: strata
     only stores the entry, it cannot derive one, since the inner state root
     belongs to the EE.
+
+    ``alpen_predicate`` is what that entry must accept proofs under, so it
+    comes from the prover backend the EE actually runs (see
+    ``common/prover_backend.py``).
     """
     params_path = datadir / "ol-params.json"
 
@@ -188,7 +193,7 @@ def generate_ol_params(
         "--max-withdrawal-descriptor-len",
         str(max_withdrawal_descriptor_len),
         "--genesis-accounts",
-        str(write_genesis_accounts(datadir, chain)),
+        str(write_genesis_accounts(datadir, alpen_predicate, chain)),
         "-o",
         str(params_path),
     ]
@@ -199,7 +204,7 @@ def generate_ol_params(
     return params_path
 
 
-def write_genesis_accounts(datadir: Path, chain: str = "dev") -> Path:
+def write_genesis_accounts(datadir: Path, predicate: str, chain: str = "dev") -> Path:
     """Writes the genesis snark account entry for the EE and returns its path.
 
     The inner state root is the SSZ tree hash of the EE genesis account state,
@@ -207,7 +212,7 @@ def write_genesis_accounts(datadir: Path, chain: str = "dev") -> Path:
     ``genesis_inner_state_roots_are_stable`` and fails if EE genesis moves.
     """
     accounts_path = datadir / "genesis-accounts.json"
-    account = GenesisAccountData(inner_state=GENESIS_INNER_STATE_ROOTS[chain])
+    account = GenesisAccountData(predicate=predicate, inner_state=GENESIS_INNER_STATE_ROOTS[chain])
     accounts_path.write_text(json.dumps({ALPEN_EE_ACCOUNT_ID: asdict(account)}, indent=2))
     return accounts_path
 

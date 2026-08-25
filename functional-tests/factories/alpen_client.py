@@ -16,42 +16,19 @@ from common.config import (
     AlpenFullNodeConfig,
     AlpenL1FeePolicyConfig,
     AlpenOlConfig,
-    AlpenProverConfig,
     AlpenSequencerConfig,
     BitcoindConfig,
     EeDaConfig,
 )
 from common.config.constants import DEFAULT_EE_BLOCK_TIME_MS
 from common.datatool import generate_ee_params
+from common.prover_backend import NATIVE_BACKEND, ProverBackend
 from common.services import AlpenClientProps, AlpenClientService
 
 
 def generate_p2p_secret_key() -> str:
     """Generate a random 32-byte hex-encoded P2P secret key."""
     return secrets.token_hex(32)
-
-
-# The native EE chunk/acct provers sign proofs with a Schnorr key instead of
-# doing real ZK proving. OL genesis (`strata-datatool gen-ol-params
-# --alpen-predicate bip340-schnorr-test`, see common/datatool.py) is
-# initialized to expect the acct proof signed by exactly this key -- see
-# `EeAcctProgram::test_signing_key` / `EeChunkProgram::test_signing_key` in
-# crates/proof-impl/alpen-{acct,chunk}. Signing with a different key still
-# produces a validly-signed proof, but OL checks it against that fixed
-# genesis value and will reject it. These are not secrets (unlike
-# SEQUENCER_PRIVATE_KEY): they're a fixed, publicly-known value both sides
-# agree on ahead of time.
-NATIVE_CHUNK_SIGNING_KEY_HEX = "03" * 32
-NATIVE_ACCT_SIGNING_KEY_HEX = "02" * 32
-
-
-def _write_native_signing_key_files(datadir: Path) -> tuple[Path, Path]:
-    """Writes the fixed native-prover signing keys OL genesis expects."""
-    chunk_key_path = datadir / "native-chunk-signing-key.hex"
-    acct_key_path = datadir / "native-acct-signing-key.hex"
-    chunk_key_path.write_text(NATIVE_CHUNK_SIGNING_KEY_HEX)
-    acct_key_path.write_text(NATIVE_ACCT_SIGNING_KEY_HEX)
-    return chunk_key_path, acct_key_path
 
 
 def generate_sequencer_keypair() -> tuple[str, str]:
@@ -107,6 +84,7 @@ class AlpenClientFactory(flexitest.Factory):
         max_withdrawal_amount: int | None = 1_000_000_000,
         beneficiary_address: str | None = None,
         da_rate_wei_per_byte: int = 0,
+        prover: ProverBackend = NATIVE_BACKEND,
         **kwargs,
     ) -> AlpenClientService:
         """
@@ -122,6 +100,7 @@ class AlpenClientFactory(flexitest.Factory):
             enable_discovery: Enable discv5 peer discovery (for bootnode mode)
             custom_chain: Chain spec to use
             ee_params_path: EE params file to use; generated when omitted
+            prover: Which EE prover backend to run; see common/prover_backend.py
         """
         ctx: flexitest.EnvContext = kwargs["ctx"]
 
@@ -141,7 +120,7 @@ class AlpenClientFactory(flexitest.Factory):
         key_hex = p2p_secret_key.removeprefix("0x")
         p2p_secret_key_file.write_text(key_hex)
 
-        chunk_signing_key_path, acct_signing_key_path = _write_native_signing_key_files(datadir)
+        prover_config = prover.prover_config(datadir)
 
         if ee_params_path is None:
             ee_params_path = generate_ee_params(
@@ -180,13 +159,7 @@ class AlpenClientFactory(flexitest.Factory):
             beneficiary_address=beneficiary_address,
             blocktime_ms=DEFAULT_EE_BLOCK_TIME_MS,
             batch_sealing_block_count=batch_sealing_block_count,
-            # Functional tests don't ship the SP1 guest ELFs, so run the EE
-            # chunk + acct provers on the zkaleido NativeHost.
-            prover=AlpenProverConfig(
-                backend="native",
-                chunk_signing_key_path=str(chunk_signing_key_path),
-                acct_signing_key_path=str(acct_signing_key_path),
-            ),
+            prover=prover_config,
             l1_fee_policy=AlpenL1FeePolicyConfig(fee_policy="fixed", fixed_fee_rate=1.0),
         )
 

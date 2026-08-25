@@ -9,6 +9,7 @@ from typing import cast
 import flexitest
 
 from common.config import EeDaConfig, ServiceType
+from common.prover_backend import NATIVE_BACKEND, ProverBackend
 from common.services.bitcoin import BitcoinService
 from factories.alpen_client import AlpenClientFactory, generate_sequencer_keypair
 from factories.bitcoin import BitcoinFactory
@@ -40,6 +41,7 @@ class AlpenClientEnvParams:
     batch_sealing_block_count: int = 10
     epoch_tracking_mode: str = "confirmed"
     beneficiary_address: str | None = None
+    prover: ProverBackend = NATIVE_BACKEND
     da_rate_wei_per_byte: int = 0
     forward_tx: bool = True
 
@@ -166,6 +168,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
             batch_sealing_block_count=envparams.batch_sealing_block_count,
             epoch_tracking_mode=envparams.epoch_tracking_mode,
             beneficiary_address=envparams.beneficiary_address,
+            prover=envparams.prover,
             da_rate_wei_per_byte=envparams.da_rate_wei_per_byte,
         )
         sequencer.wait_for_ready(timeout=60)

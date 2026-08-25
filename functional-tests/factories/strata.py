@@ -30,6 +30,7 @@ from common.datatool import (
     generate_ol_params,
     generate_sequencer_artifacts,
 )
+from common.prover_backend import NATIVE_BACKEND, ProverBackend
 from common.services import StrataProps, StrataService
 
 
@@ -79,6 +80,7 @@ class StrataFactory(flexitest.Factory):
         ol_block_time_ms: int | None = None,
         shared_params: "StrataNodeParams | None" = None,
         l1_reorg_safe_depth: int | None = None,
+        prover: ProverBackend = NATIVE_BACKEND,
         **kwargs,
     ) -> CreateNodeResult:
         """
@@ -101,6 +103,9 @@ class StrataFactory(flexitest.Factory):
             l1_reorg_safe_depth: Optional btcio L1 reorg-safe depth. Pin this in tests
                 whose behavior depends on the buried-manifest cutoff so they do not
                 break when the global default changes.
+            prover: EE prover backend this node's genesis must match; see
+                common/prover_backend.py. Ignored when `shared_params` or
+                `ol_params` is set, which bypass params generation.
         """
         # Ensured by `with_ectx` decorator. Don't like this though.
         ctx: flexitest.EnvContext = kwargs["ctx"]
@@ -177,7 +182,11 @@ class StrataFactory(flexitest.Factory):
         else:
             # Generate the sequencer key + operator pubkeys consumed when building ASM params.
             seq_artifacts = generate_sequencer_artifacts(datadir, use_unchecked_cred_rule)
-            ee_params_path = generate_ee_params(datadir)
+            if prover.ee_params_path is not None:
+                ee_params_path = datadir / "ee-params.json"
+                shutil.copyfile(prover.ee_params_path, ee_params_path)
+            else:
+                ee_params_path = generate_ee_params(datadir)
 
             # Generate or write OL params.
             if ol_params is not None:
@@ -188,6 +197,7 @@ class StrataFactory(flexitest.Factory):
                     datadir,
                     bconfig,
                     genesis_l1_height,
+                    prover.genesis_predicate,
                 )
 
             # Generate ASM params via datatool (computes correct genesis_ol_blkid from OL params).

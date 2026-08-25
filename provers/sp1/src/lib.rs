@@ -16,3 +16,10 @@ pub const GUEST_ALPEN_ACCT_ELF_PATH: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/generated/guest-alpen-acct.elf"
 );
+/// Plain-text `Sp1Groth16:<hex>` predicate for the account guest: the genesis
+/// `update_vk` a chain running these ELFs needs. Written alongside the ELFs by
+/// `build.rs`; same presence caveat as the paths above.
+pub const GUEST_ALPEN_ACCT_PREDICATE_PATH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/generated/alpen-acct.predicate"
+);
