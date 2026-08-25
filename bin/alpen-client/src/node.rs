@@ -12,7 +12,7 @@
 //! instead, via [`LaunchedNode`] and [`NodeBootstrap::run_until_exit`], both
 //! of which take the node's handles individually.
 
-use std::{future::Future, sync::Arc};
+use std::{future::Future, net::SocketAddr, path::Path, sync::Arc};
 
 use alpen_ee_common::{chain_status_checked, BlockNumHash, ConsensusHeads, OLClient};
 use alpen_ee_database::{open_ee_db, EeNodeStorage};
@@ -20,6 +20,9 @@ use alpen_ee_engine::{create_engine_control_task, AlpenRethExecEngine};
 use alpen_ee_genesis::ensure_genesis_ee_account_state;
 use alpen_ee_ol_tracker::init_ol_tracker_state;
 use alpen_ee_params::AlpenParams;
+use alpen_ee_rpc_server::{
+    get_or_create_jwt_secret, start_authenticated_rpc_server, AdminRpcServer, AlpenAdminRpcServer,
+};
 use alpen_reth_node::{AlpenEngineTypes, AlpenGossipEvent};
 use eyre::Context;
 use jsonrpsee::server::ServerHandle;
@@ -45,7 +48,7 @@ use tracing::{info, info_span, Instrument};
 use crate::{args::sequencer_privkey_from_env, sequencer};
 use crate::{
     args::{ol_submit_bearer_token_from_env, AdditionalConfig},
-    config::{AlpenClientConfig, NodeMode, OlSource},
+    config::{AdminRpcConfig, AlpenClientConfig, NodeMode, OlSource},
     full_node,
     gossip::{create_gossip_task, GossipConfig},
     ol::{DummyOLClient, OLClientKind, RpcOLClient},
@@ -109,6 +112,9 @@ pub(crate) struct NodeBootstrap {
     /// Kept alive for the node's lifetime: dropping it closes the watch
     /// channel the health server's accept loop stops on.
     _health_check_handle: ServerHandle,
+    /// Kept alive for the node's lifetime: dropping it stops the admin RPC
+    /// server. `None` when `[admin_rpc]` is not configured.
+    _admin_rpc_handle: Option<ServerHandle>,
     pub(crate) params: Arc<AlpenParams>,
     pub(crate) storage: Arc<EeNodeStorage>,
     /// Kept as the handle (not pre-extracted watchers) so each mode pulls
@@ -147,6 +153,22 @@ async fn bootstrap_node(
     .await?;
 
     let datadir = builder.config().datadir().data_dir().to_path_buf();
+
+    // Admin RPC: JWT-authenticated, on its own port, enabled only when
+    // `[admin_rpc]` is configured. Independent of reth's RPC and of the node
+    // mode, so it comes up here alongside the health check server rather than
+    // on either mode-specific path.
+    let _admin_rpc_handle = match &alpen_config.admin_rpc {
+        Some(admin_rpc_config) => Some(
+            start_admin_rpc(
+                admin_rpc_config,
+                &datadir,
+                !matches!(alpen_config.mode, NodeMode::FullNode(_)),
+            )
+            .await?,
+        ),
+        None => None,
+    };
 
     // OL client resolution validates the OL config synchronously before its
     // one network call, so a missing/invalid setting also fails here, before
@@ -195,6 +217,7 @@ async fn bootstrap_node(
     Ok(NodeBootstrap {
         health_check_state,
         _health_check_handle,
+        _admin_rpc_handle,
         params: params.clone(),
         storage,
         ol_tracker,
@@ -289,6 +312,34 @@ async fn start_health_check(
     info!(target: "alpen-client", component = "alpen", %health_check_addr, "health check server started");
 
     Ok((health_check_state, health_check_handle))
+}
+
+/// Starts the JWT-authenticated admin RPC server.
+///
+/// Returns the server's [`ServerHandle`], which the caller keeps alive for as
+/// long as the server should run: dropping it stops the server. The JWT secret
+/// is read from the path [`AdminRpcConfig::jwtsecret_path`] resolves,
+/// generating and persisting a new random secret when the file does not exist.
+async fn start_admin_rpc(
+    config: &AdminRpcConfig,
+    datadir: &Path,
+    sequencer: bool,
+) -> eyre::Result<ServerHandle> {
+    let jwt_path = config.jwtsecret_path(datadir);
+    let secret = get_or_create_jwt_secret(&jwt_path)
+        .map_err(|e| eyre::eyre!("failed to load admin RPC JWT secret from {jwt_path:?}: {e}"))?;
+    let admin_module = AdminRpcServer::new(env!("CARGO_PKG_VERSION"), sequencer).into_rpc();
+    let (admin_addr, admin_handle) = start_authenticated_rpc_server(
+        SocketAddr::new(config.host, config.port),
+        secret,
+        admin_module,
+    )
+    .instrument(info_span!("start_admin_rpc_server", component = "alpen"))
+    .await
+    .context("failed to start admin RPC server")?;
+    info!(target: "alpen-client", component = "alpen", %admin_addr, jwt_path = %jwt_path.display(), "admin RPC server started");
+
+    Ok(admin_handle)
 }
 
 /// Resolves the OL client (dummy or real RPC) and fetches its genesis epoch
