@@ -4,6 +4,9 @@
 /* @prajwolrg @irnb @sapinb @evgenyzdanovich
 * @prajwolrg @irnb @sapinb @evgenyzdanovich
 
+# Binaries
+/bin/alpen-cli/ @Zk2u @krsnapaudel @voidash
+
 # CI/CD and containers
 /.github/workflows/ @prajwolrg @irnb @sapinb @evgenyzdanovich @alexhui01
 /.github/actions/ @prajwolrg @irnb @sapinb @evgenyzdanovich @alexhui01
