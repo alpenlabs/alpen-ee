@@ -122,6 +122,7 @@ macro_rules! chunk_storage_tests {
 
 #[cfg(feature = "test-utils")]
 pub mod tests {
+    use alpen_ee_params::AlpenSpecId;
     use strata_acct_types::Hash;
     use strata_identifiers::Buf32;
 
@@ -152,7 +153,15 @@ pub mod tests {
     fn create_test_batch(idx: u64, prev_block_val: u8, last_block_val: u8) -> Batch {
         let prev_block = create_test_hash(prev_block_val);
         let last_block = create_test_hash(last_block_val);
-        Batch::new(idx, prev_block, last_block, idx * 10, Vec::new()).unwrap()
+        Batch::new(
+            idx,
+            prev_block,
+            last_block,
+            idx * 10,
+            Vec::new(),
+            AlpenSpecId::V0,
+        )
+        .unwrap()
     }
 
     /// Test saving chunks.

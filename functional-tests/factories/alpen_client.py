@@ -85,6 +85,7 @@ class AlpenClientFactory(flexitest.Factory):
         beneficiary_address: str | None = None,
         da_rate_wei_per_byte: int = 0,
         prover: ProverBackend = NATIVE_BACKEND,
+        prover_programs: dict[str, tuple[str, str]] | None = None,
         **kwargs,
     ) -> AlpenClientService:
         """
@@ -101,6 +102,11 @@ class AlpenClientFactory(flexitest.Factory):
             custom_chain: Chain spec to use
             ee_params_path: EE params file to use; generated when omitted
             prover: Which EE prover backend to run; see common/prover_backend.py
+            prover_programs: Maps an `AlpenSpecId` (e.g. "v0", "v1") to the
+                (chunk_signing_key_hex, acct_signing_key_hex) pair of the
+                program built for it, each written as its own
+                `[sequencer.prover.programs.<spec_version>]` entry.
+                Native-only; defaults to the backend's own single v0 program.
         """
         ctx: flexitest.EnvContext = kwargs["ctx"]
 
@@ -120,7 +126,7 @@ class AlpenClientFactory(flexitest.Factory):
         key_hex = p2p_secret_key.removeprefix("0x")
         p2p_secret_key_file.write_text(key_hex)
 
-        prover_config = prover.prover_config(datadir)
+        prover_config = prover.prover_config(datadir, prover_programs)
 
         if ee_params_path is None:
             ee_params_path = generate_ee_params(

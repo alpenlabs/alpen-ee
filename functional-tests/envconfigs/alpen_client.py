@@ -44,6 +44,7 @@ class AlpenClientEnvParams:
     prover: ProverBackend = NATIVE_BACKEND
     da_rate_wei_per_byte: int = 0
     forward_tx: bool = True
+    prover_programs: dict[str, tuple[str, str]] | None = None
 
 
 class AlpenClientEnv(flexitest.EnvConfig):
@@ -169,6 +170,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
             epoch_tracking_mode=envparams.epoch_tracking_mode,
             beneficiary_address=envparams.beneficiary_address,
             prover=envparams.prover,
+            prover_programs=envparams.prover_programs,
             da_rate_wei_per_byte=envparams.da_rate_wei_per_byte,
         )
         sequencer.wait_for_ready(timeout=60)

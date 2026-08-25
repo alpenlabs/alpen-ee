@@ -434,8 +434,10 @@ DA and proof failures are non-fatal; the task retries on each poll.
 - **Account (batch) proof** — consumes the batch's chunk receipts plus the prior batch's end state and a DA witness, producing the outer proof submitted to OL.
 
 **Backends**, selected by `sequencer.prover.backend`:
-- **`sp1`** — production (`sp1` feature); needs `chunk_elf_path` and `acct_elf_path`; deadline via `deadline_secs`
-- **`native`** — skips real Groth16 proving, signing proofs with a Schnorr key instead. Needs `chunk_signing_key_path` / `acct_signing_key_path` (paths to hex-encoded key files). The acct key must match whatever the OL genesis `update_vk` expects, or the account prover predicate validation at startup fails — see `crates/proof-impl/alpen-acct`'s `test_signing_key`
+- **`sp1`** — production (`sp1` feature); each program's paths are compiled guest ELFs; deadline via `deadline_secs`
+- **`native`** — skips real Groth16 proving, signing proofs with a Schnorr key instead. Each program's paths are hex-encoded key files. The acct key must match whatever the OL genesis `update_vk` expects, or the account prover predicate validation at startup fails — see `crates/proof-impl/alpen-acct`'s `test_signing_key`
+
+**Programs**: `[[sequencer.prover.programs]]` lists one entry per resident spec version, each declaring the `spec_version` it was built for plus its `chunk_path` / `acct_path` pair. Every entry is built and validated at startup, and each batch's proof request is routed to whichever entry's version matches that batch's own governing spec version. Configuring both sides of a `update_vk` rotation ahead of time therefore lets the sequencer keep proving across it without a restart. Startup still fails unless at least one entry matches the OL's live `update_vk`.
 
 Proofs and prover tasks live in a dedicated SledDB instance, separate from OL storage.
 
@@ -765,12 +767,18 @@ batch_sealing_block_count = 100
 beneficiary_address = "0x5400000000000000000000000000000000000010"
 blocktime_ms = 5000
 
-# Required. With backend = "native" the two fields become
-# chunk_signing_key_path and acct_signing_key_path instead.
+# Required. With backend = "native" each program's paths are hex-encoded
+# signing key files instead of guest ELFs.
 [sequencer.prover]
 backend = "sp1"
-chunk_elf_path = "/app/elfs/sp1/guest-alpen-chunk.elf"
-acct_elf_path = "/app/elfs/sp1/guest-alpen-acct.elf"
+
+# One entry per resident spec version; at least one is required. Each batch's
+# proof request is routed to whichever entry's spec_version matches that
+# batch's own governing version.
+[[sequencer.prover.programs]]
+spec_version = "v0"
+chunk_path = "/app/elfs/sp1/guest-alpen-chunk.elf"
+acct_path = "/app/elfs/sp1/guest-alpen-acct.elf"
 
 [sequencer.bitcoind]
 rpc_url = "http://bitcoind:18443"
