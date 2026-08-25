@@ -54,11 +54,11 @@ NATIVE_ACCT_SIGNING_KEY_HEX = "02" * 32
 # requires it to differ.
 ROTATED_ACCT_SIGNING_KEY_HEX = "04" * 32
 
-#: (spec_version, chunk_signing_key_hex, acct_signing_key_hex) triples the
+#: The (chunk_signing_key_hex, acct_signing_key_hex) pair per spec version the
 #: native backend runs when a test doesn't ask for its own set.
-DEFAULT_NATIVE_PROGRAMS: list[tuple[str, str, str]] = [
-    ("v0", NATIVE_CHUNK_SIGNING_KEY_HEX, NATIVE_ACCT_SIGNING_KEY_HEX)
-]
+DEFAULT_NATIVE_PROGRAMS: dict[str, tuple[str, str]] = {
+    "v0": (NATIVE_CHUNK_SIGNING_KEY_HEX, NATIVE_ACCT_SIGNING_KEY_HEX)
+}
 
 
 class ProverBackend(ABC):
@@ -78,12 +78,12 @@ class ProverBackend(ABC):
     def prover_config(
         self,
         datadir: Path,
-        programs: list[tuple[str, str, str]] | None = None,
+        programs: dict[str, tuple[str, str]] | None = None,
     ) -> AlpenProverConfig:
         """Builds the ``[sequencer.prover]`` table, writing any files it needs
         into ``datadir``.
 
-        ``programs`` names one resident spec version per entry, so a test can
+        ``programs`` maps a spec version to its signing-key pair, so a test can
         keep two versions' provers live across a VK rotation. Only the native
         backend can honour it."""
 
@@ -99,22 +99,17 @@ class NativeBackend(ProverBackend):
     def prover_config(
         self,
         datadir: Path,
-        programs: list[tuple[str, str, str]] | None = None,
+        programs: dict[str, tuple[str, str]] | None = None,
     ) -> AlpenProverConfig:
-        entries = []
-        for i, (spec_version, chunk_hex, acct_hex) in enumerate(
-            programs or DEFAULT_NATIVE_PROGRAMS
-        ):
-            chunk_key_path = datadir / f"native-chunk-signing-key-{i}.hex"
-            acct_key_path = datadir / f"native-acct-signing-key-{i}.hex"
+        entries = {}
+        for spec_version, (chunk_hex, acct_hex) in (programs or DEFAULT_NATIVE_PROGRAMS).items():
+            chunk_key_path = datadir / f"native-chunk-signing-key-{spec_version}.hex"
+            acct_key_path = datadir / f"native-acct-signing-key-{spec_version}.hex"
             chunk_key_path.write_text(chunk_hex)
             acct_key_path.write_text(acct_hex)
-            entries.append(
-                AlpenProverProgram(
-                    spec_version=spec_version,
-                    chunk_path=str(chunk_key_path),
-                    acct_path=str(acct_key_path),
-                )
+            entries[spec_version] = AlpenProverProgram(
+                chunk_path=str(chunk_key_path),
+                acct_path=str(acct_key_path),
             )
         return AlpenProverConfig(backend=self.backend, programs=entries)
 
@@ -132,7 +127,7 @@ class Sp1Backend(ProverBackend):
     def prover_config(
         self,
         datadir: Path,
-        programs: list[tuple[str, str, str]] | None = None,
+        programs: dict[str, tuple[str, str]] | None = None,
     ) -> AlpenProverConfig:
         if programs is not None:
             raise ValueError(
@@ -140,13 +135,12 @@ class Sp1Backend(ProverBackend):
             )
         return AlpenProverConfig(
             backend=self.backend,
-            programs=[
-                AlpenProverProgram(
-                    spec_version="v0",
+            programs={
+                "v0": AlpenProverProgram(
                     chunk_path=str(self.chunk_elf),
                     acct_path=str(self.acct_elf),
                 )
-            ],
+            },
         )
 
 

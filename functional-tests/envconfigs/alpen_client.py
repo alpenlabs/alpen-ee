@@ -44,7 +44,7 @@ class AlpenClientEnvParams:
     prover: ProverBackend = NATIVE_BACKEND
     da_rate_wei_per_byte: int = 0
     forward_tx: bool = True
-    prover_programs: list[tuple[str, str, str]] | None = None
+    prover_programs: dict[str, tuple[str, str]] | None = None
 
 
 class AlpenClientEnv(flexitest.EnvConfig):

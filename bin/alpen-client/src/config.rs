@@ -8,7 +8,7 @@
 //! module.
 
 use std::{
-    collections::BTreeSet,
+    collections::BTreeMap,
     num::{NonZeroU64, NonZeroUsize},
     path::PathBuf,
 };
@@ -239,19 +239,19 @@ pub(crate) struct SequencerMode {
     pub(crate) genesis_l1_height: L1Height,
 }
 
-/// One `[[sequencer.prover.programs]]` entry: the spec version a program is
-/// built for, plus its chunk + acct path pair (ELF paths under the `sp1`
-/// backend, signing-key file paths under `native`). Kept as one table so the
-/// three can't be mismatched by being configured as separate lists.
+/// One `[sequencer.prover.programs.<spec_version>]` entry: the chunk and
+/// acct path pair of one program (ELF paths under the `sp1` backend,
+/// signing-key file paths under `native`). Kept as one table so the two
+/// can't be mismatched by being configured as separate lists.
 ///
-/// The operator declares `spec_version` explicitly rather than it being
-/// derived: the process resolves all resident programs into a
-/// version-indexed set at startup (see `sequencer::prover::backend`), and
-/// routes each batch's proof request to whichever program's declared version
-/// matches that batch's own governing `AlpenSpecId`.
+/// The spec version a program is built for is the table key rather than a
+/// field, so declaring one version twice is a duplicate-key TOML error. The
+/// process resolves all resident programs into a version-indexed set at
+/// startup (see `sequencer::prover::backend`), and routes each batch's proof
+/// request to whichever program's version matches that batch's own governing
+/// `AlpenSpecId`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ProverProgramPaths {
-    pub(crate) spec_version: AlpenSpecId,
     pub(crate) chunk_path: PathBuf,
     pub(crate) acct_path: PathBuf,
 }
@@ -279,7 +279,9 @@ pub(crate) enum ProverBackendConfig {
     ///
     /// One program's account key has to match whatever the OL `update_vk`
     /// expects right now, or the predicate-key check at startup fails.
-    Native { programs: Vec<ProverProgramPaths> },
+    Native {
+        programs: BTreeMap<AlpenSpecId, ProverProgramPaths>,
+    },
     /// SP1 remote hosts. Needs the `sp1` feature compiled in.
     ///
     /// Each program's paths are the compiled SP1 guest ELFs. Explicit so one
@@ -289,42 +291,32 @@ pub(crate) enum ProverBackendConfig {
         /// Falls back to `DEFAULT_SP1_DEADLINE_SECS` when unset, so nothing
         /// is resolved here.
         deadline_secs: Option<u64>,
-        programs: Vec<ProverProgramPaths>,
+        programs: BTreeMap<AlpenSpecId, ProverProgramPaths>,
     },
 }
 
 impl ProverBackendConfig {
-    /// The resident programs, whichever backend was selected.
-    pub(crate) fn programs(&self) -> &[ProverProgramPaths] {
+    /// The resident programs, whichever backend was selected, keyed by the
+    /// spec version each one is built for.
+    fn programs(&self) -> &BTreeMap<AlpenSpecId, ProverProgramPaths> {
         match self {
             Self::Native { programs } | Self::Sp1 { programs, .. } => programs,
         }
     }
 
-    /// Rejects a program list that can't be routed: empty, or declaring the
-    /// same spec version twice.
+    /// Rejects an empty program set, which can't route any batch.
     ///
     /// Checked here rather than at prover startup so a bad config fails
     /// before any node, DB, or DA work begins. Only the version keys are
     /// checked, not that the paths exist or parse — reading them is left to
-    /// whoever actually builds the backend.
+    /// whoever actually builds the backend. A version declared twice needs no
+    /// check of its own: it's a duplicate TOML key.
     fn validate(&self) -> eyre::Result<()> {
-        let programs = self.programs();
-        if programs.is_empty() {
+        if self.programs().is_empty() {
             return Err(eyre::eyre!(
-                "sequencer.prover needs at least one [[sequencer.prover.programs]] entry"
+                "sequencer.prover needs at least one [sequencer.prover.programs.<spec_version>] \
+                 entry"
             ));
-        }
-
-        let mut seen = BTreeSet::new();
-        for program in programs {
-            if !seen.insert(program.spec_version) {
-                return Err(eyre::eyre!(
-                    "multiple [[sequencer.prover.programs]] entries declare spec version {}; \
-                     each resident version may have exactly one program",
-                    program.spec_version
-                ));
-            }
         }
 
         Ok(())
@@ -633,8 +625,7 @@ mod tests {
             [sequencer]
             [sequencer.prover]
             backend = "native"
-            [[sequencer.prover.programs]]
-            spec_version = "v0"
+            [sequencer.prover.programs.v0]
             chunk_path = "/tmp/chunk.key"
             acct_path = "/tmp/acct.key"
             [sequencer.bitcoind]
@@ -657,8 +648,7 @@ mod tests {
             [sequencer]
             [sequencer.prover]
             backend = "native"
-            [[sequencer.prover.programs]]
-            spec_version = "v0"
+            [sequencer.prover.programs.v0]
             chunk_path = "/tmp/chunk.key"
             acct_path = "/tmp/acct.key"
             [sequencer.bitcoind]
@@ -746,8 +736,7 @@ mod tests {
         let native = prover_backend(
             r#"
             backend = "native"
-            [[sequencer.prover.programs]]
-            spec_version = "v0"
+            [sequencer.prover.programs.v0]
             chunk_path = "/tmp/chunk.key"
             acct_path = "/tmp/acct.key"
             "#,
@@ -758,11 +747,13 @@ mod tests {
         };
         assert_eq!(
             programs,
-            [ProverProgramPaths {
-                spec_version: AlpenSpecId::V0,
-                chunk_path: PathBuf::from("/tmp/chunk.key"),
-                acct_path: PathBuf::from("/tmp/acct.key"),
-            }]
+            BTreeMap::from([(
+                AlpenSpecId::V0,
+                ProverProgramPaths {
+                    chunk_path: PathBuf::from("/tmp/chunk.key"),
+                    acct_path: PathBuf::from("/tmp/acct.key"),
+                }
+            )])
         );
 
         let err = prover_backend(
@@ -779,8 +770,7 @@ mod tests {
             r#"
             backend = "sp1"
             acct_elf_path = "/tmp/acct.elf"
-            [[sequencer.prover.programs]]
-            spec_version = "v0"
+            [sequencer.prover.programs.v0]
             chunk_path = "/tmp/chunk.elf"
             acct_path = "/tmp/acct.elf"
             "#,
@@ -792,7 +782,7 @@ mod tests {
         );
     }
 
-    /// A program list that can't route a batch is rejected when the config is
+    /// A program set that can't route a batch is rejected when the config is
     /// parsed, not later at prover startup.
     #[cfg(feature = "sequencer")]
     #[test]
@@ -818,34 +808,32 @@ mod tests {
             )
         }
 
-        let err = AlpenClientConfig::from_toml_str(&sequencer_toml("programs = []")).unwrap_err();
+        let err = AlpenClientConfig::from_toml_str(&sequencer_toml("programs = {}")).unwrap_err();
         assert!(err.to_string().contains("at least one"), "{err}");
 
+        // Keying by version is what makes a repeat impossible, so TOML
+        // itself rejects this one.
         let err = AlpenClientConfig::from_toml_str(&sequencer_toml(
             r#"
-            [[sequencer.prover.programs]]
-            spec_version = "v0"
+            [sequencer.prover.programs.v0]
             chunk_path = "/tmp/chunk-a.key"
             acct_path = "/tmp/acct-a.key"
-            [[sequencer.prover.programs]]
-            spec_version = "v0"
+            [sequencer.prover.programs.v0]
             chunk_path = "/tmp/chunk-b.key"
             acct_path = "/tmp/acct-b.key"
             "#,
         ))
         .unwrap_err();
-        assert!(err.to_string().contains("declare spec version v0"), "{err}");
+        assert!(err.to_string().contains("redefinition of table"), "{err}");
 
         // Two versions resident at once is the point: it's what lets the
         // sequencer keep proving across a rotation without a restart.
         AlpenClientConfig::from_toml_str(&sequencer_toml(
             r#"
-            [[sequencer.prover.programs]]
-            spec_version = "v0"
+            [sequencer.prover.programs.v0]
             chunk_path = "/tmp/chunk-v0.key"
             acct_path = "/tmp/acct-v0.key"
-            [[sequencer.prover.programs]]
-            spec_version = "v1"
+            [sequencer.prover.programs.v1]
             chunk_path = "/tmp/chunk-v1.key"
             acct_path = "/tmp/acct-v1.key"
             "#,
@@ -877,8 +865,7 @@ mod tests {
             [sequencer]
             [sequencer.prover]
             backend = "native"
-            [[sequencer.prover.programs]]
-            spec_version = "v0"
+            [sequencer.prover.programs.v0]
             chunk_path = "/tmp/chunk.key"
             acct_path = "/tmp/acct.key"
             [sequencer.bitcoind]
@@ -932,8 +919,7 @@ mod tests {
                 {field}
                 [sequencer.prover]
                 backend = "native"
-                [[sequencer.prover.programs]]
-                spec_version = "v0"
+                [sequencer.prover.programs.v0]
                 chunk_path = "/tmp/chunk.key"
                 acct_path = "/tmp/acct.key"
                 [sequencer.bitcoind]
@@ -963,8 +949,7 @@ mod tests {
             [sequencer]
             [sequencer.prover]
             backend = "native"
-            [[sequencer.prover.programs]]
-            spec_version = "v0"
+            [sequencer.prover.programs.v0]
             chunk_path = "/tmp/chunk.key"
             acct_path = "/tmp/acct.key"
             [sequencer.bitcoind]

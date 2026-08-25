@@ -2,8 +2,8 @@
 //!
 //! [`launch_validated_ee_batch_prover`] is the entry point: it picks a
 //! backend (`sequencer.prover.backend`, native or sp1), builds every
-//! configured `[[sequencer.prover.programs]]` entry into a launched
-//! [`ProverProgram`], keyed by the `AlpenSpecId` that entry declared, and
+//! configured `[sequencer.prover.programs.<spec_version>]` entry into a
+//! launched [`ProverProgram`], keyed by that entry's spec version, and
 //! hard-fails unless at least one resident program's derived account
 //! predicate key matches the OL's expected `update_vk` right now. Routing a
 //! given batch to the right resident program (by that batch's own governing
@@ -65,8 +65,9 @@ struct EeProvers {
     account: Prover<AcctSpec>,
 }
 
-/// Picks a prover backend, builds every resident `[[sequencer.prover.programs]]`
-/// entry into launched provers, and hard-fails unless at least one program's
+/// Picks a prover backend, builds every resident
+/// `[sequencer.prover.programs.<spec_version>]` entry into launched provers,
+/// and hard-fails unless at least one program's
 /// derived account predicate key matches the OL's expected `update_vk` right
 /// now.
 pub(crate) async fn launch_validated_ee_batch_prover(
@@ -93,8 +94,8 @@ pub(crate) async fn launch_validated_ee_batch_prover(
     )))
 }
 
-/// Builds every configured program, keyed by the `AlpenSpecId` it declared,
-/// and hard-fails unless at least one program's derived account predicate key
+/// Builds every configured program, keyed by the `AlpenSpecId` it is
+/// configured under, and hard-fails unless at least one program's derived account predicate key
 /// matches `ol_account_update_vk` right now.
 ///
 /// `backend` may carry several programs (see
@@ -119,7 +120,7 @@ async fn build_ee_provers(
         ProverBackendConfig::Native { programs } => {
             info!(target: "alpen-client", "EE chunk + acct provers: native host");
 
-            for program in &programs {
+            for (spec_version, program) in &programs {
                 let chunk_signing_key = native_schnorr_signing_key_from_file(&program.chunk_path)?;
                 let acct_signing_key = native_schnorr_signing_key_from_file(&program.acct_path)?;
 
@@ -133,7 +134,7 @@ async fn build_ee_provers(
                         process_ee_chunk(zkvm, &chunk_params)
                     })
                 };
-                let chunk = (builders.chunk)(program.spec_version).native(chunk_host);
+                let chunk = (builders.chunk)(*spec_version).native(chunk_host);
 
                 let acct_host = {
                     let acct_params = (*params).clone();
@@ -141,11 +142,9 @@ async fn build_ee_provers(
                         process_ee_acct_update(zkvm, &acct_params, &chunk_predicate_key)
                     })
                 };
-                let account = (builders.account)(program.spec_version).native(acct_host);
+                let account = (builders.account)(*spec_version).native(acct_host);
 
-                // Duplicate spec versions were rejected when the config
-                // was parsed, so this can't overwrite a sibling program.
-                provers.insert(program.spec_version, EeProvers { chunk, account });
+                provers.insert(*spec_version, EeProvers { chunk, account });
             }
         }
         #[cfg(feature = "sp1")]
@@ -157,11 +156,11 @@ async fn build_ee_provers(
             let deadline = Duration::from_secs(deadline_secs);
             let sp1_config = SP1HostConfig::default().with_deadline(deadline);
 
-            for program in &programs {
+            for (spec_version, program) in &programs {
                 info!(
                     target: "alpen-client",
                     deadline_secs,
-                    spec_version = %program.spec_version,
+                    %spec_version,
                     chunk_path = ?program.chunk_path,
                     acct_path = ?program.acct_path,
                     "sp1 EE prover deadline configured"
@@ -192,12 +191,10 @@ async fn build_ee_provers(
 
                 any_matches_live_vk |= &account_predicate_key == ol_account_update_vk;
 
-                let chunk = (builders.chunk)(program.spec_version).remote(chunk_host);
-                let account = (builders.account)(program.spec_version).remote(acct_host);
+                let chunk = (builders.chunk)(*spec_version).remote(chunk_host);
+                let account = (builders.account)(*spec_version).remote(acct_host);
 
-                // Duplicate spec versions were rejected when the config
-                // was parsed, so this can't overwrite a sibling program.
-                provers.insert(program.spec_version, EeProvers { chunk, account });
+                provers.insert(*spec_version, EeProvers { chunk, account });
             }
         }
         #[cfg(not(feature = "sp1"))]

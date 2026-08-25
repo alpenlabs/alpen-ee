@@ -87,22 +87,21 @@ class TestEePredicateTransition(BaseTest):
                 pre_generate_blocks=110,
                 admin_confirmation_depth=2,
                 fund_test_cli_wallet=True,
-                # Two resident programs, each tagged with the AlpenSpecId
-                # it's built for (see ProverProgramPaths in
+                # Two resident programs, keyed by the AlpenSpecId each is
+                # built for (see ProverProgramPaths in
                 # bin/alpen-client/src/config.rs): v1's acct key is the
                 # rotation target (see V1_ACCT_PREDICATE above),
                 # v0's is the genesis-matching key. Both are validated and
                 # loaded at startup; the sequencer routes each batch's proof
-                # request to whichever program's declared version matches
-                # that batch's own governing spec version (see
-                # PaasBatchProver in
+                # request to whichever program's version matches that batch's
+                # own governing spec version (see PaasBatchProver in
                 # bin/alpen-client/src/sequencer/prover/batch_prover.rs), so
                 # proving keeps working across the V0 -> V1 rotation below
                 # without a restart.
-                prover_programs=[
-                    ("v1", NATIVE_CHUNK_SIGNING_KEY_HEX, ROTATED_ACCT_SIGNING_KEY_HEX),
-                    ("v0", NATIVE_CHUNK_SIGNING_KEY_HEX, NATIVE_ACCT_SIGNING_KEY_HEX),
-                ],
+                prover_programs={
+                    "v1": (NATIVE_CHUNK_SIGNING_KEY_HEX, ROTATED_ACCT_SIGNING_KEY_HEX),
+                    "v0": (NATIVE_CHUNK_SIGNING_KEY_HEX, NATIVE_ACCT_SIGNING_KEY_HEX),
+                },
             )
         )
 

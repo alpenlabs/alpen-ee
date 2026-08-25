@@ -19,12 +19,11 @@ blocktime_ms = 5000
 [sequencer.prover]
 backend = "sp1"
 
-# One entry per resident spec version. Each batch's proof request is routed to
-# whichever entry's spec_version matches that batch's own governing version, so
-# an operator straddling a VK rotation configures both ahead of time and the
-# sequencer keeps proving across it without a restart.
-[[sequencer.prover.programs]]
-spec_version = "v0"
+# One entry per resident spec version, keyed by that version. Each batch's
+# proof request is routed to whichever entry matches that batch's own governing
+# version, so an operator straddling a VK rotation configures both ahead of time
+# and the sequencer keeps proving across it without a restart.
+[sequencer.prover.programs.v0]
 chunk_path = "/app/elfs/sp1/guest-alpen-chunk.elf"
 acct_path = "/app/elfs/sp1/guest-alpen-acct.elf"
 

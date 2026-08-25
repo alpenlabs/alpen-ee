@@ -43,7 +43,7 @@ class EeOLEnv(flexitest.EnvConfig):
         epoch_tracking_mode: str = "confirmed",
         batch_sealing_block_count: int = 10,
         prover: ProverBackend = NATIVE_BACKEND,
-        prover_programs: list[tuple[str, str, str]] | None = None,
+        prover_programs: dict[str, tuple[str, str]] | None = None,
     ):
         epoch_seal_config = (
             EpochSealingConfig.new_fixed_slot(seal_epoch_slots)

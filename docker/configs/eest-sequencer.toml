@@ -20,8 +20,7 @@ batch_sealing_block_count = 5
 [sequencer.prover]
 backend = "native"
 
-[[sequencer.prover.programs]]
-spec_version = "v0"
+[sequencer.prover.programs.v0]
 chunk_path = "/app/keys/native-chunk-signing-key.hex"
 acct_path = "/app/keys/native-acct-signing-key.hex"
 
