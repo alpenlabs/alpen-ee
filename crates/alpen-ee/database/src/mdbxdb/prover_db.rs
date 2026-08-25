@@ -9,22 +9,20 @@
 
 use std::{path::Path, sync::Arc};
 
-use alpen_db_store_mdbx::{DbError as MdbxError, MdbxConfig, MdbxEnv};
+use alpen_db_store_mdbx::{MdbxConfig, MdbxEnv};
 use alpen_ee_common::{BatchId, ProofId};
 use strata_db_types::{errors::DbError, prover_task::ProverTaskDatabase, DbResult};
 use strata_paas::TaskRecordData;
 use zkaleido::ProofReceiptWithMetadata;
 
-use super::schema::{
-    prover_tables, AcctProofIdIndexSchema, AcctProofReceiptSchema, ChunkProofReceiptSchema,
-    ProverTaskSchema,
+use super::{
+    schema::{
+        prover_tables, AcctProofIdIndexSchema, AcctProofReceiptSchema, ChunkProofReceiptSchema,
+        ProverTaskSchema,
+    },
+    to_db_error,
 };
 use crate::serialization_types::DBBatchId;
-
-/// Maps a storage-engine error into the prover database error type.
-fn map_mdbx(err: MdbxError) -> DbError {
-    DbError::Other(format!("mdbx: {err}"))
-}
 
 /// `ProofId` for a batch — its `last_block` hash.
 fn proof_id_for(batch_id: BatchId) -> ProofId {
@@ -45,7 +43,7 @@ impl EeProverDbMdbx {
 
     /// Opens a standalone environment at `path` with just the prover tables.
     pub fn open(path: &Path, config: &MdbxConfig) -> DbResult<Self> {
-        let env = MdbxEnv::open(path, config, &prover_tables()).map_err(map_mdbx)?;
+        let env = MdbxEnv::open(path, config, &prover_tables()).map_err(to_db_error)?;
         Ok(Self::new(Arc::new(env)))
     }
 
@@ -61,20 +59,20 @@ impl EeProverDbMdbx {
                 w.put::<ChunkProofReceiptSchema>(&key, &receipt)?;
                 Ok(())
             })
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     pub fn get_chunk_receipt(&self, key: &[u8]) -> DbResult<Option<ProofReceiptWithMetadata>> {
         self.env
             .view(|r| r.get::<ChunkProofReceiptSchema>(&key.to_vec()))
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     /// Removes a chunk receipt, returning `true` if a row existed.
     pub fn delete_chunk_receipt(&self, key: &[u8]) -> DbResult<bool> {
         self.env
             .update(|w| w.delete::<ChunkProofReceiptSchema>(&key.to_vec()))
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     // ---- Acct proof store (typed BatchId API) ----
@@ -93,14 +91,14 @@ impl EeProverDbMdbx {
                 w.put::<AcctProofIdIndexSchema>(&proof_id, &index_value)?;
                 Ok(())
             })
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     pub fn get_acct_proof(&self, batch_id: BatchId) -> DbResult<Option<ProofReceiptWithMetadata>> {
         let db_id: DBBatchId = batch_id.into();
         self.env
             .view(|r| r.get::<AcctProofReceiptSchema>(&db_id))
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     pub fn has_acct_proof(&self, batch_id: BatchId) -> DbResult<bool> {
@@ -118,7 +116,7 @@ impl EeProverDbMdbx {
                 };
                 r.get::<AcctProofReceiptSchema>(&db_id)
             })
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     /// Removes an acct proof along with its secondary index entry, returning
@@ -132,7 +130,7 @@ impl EeProverDbMdbx {
                 w.delete::<AcctProofIdIndexSchema>(&proof_id)?;
                 Ok(existed)
             })
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 }
 
@@ -140,7 +138,7 @@ impl ProverTaskDatabase for EeProverDbMdbx {
     fn get_task(&self, key: Vec<u8>) -> DbResult<Option<TaskRecordData>> {
         self.env
             .view(|r| r.get::<ProverTaskSchema>(&key))
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     fn insert_task(&self, key: Vec<u8>, record: TaskRecordData) -> DbResult<()> {
@@ -155,7 +153,7 @@ impl ProverTaskDatabase for EeProverDbMdbx {
                 w.put::<ProverTaskSchema>(&key, &record)?;
                 Ok(true)
             })
-            .map_err(map_mdbx)?;
+            .map_err(to_db_error)?;
         if inserted {
             Ok(())
         } else {
@@ -169,13 +167,13 @@ impl ProverTaskDatabase for EeProverDbMdbx {
                 w.put::<ProverTaskSchema>(&key, &record)?;
                 Ok(())
             })
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     fn delete_task(&self, key: Vec<u8>) -> DbResult<bool> {
         self.env
             .update(|w| w.delete::<ProverTaskSchema>(&key))
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     fn list_retriable(&self, now_secs: u64) -> DbResult<Vec<(Vec<u8>, TaskRecordData)>> {
@@ -192,7 +190,7 @@ impl ProverTaskDatabase for EeProverDbMdbx {
                 })?;
                 Ok(out)
             })
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     fn list_unfinished(&self) -> DbResult<Vec<(Vec<u8>, TaskRecordData)>> {
@@ -207,7 +205,7 @@ impl ProverTaskDatabase for EeProverDbMdbx {
                 })?;
                 Ok(out)
             })
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     fn list_all_tasks(&self) -> DbResult<Vec<(Vec<u8>, TaskRecordData)>> {
@@ -220,7 +218,7 @@ impl ProverTaskDatabase for EeProverDbMdbx {
                 })?;
                 Ok(out)
             })
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     fn count_tasks(&self) -> DbResult<usize> {
@@ -233,7 +231,7 @@ impl ProverTaskDatabase for EeProverDbMdbx {
                 })?;
                 Ok(count)
             })
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 }
 

@@ -9,17 +9,20 @@ pub const TIB: usize = 1024 * GIB;
 /// The durability mode MDBX uses when committing a write transaction.
 ///
 /// See the MDBX crash-safety review for the guarantees each mode provides.
+///
+/// Only the durable mode is offered for now. MDBX's `SAFE_NOSYNC` is the
+/// obvious next variant, but it is only sound with a bounded flush policy
+/// (`set_sync_period`/`set_sync_bytes`, or explicit [`MdbxEnv::sync`] calls at
+/// milestones); without one the loss window on a power cut is every commit
+/// since the environment was opened. Add it together with that policy when a
+/// rebuildable store actually needs the throughput.
+///
+/// [`MdbxEnv::sync`]: crate::MdbxEnv::sync
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MdbxSyncMode {
     /// fsync data and meta on every commit. Loses nothing on crash; slowest.
     /// The no-regret default.
     Durable,
-    /// Defer fsync; a crash may lose the last N commits but **never** corrupts
-    /// (MDBX `SAFE_NOSYNC`, not LMDB's unsafe `NOSYNC`). Safe here because
-    /// Tier-2 data is rebuildable. Requires periodic [`MdbxEnv::sync`] flushes.
-    ///
-    /// [`MdbxEnv::sync`]: crate::MdbxEnv::sync
-    SafeNoSync,
 }
 
 /// Configuration for opening an [`MdbxEnv`](crate::MdbxEnv).
@@ -44,7 +47,9 @@ pub struct MdbxConfig {
     /// Upper bound of the map, in bytes. Sparse — reserves address space, not
     /// disk. Hitting it is a hard `MAP_FULL`, so set it generously.
     pub max_size: usize,
-    /// Geometry growth step, in bytes.
+    /// Geometry growth step, in bytes. Signed because MDBX takes the step as
+    /// an `intptr_t` and reserves negative values as sentinels (the binding
+    /// passes `-1` for "leave at the built-in default").
     pub growth_step: isize,
     /// Explicit page size in bytes, or [`None`] to let MDBX pick the system
     /// default (typically 4 KiB).

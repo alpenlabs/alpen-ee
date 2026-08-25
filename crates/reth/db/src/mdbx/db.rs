@@ -11,7 +11,7 @@ use super::schema::{
 use crate::{errors::DbError, DbResult, EeDaContext, StateDiffProvider, StateDiffStore};
 
 /// Maps a storage-engine error into the reth state-diff database error type.
-fn map_mdbx(err: MdbxError) -> DbError {
+fn to_db_error(err: MdbxError) -> DbError {
     DbError::Other(format!("mdbx: {err}"))
 }
 
@@ -30,7 +30,7 @@ impl WitnessDbMdbx {
 
     /// Opens a standalone environment at `path` with just the state-diff tables.
     pub fn open(path: &Path, config: &MdbxConfig) -> DbResult<Self> {
-        let env = MdbxEnv::open(path, config, &witness_tables()).map_err(map_mdbx)?;
+        let env = MdbxEnv::open(path, config, &witness_tables()).map_err(to_db_error)?;
         Ok(Self::new(Arc::new(env)))
     }
 }
@@ -40,7 +40,7 @@ impl StateDiffProvider for WitnessDbMdbx {
         let raw = self
             .env
             .view(|r| r.get::<BlockStateChangesSchema>(&block_hash))
-            .map_err(map_mdbx)?;
+            .map_err(to_db_error)?;
         raw.map(|bytes| bincode::deserialize(&bytes))
             .transpose()
             .map_err(|err| DbError::CodecError(err.to_string()))
@@ -50,7 +50,7 @@ impl StateDiffProvider for WitnessDbMdbx {
         let block_hash = self
             .env
             .view(|r| r.get::<BlockHashByNumber>(&block_number))
-            .map_err(map_mdbx)?;
+            .map_err(to_db_error)?;
         let Some(bytes) = block_hash else {
             return Ok(None);
         };
@@ -73,7 +73,7 @@ impl StateDiffStore for WitnessDbMdbx {
                 w.put::<BlockStateChangesSchema>(&block_hash, &serialized)?;
                 Ok(())
             })
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     fn del_state_diff(&self, block_hash: B256) -> DbResult<()> {
@@ -82,7 +82,7 @@ impl StateDiffStore for WitnessDbMdbx {
                 w.delete::<BlockStateChangesSchema>(&block_hash)?;
                 Ok(())
             })
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 }
 
@@ -133,7 +133,7 @@ impl<S: StateDiffProvider + 'static> EeDaContext for EeDaContextDbMdbx<S> {
         let exists = self
             .env
             .view(|r| r.get::<PublishedCodeHashSchema>(code_hash))
-            .map_err(map_mdbx)?;
+            .map_err(to_db_error)?;
         Ok(exists.is_some())
     }
 
@@ -145,7 +145,7 @@ impl<S: StateDiffProvider + 'static> EeDaContext for EeDaContextDbMdbx<S> {
                 }
                 Ok(())
             })
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     fn update_da_filter(&self, block_hashes: &[B256]) -> DbResult<()> {
