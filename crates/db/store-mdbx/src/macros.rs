@@ -213,3 +213,51 @@ macro_rules! define_table_raw_be_key {
         $crate::impl_raw_value_codec!($name);
     };
 }
+
+/// CBOR [`ValueCodec`](crate::ValueCodec) via `ciborium`, for values that are
+/// `serde`-serializable but not borsh.
+///
+/// CBOR's self-describing map encoding also tolerates fields being added to a
+/// record later, which matters for the broadcast/envelope entries shared with
+/// the upstream sled stores.
+#[macro_export]
+macro_rules! impl_cbor_value_codec {
+    ($schema:ty, $value:ty) => {
+        impl $crate::ValueCodec<$schema> for $value {
+            fn encode_value(
+                &self,
+            ) -> ::core::result::Result<::std::vec::Vec<u8>, $crate::CodecError> {
+                let mut buf = ::std::vec::Vec::new();
+                ::ciborium::into_writer(self, &mut buf).map_err(|e| {
+                    $crate::CodecError::encode(<$schema as $crate::Schema>::NAME, e)
+                })?;
+                ::core::result::Result::Ok(buf)
+            }
+
+            fn decode_value(bytes: &[u8]) -> ::core::result::Result<Self, $crate::CodecError> {
+                ::ciborium::from_reader(bytes)
+                    .map_err(|e| $crate::CodecError::decode(<$schema as $crate::Schema>::NAME, e))
+            }
+        }
+    };
+}
+
+/// Raw-bytes [`KeyCodec`](crate::KeyCodec) for `Vec<u8>`: the key is stored
+/// verbatim, so any tag prefix it carries sorts as written. A length-prefixed
+/// encoding would sort by length first.
+#[macro_export]
+macro_rules! impl_raw_key_codec {
+    ($schema:ty) => {
+        impl $crate::KeyCodec<$schema> for ::std::vec::Vec<u8> {
+            fn encode_key(
+                &self,
+            ) -> ::core::result::Result<::std::vec::Vec<u8>, $crate::CodecError> {
+                ::core::result::Result::Ok(self.clone())
+            }
+
+            fn decode_key(bytes: &[u8]) -> ::core::result::Result<Self, $crate::CodecError> {
+                ::core::result::Result::Ok(bytes.to_vec())
+            }
+        }
+    };
+}

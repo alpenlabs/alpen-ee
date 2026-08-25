@@ -12,7 +12,7 @@ use crate::{errors::DbError, DbResult, EeDaContext, StateDiffProvider, StateDiff
 
 /// Maps a storage-engine error into the reth state-diff database error type.
 fn map_mdbx(err: MdbxError) -> DbError {
-    DbError::IoError(err.to_string())
+    DbError::Other(format!("mdbx: {err}"))
 }
 
 /// MDBX-backed state-diff store.
