@@ -115,3 +115,41 @@ def wait_until_with_value(
         logger.warning(f"caught {type(e).__name__}, will still wait for timeout: {e}")
 
     raise AssertionError(error_with)
+
+
+def wait_for_account_update_seq(
+    rpc,
+    account_id_hex: str,
+    min_next_seq_no: int,
+    start_epoch: int,
+    btc_rpc,
+    miner_addr: str,
+    timeout: int = 600,
+    blocks_per_step: int = 4,
+    poll: float = 1.0,
+) -> int:
+    """Wait until OL terminal epoch summaries include the submitted update."""
+    deadline = time.time() + timeout
+    last_terminal_epoch = start_epoch
+    last_seen_seq_no = -1
+    while time.time() < deadline:
+        btc_rpc.proxy.generatetoaddress(blocks_per_step, miner_addr)
+        time.sleep(poll)
+        status = rpc.strata_getChainStatus()
+        latest = status["latest"]
+        last_terminal_epoch = int(latest["epoch"])
+        for epoch in range(start_epoch, last_terminal_epoch + 1):
+            try:
+                summary = rpc.strata_getAccountEpochSummary(account_id_hex, epoch)
+            except RpcError:
+                continue
+            updates = (summary.get("update_inputs") or []) if summary else []
+            for update in updates:
+                seq_no = int(update.get("seq_no", -1))
+                last_seen_seq_no = max(last_seen_seq_no, seq_no)
+                if seq_no >= min_next_seq_no:
+                    return epoch
+    raise AssertionError(
+        f"account update seq_no >= {min_next_seq_no} not found from epoch {start_epoch}; "
+        f"last_terminal_epoch={last_terminal_epoch}, last_seen_seq_no={last_seen_seq_no}"
+    )
