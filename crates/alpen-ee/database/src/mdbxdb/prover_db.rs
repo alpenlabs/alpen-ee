@@ -23,7 +23,7 @@ use crate::serialization_types::DBBatchId;
 
 /// Maps a storage-engine error into the prover database error type.
 fn map_mdbx(err: MdbxError) -> DbError {
-    DbError::IoError(err.to_string())
+    DbError::Other(format!("mdbx: {err}"))
 }
 
 /// `ProofId` for a batch — its `last_block` hash.

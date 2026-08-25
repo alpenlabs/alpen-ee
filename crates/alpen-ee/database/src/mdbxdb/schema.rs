@@ -4,10 +4,17 @@
 //! big-endian keys so MDBX's lexicographic cursor order matches numeric order
 //! (relied on by `first`/`last`/range queries).
 
-use alpen_db_store_mdbx::{define_table_be_key, define_table_borsh, tables, TableSpec};
+use alpen_db_store_mdbx::{
+    define_table, define_table_be_key, define_table_borsh, impl_be_key_codec, impl_borsh_key_codec,
+    impl_cbor_value_codec, impl_raw_key_codec, tables, CodecError, KeyCodec, Schema, TableSpec,
+};
 use alpen_ee_common::AccessedStateRecord;
 use strata_acct_types::Hash;
-use strata_db_types::{chunked_envelope::ChunkedEnvelopeEntry, l1_broadcast::L1TxEntry};
+use strata_db_types::{
+    chunked_envelope::ChunkedEnvelopeEntry,
+    fee_bump::{TxNodeId, TxNodeRecord},
+    l1_broadcast::L1TxEntry,
+};
 use strata_identifiers::Buf32;
 use strata_paas::TaskRecordData;
 use zkaleido::ProofReceiptWithMetadata;
@@ -16,6 +23,28 @@ use crate::serialization_types::{
     DBAccountStateAtEpoch, DBBatchId, DBBatchWithStatus, DBChunkId, DBChunkWithStatus,
     DBExecBlockRecord, DBOLBlockId,
 };
+
+/// Raw 32-byte [`KeyCodec`] for [`TxNodeId`], which is a newtype over a hash
+/// and carries no codec of its own.
+macro_rules! impl_node_id_key_codec {
+    ($schema:ty) => {
+        impl KeyCodec<$schema> for TxNodeId {
+            fn encode_key(&self) -> Result<Vec<u8>, CodecError> {
+                Ok(self.0 .0.to_vec())
+            }
+
+            fn decode_key(bytes: &[u8]) -> Result<Self, CodecError> {
+                let raw: [u8; 32] = bytes.try_into().map_err(|_| {
+                    CodecError::decode(
+                        <$schema as Schema>::NAME,
+                        format!("expected 32-byte node id, got {}", bytes.len()),
+                    )
+                })?;
+                Ok(Self(Buf32(raw)))
+            }
+        }
+    };
+}
 
 define_table_be_key! {
     /// Canonical final OL block id at OL epoch.
@@ -90,10 +119,15 @@ define_table_borsh! {
 
 // --- Prover-side tables (shared task store + proof receipts) ---
 
-define_table_borsh! {
+define_table! {
     /// Shared prover task store, keyed by tag-prefixed `ProofSpec::Task` bytes.
+    ///
+    /// The key is stored verbatim so the documented kind-tag prefixes sort as
+    /// written; [`TaskRecordData`] is serde-only, hence the CBOR value.
     (ProverTaskSchema) Vec<u8> => TaskRecordData
 }
+impl_raw_key_codec!(ProverTaskSchema);
+impl_cbor_value_codec!(ProverTaskSchema, TaskRecordData);
 
 define_table_borsh! {
     /// Chunk proof receipts, keyed by chunk task bytes.
@@ -118,15 +152,37 @@ define_table_be_key! {
     (L1BroadcastTxIdSchema) u64 => Buf32
 }
 
-define_table_borsh! {
+define_table! {
     /// L1 broadcast: transaction id to its [`L1TxEntry`].
     (L1BroadcastTxSchema) Buf32 => L1TxEntry
 }
+impl_borsh_key_codec!(L1BroadcastTxSchema, Buf32);
+impl_cbor_value_codec!(L1BroadcastTxSchema, L1TxEntry);
 
-define_table_be_key! {
+define_table! {
+    /// L1 broadcast: logical transaction replacement chains, keyed by the
+    /// chain's [`TxNodeId`].
+    (L1BroadcastTxNodeSchema) TxNodeId => TxNodeRecord
+}
+impl_node_id_key_codec!(L1BroadcastTxNodeSchema);
+impl_cbor_value_codec!(L1BroadcastTxNodeSchema, TxNodeRecord);
+
+define_table! {
+    /// Presence marker: this replacement chain may still need fee bumping.
+    ///
+    /// The replacement pass scans this set instead of the whole node table,
+    /// whose records are kept forever for crash-recovery point lookups.
+    (L1BroadcastActiveTxNodeSchema) TxNodeId => ()
+}
+impl_node_id_key_codec!(L1BroadcastActiveTxNodeSchema);
+impl_cbor_value_codec!(L1BroadcastActiveTxNodeSchema, ());
+
+define_table! {
     /// Chunked-envelope entry by sequential index.
     (L1ChunkedEnvelopeSchema) u64 => ChunkedEnvelopeEntry
 }
+impl_be_key_codec!(L1ChunkedEnvelopeSchema, u64);
+impl_cbor_value_codec!(L1ChunkedEnvelopeSchema, ChunkedEnvelopeEntry);
 
 /// The full set of tables backing the EE node database, for
 /// [`MdbxEnv::open`](alpen_db_store_mdbx::MdbxEnv::open).
@@ -165,6 +221,8 @@ pub(crate) fn da_tables() -> Vec<TableSpec> {
     tables![
         L1BroadcastTxIdSchema,
         L1BroadcastTxSchema,
+        L1BroadcastTxNodeSchema,
+        L1BroadcastActiveTxNodeSchema,
         L1ChunkedEnvelopeSchema,
     ]
 }

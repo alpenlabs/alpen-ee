@@ -17,7 +17,7 @@ use super::schema::L1ChunkedEnvelopeSchema;
 
 /// Maps a storage-engine error into the chunked-envelope database error type.
 fn map_mdbx(err: MdbxError) -> DbError {
-    DbError::IoError(err.to_string())
+    DbError::Other(format!("mdbx: {err}"))
 }
 
 /// MDBX-backed [`L1ChunkedEnvelopeDatabase`] over a shared [`MdbxEnv`].

@@ -37,6 +37,7 @@
 // downstream crates, so they look unused from within this crate.
 use bincode as _;
 use borsh as _;
+use ciborium as _;
 use strata_codec as _;
 
 mod codec;
