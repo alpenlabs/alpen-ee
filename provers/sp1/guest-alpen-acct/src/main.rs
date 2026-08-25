@@ -21,10 +21,11 @@ mod alpen_params {
 /// Constructs the chunk proof predicate key from the Groth16 predicate
 /// condition bytes that `build.rs` embeds in `predicates.rs`.
 fn chunk_predicate_key() -> PredicateKey {
-    PredicateKey::new(
+    PredicateKey::try_new(
         PredicateTypeId::Sp1Groth16,
         predicates::ALPEN_CHUNK_PREDICATE_CONDITION_BYTES.to_vec(),
     )
+    .expect("embedded Groth16 condition fits within the key length limit")
 }
 
 fn embedded_alpen_params() -> AlpenParams {

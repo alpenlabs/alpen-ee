@@ -1,12 +1,12 @@
 use alpen_ee_common::AccessedStateRecord;
 use strata_acct_types::Hash;
 use strata_db_store_sled::{
-    define_table_with_default_codec, define_table_without_codec, /* impl_bincode_key_codec, */
-    impl_borsh_value_codec,
+    define_table_without_codec, impl_cbor_value_codec, impl_raw_bytes_key_codec,
 };
 use strata_paas::TaskRecordData;
 use zkaleido::ProofReceiptWithMetadata;
 
+use super::macros::{define_table_with_default_codec, impl_borsh_value_codec};
 use crate::serialization_types::{
     DBAccountStateAtEpoch, DBBatchId, DBBatchWithStatus, DBChunkId, DBChunkWithStatus,
     DBExecBlockRecord, DBOLBlockId,
@@ -112,13 +112,15 @@ define_table_with_default_codec!(
 // index from `ProofId` (= batch's `last_block`) back to the batch, so
 // `BatchProver::get_proof(proof_id)` is an O(1) lookup.
 
-define_table_with_default_codec!(
+define_table_without_codec!(
     /// Shared prover task store for chunk + acct provers.
     ///
     /// Keyed by the serialized `ProofSpec::Task` bytes; tag-prefixed on
     /// the caller side (`ChunkTask` / `BatchTask`).
     (ProverTaskSchema) Vec<u8> => TaskRecordData
 );
+impl_raw_bytes_key_codec!(ProverTaskSchema, Vec<u8>);
+impl_cbor_value_codec!(ProverTaskSchema, TaskRecordData);
 
 define_table_with_default_codec!(
     /// Chunk proof receipts, keyed by chunk task bytes.

@@ -240,8 +240,13 @@ mod tests {
         let key = PredicateKey::always_accept();
         let msg = DecodedEeMessageData::PredicateUpdate(PredicateUpdateMsgData::new(key.clone()));
 
-        apply_decoded_message(&mut state, &msg, BitcoinAmount::ZERO, ADMIN_MSG_ACCT_ID)
-            .expect("apply succeeds");
+        apply_decoded_message(
+            &mut state,
+            &msg,
+            BitcoinAmount::default(),
+            ADMIN_MSG_ACCT_ID,
+        )
+        .expect("apply succeeds");
 
         assert_eq!(state.pending_inputs().len(), 1);
         assert!(matches!(
@@ -257,7 +262,7 @@ mod tests {
         let msg = DecodedEeMessageData::PredicateUpdate(PredicateUpdateMsgData::new(key));
         let attacker = AccountId::new([0xAA; 32]);
 
-        apply_decoded_message(&mut state, &msg, BitcoinAmount::ZERO, attacker)
+        apply_decoded_message(&mut state, &msg, BitcoinAmount::default(), attacker)
             .expect("apply succeeds");
 
         assert!(state.pending_inputs().is_empty());

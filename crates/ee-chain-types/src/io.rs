@@ -164,6 +164,12 @@ mod tests {
     use super::*;
     use crate::*;
 
+    /// Satoshi amounts capped at the bitcoin money supply, the bound
+    /// [`BitcoinAmount`] enforces.
+    fn any_sats() -> impl Strategy<Value = u64> {
+        0..=21_000_000u64 * 100_000_000
+    }
+
     mod exec_block_commitment {
         use super::*;
 
@@ -193,10 +199,10 @@ mod tests {
 
         ssz_proptest!(
             SubjectDepositData,
-            (any::<[u8; 32]>(), any::<u64>()).prop_map(|(dest, sats)| {
+            (any::<[u8; 32]>(), any_sats()).prop_map(|(dest, sats)| {
                 SubjectDepositData {
                     dest: SubjectId::new(dest),
-                    value: BitcoinAmount::from_sat(sats),
+                    value: BitcoinAmount::try_from(sats).unwrap(),
                 }
             })
         );
@@ -204,7 +210,7 @@ mod tests {
         #[test]
         fn test_new() {
             let dest = SubjectId::new([0xcc; 32]);
-            let value = BitcoinAmount::from_sat(1000);
+            let value = BitcoinAmount::try_from(1000).unwrap();
             let deposit = SubjectDepositData::new(dest, value);
 
             assert_eq!(deposit.dest(), dest);
@@ -218,10 +224,10 @@ mod tests {
         ssz_proptest!(
             ExecInputs,
             prop::collection::vec(
-                (any::<[u8; 32]>(), any::<u64>()).prop_map(|(dest, sats)| {
+                (any::<[u8; 32]>(), any_sats()).prop_map(|(dest, sats)| {
                     SubjectDepositData {
                         dest: SubjectId::new(dest),
-                        value: BitcoinAmount::from_sat(sats),
+                        value: BitcoinAmount::try_from(sats).unwrap(),
                     }
                 }),
                 0..10
@@ -242,8 +248,10 @@ mod tests {
         #[test]
         fn test_add_subject_deposit() {
             let mut inputs = ExecInputs::new_empty();
-            let deposit =
-                SubjectDepositData::new(SubjectId::new([0xdd; 32]), BitcoinAmount::from_sat(500));
+            let deposit = SubjectDepositData::new(
+                SubjectId::new([0xdd; 32]),
+                BitcoinAmount::try_from(500).unwrap(),
+            );
 
             inputs.add_subject_deposit(deposit);
             assert_eq!(inputs.total_inputs(), 1);
@@ -255,10 +263,10 @@ mod tests {
 
         ssz_proptest!(
             OutputTransfer,
-            (any::<[u8; 32]>(), any::<u64>()).prop_map(|(dest, sats)| {
+            (any::<[u8; 32]>(), any_sats()).prop_map(|(dest, sats)| {
                 OutputTransfer {
                     dest: AccountId::new(dest),
-                    value: BitcoinAmount::from_sat(sats),
+                    value: BitcoinAmount::try_from(sats).unwrap(),
                 }
             })
         );
@@ -266,7 +274,7 @@ mod tests {
         #[test]
         fn test_new() {
             let dest = AccountId::new([0xee; 32]);
-            let value = BitcoinAmount::from_sat(2000);
+            let value = BitcoinAmount::try_from(2000).unwrap();
             let transfer = OutputTransfer::new(dest, value);
 
             assert_eq!(transfer.dest(), dest);
@@ -280,18 +288,20 @@ mod tests {
         use super::*;
 
         fn predicate_key_strategy() -> impl Strategy<Value = PredicateKey> {
-            prop::collection::vec(any::<u8>(), 0..64)
-                .prop_map(|condition| PredicateKey::new(PredicateTypeId::AlwaysAccept, condition))
+            prop::collection::vec(any::<u8>(), 0..64).prop_map(|condition| {
+                PredicateKey::try_new(PredicateTypeId::AlwaysAccept, condition)
+                    .expect("condition fits within the key length limit")
+            })
         }
 
         ssz_proptest!(
             ExecOutputs,
             (
                 prop::collection::vec(
-                    (any::<[u8; 32]>(), any::<u64>()).prop_map(|(dest, sats)| {
+                    (any::<[u8; 32]>(), any_sats()).prop_map(|(dest, sats)| {
                         OutputTransfer {
                             dest: AccountId::new(dest),
-                            value: BitcoinAmount::from_sat(sats),
+                            value: BitcoinAmount::try_from(sats).unwrap(),
                         }
                     }),
                     0..10
@@ -299,14 +309,14 @@ mod tests {
                 prop::collection::vec(
                     (
                         any::<[u8; 32]>(),
-                        any::<u64>(),
+                        any_sats(),
                         prop::collection::vec(any::<u8>(), 0..50)
                     )
                         .prop_map(|(dest, sats, data)| {
                             OutputMessage::new(
                                 AccountId::new(dest),
                                 strata_acct_types::MsgPayload::from_bytes(
-                                    BitcoinAmount::from_sat(sats),
+                                    BitcoinAmount::try_from(sats).unwrap(),
                                     data,
                                 )
                                 .expect("message payload bytes must fit within SSZ max length"),

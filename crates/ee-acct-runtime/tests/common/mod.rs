@@ -211,14 +211,18 @@ pub(crate) fn create_predicate_update_message(
     // The body is a strata-codec-encoded VarVec of the new key's raw
     // serialized bytes, matching the OL STF's PredicateUpdateMsgData wire
     // format.
-    let key_bytes =
-        VarVec::<u8, { MAX_PREDICATE_KEY_BYTES }>::from_vec(new_key.as_buf_ref().to_bytes())
-            .expect("key bytes fit");
+    let key_bytes = VarVec::<u8, { MAX_PREDICATE_KEY_BYTES }>::from_vec(
+        new_key
+            .try_as_buf_ref()
+            .expect("key has a known predicate type")
+            .to_bytes(),
+    )
+    .expect("key bytes fit");
     let body = encode_to_vec(&key_bytes).expect("encoding should succeed");
     let msg = OwnedMsg::new(PREDICATE_UPDATE_MSG_TYPE_ID, body).expect("create message");
     let payload_data = msg.to_vec();
 
-    let payload = MsgPayload::from_bytes(BitcoinAmount::ZERO, payload_data)
+    let payload = MsgPayload::from_bytes(BitcoinAmount::default(), payload_data)
         .expect("message payload bytes must fit within SSZ max length");
     MessageEntry::new(ADMIN_MSG_ACCT_ID, incl_epoch, payload)
 }

@@ -139,7 +139,7 @@ mod tests {
     fn make_deposit(dest_bytes: [u8; 32], sats: u64) -> PendingInputEntry {
         PendingInputEntry::Deposit(SubjectDepositData::new(
             SubjectId::new(dest_bytes),
-            BitcoinAmount::from_sat(sats),
+            BitcoinAmount::try_from(sats).unwrap(),
         ))
     }
 
@@ -191,11 +191,11 @@ mod tests {
         assert_eq!(deposits.len(), 3);
         assert_eq!(consumed.processed(), 3);
         // Verify order is preserved (first 3)
-        assert_eq!(deposits[0].amount(), BitcoinAmount::from_sat(1000));
+        assert_eq!(deposits[0].amount(), BitcoinAmount::try_from(1000).unwrap());
         assert_eq!(deposits[0].idx(), 9);
-        assert_eq!(deposits[1].amount(), BitcoinAmount::from_sat(2000));
+        assert_eq!(deposits[1].amount(), BitcoinAmount::try_from(2000).unwrap());
         assert_eq!(deposits[1].idx(), 10);
-        assert_eq!(deposits[2].amount(), BitcoinAmount::from_sat(3000));
+        assert_eq!(deposits[2].amount(), BitcoinAmount::try_from(3000).unwrap());
         assert_eq!(deposits[2].idx(), 11);
     }
 
@@ -215,7 +215,10 @@ mod tests {
 
         // The deposit after the rotation is never extracted in this block.
         assert_eq!(consumed.deposits.len(), 1);
-        assert_eq!(consumed.deposits[0].amount(), BitcoinAmount::from_sat(1000));
+        assert_eq!(
+            consumed.deposits[0].amount(),
+            BitcoinAmount::try_from(1000).unwrap()
+        );
         // But the rotation itself is drained alongside the deposit before it.
         assert_eq!(consumed.processed(), 2);
         assert_eq!(consumed.new_predicate, Some(PredicateKey::always_accept()));

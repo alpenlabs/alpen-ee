@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 use alpen_ee_common::{BatchId, ProofId};
-use strata_db_store_sled::SledDbConfig;
+use strata_db_store_sled::{utils::conv_sled_err, SledDbConfig};
 use strata_db_types::{errors::DbError, prover_task::ProverTaskDatabase, DbResult};
 use strata_paas::TaskRecordData;
 use typed_sled::{SledDb, SledTree};
@@ -49,10 +49,10 @@ pub struct EeProverDbSled {
 impl EeProverDbSled {
     pub fn new(db: Arc<SledDb>, config: SledDbConfig) -> DbResult<Self> {
         Ok(Self {
-            prover_task_tree: db.get_tree()?,
-            chunk_receipt_tree: db.get_tree()?,
-            acct_proof_tree: db.get_tree()?,
-            acct_proof_id_index_tree: db.get_tree()?,
+            prover_task_tree: db.get_tree().map_err(conv_sled_err)?,
+            chunk_receipt_tree: db.get_tree().map_err(conv_sled_err)?,
+            acct_proof_tree: db.get_tree().map_err(conv_sled_err)?,
+            acct_proof_id_index_tree: db.get_tree().map_err(conv_sled_err)?,
             config,
         })
     }
@@ -64,20 +64,28 @@ impl EeProverDbSled {
         key: Vec<u8>,
         receipt: ProofReceiptWithMetadata,
     ) -> DbResult<()> {
-        self.chunk_receipt_tree.insert(&key, &receipt)?;
+        self.chunk_receipt_tree
+            .insert(&key, &receipt)
+            .map_err(conv_sled_err)?;
         Ok(())
     }
 
     pub fn get_chunk_receipt(&self, key: &[u8]) -> DbResult<Option<ProofReceiptWithMetadata>> {
-        Ok(self.chunk_receipt_tree.get(&key.to_vec())?)
+        self.chunk_receipt_tree
+            .get(&key.to_vec())
+            .map_err(conv_sled_err)
     }
 
     /// Removes a chunk receipt, returning `true` if a row existed.
     ///
-    /// Admin-only path (offline dbtool). Callers must keep the node down
-    /// to avoid racing with chunk-prover writes.
+    /// Admin-only path. Callers must keep the node down to avoid racing
+    /// with chunk-prover writes.
     pub fn delete_chunk_receipt(&self, key: &[u8]) -> DbResult<bool> {
-        Ok(self.chunk_receipt_tree.take(&key.to_vec())?.is_some())
+        Ok(self
+            .chunk_receipt_tree
+            .take(&key.to_vec())
+            .map_err(conv_sled_err)?
+            .is_some())
     }
 
     // ---- Acct proof store (typed BatchId API) ----
@@ -91,15 +99,18 @@ impl EeProverDbSled {
         let proof_id = proof_id_for(batch_id);
         // Upsert is fine: idempotent re-submits from paas replace the
         // receipt. The index entry is idempotent too.
-        self.acct_proof_tree.insert(&db_id, &receipt)?;
+        self.acct_proof_tree
+            .insert(&db_id, &receipt)
+            .map_err(conv_sled_err)?;
         self.acct_proof_id_index_tree
-            .insert(&proof_id, &batch_id.into())?;
+            .insert(&proof_id, &batch_id.into())
+            .map_err(conv_sled_err)?;
         Ok(())
     }
 
     pub fn get_acct_proof(&self, batch_id: BatchId) -> DbResult<Option<ProofReceiptWithMetadata>> {
         let db_id: DBBatchId = batch_id.into();
-        Ok(self.acct_proof_tree.get(&db_id)?)
+        self.acct_proof_tree.get(&db_id).map_err(conv_sled_err)
     }
 
     pub fn has_acct_proof(&self, batch_id: BatchId) -> DbResult<bool> {
@@ -110,7 +121,11 @@ impl EeProverDbSled {
         &self,
         proof_id: ProofId,
     ) -> DbResult<Option<ProofReceiptWithMetadata>> {
-        let Some(db_id) = self.acct_proof_id_index_tree.get(&proof_id)? else {
+        let Some(db_id) = self
+            .acct_proof_id_index_tree
+            .get(&proof_id)
+            .map_err(conv_sled_err)?
+        else {
             return Ok(None);
         };
         let batch_id: BatchId = db_id.into();
@@ -120,52 +135,70 @@ impl EeProverDbSled {
     /// Removes an acct proof along with its secondary index entry,
     /// returning `true` if the proof row existed.
     ///
-    /// Admin-only path (offline dbtool). The two trees are not deleted
-    /// in a single transaction — acceptable because callers stop the
-    /// node before invoking this, so no concurrent writer can observe
-    /// the intermediate state.
+    /// Admin-only path. The two trees are not deleted in a single
+    /// transaction — acceptable because callers stop the node before
+    /// invoking this, so no concurrent writer can observe the
+    /// intermediate state.
     pub fn delete_acct_proof(&self, batch_id: BatchId) -> DbResult<bool> {
         let db_id: DBBatchId = batch_id.into();
         let proof_id = proof_id_for(batch_id);
-        let existed = self.acct_proof_tree.take(&db_id)?.is_some();
-        self.acct_proof_id_index_tree.remove(&proof_id)?;
+        let existed = self
+            .acct_proof_tree
+            .take(&db_id)
+            .map_err(conv_sled_err)?
+            .is_some();
+        self.acct_proof_id_index_tree
+            .remove(&proof_id)
+            .map_err(conv_sled_err)?;
         Ok(existed)
     }
 }
 
 impl ProverTaskDatabase for EeProverDbSled {
     fn get_task(&self, key: Vec<u8>) -> DbResult<Option<TaskRecordData>> {
-        Ok(self.prover_task_tree.get(&key)?)
+        self.prover_task_tree.get(&key).map_err(conv_sled_err)
     }
 
     fn insert_task(&self, key: Vec<u8>, record: TaskRecordData) -> DbResult<()> {
-        if self.prover_task_tree.get(&key)?.is_some() {
+        if self
+            .prover_task_tree
+            .get(&key)
+            .map_err(conv_sled_err)?
+            .is_some()
+        {
             return Err(DbError::EntryAlreadyExists);
         }
         self.prover_task_tree
-            .compare_and_swap(key, None, Some(record))?;
+            .compare_and_swap(key, None, Some(record))
+            .map_err(conv_sled_err)?;
         Ok(())
     }
 
     fn put_task(&self, key: Vec<u8>, record: TaskRecordData) -> DbResult<()> {
-        let old = self.prover_task_tree.get(&key)?;
+        let old = self.prover_task_tree.get(&key).map_err(conv_sled_err)?;
         self.prover_task_tree
-            .compare_and_swap(key, old, Some(record))?;
+            .compare_and_swap(key, old, Some(record))
+            .map_err(conv_sled_err)?;
         Ok(())
     }
 
     fn delete_task(&self, key: Vec<u8>) -> DbResult<bool> {
-        let old = self.prover_task_tree.get(&key)?;
+        let old = self.prover_task_tree.get(&key).map_err(conv_sled_err)?;
         let existed = old.is_some();
-        self.prover_task_tree.compare_and_swap(key, old, None)?;
+        self.prover_task_tree
+            .compare_and_swap(key, old, None)
+            .map_err(conv_sled_err)?;
         Ok(existed)
     }
 
     fn list_retriable(&self, now_secs: u64) -> DbResult<Vec<(Vec<u8>, TaskRecordData)>> {
         let mut out = Vec::new();
         for item in self.prover_task_tree.iter() {
-            let (key, record) = item?;
-            if record.status().is_retriable()
+            let (key, record) = item.map_err(conv_sled_err)?;
+            // `wants_rescan`, not `is_retriable`: blocked tasks are waiting on a
+            // dependency rather than failing, and the scanner has to re-spawn
+            // them too or they park forever.
+            if record.status().wants_rescan()
                 && record.retry_after_secs().is_some_and(|t| t <= now_secs)
             {
                 out.push((key, record));
@@ -177,7 +210,7 @@ impl ProverTaskDatabase for EeProverDbSled {
     fn list_unfinished(&self) -> DbResult<Vec<(Vec<u8>, TaskRecordData)>> {
         let mut out = Vec::new();
         for item in self.prover_task_tree.iter() {
-            let (key, record) = item?;
+            let (key, record) = item.map_err(conv_sled_err)?;
             if record.status().is_unfinished() {
                 out.push((key, record));
             }
@@ -188,7 +221,7 @@ impl ProverTaskDatabase for EeProverDbSled {
     fn list_all_tasks(&self) -> DbResult<Vec<(Vec<u8>, TaskRecordData)>> {
         let mut out = Vec::new();
         for item in self.prover_task_tree.iter() {
-            out.push(item?);
+            out.push(item.map_err(conv_sled_err)?);
         }
         Ok(out)
     }
@@ -196,7 +229,7 @@ impl ProverTaskDatabase for EeProverDbSled {
     fn count_tasks(&self) -> DbResult<usize> {
         let mut n = 0;
         for item in self.prover_task_tree.iter() {
-            item?;
+            item.map_err(conv_sled_err)?;
             n += 1;
         }
         Ok(n)

@@ -159,9 +159,13 @@ mod tests {
     /// Builds the message body the OL STF stages for a rotation: a
     /// strata-codec-encoded `VarVec` of the new key's raw serialized bytes.
     fn predicate_update_body(new_key: &PredicateKey) -> Vec<u8> {
-        let key_bytes =
-            VarVec::<u8, { MAX_PREDICATE_KEY_BYTES }>::from_vec(new_key.as_buf_ref().to_bytes())
-                .expect("key bytes fit");
+        let key_bytes = VarVec::<u8, { MAX_PREDICATE_KEY_BYTES }>::from_vec(
+            new_key
+                .try_as_buf_ref()
+                .expect("key has a known predicate type")
+                .to_bytes(),
+        )
+        .expect("key bytes fit");
         encode_to_vec(&key_bytes).expect("encoding should succeed")
     }
 

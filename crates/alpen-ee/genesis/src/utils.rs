@@ -65,3 +65,72 @@ pub fn build_genesis_exec_block(
 
     (block, payload)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use alpen_ee_params::AlpenParams;
+    use strata_acct_types::tree_hash::{Sha256Hasher, TreeHash};
+
+    use super::build_genesis_ee_account_state;
+
+    /// Genesis inner-state root of the EE account for each shipped chain spec.
+    ///
+    /// The functional tests pre-register the EE account in OL genesis and have
+    /// to write these roots into the genesis-accounts file by hand, since
+    /// computing one means SSZ-hashing [`EeAccountState`]. Pinning them here
+    /// means a change to EE genesis fails this test instead of surfacing as an
+    /// unexplained proof mismatch on the first update.
+    ///
+    /// Keep in sync with `GENESIS_INNER_STATE_ROOTS` in
+    /// `functional-tests/common/datatool.py`.
+    const GENESIS_INNER_STATE_ROOTS: &[(&str, &str)] = &[
+        (
+            "alpen-dev-chain",
+            "a0a5f13344251d480f42dc85cabe0ca6dffa168e67ad32a9224970383baa63be",
+        ),
+        (
+            "devnet-chain",
+            "185eea4e22a815a87a512843c279e42f87f9b57432d29abfe35b4ccfc0da1a1e",
+        ),
+        (
+            "testnet-chain",
+            "2a82d8daab762ffd91786783f47ca123d7d2206982533748697413e21c05f4b2",
+        ),
+        (
+            "testnet3-chain",
+            "87da9f8fd94022e63d24f05207dffd8a513136d1b07d68c0a350c47190085036",
+        ),
+    ];
+
+    /// Builds params carrying `chain`'s genesis document. Only the EVM genesis
+    /// feeds the inner-state root, so the other fields are the defaults.
+    fn params_for_chain(chain: &str) -> AlpenParams {
+        let spec = fs::read_to_string(format!(
+            "{}/../../reth/chainspec/src/res/{chain}.json",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("chain spec should be readable");
+
+        serde_json::from_str(&format!(
+            r#"{{"strata_exec_account_id":"{id}","bridge_params":{{"denomination":100000000,"max_withdrawal_amount":1000000000,"max_withdrawal_descriptor_len":81}},"blob_spec":{{"magic_bytes":"ALPN"}},"spec_schedule":{{"v0":0}},"evm_spec":{spec}}}"#,
+            id = "01".repeat(32),
+        ))
+        .expect("params should parse")
+    }
+
+    #[test]
+    fn genesis_inner_state_roots_are_stable() {
+        for (chain, expected) in GENESIS_INNER_STATE_ROOTS {
+            let state = build_genesis_ee_account_state(&params_for_chain(chain));
+            let root = TreeHash::tree_hash_root::<Sha256Hasher>(&state);
+            assert_eq!(
+                hex::encode(root.0),
+                *expected,
+                "genesis inner state root changed for {chain}; update \
+                 GENESIS_INNER_STATE_ROOTS here and in functional-tests/common/datatool.py"
+            );
+        }
+    }
+}

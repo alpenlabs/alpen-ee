@@ -3,6 +3,7 @@ use std::sync::Arc;
 use alpen_reth_statediff::BlockStateChanges;
 use revm_primitives::alloy_primitives::B256;
 use sled::transaction::{ConflictableTransactionError, ConflictableTransactionResult};
+use strata_db_store_sled::utils::conv_sled_err;
 use tracing::warn;
 use typed_sled::{error::Error, transaction::SledTransactional, SledDb, SledTree};
 
@@ -38,7 +39,10 @@ impl WitnessDB {
 
 impl StateDiffProvider for WitnessDB {
     fn get_state_diff_by_hash(&self, block_hash: B256) -> DbResult<Option<BlockStateChanges>> {
-        let raw = self.state_diff_tree.get(&block_hash)?;
+        let raw = self
+            .state_diff_tree
+            .get(&block_hash)
+            .map_err(conv_sled_err)?;
 
         let parsed: Option<BlockStateChanges> = raw
             .map(|bytes| bincode::deserialize(&bytes))
@@ -89,7 +93,10 @@ impl StateDiffStore for WitnessDB {
     }
 
     fn del_state_diff(&self, block_hash: B256) -> DbResult<()> {
-        Ok(self.state_diff_tree.remove(&block_hash)?)
+        self.state_diff_tree
+            .remove(&block_hash)
+            .map_err(conv_sled_err)?;
+        Ok(())
     }
 }
 
