@@ -207,7 +207,7 @@ macro_rules! define_table_be_key {
 /// verbatim — for opaque encoded blobs served directly (e.g. bincode payloads).
 #[macro_export]
 macro_rules! define_table_raw_be_key {
-    ($(#[$docs:meta])* ($name:ident) $key:ty) => {
+    ($(#[$docs:meta])* ($name:ident) $key:ty => Vec<u8>) => {
         $crate::define_table!($(#[$docs])* ($name) $key => ::std::vec::Vec<u8>);
         $crate::impl_be_key_codec!($name, $key);
         $crate::impl_raw_value_codec!($name);

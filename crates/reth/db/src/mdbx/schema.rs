@@ -8,17 +8,17 @@ use revm_primitives::alloy_primitives::B256;
 
 define_table_raw_be_key! {
     /// Block state-diff data, stored as serialized bytes for direct RPC serving.
-    (BlockStateChangesSchema) B256
+    (BlockStateChangesSchema) B256 => Vec<u8>
 }
 
 define_table_raw_be_key! {
     /// Block number to hash mapping.
-    (BlockHashByNumber) u64
+    (BlockHashByNumber) u64 => Vec<u8>
 }
 
 define_table_raw_be_key! {
     /// Set of contract code hashes already published to DA (presence-only).
-    (PublishedCodeHashSchema) B256
+    (PublishedCodeHashSchema) B256 => Vec<u8>
 }
 
 /// The full set of tables backing the state-diff / DA-context store.

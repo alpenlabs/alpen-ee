@@ -21,15 +21,13 @@ use strata_db_types::{
 };
 use strata_identifiers::Buf32;
 
-use super::schema::{
-    L1BroadcastActiveTxNodeSchema, L1BroadcastTxIdSchema, L1BroadcastTxNodeSchema,
-    L1BroadcastTxSchema,
+use super::{
+    schema::{
+        L1BroadcastActiveTxNodeSchema, L1BroadcastTxIdSchema, L1BroadcastTxNodeSchema,
+        L1BroadcastTxSchema,
+    },
+    to_db_error,
 };
-
-/// Maps a storage-engine error into the broadcast database error type.
-fn map_mdbx(err: MdbxError) -> DbError {
-    DbError::Other(format!("mdbx: {err}"))
-}
 
 /// MDBX-backed [`L1BroadcastDatabase`] over a shared [`MdbxEnv`].
 ///
@@ -66,7 +64,7 @@ impl L1BroadcastDatabase for L1BroadcastDbMdbx {
                 w.put::<L1BroadcastTxSchema>(&txid, &txentry)?;
                 Ok(idx)
             })
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     fn put_tx_entry_by_idx(&self, idx: u64, txentry: L1TxEntry) -> DbResult<()> {
@@ -101,7 +99,7 @@ impl L1BroadcastDatabase for L1BroadcastDbMdbx {
                 w.put::<L1BroadcastTxSchema>(&txid, &txentry)?;
                 Ok(Outcome::Updated)
             })
-            .map_err(map_mdbx)?;
+            .map_err(to_db_error)?;
 
         match outcome {
             Outcome::Updated => Ok(()),
@@ -126,7 +124,7 @@ impl L1BroadcastDatabase for L1BroadcastDbMdbx {
                 }
                 Ok(exists)
             })
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     fn del_tx_entries_from_idx(&self, start_idx: u64) -> DbResult<Vec<u64>> {
@@ -149,13 +147,13 @@ impl L1BroadcastDatabase for L1BroadcastDbMdbx {
                 }
                 Ok(deleted)
             })
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     fn get_tx_entry_by_id(&self, txid: Buf32) -> DbResult<Option<L1TxEntry>> {
         self.env
             .view(|r| r.get::<L1BroadcastTxSchema>(&txid))
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     fn get_next_tx_idx(&self) -> DbResult<u64> {
@@ -166,13 +164,13 @@ impl L1BroadcastDatabase for L1BroadcastDbMdbx {
                     None => 0,
                 })
             })
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     fn get_txid(&self, idx: u64) -> DbResult<Option<Buf32>> {
         self.env
             .view(|r| r.get::<L1BroadcastTxIdSchema>(&idx))
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     fn get_tx_entry(&self, idx: u64) -> DbResult<Option<L1TxEntry>> {
@@ -186,7 +184,7 @@ impl L1BroadcastDatabase for L1BroadcastDbMdbx {
                     None => None,
                 })
             })
-            .map_err(map_mdbx)?;
+            .map_err(to_db_error)?;
 
         match resolved {
             Some(entry) => Ok(entry),
@@ -197,9 +195,17 @@ impl L1BroadcastDatabase for L1BroadcastDbMdbx {
     }
 
     fn get_last_tx_entry(&self) -> DbResult<Option<L1TxEntry>> {
+        // Resolve through the index table: `L1BroadcastTxSchema` is keyed by
+        // txid, so its last entry is the greatest txid, not the most recently
+        // inserted one.
         self.env
-            .view(|r| Ok(r.last::<L1BroadcastTxSchema>()?.map(|(_, entry)| entry)))
-            .map_err(map_mdbx)
+            .view(|r| {
+                let Some((_, txid)) = r.last::<L1BroadcastTxIdSchema>()? else {
+                    return Ok(None);
+                };
+                r.get::<L1BroadcastTxSchema>(&txid)
+            })
+            .map_err(to_db_error)
     }
 
     fn put_replacement_tx_entry(
@@ -243,7 +249,7 @@ impl L1BroadcastDatabase for L1BroadcastDbMdbx {
 
                 Ok(Some(idx))
             })
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     fn try_mark_tx_entry_replaced(&self, txid: Buf32, replacement_txid: L1TxId) -> DbResult<bool> {
@@ -261,7 +267,7 @@ impl L1BroadcastDatabase for L1BroadcastDbMdbx {
                 w.put::<L1BroadcastTxSchema>(&txid, &entry)?;
                 Ok(true)
             })
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     fn adopt_confirmed_ancestor(
@@ -305,7 +311,7 @@ impl L1BroadcastDatabase for L1BroadcastDbMdbx {
 
                 Ok(true)
             })
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     fn put_tx_node(&self, node_id: TxNodeId, record: TxNodeRecord) -> DbResult<()> {
@@ -321,13 +327,13 @@ impl L1BroadcastDatabase for L1BroadcastDbMdbx {
                 }
                 Ok(())
             })
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     fn get_tx_node(&self, node_id: TxNodeId) -> DbResult<Option<TxNodeRecord>> {
         self.env
             .view(|r| r.get::<L1BroadcastTxNodeSchema>(&node_id))
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     fn get_all_tx_nodes(&self) -> DbResult<Vec<TxNodeRecord>> {
@@ -340,7 +346,7 @@ impl L1BroadcastDatabase for L1BroadcastDbMdbx {
                 })?;
                 Ok(records)
             })
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     fn get_active_tx_nodes(&self) -> DbResult<Vec<TxNodeRecord>> {
@@ -360,7 +366,7 @@ impl L1BroadcastDatabase for L1BroadcastDbMdbx {
                 }
                 Ok(records)
             })
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     fn retire_tx_node(&self, node_id: TxNodeId, expected_active_txid: L1TxId) -> DbResult<bool> {
@@ -383,7 +389,7 @@ impl L1BroadcastDatabase for L1BroadcastDbMdbx {
                 w.delete::<L1BroadcastActiveTxNodeSchema>(&node_id)?;
                 Ok(true)
             })
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 }
 

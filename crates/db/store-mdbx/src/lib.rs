@@ -8,14 +8,18 @@
 //! # Model
 //!
 //! One [`MdbxEnv`] is one MDBX environment: a single writer (transactions
-//! serialize on the environment write-lock) with unlimited MVCC readers. All
+//! serialize on the environment write-lock) alongside MVCC readers that never
+//! block it, up to the [`MdbxConfig::max_readers`] reader slots. All
 //! access goes through [`MdbxEnv::view`] (read) and [`MdbxEnv::update`] (write)
 //! closures, which scope a transaction to a single call — the discipline that
 //! keeps writes short and readers from stalling page reclamation.
 //!
 //! # Defining tables
 //!
-//! Table markers are crate-private, so define them inside your crate:
+//! Table markers are crate-private, so define them inside your crate. The
+//! key and value types below are just examples — any Borsh-serializable type
+//! works for either side (and `define_table_be_key!` additionally requires the
+//! key to be a big-endian-encodable integer or byte array):
 //!
 //! ```
 //! mod schema {

@@ -101,6 +101,9 @@ impl EeNodeDb for EeNodeDbMdbx {
             for epoch in (min_epoch..=max_epoch).rev() {
                 let Some(blockid) = w.get::<OLBlockAtEpochSchema>(&epoch)? else {
                     warn!(%epoch, "expected block to exist in db");
+                    // The epoch is already gone, which is what we wanted, but
+                    // its account state entry may survive as an orphan. Needs
+                    // an orphan cleanup util or task if that ever bites.
                     continue;
                 };
                 w.delete::<OLBlockAtEpochSchema>(&epoch)?;

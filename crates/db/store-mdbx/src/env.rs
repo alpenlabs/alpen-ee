@@ -64,7 +64,6 @@ impl MdbxEnv {
 
         let sync_mode = match config.sync_mode {
             MdbxSyncMode::Durable => SyncMode::Durable,
-            MdbxSyncMode::SafeNoSync => SyncMode::SafeNoSync,
         };
 
         let mut builder = Environment::builder();
@@ -128,8 +127,9 @@ impl MdbxEnv {
         Ok(out)
     }
 
-    /// Flushes pending writes to disk. A no-op under `DURABLE`; the periodic
-    /// flush lever for [`MdbxSyncMode::SafeNoSync`].
+    /// Flushes pending writes to disk. A no-op under the current
+    /// [`MdbxSyncMode::Durable`] mode, which already fsyncs on every commit;
+    /// kept as the flush lever a future deferred-sync mode would need.
     pub fn sync(&self, force: bool) -> DbResult<()> {
         self.env.sync(force)?;
         Ok(())
@@ -162,7 +162,10 @@ where
 {
     let db = txn.open_db(Some(S::NAME))?;
     let mut cursor = txn.cursor(db)?;
-    decode_entry::<S>(cursor.first::<Vec<u8>, Vec<u8>>()?)
+    cursor
+        .first::<Vec<u8>, Vec<u8>>()?
+        .map(decode_entry::<S>)
+        .transpose()
 }
 
 fn last_in<S: Schema, K>(txn: &TxUnsync<K>) -> DbResult<Option<(S::Key, S::Value)>>
@@ -171,7 +174,10 @@ where
 {
     let db = txn.open_db(Some(S::NAME))?;
     let mut cursor = txn.cursor(db)?;
-    decode_entry::<S>(cursor.last::<Vec<u8>, Vec<u8>>()?)
+    cursor
+        .last::<Vec<u8>, Vec<u8>>()?
+        .map(decode_entry::<S>)
+        .transpose()
 }
 
 fn for_each_in<S: Schema, K>(
@@ -193,15 +199,12 @@ where
 }
 
 fn decode_entry<S: Schema>(
-    entry: Option<(Vec<u8>, Vec<u8>)>,
-) -> DbResult<Option<(S::Key, S::Value)>> {
-    match entry {
-        Some((key_bytes, value_bytes)) => Ok(Some((
-            <S::Key as KeyCodec<S>>::decode_key(&key_bytes)?,
-            <S::Value as ValueCodec<S>>::decode_value(&value_bytes)?,
-        ))),
-        None => Ok(None),
-    }
+    (key_bytes, value_bytes): (Vec<u8>, Vec<u8>),
+) -> DbResult<(S::Key, S::Value)> {
+    Ok((
+        <S::Key as KeyCodec<S>>::decode_key(&key_bytes)?,
+        <S::Value as ValueCodec<S>>::decode_value(&value_bytes)?,
+    ))
 }
 
 /// Read accessor handed to a [`MdbxEnv::view`] closure.

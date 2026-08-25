@@ -6,19 +6,13 @@
 
 use std::sync::Arc;
 
-use alpen_db_store_mdbx::{DbError as MdbxError, MdbxEnv};
+use alpen_db_store_mdbx::MdbxEnv;
 use strata_db_types::{
     chunked_envelope::{ChunkedEnvelopeEntry, L1ChunkedEnvelopeDatabase},
-    errors::DbError,
     DbResult,
 };
 
-use super::schema::L1ChunkedEnvelopeSchema;
-
-/// Maps a storage-engine error into the chunked-envelope database error type.
-fn map_mdbx(err: MdbxError) -> DbError {
-    DbError::Other(format!("mdbx: {err}"))
-}
+use super::{schema::L1ChunkedEnvelopeSchema, to_db_error};
 
 /// MDBX-backed [`L1ChunkedEnvelopeDatabase`] over a shared [`MdbxEnv`].
 #[derive(Debug)]
@@ -38,13 +32,13 @@ impl L1ChunkedEnvelopeDatabase for L1ChunkedEnvelopeDbMdbx {
     fn put_chunked_envelope_entry(&self, idx: u64, entry: ChunkedEnvelopeEntry) -> DbResult<()> {
         self.env
             .update(|w| w.put::<L1ChunkedEnvelopeSchema>(&idx, &entry))
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     fn get_chunked_envelope_entry(&self, idx: u64) -> DbResult<Option<ChunkedEnvelopeEntry>> {
         self.env
             .view(|r| r.get::<L1ChunkedEnvelopeSchema>(&idx))
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     fn get_chunked_envelope_entries_from(
@@ -68,7 +62,7 @@ impl L1ChunkedEnvelopeDatabase for L1ChunkedEnvelopeDbMdbx {
                 entries.truncate(max_count);
                 Ok(entries)
             })
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     fn get_next_chunked_envelope_idx(&self) -> DbResult<u64> {
@@ -78,7 +72,7 @@ impl L1ChunkedEnvelopeDatabase for L1ChunkedEnvelopeDbMdbx {
                     .map(|(idx, _)| idx + 1)
                     .unwrap_or(0))
             })
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     fn del_chunked_envelope_entry(&self, idx: u64) -> DbResult<bool> {
@@ -90,7 +84,7 @@ impl L1ChunkedEnvelopeDatabase for L1ChunkedEnvelopeDbMdbx {
                 }
                 Ok(exists)
             })
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 
     fn del_chunked_envelope_entries_from_idx(&self, start_idx: u64) -> DbResult<Vec<u64>> {
@@ -112,7 +106,7 @@ impl L1ChunkedEnvelopeDatabase for L1ChunkedEnvelopeDbMdbx {
                 }
                 Ok(deleted)
             })
-            .map_err(map_mdbx)
+            .map_err(to_db_error)
     }
 }
 
