@@ -19,7 +19,7 @@ impl fmt::Display for BatchId {
     ///
     /// `Buf32`'s `Display` impl truncates to a `prefix..suffix` form, which
     /// is fine for at-a-glance logs but lossy if you ever want to round-trip
-    /// the id (e.g. paste it into `strata-dbtool ee-get-acct-proof`). The
+    /// the id (e.g. paste it into an admin or debugging tool). The
     /// `{:x}` formatter on each half uses `LowerHex`, which is the full
     /// hex form, so the rendered string is directly parseable.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

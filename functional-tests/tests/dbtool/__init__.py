@@ -1,1 +1,0 @@
-"""dbtool functional test package."""

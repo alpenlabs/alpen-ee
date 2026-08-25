@@ -64,7 +64,6 @@ CARGO_TARGET_DIR="$SRC_DIR/target" cargo build \
     --bin strata-signer \
     --bin strata-datatool \
     --bin strata-test-cli \
-    --bin strata-dbtool \
     >&2
 
 echo "$SRC_DIR/target/$PROFILE_DIR"

@@ -78,8 +78,8 @@ impl EeProverDbSled {
 
     /// Removes a chunk receipt, returning `true` if a row existed.
     ///
-    /// Admin-only path (offline dbtool). Callers must keep the node down
-    /// to avoid racing with chunk-prover writes.
+    /// Admin-only path. Callers must keep the node down to avoid racing
+    /// with chunk-prover writes.
     pub fn delete_chunk_receipt(&self, key: &[u8]) -> DbResult<bool> {
         Ok(self
             .chunk_receipt_tree
@@ -135,10 +135,10 @@ impl EeProverDbSled {
     /// Removes an acct proof along with its secondary index entry,
     /// returning `true` if the proof row existed.
     ///
-    /// Admin-only path (offline dbtool). The two trees are not deleted
-    /// in a single transaction — acceptable because callers stop the
-    /// node before invoking this, so no concurrent writer can observe
-    /// the intermediate state.
+    /// Admin-only path. The two trees are not deleted in a single
+    /// transaction — acceptable because callers stop the node before
+    /// invoking this, so no concurrent writer can observe the
+    /// intermediate state.
     pub fn delete_acct_proof(&self, batch_id: BatchId) -> DbResult<bool> {
         let db_id: DBBatchId = batch_id.into();
         let proof_id = proof_id_for(batch_id);
