@@ -15629,6 +15629,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "strata-proofimpl-alpen-acct-v0"
+version = "0.1.0"
+dependencies = [
+ "alpen-ee-da-runtime",
+ "alpen-ee-da-types",
+ "alpen-reth-evm",
+ "k256",
+ "reth-chainspec",
+ "rkyv",
+ "rsp-primitives",
+ "ssz",
+ "strata-bridge-params",
+ "strata-ee-acct-runtime",
+ "strata-ee-acct-types",
+ "strata-evm-ee",
+ "strata-predicate",
+ "strata-snark-acct-runtime",
+ "strata-snark-acct-types",
+ "zkaleido",
+ "zkaleido-native-adapter",
+]
+
+[[package]]
 name = "strata-proofimpl-alpen-chunk"
 version = "0.1.0"
 dependencies = [
@@ -15651,6 +15674,25 @@ dependencies = [
  "strata-ee-chunk-runtime",
  "strata-evm-ee",
  "strata-l1-txfmt",
+ "strata-predicate",
+ "zkaleido",
+ "zkaleido-native-adapter",
+]
+
+[[package]]
+name = "strata-proofimpl-alpen-chunk-v0"
+version = "0.1.0"
+dependencies = [
+ "alpen-reth-evm",
+ "k256",
+ "reth-chainspec",
+ "rkyv",
+ "rsp-primitives",
+ "ssz",
+ "strata-bridge-params",
+ "strata-ee-chain-types",
+ "strata-ee-chunk-runtime",
+ "strata-evm-ee",
  "strata-predicate",
  "zkaleido",
  "zkaleido-native-adapter",
