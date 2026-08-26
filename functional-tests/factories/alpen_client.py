@@ -85,7 +85,6 @@ class AlpenClientFactory(flexitest.Factory):
         beneficiary_address: str | None = None,
         da_rate_wei_per_byte: int = 0,
         prover: ProverBackend = NATIVE_BACKEND,
-        prover_programs: dict[str, tuple[str, str]] | None = None,
         **kwargs,
     ) -> AlpenClientService:
         """
@@ -101,12 +100,8 @@ class AlpenClientFactory(flexitest.Factory):
             enable_discovery: Enable discv5 peer discovery (for bootnode mode)
             custom_chain: Chain spec to use
             ee_params_path: EE params file to use; generated when omitted
-            prover: Which EE prover backend to run; see common/prover_backend.py
-            prover_programs: Maps an `AlpenSpecId` (e.g. "v0", "v1") to the
-                (chunk_signing_key_hex, acct_signing_key_hex) pair of the
-                program built for it, each written as its own
-                `[sequencer.prover.programs.<spec_version>]` entry.
-                Native-only; defaults to the backend's own single v0 program.
+            prover: Which EE prover backend to run, and which spec versions
+                it has resident programs for; see common/prover_backend.py
         """
         ctx: flexitest.EnvContext = kwargs["ctx"]
 
@@ -126,7 +121,7 @@ class AlpenClientFactory(flexitest.Factory):
         key_hex = p2p_secret_key.removeprefix("0x")
         p2p_secret_key_file.write_text(key_hex)
 
-        prover_config = prover.prover_config(datadir, prover_programs)
+        prover_config = prover.prover_config(datadir)
 
         if ee_params_path is None:
             ee_params_path = generate_ee_params(
@@ -141,6 +136,7 @@ class AlpenClientFactory(flexitest.Factory):
             bridge_denomination=bridge_denomination,
             max_withdrawal_amount=max_withdrawal_amount,
             da_magic_bytes=da_config.magic_bytes.decode("ascii"),
+            spec_schedule=prover.genesis_spec_schedule,
         )
 
         ol_config = (
@@ -269,6 +265,7 @@ class AlpenClientFactory(flexitest.Factory):
         ol_endpoint: str | None = None,
         bridge_denomination: int = 100_000_000,
         max_withdrawal_amount: int | None = 1_000_000_000,
+        spec_schedule: dict[str, int] | None = None,
         **kwargs,
     ) -> AlpenClientService:
         """
@@ -285,6 +282,9 @@ class AlpenClientFactory(flexitest.Factory):
             instance_id: Instance ID for multiple fullnodes
             datadir_override: Optional datadir path (bypasses EnvContext requirement)
             sequencer_http: Sequencer HTTP URL for transaction forwarding
+            spec_schedule: which spec version the chain launches on; must
+                match the sequencer's, so it comes from the same prover
+                backend
         """
         if datadir_override:
             datadir = Path(datadir_override)
@@ -324,6 +324,7 @@ class AlpenClientFactory(flexitest.Factory):
             chain=custom_chain,
             bridge_denomination=bridge_denomination,
             max_withdrawal_amount=max_withdrawal_amount,
+            spec_schedule=spec_schedule,
         )
 
         alpen_config = AlpenClientConfig(

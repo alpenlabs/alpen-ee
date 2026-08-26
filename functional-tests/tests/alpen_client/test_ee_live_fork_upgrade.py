@@ -21,21 +21,43 @@ from common.base_test import BaseTest
 from common.config.constants import ALPEN_ACCOUNT_ID, DEV_CHAIN_ID, DEV_PRIVATE_KEY, ServiceType
 from common.evm import DEV_ACCOUNT_ADDRESS, sign_deploy
 from common.evm_utils import wait_for_receipt
+from common.prover_backend import ROTATION_SPEC_VERSIONS, ProverBackend, resolve_prover_backend
 from common.rpc import RpcError
 from common.services.alpen_client import AlpenClientService
 from common.services.bitcoin import BitcoinService
 from common.services.strata import StrataService
 from common.test_cli import create_ee_predicate_update
 from common.wait import wait_until_with_value
+from envconfigs.el_ol import EeOLEnv
 
 logger = logging.getLogger(__name__)
 
 INITIAL_BLOCKS = 5
 POST_ADMIN_UPDATE_L1_BLOCKS = 5
-ROTATION_PREDICATE = "AlwaysAccept"
-SPEC_VERSION_SETTLE_TIMEOUT_SECONDS = 180
-UPDATE_VK_SETTLE_TIMEOUT_SECONDS = 300
 PROBE_CALL_GAS = 100_000
+
+# Real SP1 proving costs minutes per batch where native signing is
+# near-instant, so every wait that ends up behind a proof, and how much EE
+# activity each batch swallows, is scaled per backend.
+NATIVE_BATCH_SEALING_BLOCK_COUNT = 3
+SP1_BATCH_SEALING_BLOCK_COUNT = 8
+NATIVE_TIMEOUTS = {"spec_version_settle": 180, "update_vk_settle": 300}
+SP1_TIMEOUTS = {"spec_version_settle": 900, "update_vk_settle": 2400}
+
+
+def _batch_sealing_block_count(prover: ProverBackend) -> int:
+    """EE blocks per sealed batch for `prover`."""
+    if prover.backend == "sp1":
+        return SP1_BATCH_SEALING_BLOCK_COUNT
+    return NATIVE_BATCH_SEALING_BLOCK_COUNT
+
+
+def _timeouts(prover: ProverBackend) -> dict[str, int]:
+    """Seconds to allow for each wait that sits behind a proof."""
+    if prover.backend == "sp1":
+        return SP1_TIMEOUTS
+    return NATIVE_TIMEOUTS
+
 
 # --- CLZ probe contract ------------------------------------------------------
 #
@@ -124,9 +146,42 @@ class TestEeLiveForkUpgrade(BaseTest):
     """VK rotation activates Osaka; CLZ fails before, succeeds after -- per fullnodes."""
 
     def __init__(self, ctx: flexitest.InitContext):
-        ctx.set_env("el_ol_ee_live_fork_upgrade")
+        # Resolved here and read again in `main` (`resolve_prover_backend` is
+        # a pure function of EE_PROVER_BACKEND, so both calls agree): the
+        # rotation target is whatever predicate the v1 program actually proves
+        # under, which differs per backend -- a fixed Schnorr key under
+        # native, the freshly built guest's Sp1Groth16 VK under sp1.
+        prover = resolve_prover_backend(ROTATION_SPEC_VERSIONS)
+        # Inline env rather than a shared named one: this test needs its
+        # services configured from the resolved backend, and it mutates the
+        # bitcoin chain, so it must not share an env with sibling tests.
+        #
+        # Two EE fullnodes (not just the sequencer) so a live VK-rotation ->
+        # spec-version (hardfork) boundary can be verified as independently
+        # observed and enforced by fullnodes, not just claimed by the
+        # sequencer. `epoch_tracking_mode="latest"` lets the EE consume the
+        # rotation's inbox message without waiting on the L1 checkpoint round
+        # trip, and a small `batch_sealing_block_count` keeps the
+        # rotation-consuming block's forced batch seal (see
+        # alpen-ee-sequencer's force-seal-after-rotation behavior) from
+        # stalling the test.
+        ctx.set_env(
+            EeOLEnv(
+                fullnode_count=2,
+                pre_generate_blocks=110,
+                admin_confirmation_depth=2,
+                fund_test_cli_wallet=True,
+                epoch_tracking_mode="latest",
+                batch_sealing_block_count=_batch_sealing_block_count(prover),
+                prover=prover,
+            )
+        )
 
     def main(self, ctx):
+        prover = resolve_prover_backend(ROTATION_SPEC_VERSIONS)
+        rotation_predicate = prover.rotation_target_predicate
+        timeouts = _timeouts(prover)
+
         alpen_seq: AlpenClientService = self.get_service(ServiceType.AlpenSequencer)
         fullnodes: list[AlpenClientService] = [
             self.get_service(f"{ServiceType.AlpenFullNode}_0"),
@@ -203,13 +258,13 @@ class TestEeLiveForkUpgrade(BaseTest):
         # --- Rotate update_vk: the only on-chain trigger for the fork --------
         result = create_ee_predicate_update(
             seq_no=1,
-            predicate=ROTATION_PREDICATE,
+            predicate=rotation_predicate,
             admin_xpriv=admin_xpriv,
             btc_url=btc_url,
             btc_user=btc_user,
             btc_password=btc_password,
         )
-        logger.info("Submitted EeStfVk update to %s: %s", ROTATION_PREDICATE, result)
+        logger.info("Submitted EeStfVk update to %s: %s", rotation_predicate, result)
         btc_rpc.proxy.generatetoaddress(POST_ADMIN_UPDATE_L1_BLOCKS, mine_addr)
 
         # --- Poll fullnode block headers for the extra_data spec-version -----
@@ -241,7 +296,7 @@ class TestEeLiveForkUpgrade(BaseTest):
             mine_and_find_activation_heights,
             lambda heights: heights is not None,
             error_with="Osaka spec version (V1) never appeared on all fullnodes",
-            timeout=SPEC_VERSION_SETTLE_TIMEOUT_SECONDS,
+            timeout=timeouts["spec_version_settle"],
         )
         assert activation_heights is not None
         assert len(set(activation_heights)) == 1, (
@@ -287,10 +342,10 @@ class TestEeLiveForkUpgrade(BaseTest):
 
         wait_until_with_value(
             fetch_update_vk_and_mine,
-            lambda vk: vk == ROTATION_PREDICATE,
-            error_with=f"update_vk did not settle to {ROTATION_PREDICATE} in OL state",
-            timeout=UPDATE_VK_SETTLE_TIMEOUT_SECONDS,
+            lambda vk: vk == rotation_predicate,
+            error_with=f"update_vk did not settle to {rotation_predicate} in OL state",
+            timeout=timeouts["update_vk_settle"],
         )
-        logger.info("update_vk settled to %s in OL state", ROTATION_PREDICATE)
+        logger.info("update_vk settled to %s in OL state", rotation_predicate)
 
         return True

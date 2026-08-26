@@ -33,9 +33,13 @@ sequencer = [
   "dep:strata-ee-chain-types",
   "dep:strata-ee-chunk-runtime",
   "dep:strata-evm-ee",
+  "dep:rsp-primitives",
+  "dep:strata-bridge-params",
   "dep:strata-paas",
   "dep:strata-proofimpl-alpen-acct",
+  "dep:strata-proofimpl-alpen-acct-v0",
   "dep:strata-proofimpl-alpen-chunk",
+  "dep:strata-proofimpl-alpen-chunk-v0",
   "dep:strata-snark-acct-runtime",
   "dep:thiserror",
   "dep:zkaleido",
@@ -85,6 +89,7 @@ bitcoind-async-client = { workspace = true, optional = true }
 k256 = { workspace = true, optional = true }
 ssz.workspace = true
 strata-acct-types.workspace = true
+strata-bridge-params = { workspace = true, optional = true }
 strata-btcio = { workspace = true, optional = true }
 strata-codec = { workspace = true, optional = true }
 strata-common = { workspace = true, features = ["async"] }
@@ -103,7 +108,9 @@ strata-paas = { workspace = true, optional = true }
 strata-predicate.workspace = true
 strata-primitives.workspace = true
 strata-proofimpl-alpen-acct = { workspace = true, optional = true }
+strata-proofimpl-alpen-acct-v0 = { workspace = true, optional = true }
 strata-proofimpl-alpen-chunk = { workspace = true, optional = true }
+strata-proofimpl-alpen-chunk-v0 = { workspace = true, optional = true }
 strata-service.workspace = true
 strata-snark-acct-runtime = { workspace = true, optional = true }
 strata-snark-acct-types.workspace = true
@@ -133,6 +140,7 @@ reth-payload-builder = { workspace = true, optional = true }
 reth-primitives.workspace = true
 reth-primitives-traits = { workspace = true, optional = true }
 reth-provider.workspace = true
+rsp-primitives = { workspace = true, optional = true }
 reth-tasks.workspace = true
 serde.workspace = true
 serde_json.workspace = true

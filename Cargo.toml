@@ -23,7 +23,9 @@ members = [
   "crates/ee-chunk-runtime",
   "crates/evm-ee",
   "crates/proof-impl/alpen-chunk",
+  "crates/proof-impl/alpen-chunk-v0",
   "crates/proof-impl/alpen-acct",
+  "crates/proof-impl/alpen-acct-v0",
   "crates/reth/chainspec",
   "crates/reth/db",
   "crates/reth/evm",
@@ -95,7 +97,9 @@ strata-ee-chain-types = { path = "crates/ee-chain-types" }
 strata-ee-chunk-runtime = { path = "crates/ee-chunk-runtime" }
 strata-evm-ee = { path = "crates/evm-ee" }
 strata-proofimpl-alpen-acct = { path = "crates/proof-impl/alpen-acct" }
+strata-proofimpl-alpen-acct-v0 = { path = "crates/proof-impl/alpen-acct-v0" }
 strata-proofimpl-alpen-chunk = { path = "crates/proof-impl/alpen-chunk" }
+strata-proofimpl-alpen-chunk-v0 = { path = "crates/proof-impl/alpen-chunk-v0" }
 strata-simple-ee = { path = "crates/simple-ee" }
 
 # strata dependencies, pinned to the pre-split repo's main so the EE stays in
@@ -287,6 +291,7 @@ reth-trie-common = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1"
 reth-trie-db = { git = "https://github.com/paradigmxyz/reth", tag = "v1.9.1" }
 
 rsp-client-executor = { git = "https://github.com/succinctlabs/rsp", tag = "reth-1.9.1b" }
+rsp-primitives = { git = "https://github.com/succinctlabs/rsp", tag = "reth-1.9.1b" }
 rsp-mpt = { git = "https://github.com/succinctlabs/rsp", tag = "reth-1.9.1b" }
 sp1-build = "6.3.0"
 sp1-sdk = "6.3.0"

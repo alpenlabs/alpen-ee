@@ -307,23 +307,6 @@ def main(argv: list[str]) -> int:
         ),
         # Environments containing both ee and ol
         "el_ol": EeOLEnv(pre_generate_blocks=110),
-        # Two EE fullnodes (not just the sequencer) so a live VK-rotation ->
-        # spec-version (hardfork) boundary can be verified as independently
-        # observed and enforced by fullnodes, not just claimed by the
-        # sequencer. `epoch_tracking_mode="latest"` lets the EE consume the
-        # rotation's inbox message without waiting on the L1 checkpoint
-        # round trip, and a small `batch_sealing_block_count` keeps the
-        # rotation-consuming block's forced batch seal (see
-        # alpen-ee-sequencer's force-seal-after-rotation behavior) from
-        # stalling the test.
-        "el_ol_ee_live_fork_upgrade": EeOLEnv(
-            fullnode_count=2,
-            pre_generate_blocks=110,
-            admin_confirmation_depth=2,
-            fund_test_cli_wallet=True,
-            epoch_tracking_mode="latest",
-            batch_sealing_block_count=3,
-        ),
         # Same as `el_ol` but with a tighter OL block time so bridge tests can
         # drive a deposit -> bridgeout -> WF cycle within reasonable runtime.
         # 500ms was tried first but flagged as likely-flaky in #1699 review;

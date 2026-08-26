@@ -19,7 +19,9 @@ use strata_paas::{Prover, ProverBuilder, ProverServiceBuilder};
 use strata_predicate::{PredicateKey, PredicateTypeId};
 use strata_primitives::buf::Buf32;
 use strata_proofimpl_alpen_acct::process_ee_acct_update;
+use strata_proofimpl_alpen_acct_v0::process_ee_acct_update as process_ee_acct_update_v0;
 use strata_proofimpl_alpen_chunk::process_ee_chunk;
+use strata_proofimpl_alpen_chunk_v0::process_ee_chunk as process_ee_chunk_v0;
 use tracing::info;
 #[cfg(feature = "sp1")]
 use zkaleido::ZkVmExecutor;
@@ -29,7 +31,10 @@ use zkaleido_sp1_groth16_verifier::SP1Groth16Verifier;
 #[cfg(feature = "sp1")]
 use zkaleido_sp1_host::{SP1Host, SP1HostConfig};
 
-use super::{AcctSpec, ChunkSpec, EeBatchProofDbManager, PaasBatchProver, ProverProgram};
+use super::{
+    spec_v0::{AcctSpecV0, ChunkSpecV0},
+    AcctSpec, ChunkSpec, EeBatchProofDbManager, PaasBatchProver, ProverProgram,
+};
 use crate::{config::ProverBackendConfig, service_executor::ServiceExecutor};
 
 /// Default end-to-end deadline applied to the SP1 prover network for the EE
@@ -51,6 +56,8 @@ const DEFAULT_SP1_DEADLINE_SECS: u64 = 4 * 60 * 60;
 pub(crate) struct EeProverBuilders {
     pub(crate) chunk: Box<dyn Fn(AlpenSpecId) -> ProverBuilder<ChunkSpec> + Send + Sync>,
     pub(crate) account: Box<dyn Fn(AlpenSpecId) -> ProverBuilder<AcctSpec> + Send + Sync>,
+    pub(crate) chunk_v0: Box<dyn Fn(AlpenSpecId) -> ProverBuilder<ChunkSpecV0> + Send + Sync>,
+    pub(crate) account_v0: Box<dyn Fn(AlpenSpecId) -> ProverBuilder<AcctSpecV0> + Send + Sync>,
 }
 
 pub(crate) struct EeProverStores {
@@ -60,9 +67,19 @@ pub(crate) struct EeProverStores {
 }
 
 /// One resident candidate's built, not-yet-launched chunk + acct provers.
-struct EeProvers {
-    chunk: Prover<ChunkSpec>,
-    account: Prover<AcctSpec>,
+///
+/// Split by version for the same reason [`ProverProgram`] is: v0's guest
+/// reads a different input encoding, so it is a different [`ProofSpec`] pair
+/// and therefore a different `Prover` type.
+enum EeProvers {
+    V0 {
+        chunk: Prover<ChunkSpecV0>,
+        account: Prover<AcctSpecV0>,
+    },
+    Current {
+        chunk: Prover<ChunkSpec>,
+        account: Prover<AcctSpec>,
+    },
 }
 
 /// Picks a prover backend, builds every resident
@@ -128,23 +145,49 @@ async fn build_ee_provers(
                 any_matches_live_vk |= &account_predicate_key == ol_account_update_vk;
 
                 let chunk_predicate_key = schnorr_predicate_key(&chunk_signing_key);
-                let chunk_host = {
-                    let chunk_params = (*params).clone();
-                    NativeHost::new(chunk_signing_key, move |zkvm| {
-                        process_ee_chunk(zkvm, &chunk_params)
-                    })
-                };
-                let chunk = (builders.chunk)(*spec_version).native(chunk_host);
+                let spec_version = *spec_version;
 
-                let acct_host = {
-                    let acct_params = (*params).clone();
-                    NativeHost::new(acct_signing_key, move |zkvm| {
-                        process_ee_acct_update(zkvm, &acct_params, &chunk_predicate_key)
-                    })
-                };
-                let account = (builders.account)(*spec_version).native(acct_host);
+                // v0 runs the frozen v0 guest logic, matching what its
+                // deployed ELF does under the sp1 backend. Native never
+                // verifies a proof, so the encoding is invisible here, but
+                // keeping the split means both backends exercise the same
+                // dispatch.
+                let provers_for_version = if spec_version == AlpenSpecId::V0 {
+                    let chunk_host = NativeHost::new(chunk_signing_key, process_ee_chunk_v0);
+                    let chunk = (builders.chunk_v0)(spec_version).native(chunk_host);
 
-                provers.insert(*spec_version, EeProvers { chunk, account });
+                    let acct_host = NativeHost::new(acct_signing_key, move |zkvm| {
+                        process_ee_acct_update_v0(zkvm, &chunk_predicate_key)
+                    });
+                    let account = (builders.account_v0)(spec_version).native(acct_host);
+
+                    EeProvers::V0 { chunk, account }
+                } else {
+                    let chunk_host = {
+                        let chunk_params = (*params).clone();
+                        NativeHost::new(chunk_signing_key, move |zkvm| {
+                            process_ee_chunk(zkvm, &chunk_params, spec_version)
+                        })
+                    };
+                    let chunk = (builders.chunk)(spec_version).native(chunk_host);
+
+                    let acct_host = {
+                        let acct_params = (*params).clone();
+                        NativeHost::new(acct_signing_key, move |zkvm| {
+                            process_ee_acct_update(
+                                zkvm,
+                                &acct_params,
+                                spec_version,
+                                &chunk_predicate_key,
+                            )
+                        })
+                    };
+                    let account = (builders.account)(spec_version).native(acct_host);
+
+                    EeProvers::Current { chunk, account }
+                };
+
+                provers.insert(spec_version, provers_for_version);
             }
         }
         #[cfg(feature = "sp1")]
@@ -191,10 +234,20 @@ async fn build_ee_provers(
 
                 any_matches_live_vk |= &account_predicate_key == ol_account_update_vk;
 
-                let chunk = (builders.chunk)(*spec_version).remote(chunk_host);
-                let account = (builders.account)(*spec_version).remote(acct_host);
+                let spec_version = *spec_version;
+                let provers_for_version = if spec_version == AlpenSpecId::V0 {
+                    EeProvers::V0 {
+                        chunk: (builders.chunk_v0)(spec_version).remote(chunk_host),
+                        account: (builders.account_v0)(spec_version).remote(acct_host),
+                    }
+                } else {
+                    EeProvers::Current {
+                        chunk: (builders.chunk)(spec_version).remote(chunk_host),
+                        account: (builders.account)(spec_version).remote(acct_host),
+                    }
+                };
 
-                provers.insert(*spec_version, EeProvers { chunk, account });
+                provers.insert(spec_version, provers_for_version);
             }
         }
         #[cfg(not(feature = "sp1"))]
@@ -285,24 +338,41 @@ async fn launch_ee_prover_services(
     let prover_tick = Duration::from_secs(5);
     let mut programs = BTreeMap::new();
     for (spec_version, provers) in provers {
-        let chunk_handle = ProverServiceBuilder::new(provers.chunk)
-            .tick_interval(prover_tick)
-            .launch(service_executor)
-            .await
-            .map_err(|e| eyre::eyre!("launching chunk prover service for {spec_version}: {e}"))?;
-        let acct_handle = ProverServiceBuilder::new(provers.account)
-            .tick_interval(prover_tick)
-            .launch(service_executor)
-            .await
-            .map_err(|e| eyre::eyre!("launching acct prover service for {spec_version}: {e}"))?;
-
-        programs.insert(
-            spec_version,
-            ProverProgram {
-                chunk_handle,
-                acct_handle,
+        let program = match provers {
+            EeProvers::V0 { chunk, account } => ProverProgram::V0 {
+                chunk_handle: ProverServiceBuilder::new(chunk)
+                    .tick_interval(prover_tick)
+                    .launch(service_executor)
+                    .await
+                    .map_err(|e| {
+                        eyre::eyre!("launching chunk prover service for {spec_version}: {e}")
+                    })?,
+                acct_handle: ProverServiceBuilder::new(account)
+                    .tick_interval(prover_tick)
+                    .launch(service_executor)
+                    .await
+                    .map_err(|e| {
+                        eyre::eyre!("launching acct prover service for {spec_version}: {e}")
+                    })?,
             },
-        );
+            EeProvers::Current { chunk, account } => ProverProgram::Current {
+                chunk_handle: ProverServiceBuilder::new(chunk)
+                    .tick_interval(prover_tick)
+                    .launch(service_executor)
+                    .await
+                    .map_err(|e| {
+                        eyre::eyre!("launching chunk prover service for {spec_version}: {e}")
+                    })?,
+                acct_handle: ProverServiceBuilder::new(account)
+                    .tick_interval(prover_tick)
+                    .launch(service_executor)
+                    .await
+                    .map_err(|e| {
+                        eyre::eyre!("launching acct prover service for {spec_version}: {e}")
+                    })?,
+            },
+        };
+        programs.insert(spec_version, program);
     }
 
     Ok(programs)

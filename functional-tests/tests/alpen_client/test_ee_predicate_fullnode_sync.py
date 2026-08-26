@@ -9,6 +9,7 @@ import flexitest
 
 from common.base_test import BaseTest
 from common.config.constants import ALPEN_ACCOUNT_ID, ServiceType
+from common.prover_backend import ROTATION_SPEC_VERSIONS, NativeBackend
 from common.services.alpen_client import AlpenClientService
 from common.services.bitcoin import BitcoinService
 from common.services.strata import StrataService
@@ -25,11 +26,12 @@ PREDICATE_SETTLE_TIMEOUT_SECONDS = 120
 HISTORICAL_EE_BLOCKS_AFTER_ROTATION = 8
 FRESH_EE_BLOCKS_AFTER_LATE_JOIN = 3
 
-# Initial Alpen account predicate matches `EeAcctProgram::test_predicate_key()`
-# (deterministic test SK = [0x02; 32] in strata_proofimpl_alpen_acct).
-INITIAL_ACCT_PREDICATE = (
-    "Bip340Schnorr:4d4b6cd1361032ca9bd2aeb9d900aa4d45d9ead80ac9423374c451a7254d0766"
-)
+# This test rotates the predicate, so it launches the chain a version back:
+# consuming a rotation advances to the successor spec version, and there has
+# to be one this binary knows. `PROVER` owns the genesis predicate that goes
+# with the version it launches on.
+PROVER = NativeBackend(spec_versions=ROTATION_SPEC_VERSIONS)
+INITIAL_ACCT_PREDICATE = PROVER.genesis_predicate
 
 
 @flexitest.register
@@ -42,6 +44,7 @@ class TestEePredicateFullnodeSync(BaseTest):
                 pre_generate_blocks=110,
                 admin_confirmation_depth=2,
                 fund_test_cli_wallet=True,
+                prover=PROVER,
             )
         )
 
@@ -121,6 +124,7 @@ class TestEePredicateFullnodeSync(BaseTest):
                 datadir_override=tmpdir,
                 sequencer_http=alpen_seq.props["http_url"],
                 ol_endpoint=strata_seq.props["rpc_url"],
+                spec_schedule=PROVER.genesis_spec_schedule,
             )
             ee_fullnode_1.wait_for_ready(timeout=30)
 

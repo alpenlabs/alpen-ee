@@ -1,5 +1,5 @@
 use alpen_ee_da_types::DaWitness;
-use alpen_ee_params::AlpenParams;
+use alpen_ee_params::{AlpenParams, AlpenSpecId};
 use k256::schnorr::SigningKey;
 use rkyv::rancor::Error as RkyvError;
 use ssz::Decode;
@@ -42,13 +42,19 @@ pub struct EeAcctProofInput {
 pub struct EeAcctProgram {
     chunk_predicate_key: PredicateKey,
     params: AlpenParams,
+    spec_version: AlpenSpecId,
 }
 
 impl EeAcctProgram {
-    pub fn new(chunk_predicate_key: PredicateKey, params: AlpenParams) -> Self {
+    pub fn new(
+        chunk_predicate_key: PredicateKey,
+        params: AlpenParams,
+        spec_version: AlpenSpecId,
+    ) -> Self {
         Self {
             chunk_predicate_key,
             params,
+            spec_version,
         }
     }
 }
@@ -106,8 +112,9 @@ impl EeAcctProgram {
     pub fn native_host(&self) -> NativeHost {
         let key = self.chunk_predicate_key.clone();
         let params = self.params.clone();
+        let spec_version = self.spec_version;
         NativeHost::new(Self::test_signing_key(), move |zkvm| {
-            process_ee_acct_update(zkvm, &params, &key)
+            process_ee_acct_update(zkvm, &params, spec_version, &key)
         })
     }
 
@@ -195,6 +202,7 @@ mod tests {
             PredicateKey::try_new(PredicateTypeId::Bip340Schnorr, vec![0u8; 32])
                 .expect("condition fits within the length limit"),
             params,
+            AlpenSpecId::V1,
         );
         let result = program
             .execute(&proof_input)

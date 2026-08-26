@@ -20,11 +20,7 @@ import flexitest
 
 from common.base_test import BaseTest
 from common.config.constants import ALPEN_ACCOUNT_ID, ServiceType
-from common.prover_backend import (
-    NATIVE_ACCT_SIGNING_KEY_HEX,
-    NATIVE_CHUNK_SIGNING_KEY_HEX,
-    ROTATED_ACCT_SIGNING_KEY_HEX,
-)
+from common.prover_backend import ROTATION_SPEC_VERSIONS, NativeBackend
 from common.services.alpen_client import AlpenClientService
 from common.services.bitcoin import BitcoinService
 from common.services.strata import StrataService
@@ -40,14 +36,14 @@ PREDICATE_SETTLE_TIMEOUT_SECONDS = 120
 POST_ROTATION_UPDATE_TIMEOUT_SECONDS = 180
 UNSUPPORTED_ROTATION_TIMEOUT_SECONDS = 120
 
-# Initial Alpen account predicate matches `EeAcctProgram::test_predicate_key()`
-# (deterministic test SK = [0x02; 32] in strata_proofimpl_alpen_acct,
-# `NATIVE_ACCT_SIGNING_KEY_HEX`).
-V0_ACCT_PREDICATE = "Bip340Schnorr:4d4b6cd1361032ca9bd2aeb9d900aa4d45d9ead80ac9423374c451a7254d0766"
-
-# The rotation target: a Bip340Schnorr predicate bound to the deterministic
-# SK [0x04; 32] (`ROTATED_ACCT_SIGNING_KEY_HEX`).
-V1_ACCT_PREDICATE = "Bip340Schnorr:462779ad4aad39514614751a71085f2f10e1c7a593e4e030efb5b8721ce55b0b"
+# This test turns on the native backend's own key pairs -- it asserts on
+# rotation bookkeeping, not on real proving -- so it pins the backend rather
+# than resolving it from EE_PROVER_BACKEND. `PROVER` owns both the genesis
+# predicate and the rotation target, so the two cannot drift apart from the
+# programs actually configured below.
+PROVER = NativeBackend(spec_versions=ROTATION_SPEC_VERSIONS)
+V0_ACCT_PREDICATE = PROVER.genesis_predicate
+V1_ACCT_PREDICATE = PROVER.rotation_target_predicate
 
 # A further rotation target, standing in for spec version V2 -- which this
 # binary has no support for, so the rotation to it can't be handled and must
@@ -90,18 +86,14 @@ class TestEePredicateTransition(BaseTest):
                 # Two resident programs, keyed by the AlpenSpecId each is
                 # built for (see ProverProgramPaths in
                 # bin/alpen-client/src/config.rs): v1's acct key is the
-                # rotation target (see V1_ACCT_PREDICATE above),
-                # v0's is the genesis-matching key. Both are validated and
-                # loaded at startup; the sequencer routes each batch's proof
-                # request to whichever program's version matches that batch's
-                # own governing spec version (see PaasBatchProver in
-                # bin/alpen-client/src/sequencer/prover/batch_prover.rs), so
+                # rotation target, v0's is the genesis-matching key. Both are
+                # validated and loaded at startup; the sequencer routes each
+                # batch's proof request to whichever program's version matches
+                # that batch's own governing spec version (see PaasBatchProver
+                # in bin/alpen-client/src/sequencer/prover/batch_prover.rs), so
                 # proving keeps working across the V0 -> V1 rotation below
                 # without a restart.
-                prover_programs={
-                    "v1": (NATIVE_CHUNK_SIGNING_KEY_HEX, ROTATED_ACCT_SIGNING_KEY_HEX),
-                    "v0": (NATIVE_CHUNK_SIGNING_KEY_HEX, NATIVE_ACCT_SIGNING_KEY_HEX),
-                },
+                prover=PROVER,
             )
         )
 
