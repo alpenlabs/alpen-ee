@@ -97,7 +97,9 @@ strata-ee-chain-types = { path = "crates/ee-chain-types" }
 strata-ee-chunk-runtime = { path = "crates/ee-chunk-runtime" }
 strata-evm-ee = { path = "crates/evm-ee" }
 strata-proofimpl-alpen-acct = { path = "crates/proof-impl/alpen-acct" }
+strata-proofimpl-alpen-acct-v0 = { path = "crates/proof-impl/alpen-acct-v0" }
 strata-proofimpl-alpen-chunk = { path = "crates/proof-impl/alpen-chunk" }
+strata-proofimpl-alpen-chunk-v0 = { path = "crates/proof-impl/alpen-chunk-v0" }
 strata-simple-ee = { path = "crates/simple-ee" }
 
 # strata dependencies, pinned to the pre-split repo's main so the EE stays in

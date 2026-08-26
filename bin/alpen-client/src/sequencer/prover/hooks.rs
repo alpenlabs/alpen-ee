@@ -10,13 +10,11 @@ use std::sync::Arc;
 
 use alpen_ee_common::{BatchStatus, BatchStorage, ChunkStatus, ChunkStorage};
 use async_trait::async_trait;
-use strata_paas::{ProverError, ProverResult, ReceiptHook};
+use strata_paas::{ProofSpec, ProverError, ProverResult, ReceiptHook};
 use tracing::{info, warn};
 use zkaleido::ProofReceiptWithMetadata;
 
-use super::{
-    spec_acct::AcctSpec, spec_chunk::ChunkSpec, BatchTask, ChunkTask, EeBatchProofDbManager,
-};
+use super::{BatchTask, ChunkTask, EeBatchProofDbManager};
 
 /// Hook fired after a chunk proof is stored in paas's `ReceiptStore`.
 ///
@@ -34,8 +32,12 @@ impl ChunkReceiptHook {
     }
 }
 
+// Generic over the spec rather than tied to one: the hook only reads the
+// task id and the receipt, so it serves every version's chunk spec -- the
+// frozen v0 pair included, which is a distinct spec type only because its
+// guest reads a different input encoding.
 #[async_trait]
-impl ReceiptHook<ChunkSpec> for ChunkReceiptHook {
+impl<S: ProofSpec<Task = ChunkTask>> ReceiptHook<S> for ChunkReceiptHook {
     async fn on_receipt(
         &self,
         task: &ChunkTask,
@@ -74,8 +76,9 @@ impl AcctReceiptHook {
     }
 }
 
+// Generic for the same reason as `ChunkReceiptHook` above.
 #[async_trait]
-impl ReceiptHook<AcctSpec> for AcctReceiptHook {
+impl<S: ProofSpec<Task = BatchTask>> ReceiptHook<S> for AcctReceiptHook {
     async fn on_receipt(
         &self,
         task: &BatchTask,

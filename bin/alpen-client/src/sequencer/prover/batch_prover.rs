@@ -29,15 +29,51 @@ use strata_paas::{ProverError as PaasError, ProverHandle, TaskStatus};
 use tracing::{debug, info, warn};
 
 use super::{
-    spec_acct::AcctSpec, spec_chunk::ChunkSpec, BatchTask, ChunkTask, EeBatchProofDbManager,
+    spec_acct::AcctSpec,
+    spec_chunk::ChunkSpec,
+    spec_v0::{AcctSpecV0, ChunkSpecV0},
+    BatchTask, ChunkTask, EeBatchProofDbManager,
 };
 
 /// One resident `--prover-program` candidate's launched chunk + acct prover
 /// handles. Named to mirror the config-side `ProverProgramPaths` it was
 /// resolved from.
-pub(crate) struct ProverProgram {
-    pub(crate) chunk_handle: ProverHandle<ChunkSpec>,
-    pub(crate) acct_handle: ProverHandle<AcctSpec>,
+pub(crate) enum ProverProgram {
+    /// The frozen v0 pair. Split out because v0's guest reads a different
+    /// input encoding, which needs its own [`ProofSpec`] pair and therefore
+    /// its own handle types — see `super::spec_v0`.
+    V0 {
+        chunk_handle: ProverHandle<ChunkSpecV0>,
+        acct_handle: ProverHandle<AcctSpecV0>,
+    },
+    /// The current pair, serving v1 onward.
+    Current {
+        chunk_handle: ProverHandle<ChunkSpec>,
+        acct_handle: ProverHandle<AcctSpec>,
+    },
+}
+
+impl ProverProgram {
+    async fn submit_chunk(&self, task: ChunkTask) -> Result<(), PaasError> {
+        match self {
+            Self::V0 { chunk_handle, .. } => chunk_handle.submit(task).await,
+            Self::Current { chunk_handle, .. } => chunk_handle.submit(task).await,
+        }
+    }
+
+    async fn submit_batch(&self, task: BatchTask) -> Result<(), PaasError> {
+        match self {
+            Self::V0 { acct_handle, .. } => acct_handle.submit(task).await,
+            Self::Current { acct_handle, .. } => acct_handle.submit(task).await,
+        }
+    }
+
+    fn acct_status(&self, task: &BatchTask) -> Result<TaskStatus, PaasError> {
+        match self {
+            Self::V0 { acct_handle, .. } => acct_handle.get_status(task),
+            Self::Current { acct_handle, .. } => acct_handle.get_status(task),
+        }
+    }
 }
 
 /// New-paas-backed [`BatchProver`].
@@ -106,8 +142,7 @@ impl BatchProver for PaasBatchProver {
         for chunk_id in chunks {
             let task = ChunkTask(chunk_id);
             program
-                .chunk_handle
-                .submit(task)
+                .submit_chunk(task)
                 .await
                 .map_err(|e| eyre::eyre!("submit chunk task {chunk_id:?}: {e}"))?;
 
@@ -124,8 +159,7 @@ impl BatchProver for PaasBatchProver {
         }
 
         program
-            .acct_handle
-            .submit(BatchTask(batch_id))
+            .submit_batch(BatchTask(batch_id))
             .await
             .map_err(|e| eyre::eyre!("submit acct task {batch_id}: {e}"))?;
 
@@ -146,7 +180,7 @@ impl BatchProver for PaasBatchProver {
         // Else map paas's task lifecycle status. `TaskNotFound` ⇒ NotStarted
         // (we never submitted, or we're in a fresh process and haven't yet
         // recovered).
-        match program.acct_handle.get_status(&BatchTask(batch_id)) {
+        match program.acct_status(&BatchTask(batch_id)) {
             Ok(TaskStatus::Completed) => {
                 // Completed but not in the proof DB? Hook hasn't fired yet
                 // or the DB lost its entry. Treat as Pending so the

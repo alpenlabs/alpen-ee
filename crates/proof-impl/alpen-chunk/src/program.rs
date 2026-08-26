@@ -201,7 +201,7 @@ mod tests {
         // TODO(STR-4002): pin to v0 until per-chunk version resolution is
         // threaded through the proof guests.
         let chain_spec: Arc<reth_chainspec::ChainSpec> =
-            params.evm_spec().chain_spec(AlpenSpecId::V0).clone();
+            params.evm_spec().chain_spec(AlpenSpecId::V1).clone();
         let ee = EvmExecutionEnvironment::new(chain_spec, AlpenEvmFactory::default());
         let header_intrinsics = block.get_header().get_intrinsics();
         let exec_payload = ExecPayload::new(&header_intrinsics, block.get_body());
@@ -240,7 +240,7 @@ mod tests {
         let proof_input = EeChunkProofInput { private_input };
 
         // Run the full native execution pipeline.
-        let result = EeChunkProgram::new(params, AlpenSpecId::V0)
+        let result = EeChunkProgram::new(params, AlpenSpecId::V1)
             .execute(&proof_input)
             .expect("native execution should succeed");
 

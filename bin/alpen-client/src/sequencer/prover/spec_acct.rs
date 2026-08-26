@@ -166,7 +166,7 @@ impl AcctSpec {
     /// Assembles the proof input, reporting "not ready yet" as a transient
     /// failure and unprovable batches as a permanent one. `resolve_input`
     /// turns those into `Blocked` / `Rejected`.
-    async fn fetch_input(&self, task: &BatchTask) -> ProverResult<EeAcctProofInput> {
+    pub(crate) async fn fetch_input(&self, task: &BatchTask) -> ProverResult<EeAcctProofInput> {
         let batch_id = task.0;
 
         // 1. Chunk inputs: per-chunk transitions + their proofs, in order.

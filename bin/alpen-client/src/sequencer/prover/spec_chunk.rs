@@ -77,6 +77,7 @@ impl TryFrom<Vec<u8>> for ChunkTask {
 /// "not produced yet" should map to `Blocked` instead of a fake transient failure —
 /// block-production blocks on witness capture, so a present chunk should always resolve `Ready` on
 /// the normal path.
+#[derive(Clone)]
 pub(crate) struct ChunkSpec {
     chunk_storage: Arc<dyn ChunkStorage>,
     storage: Arc<EeNodeStorage>,
@@ -108,7 +109,7 @@ impl ChunkSpec {
     /// Assembles the proof input, reporting "not ready yet" as a transient
     /// failure and unprovable chunks as a permanent one. `resolve_input`
     /// turns those into `Blocked` / `Rejected`.
-    async fn fetch_input(&self, task: &ChunkTask) -> ProverResult<EeChunkProofInput> {
+    pub(crate) async fn fetch_input(&self, task: &ChunkTask) -> ProverResult<EeChunkProofInput> {
         let chunk_id = task.0;
 
         // 1. Read the chunk's block list.

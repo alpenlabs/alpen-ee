@@ -26,9 +26,9 @@ use strata_paas::{ProverBuilder, ReceiptStore, RetryConfig, TaskStore};
 use tracing::info;
 
 use super::prover::{
-    launch_validated_ee_batch_prover, AcctRangeWitnessFn, AcctReceiptHook, AcctSpec,
-    ChunkReceiptHook, ChunkSpec, EeBatchProofDbManager, EeChunkReceiptStore, EeProverBuilders,
-    EeProverStores, EeProverTaskDbManager, PaasBatchProver, VersionedTaskStore,
+    launch_validated_ee_batch_prover, AcctRangeWitnessFn, AcctReceiptHook, AcctSpec, AcctSpecV0,
+    ChunkReceiptHook, ChunkSpec, ChunkSpecV0, EeBatchProofDbManager, EeChunkReceiptStore,
+    EeProverBuilders, EeProverStores, EeProverTaskDbManager, PaasBatchProver, VersionedTaskStore,
 };
 use crate::{config::ProverBackendConfig, service_executor::ServiceExecutor};
 
@@ -139,12 +139,68 @@ where
         })
     };
 
+    // The v0 factories rebuild the same spec and wrap it in the frozen v0
+    // encoding, so both versions gather inputs identically -- only the wire
+    // format the guest reads differs. See `prover::spec_v0`.
+    let chunk_v0_builder_factory: Box<
+        dyn Fn(AlpenSpecId) -> ProverBuilder<ChunkSpecV0> + Send + Sync,
+    > = {
+        let chunk_storage_dyn = chunk_storage_dyn.clone();
+        let storage = storage.clone();
+        let task_store = task_store.clone();
+        let chunk_receipts = chunk_receipts.clone();
+        let params = params.clone();
+        Box::new(move |spec_version| {
+            let inner = ChunkSpec::new(chunk_storage_dyn.clone(), storage.clone());
+            ProverBuilder::new(ChunkSpecV0::new(inner, &params))
+                .task_store(VersionedTaskStore::new(task_store.clone(), spec_version))
+                .receipt_store(chunk_receipts.clone())
+                .receipt_hook(ChunkReceiptHook::new(chunk_storage_dyn.clone()))
+                .retry(RetryConfig::default())
+        })
+    };
+
+    let acct_v0_builder_factory: Box<
+        dyn Fn(AlpenSpecId) -> ProverBuilder<AcctSpecV0> + Send + Sync,
+    > = {
+        let chunk_receipts = chunk_receipts.clone();
+        let batch_storage_dyn = batch_storage_dyn.clone();
+        let chunk_storage_dyn = chunk_storage_dyn.clone();
+        let storage = storage.clone();
+        let btc_client = btc_client.clone();
+        let witness_db = witness_db.clone();
+        let acct_range_witness_fn = acct_range_witness_fn.clone();
+        let task_store = task_store.clone();
+        let batch_proofs = batch_proofs.clone();
+        let params = params.clone();
+        Box::new(move |spec_version| {
+            let inner = AcctSpec::new(
+                chunk_receipts.clone(),
+                batch_storage_dyn.clone(),
+                chunk_storage_dyn.clone(),
+                storage.clone(),
+                btc_client.clone(),
+                witness_db.clone(),
+                acct_range_witness_fn.clone(),
+            );
+            ProverBuilder::new(AcctSpecV0::new(inner, &params))
+                .task_store(VersionedTaskStore::new(task_store.clone(), spec_version))
+                .receipt_hook(AcctReceiptHook::new(
+                    batch_storage_dyn.clone(),
+                    batch_proofs.clone(),
+                ))
+                .retry(RetryConfig::default())
+        })
+    };
+
     let batch_prover = launch_validated_ee_batch_prover(
         ol_client,
         service_executor,
         EeProverBuilders {
             chunk: chunk_builder_factory,
             account: acct_builder_factory,
+            chunk_v0: chunk_v0_builder_factory,
+            account_v0: acct_v0_builder_factory,
         },
         EeProverStores {
             chunk_storage: chunk_storage_dyn,

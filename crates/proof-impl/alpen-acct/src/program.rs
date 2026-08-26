@@ -202,7 +202,7 @@ mod tests {
             PredicateKey::try_new(PredicateTypeId::Bip340Schnorr, vec![0u8; 32])
                 .expect("condition fits within the length limit"),
             params,
-            AlpenSpecId::V0,
+            AlpenSpecId::V1,
         );
         let result = program
             .execute(&proof_input)
