@@ -13,7 +13,7 @@ use bdk_wallet::{
     CreateParams, KeychainKind, LoadParams, Wallet,
 };
 use bip39::{Language, Mnemonic};
-use dialoguer::{Confirm, Input};
+use dialoguer::{Confirm, Input, Select};
 use password::{HashVersion, IncorrectPassword, Password};
 use rand_core::{CryptoRngCore, OsRng};
 use sha2::{Digest, Sha256};
@@ -23,8 +23,91 @@ use terrors::OneOf;
 use zeroize::Zeroizing;
 
 use crate::constants::{
-    AES_NONCE_LEN, AES_TAG_LEN, BIP44_ALPEN_EVM_WALLET_PATH, PW_SALT_LEN, SEED_LEN,
+    AES_NONCE_LEN, AES_TAG_LEN, BIP44_ALPEN_EVM_WALLET_PATH, LANGUAGE_CODE_LEN, PW_SALT_LEN,
+    SEED_LEN,
 };
+
+// One supported mnemonic language: its display name, the `bip39` variant, and its on-disk code.
+//
+// `code` has to be assigned by us, by hand: bip39::Language has no #[repr] or documented
+// discriminant values, so even `language as u8` would silently ride on the crate's internal
+// declaration order -- not a stable API guarantee, and liable to shift on a crate version bump.
+// Our own codes are at least ones we control: never reuse or reassign an existing language's
+// code, since it's baked into already-encrypted seed files. LANGUAGES' order only controls the
+// language-selection prompt's display order and is safe to change freely.
+struct LanguageEntry {
+    name: &'static str,
+    language: Language,
+    code: u8,
+}
+
+const LANGUAGES: &[LanguageEntry] = &[
+    LanguageEntry {
+        name: "English",
+        language: Language::English,
+        code: 0,
+    },
+    LanguageEntry {
+        name: "Simplified Chinese",
+        language: Language::SimplifiedChinese,
+        code: 1,
+    },
+    LanguageEntry {
+        name: "Traditional Chinese",
+        language: Language::TraditionalChinese,
+        code: 2,
+    },
+    LanguageEntry {
+        name: "Czech",
+        language: Language::Czech,
+        code: 3,
+    },
+    LanguageEntry {
+        name: "French",
+        language: Language::French,
+        code: 4,
+    },
+    LanguageEntry {
+        name: "Italian",
+        language: Language::Italian,
+        code: 5,
+    },
+    LanguageEntry {
+        name: "Japanese",
+        language: Language::Japanese,
+        code: 6,
+    },
+    LanguageEntry {
+        name: "Korean",
+        language: Language::Korean,
+        code: 7,
+    },
+    LanguageEntry {
+        name: "Portuguese",
+        language: Language::Portuguese,
+        code: 8,
+    },
+    LanguageEntry {
+        name: "Spanish",
+        language: Language::Spanish,
+        code: 9,
+    },
+];
+
+fn language_code(language: Language) -> u8 {
+    LANGUAGES
+        .iter()
+        .find(|entry| entry.language == language)
+        .map(|entry| entry.code)
+        .expect("all bip39 Language variants are listed in LANGUAGES")
+}
+
+fn language_from_code(code: u8) -> Option<Language> {
+    LANGUAGES
+        .iter()
+        .find(|entry| entry.code == code)
+        .map(|entry| entry.language)
+}
 
 #[expect(
     missing_debug_implementations,
@@ -44,31 +127,41 @@ impl BaseWallet {
     not(feature = "test-mode"),
     expect(missing_debug_implementations, reason = "debug not required")
 )]
-// NOTE: This is not a BIP39 seed, instead random bytes of entropy.
-pub struct Seed(Zeroizing<[u8; SEED_LEN]>);
+pub struct Seed {
+    // NOTE: This is not a BIP39 seed, instead random bytes of entropy.
+    entropy: Zeroizing<[u8; SEED_LEN]>,
+
+    // The mnemonic language this entropy is always encoded/derived with, so a mnemonic printed
+    // by `print_mnemonic` and the keys derived by `signet_wallet`/`get_alpen_wallet` agree with
+    // what a standard wallet computes from that same printed mnemonic.
+    language: Language,
+}
 
 impl Seed {
     #[cfg(feature = "test-mode")]
     pub fn from_file(bytes: Hex<[u8; SEED_LEN]>) -> Self {
-        let bytes = Zeroizing::new(*bytes);
-        Self(bytes)
+        Self {
+            entropy: Zeroizing::new(*bytes),
+            language: Language::English,
+        }
     }
 
-    fn gen<R: CryptoRngCore>(rng: &mut R) -> Self {
-        let mut bytes = Zeroizing::new([0u8; SEED_LEN]);
-        rng.fill_bytes(bytes.as_mut());
-        Self(bytes)
+    fn gen<R: CryptoRngCore>(rng: &mut R, language: Language) -> Self {
+        let mut entropy = Zeroizing::new([0u8; SEED_LEN]);
+        rng.fill_bytes(entropy.as_mut());
+        Self { entropy, language }
     }
 
-    pub fn print_mnemonic(&self, language: Language) {
-        let mnemonic = Mnemonic::from_entropy_in(language, self.0.as_ref()).expect("valid entropy");
+    pub fn print_mnemonic(&self) {
+        let mnemonic =
+            Mnemonic::from_entropy_in(self.language, self.entropy.as_ref()).expect("valid entropy");
         println!("{mnemonic}");
     }
 
     pub fn descriptor_recovery_key(&self) -> [u8; 32] {
         let mut hasher = <Sha256 as Digest>::new(); // this is to appease the analyzer
         hasher.update(b"alpen labs alpen descriptor recovery file 2024");
-        hasher.update(self.0.as_slice());
+        hasher.update(self.entropy.as_slice());
         hasher.finalize().into()
     }
 
@@ -88,21 +181,24 @@ impl Seed {
             .map_err(OneOf::new)?;
 
         let (salt_and_nonce, rest) = buf.split_at_mut(PW_SALT_LEN + AES_NONCE_LEN);
-        let (seed, _) = rest.split_at_mut(SEED_LEN);
-        seed.copy_from_slice(self.0.as_ref());
+        let (plaintext, _) = rest.split_at_mut(SEED_LEN + LANGUAGE_CODE_LEN);
+        let (entropy, language_code_byte) = plaintext.split_at_mut(SEED_LEN);
+        entropy.copy_from_slice(self.entropy.as_ref());
+        language_code_byte[0] = language_code(self.language);
 
         let mut cipher = Aes256GcmSiv::new_from_slice(seed_encryption_key.as_ref())
             .expect("should be correct key size");
         let nonce = Nonce::from_slice(&salt_and_nonce[PW_SALT_LEN..]);
         let tag = cipher
-            .encrypt_in_place_detached(nonce, &[], seed)
+            .encrypt_in_place_detached(nonce, &[], plaintext)
             .map_err(OneOf::new)?;
         buf[(EncryptedSeed::LEN - AES_TAG_LEN)..].copy_from_slice(tag.as_slice());
         Ok(EncryptedSeed(buf))
     }
 
     pub fn signet_wallet(&self) -> BaseWallet {
-        let mnemonic = Mnemonic::from_entropy(self.0.as_ref()).expect("valid entropy");
+        let mnemonic =
+            Mnemonic::from_entropy_in(self.language, self.entropy.as_ref()).expect("valid entropy");
         // We do not use a passphrase.
         let bip39_seed = mnemonic.to_seed("");
         let rootpriv = Xpriv::new_master(Network::Signet, &bip39_seed).expect("valid xpriv");
@@ -121,7 +217,8 @@ impl Seed {
     pub fn get_alpen_wallet(&self) -> EthereumWallet {
         let derivation_path = DerivationPath::master().extend(BIP44_ALPEN_EVM_WALLET_PATH);
 
-        let mnemonic = Mnemonic::from_entropy(self.0.as_ref()).expect("valid entropy");
+        let mnemonic =
+            Mnemonic::from_entropy_in(self.language, self.entropy.as_ref()).expect("valid entropy");
         // We do not use a passphrase.
         let bip39_seed = mnemonic.to_seed("");
         // Network choice affects how extended public and private keys are serialized. See
@@ -147,7 +244,7 @@ impl Seed {
 pub struct EncryptedSeed([u8; Self::LEN]);
 
 impl EncryptedSeed {
-    const LEN: usize = PW_SALT_LEN + AES_NONCE_LEN + SEED_LEN + AES_TAG_LEN;
+    const LEN: usize = PW_SALT_LEN + AES_NONCE_LEN + SEED_LEN + LANGUAGE_CODE_LEN + AES_TAG_LEN;
 
     fn decrypt(
         mut self,
@@ -163,18 +260,23 @@ impl EncryptedSeed {
         let mut cipher = Aes256GcmSiv::new_from_slice(seed_encryption_key.as_ref())
             .expect("should be correct key size");
         let (salt_and_nonce, rest) = self.0.split_at_mut(PW_SALT_LEN + AES_NONCE_LEN);
-        let (encrypted_seed, tag) = rest.split_at_mut(SEED_LEN);
+        let (plaintext, tag) = rest.split_at_mut(SEED_LEN + LANGUAGE_CODE_LEN);
         let tag = Tag::from_slice(tag);
         let nonce = Nonce::from_slice(&salt_and_nonce[PW_SALT_LEN..]);
 
-        let mut seed = Zeroizing::new([0u8; SEED_LEN]);
-        seed.copy_from_slice(encrypted_seed);
+        let mut decrypted = Zeroizing::new([0u8; SEED_LEN + LANGUAGE_CODE_LEN]);
+        decrypted.copy_from_slice(plaintext);
 
         cipher
-            .decrypt_in_place_detached(nonce, &[], seed.as_mut(), tag)
+            .decrypt_in_place_detached(nonce, &[], decrypted.as_mut(), tag)
             .map_err(OneOf::new)?;
 
-        Ok(Seed(seed))
+        let mut entropy = Zeroizing::new([0u8; SEED_LEN]);
+        entropy.copy_from_slice(&decrypted[..SEED_LEN]);
+        let language = language_from_code(decrypted[SEED_LEN])
+            .expect("encrypted seed's language code is written by our own encrypt()");
+
+        Ok(Seed { entropy, language })
     }
 }
 
@@ -227,11 +329,26 @@ pub fn load_or_create(
                 }
                 let mut buf = Zeroizing::new([0u8; SEED_LEN]);
                 buf.copy_from_slice(&entropy);
-                break Seed(buf);
+                break Seed {
+                    entropy: buf,
+                    // The mnemonic's own language, not a default: this is the language a
+                    // standard wallet would derive from these exact words, so it's the only
+                    // choice that keeps Alpen's derivation consistent with the phrase the user
+                    // actually typed in.
+                    language: mnemonic.language(),
+                };
             }
         } else {
             println!("Creating new wallet");
-            Seed::gen(&mut OsRng)
+            let language_names: Vec<&str> = LANGUAGES.iter().map(|entry| entry.name).collect();
+            let language_idx = Select::new()
+                .with_prompt("Choose a language for your recovery mnemonic")
+                .items(&language_names)
+                .default(0)
+                .interact()
+                .map_err(OneOf::new)?;
+            let language = LANGUAGES[language_idx].language;
+            Seed::gen(&mut OsRng, language)
         };
 
         let mut password = Password::read(true).map_err(OneOf::new)?;
@@ -342,12 +459,13 @@ mod test {
     // Test valid seed encryption and decryption
     fn seed_encrypt_decrypt() {
         let mut password = Password::new(String::from("swordfish"));
-        let seed = Seed::gen(&mut OsRng);
+        let seed = Seed::gen(&mut OsRng, Language::Spanish);
 
         let encrypted_seed = seed.encrypt(&mut password, &mut OsRng).unwrap();
         let decrypted_seed = encrypted_seed.decrypt(&mut password).unwrap();
 
-        assert_eq!(seed.0, decrypted_seed.0);
+        assert_eq!(seed.entropy, decrypted_seed.entropy);
+        assert_eq!(seed.language, decrypted_seed.language);
     }
 
     #[test]
@@ -355,7 +473,7 @@ mod test {
     fn evil_password() {
         let mut password = Password::new(String::from("swordfish"));
         let mut evil_password = Password::new(String::from("evil"));
-        let seed = Seed::gen(&mut OsRng);
+        let seed = Seed::gen(&mut OsRng, Language::English);
 
         let encrypted_seed = seed.encrypt(&mut password, &mut OsRng).unwrap();
 
@@ -366,7 +484,7 @@ mod test {
     // Using an evil salt fails decryption
     fn evil_salt() {
         let mut password = Password::new(String::from("swordfish"));
-        let seed = Seed::gen(&mut OsRng);
+        let seed = Seed::gen(&mut OsRng, Language::English);
 
         let mut encrypted_seed = seed.encrypt(&mut password, &mut OsRng).unwrap();
         let index = 0;
@@ -379,7 +497,7 @@ mod test {
     // Using an evil nonce fails decryption
     fn evil_nonce() {
         let mut password = Password::new(String::from("swordfish"));
-        let seed = Seed::gen(&mut OsRng);
+        let seed = Seed::gen(&mut OsRng, Language::English);
 
         let mut encrypted_seed = seed.encrypt(&mut password, &mut OsRng).unwrap();
         let index = PW_SALT_LEN;
@@ -392,7 +510,7 @@ mod test {
     // Using an evil seed fails decryption
     fn evil_seed() {
         let mut password = Password::new(String::from("swordfish"));
-        let seed = Seed::gen(&mut OsRng);
+        let seed = Seed::gen(&mut OsRng, Language::English);
 
         let mut encrypted_seed = seed.encrypt(&mut password, &mut OsRng).unwrap();
         let index = PW_SALT_LEN + AES_NONCE_LEN;
@@ -405,7 +523,7 @@ mod test {
     // Using an evil tag fails decryption
     fn evil_tag() {
         let mut password = Password::new(String::from("swordfish"));
-        let seed = Seed::gen(&mut OsRng);
+        let seed = Seed::gen(&mut OsRng, Language::English);
 
         let mut encrypted_seed = seed.encrypt(&mut password, &mut OsRng).unwrap();
         let index = PW_SALT_LEN + AES_NONCE_LEN + SEED_LEN;
@@ -415,16 +533,33 @@ mod test {
     }
 
     #[test]
+    // The on-disk language code must round-trip for every supported language, not just whichever
+    // one other tests happen to exercise.
+    fn language_code_round_trips_for_every_supported_language() {
+        for entry in LANGUAGES {
+            let code = language_code(entry.language);
+            assert_eq!(code, entry.code, "language code for {} changed", entry.name);
+            assert_eq!(
+                language_from_code(code),
+                Some(entry.language),
+                "language code for {} did not round-trip",
+                entry.name
+            );
+        }
+    }
+
+    #[test]
     // Test L2 wallet address matches the one from BIP39 tool (e.g. https://iancoleman.io/bip39/)
     // using the same menmonic and derivation path.
     fn test_l2_wallet_address() {
-        let seed = Seed(
-            [
+        let seed = Seed {
+            entropy: [
                 0xBA, 0xAE, 0xDC, 0xE6, 0xAF, 0x48, 0xA0, 0x3B, 0xBF, 0xD2, 0x5E, 0x8C, 0xD0, 0x36,
                 0x41, 0x41,
             ]
             .into(),
-        );
+            language: Language::English,
+        };
         let l2wallet = seed.get_alpen_wallet();
         let address = l2wallet.default_signer().address().to_string();
         // BIP39 Mnemonic for `seed` should be:
@@ -442,7 +577,10 @@ mod test {
     // -> PBKDF2 seed -> BIP32) instead of raw entropy, so any BIP-86-compliant wallet can recover
     // the same funds. https://github.com/bitcoin/bips/blob/master/bip-0086.mediawiki#test-vectors
     fn test_l1_signet_wallet_matches_bip86_test_vector() {
-        let seed = Seed([0u8; SEED_LEN].into());
+        let seed = Seed {
+            entropy: [0u8; SEED_LEN].into(),
+            language: Language::English,
+        };
         let (_, create) = seed.signet_wallet().split();
         let mut wallet = create
             .network(Network::Signet)
@@ -458,5 +596,78 @@ mod test {
         )
         .expect("valid hex");
         assert_eq!(script_pubkey.as_bytes(), expected_bytes.as_slice());
+    }
+
+    #[test]
+    // Finding #5: get_alpen_wallet used to always reconstruct the mnemonic in English before
+    // hashing, regardless of the seed's actual language, diverging from what a real wallet
+    // computes for a mnemonic in any other language. Now that Seed carries its own language and
+    // get_alpen_wallet uses it, a Spanish-language seed must match a correct Spanish derivation.
+    fn l2_wallet_matches_correct_derivation_for_non_english_mnemonic() {
+        let seed = Seed {
+            entropy: [0u8; SEED_LEN].into(),
+            language: Language::Spanish,
+        };
+
+        // What Alpen actually computes.
+        let alpen_address = seed.get_alpen_wallet().default_signer().address();
+
+        // What a real external wallet would compute, given the Spanish mnemonic `alpen backup`
+        // prints for this same seed.
+        let spanish_mnemonic = Mnemonic::from_entropy_in(Language::Spanish, seed.entropy.as_ref())
+            .expect("valid entropy");
+        let correct_bip39_seed = spanish_mnemonic.to_seed("");
+        let correct_root =
+            Xpriv::new_master(Network::Bitcoin, &correct_bip39_seed).expect("valid xpriv");
+        let derivation_path = DerivationPath::master().extend(BIP44_ALPEN_EVM_WALLET_PATH);
+        let derived_key = correct_root
+            .derive_priv(SECP256K1, &derivation_path)
+            .unwrap();
+        let correct_signer =
+            PrivateKeySigner::from_slice(derived_key.private_key.secret_bytes().as_slice())
+                .expect("valid slice");
+
+        assert_eq!(alpen_address, correct_signer.address());
+    }
+
+    #[test]
+    // L1 counterpart to l2_wallet_matches_correct_derivation_for_non_english_mnemonic.
+    fn l1_signet_wallet_matches_correct_derivation_for_non_english_mnemonic() {
+        let seed = Seed {
+            entropy: [0u8; SEED_LEN].into(),
+            language: Language::Spanish,
+        };
+
+        // What Alpen actually computes.
+        let (_, create) = seed.signet_wallet().split();
+        let mut wallet = create
+            .network(Network::Signet)
+            .create_wallet_no_persist()
+            .expect("valid descriptor");
+        let alpen_script_pubkey = wallet
+            .reveal_next_address(KeychainKind::External)
+            .address
+            .script_pubkey();
+
+        // What a real external wallet would compute, given the Spanish mnemonic `alpen backup`
+        // prints for this same seed.
+        let spanish_mnemonic = Mnemonic::from_entropy_in(Language::Spanish, seed.entropy.as_ref())
+            .expect("valid entropy");
+        let correct_bip39_seed = spanish_mnemonic.to_seed("");
+        let correct_root =
+            Xpriv::new_master(Network::Signet, &correct_bip39_seed).expect("valid xpriv");
+        let base_desc = format!("tr({correct_root}/86h/0h/0h");
+        let external_desc = format!("{base_desc}/0/*)");
+        let internal_desc = format!("{base_desc}/1/*)");
+        let mut correct_wallet = Wallet::create(external_desc, internal_desc)
+            .network(Network::Signet)
+            .create_wallet_no_persist()
+            .expect("valid descriptor");
+        let correct_script_pubkey = correct_wallet
+            .reveal_next_address(KeychainKind::External)
+            .address
+            .script_pubkey();
+
+        assert_eq!(alpen_script_pubkey, correct_script_pubkey);
     }
 }

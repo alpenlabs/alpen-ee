@@ -32,6 +32,9 @@ pub const PW_SALT_LEN: usize = 16;
 pub const AES_NONCE_LEN: usize = 12;
 /// Length of seed in bytes
 pub const SEED_LEN: usize = 16;
+/// Length in bytes of the mnemonic-language code stored alongside the seed's entropy in the
+/// encrypted envelope.
+pub const LANGUAGE_CODE_LEN: usize = 1;
 /// AES-256-GCM-SIV tag len
 pub const AES_TAG_LEN: usize = 16;
 /// OP_RETURN magic bytes len
