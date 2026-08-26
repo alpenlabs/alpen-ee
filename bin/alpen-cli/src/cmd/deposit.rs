@@ -4,8 +4,9 @@ use alloy::{primitives::Address as AlpenAddress, providers::WalletProvider};
 use argh::FromArgs;
 use bdk_wallet::{
     bitcoin::{
-        secp256k1::SECP256K1, Address as BitcoinAddress, Amount, FeeRate, Network, PrivateKey,
-        Transaction, TxOut, XOnlyPublicKey,
+        secp256k1::{PublicKey, SecretKey, SECP256K1},
+        Address as BitcoinAddress, Amount, FeeRate, Network, PrivateKey, Transaction, TxOut,
+        XOnlyPublicKey,
     },
     chain::ChainOracle,
     coin_selection::InsufficientFunds,
@@ -16,7 +17,6 @@ use bdk_wallet::{
 };
 use colored::Colorize;
 use indicatif::ProgressBar;
-use rand_core::OsRng;
 use shrex::encode;
 use strata_asm_proto_bridge_txs::deposit_request::DrtHeaderAux;
 use strata_cli_common::errors::{DisplayableError, DisplayedError};
@@ -93,8 +93,9 @@ fn prepare_deposit_request(
     recover_delay: u16,
     alpen_address: AlpenAddress,
     bridge_in_amount: Amount,
+    reclaim_keypair: (SecretKey, PublicKey),
 ) -> (DescriptorTemplateOut, BitcoinAddress, DrtHeaderAux, TxOut) {
-    let (secret_key, recovery_public_key) = even_kp(SECP256K1.generate_keypair(&mut OsRng));
+    let (secret_key, recovery_public_key) = even_kp(reclaim_keypair);
     let recovery_public_key = recovery_public_key.x_only_public_key().0;
     let recovery_private_key = PrivateKey::new(secret_key.into(), network);
 
@@ -166,12 +167,22 @@ pub async fn deposit(
         alpen_address.to_string().cyan(),
     );
 
+    let mut desc_file = DescriptorRecovery::open(&seed, &settings.descriptor_db)
+        .await
+        .internal_error("Failed to open descriptor recovery file")?;
+    let reclaim_counter = desc_file
+        .next_reclaim_counter()
+        .await
+        .internal_error("Failed to reserve a deposit reclaim key counter")?;
+    let reclaim_keypair = seed.drt_reclaim_keypair(reclaim_counter);
+
     let (bridge_in_desc, bridge_in_address, header_aux, deposit_output) = prepare_deposit_request(
         settings.bridge_musig2_pubkey,
         settings.network,
         settings.recovery_delay,
         alpen_address,
         drt_amount,
+        reclaim_keypair,
     );
 
     println!(
@@ -210,9 +221,6 @@ pub async fn deposit(
     let pb = ProgressBar::new_spinner().with_message("Saving output descriptor");
     pb.enable_steady_tick(Duration::from_millis(100));
 
-    let mut desc_file = DescriptorRecovery::open(&seed, &settings.descriptor_db)
-        .await
-        .internal_error("Failed to open descriptor recovery file")?;
     desc_file
         .add_desc(recover_at, &bridge_in_desc)
         .await
@@ -244,7 +252,7 @@ pub async fn deposit(
 ///
 /// This is a P2TR address that the key path spend is locked to the bridge aggregated public key
 /// and the single script path spend is locked to the user's recovery address with a timelock of
-fn bridge_in_descriptor(
+pub(crate) fn bridge_in_descriptor(
     bridge_pubkey: XOnlyPublicKey,
     private_key: PrivateKey,
     recover_delay: u16,
@@ -266,6 +274,7 @@ mod tests {
         keys::{DescriptorPublicKey, SinglePub, SinglePubKey},
         miniscript::{descriptor::TapTree, Descriptor, Miniscript},
     };
+    use rand_core::OsRng;
     use strata_asm_proto_bridge_txs::deposit_request::parse_drt;
     use strata_primitives::constants::RECOVER_DELAY;
     use strata_test_utils_btcio::BtcioTestHarness;
@@ -373,6 +382,7 @@ mod tests {
                 RECOVER_DELAY,
                 alpen_address,
                 bridge_in_amount,
+                SECP256K1.generate_keypair(&mut OsRng),
             );
 
         let tx = build_deposit_request_tx(

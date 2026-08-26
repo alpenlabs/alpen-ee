@@ -2,15 +2,21 @@ use std::collections::BTreeMap;
 
 use argh::FromArgs;
 use bdk_wallet::{
-    bitcoin::Amount, chain::ChainOracle, coin_selection::InsufficientFunds,
-    descriptor::IntoWalletDescriptor, error::CreateTxError, KeychainKind, Wallet,
+    bitcoin::{secp256k1::SECP256K1, Amount, FeeRate, PrivateKey},
+    chain::ChainOracle,
+    coin_selection::InsufficientFunds,
+    descriptor::IntoWalletDescriptor,
+    error::CreateTxError,
+    KeychainKind, Wallet,
 };
 use chrono::Utc;
 use colored::Colorize;
 use strata_cli_common::errors::{DisplayableError, DisplayedError};
+use strata_primitives::crypto::even_kp;
 
 use crate::{
-    constants::RECOVERY_DESC_CLEANUP_DELAY,
+    cmd::deposit::bridge_in_descriptor,
+    constants::{RECOVERY_DESC_CLEANUP_DELAY, SEED_RECOVERY_GAP_LIMIT},
     link::{OnchainObject, PrettyPrint},
     recovery::DescriptorRecovery,
     seed::Seed,
@@ -60,8 +66,7 @@ pub async fn recover(
         .internal_error("Failed to read descriptors after chain height")?;
 
     if descs.is_empty() {
-        println!("Nothing to recover");
-        return Ok(());
+        println!("No descriptors in the local database");
     }
 
     let fee_rate = get_fee_rate(args.fee_rate, settings.signet_backend.as_ref()).await;
@@ -98,64 +103,150 @@ pub async fn recover(
             continue;
         }
 
-        recovery_wallet.transactions().for_each(|tx| {
-            l1w.apply_unconfirmed_txs([(tx.tx_node.tx, Utc::now().timestamp() as u64)]);
-        });
-
-        let recover_to = l1w.reveal_next_address(KeychainKind::External).address;
         println!(
-            "Recovering a deposit transaction from recovery address {} to wallet address {}",
+            "Recovering a deposit transaction from recovery address {}",
             address.to_string().yellow(),
-            recover_to.to_string().yellow()
         );
+        drain_recovery_path(&mut recovery_wallet, &mut l1w, &settings, fee_rate).await?;
+    }
 
-        let policy = recovery_wallet
-            .policies(KeychainKind::External)
-            .expect("valid descriptor use")
-            .expect("a policy");
+    recover_from_seed(&seed, &settings, &mut l1w, fee_rate).await?;
 
-        // we want to drain the recovery path to the l1 wallet
-        let mut psbt = {
-            let mut builder = recovery_wallet.build_tx();
-            // we want to spend via the 2nd option - the recovery + delay
-            builder.policy_path(
-                BTreeMap::from([(policy.id, vec![1])]),
-                KeychainKind::External,
-            );
-            builder.drain_wallet();
-            builder.drain_to(recover_to.script_pubkey());
-            builder.fee_rate(fee_rate);
-            match builder.finish() {
-                Ok(psbt) => psbt,
-                Err(CreateTxError::CoinSelection(e @ InsufficientFunds { .. })) => {
-                    return Err(DisplayedError::UserError(
-                        "Failed to create PSBT".to_string(),
-                        Box::new(e),
-                    ));
-                }
-                Err(e) => panic!("Unexpected error in creating PSBT: {e:?}"),
+    Ok(())
+}
+
+/// Drains `recovery_wallet`'s reclaim path (policy path index 1: recovery pubkey + timelock,
+/// see [`bridge_in_descriptor`]) to `l1w`, signing and broadcasting the spend.
+async fn drain_recovery_path(
+    recovery_wallet: &mut Wallet,
+    l1w: &mut Wallet,
+    settings: &Settings,
+    fee_rate: FeeRate,
+) -> Result<(), DisplayedError> {
+    recovery_wallet.transactions().for_each(|tx| {
+        l1w.apply_unconfirmed_txs([(tx.tx_node.tx, Utc::now().timestamp() as u64)]);
+    });
+
+    let recover_to = l1w.reveal_next_address(KeychainKind::External).address;
+    println!(
+        "Recovering to wallet address {}",
+        recover_to.to_string().yellow()
+    );
+
+    let policy = recovery_wallet
+        .policies(KeychainKind::External)
+        .expect("valid descriptor use")
+        .expect("a policy");
+
+    // we want to drain the recovery path to the l1 wallet
+    let mut psbt = {
+        let mut builder = recovery_wallet.build_tx();
+        // we want to spend via the 2nd option - the recovery + delay
+        builder.policy_path(
+            BTreeMap::from([(policy.id, vec![1])]),
+            KeychainKind::External,
+        );
+        builder.drain_wallet();
+        builder.drain_to(recover_to.script_pubkey());
+        builder.fee_rate(fee_rate);
+        match builder.finish() {
+            Ok(psbt) => psbt,
+            Err(CreateTxError::CoinSelection(e @ InsufficientFunds { .. })) => {
+                return Err(DisplayedError::UserError(
+                    "Failed to create PSBT".to_string(),
+                    Box::new(e),
+                ));
             }
-        };
+            Err(e) => panic!("Unexpected error in creating PSBT: {e:?}"),
+        }
+    };
 
-        assert!(
-            recovery_wallet
-                .sign(&mut psbt, Default::default())
-                .expect("sign to be ok"),
-            "transaction should be finalized"
+    assert!(
+        recovery_wallet
+            .sign(&mut psbt, Default::default())
+            .expect("sign to be ok"),
+        "transaction should be finalized"
+    );
+
+    let tx = psbt.extract_tx().expect("tx should be signed and ready");
+    settings
+        .signet_backend
+        .broadcast_tx(&tx)
+        .await
+        .internal_error("Failed to broadcast signet transaction")?;
+
+    println!(
+        "{}",
+        OnchainObject::from(&tx.compute_txid())
+            .with_maybe_explorer(settings.mempool_space_endpoint.as_deref())
+            .pretty()
+    );
+
+    Ok(())
+}
+
+/// Reconstructs and recovers deposits directly from the seed, for deposits whose descriptor DB
+/// entry is missing. Tries `seed.drt_reclaim_keypair(counter)` for `counter = 0, 1, 2, ...`,
+/// rebuilding each candidate's descriptor with the network's *current* bridge pubkey and
+/// recovery delay -- if either has changed since a given deposit was created, that deposit won't
+/// be found here. Stops after [`SEED_RECOVERY_GAP_LIMIT`] consecutive counters with no on-chain
+/// history, the same convention BIP44 uses for address-gap discovery.
+async fn recover_from_seed(
+    seed: &Seed,
+    settings: &Settings,
+    l1w: &mut Wallet,
+    fee_rate: FeeRate,
+) -> Result<(), DisplayedError> {
+    println!("Scanning for deposits reconstructable from the seed alone...");
+
+    let mut found_any = false;
+    let mut consecutive_misses = 0;
+    let mut counter = 0u32;
+    while consecutive_misses < SEED_RECOVERY_GAP_LIMIT {
+        let (secret_key, _) = even_kp(seed.drt_reclaim_keypair(counter));
+        let recovery_private_key = PrivateKey::new(secret_key.into(), settings.network);
+        let desc = bridge_in_descriptor(
+            settings.bridge_musig2_pubkey,
+            recovery_private_key,
+            settings.recovery_delay,
         );
 
-        let tx = psbt.extract_tx().expect("tx should be signed and ready");
-        settings
-            .signet_backend
-            .broadcast_tx(&tx)
-            .await
-            .internal_error("Failed to broadcast signet transaction")?;
+        let wallet_desc = desc
+            .into_wallet_descriptor(SECP256K1, settings.network)
+            .internal_error("Failed to convert to wallet descriptor")?;
+        let mut recovery_wallet = Wallet::create_single(wallet_desc)
+            .network(settings.network)
+            .create_wallet_no_persist()
+            .internal_error("Failed to create recovery wallet")?;
 
+        let address = recovery_wallet.reveal_next_address(KeychainKind::External);
+        sync_wallet(&mut recovery_wallet, settings.signet_backend.clone())
+            .await
+            .internal_error("Failed to sync recovery wallet")?;
+
+        if recovery_wallet.transactions().next().is_none() {
+            consecutive_misses += 1;
+            counter += 1;
+            continue;
+        }
+        consecutive_misses = 0;
+
+        if recovery_wallet.balance().confirmed > Amount::ZERO {
+            found_any = true;
+            println!(
+                "Recovering a deposit transaction (counter {counter}) from recovery address {}",
+                address.to_string().yellow(),
+            );
+            drain_recovery_path(&mut recovery_wallet, l1w, settings, fee_rate).await?;
+        }
+
+        counter += 1;
+    }
+
+    if !found_any {
         println!(
-            "{}",
-            OnchainObject::from(&tx.compute_txid())
-                .with_maybe_explorer(settings.mempool_space_endpoint.as_deref())
-                .pretty()
+            "Nothing found to recover from the seed within {SEED_RECOVERY_GAP_LIMIT} unused \
+             counters past the last one with on-chain activity."
         );
     }
 
