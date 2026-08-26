@@ -181,7 +181,10 @@ impl ProverTaskDatabase for EeProverDbMdbx {
             .view(|r| {
                 let mut out = Vec::new();
                 r.for_each::<ProverTaskSchema>(|key, record| {
-                    if record.status().is_retriable()
+                    // `wants_rescan`, not `is_retriable`: a task blocked on a
+                    // dependency has to be re-spawned to recheck it, and
+                    // `is_retriable` covers only transient failures.
+                    if record.status().wants_rescan()
                         && record.retry_after_secs().is_some_and(|t| t <= now_secs)
                     {
                         out.push((key, record));
