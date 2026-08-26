@@ -130,16 +130,23 @@ async fn build_ee_provers(
                 let chunk_predicate_key = schnorr_predicate_key(&chunk_signing_key);
                 let chunk_host = {
                     let chunk_params = (*params).clone();
+                    let spec_version = *spec_version;
                     NativeHost::new(chunk_signing_key, move |zkvm| {
-                        process_ee_chunk(zkvm, &chunk_params)
+                        process_ee_chunk(zkvm, &chunk_params, spec_version)
                     })
                 };
                 let chunk = (builders.chunk)(*spec_version).native(chunk_host);
 
                 let acct_host = {
                     let acct_params = (*params).clone();
+                    let spec_version = *spec_version;
                     NativeHost::new(acct_signing_key, move |zkvm| {
-                        process_ee_acct_update(zkvm, &acct_params, &chunk_predicate_key)
+                        process_ee_acct_update(
+                            zkvm,
+                            &acct_params,
+                            spec_version,
+                            &chunk_predicate_key,
+                        )
                     })
                 };
                 let account = (builders.account)(*spec_version).native(acct_host);

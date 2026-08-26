@@ -152,7 +152,7 @@ mod tests {
     #[test]
     fn test_alpen_chunk_native_execution() {
         let input = prepare_input();
-        let output = EeChunkProgram::new(perf_alpen_params())
+        let output = EeChunkProgram::new(perf_alpen_params(), AlpenSpecId::V1)
             .execute(&input)
             .unwrap();
         // The chunk transition's parent/tip blkids must match the block
