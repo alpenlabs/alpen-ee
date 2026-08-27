@@ -39,7 +39,7 @@ pub(crate) async fn run(
     let live_da_rate = Arc::new(AtomicU64::new(0));
     let node = AlpenEthereumNode::new(
         evm_factory,
-        common.params.evm_spec().clone(),
+        &common.params,
         AlpenNodeMode::full_node(config.sequencer_http_url.clone()),
         live_da_rate,
     );

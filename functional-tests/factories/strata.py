@@ -81,6 +81,7 @@ class StrataFactory(flexitest.Factory):
         shared_params: "StrataNodeParams | None" = None,
         l1_reorg_safe_depth: int | None = None,
         prover: ProverBackend = NATIVE_BACKEND,
+        custom_chain: str = "dev",
         **kwargs,
     ) -> CreateNodeResult:
         """
@@ -198,6 +199,7 @@ class StrataFactory(flexitest.Factory):
                     bconfig,
                     genesis_l1_height,
                     prover.genesis_predicate,
+                    chain=custom_chain,
                 )
 
             # Generate ASM params via datatool (computes correct genesis_ol_blkid from OL params).

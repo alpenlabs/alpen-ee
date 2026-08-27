@@ -17,6 +17,7 @@ ALPEN_EE_ACCOUNT_ID = "01" * 32
 # pins the same values against the real computation.
 GENESIS_INNER_STATE_ROOTS = {
     "dev": "a0a5f13344251d480f42dc85cabe0ca6dffa168e67ad32a9224970383baa63be",
+    "eest": "7ec9df7c5a5d8177672e9e6e498353f92cd9e30ca902ab9bb989557675166058",
     "devnet": "185eea4e22a815a87a512843c279e42f87f9b57432d29abfe35b4ccfc0da1a1e",
     "testnet": "2a82d8daab762ffd91786783f47ca123d7d2206982533748697413e21c05f4b2",
     "testnet3": "87da9f8fd94022e63d24f05207dffd8a513136d1b07d68c0a350c47190085036",

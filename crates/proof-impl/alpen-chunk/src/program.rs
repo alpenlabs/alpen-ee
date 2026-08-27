@@ -106,7 +106,8 @@ mod tests {
     use std::{fs, path::PathBuf, sync::Arc};
 
     use alpen_ee_params::{
-        AlpenSpecId, AlpenSpecSchedule, BlobSpec, DEFAULT_ALPEN_EE_ACCOUNT_ID, EvmSpec,
+        AlpenSpecId, AlpenSpecSchedule, BlobSpec, DEFAULT_ALPEN_EE_ACCOUNT_ID,
+        DEFAULT_BASE_FEE_FLOOR, EvmSpec,
     };
     use alpen_reth_evm::evm::AlpenEvmFactory;
     use reth_primitives_traits::Block as _;
@@ -150,6 +151,7 @@ mod tests {
                 .expect("valid bridge params"),
             BlobSpec::new(MagicBytes::new(*b"ALPN")),
             AlpenSpecSchedule::genesis(),
+            DEFAULT_BASE_FEE_FLOOR,
             evm_spec,
         )
     }

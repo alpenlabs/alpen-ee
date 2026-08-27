@@ -14,7 +14,7 @@
 //! consensus with the fee model's base-fee floor. Only the
 //! base-fee-against-parent check diverges from [`EthBeaconConsensus`] — full
 //! nodes import blocks before the proof exists, so they must accept the
-//! floored base fee `max(BASE_FEE_FLOOR, eip1559_next(parent))` (see
+//! floored base fee `max(configured_floor, eip1559_next(parent))` (see
 //! [`alpen_reth_evm::base_fee`]); stock reth recomputes the pure EIP-1559
 //! value and would reject a floored block. Above the floor the two agree.
 
@@ -52,35 +52,39 @@ fn consensus_error(err: HeaderExtraError) -> ConsensusError {
 pub(crate) struct FlooredConsensus {
     inner: EthBeaconConsensus<ChainSpec>,
     chain_spec: Arc<ChainSpec>,
+    base_fee_floor: u64,
 }
 
 impl FlooredConsensus {
     /// Creates a [`FlooredConsensus`] for the given chain spec.
-    pub(crate) fn new(chain_spec: Arc<ChainSpec>) -> Self {
+    pub(crate) fn new(chain_spec: Arc<ChainSpec>, base_fee_floor: u64) -> Self {
         Self {
             inner: EthBeaconConsensus::new(chain_spec.clone()),
             chain_spec,
+            base_fee_floor,
         }
     }
 }
 
 /// Floored variant of reth's `validate_against_parent_eip1559_base_fee`: the expected base
-/// fee is `max(BASE_FEE_FLOOR, eip1559_next(parent))` — identical to stock except for the
+/// fee is `max(base_fee_floor, eip1559_next(parent))` — identical to stock except for the
 /// [`apply_base_fee_floor`] clamp.
 fn validate_against_parent_base_fee_floored(
     header: &Header,
     parent: &Header,
     chain_spec: &ChainSpec,
+    base_fee_floor: u64,
 ) -> Result<(), ConsensusError> {
     if chain_spec.is_london_active_at_block(header.number()) {
         let base_fee = header
             .base_fee_per_gas()
             .ok_or(ConsensusError::BaseFeeMissing)?;
 
-        // Single source of truth shared with the proof guest (`evm-ee`), so host and guest
-        // enforce byte-identical base fees.
-        let expected_base_fee = expected_floored_base_fee(header, parent, chain_spec)
-            .ok_or(ConsensusError::BaseFeeMissing)?;
+        // Single source of truth for the host against-parent rule. The payload builder uses
+        // the same clamping primitive when constructing the child block.
+        let expected_base_fee =
+            expected_floored_base_fee(header, parent, chain_spec, base_fee_floor)
+                .ok_or(ConsensusError::BaseFeeMissing)?;
 
         if expected_base_fee != base_fee {
             return Err(ConsensusError::BaseFeeDiff(GotExpected {
@@ -112,6 +116,7 @@ impl HeaderValidator for FlooredConsensus {
             header.header(),
             parent.header(),
             self.chain_spec.as_ref(),
+            self.base_fee_floor,
         )?;
         if let Some(blob_params) = self.chain_spec.blob_params_at_timestamp(header.timestamp()) {
             validate_against_parent_4844(header.header(), parent.header(), blob_params)?;
@@ -164,13 +169,13 @@ pub struct AlpenConsensus {
 
 impl AlpenConsensus {
     /// Creates the consensus over `evm_spec`'s per-version chain spec table.
-    pub fn new(evm_spec: &EvmSpec) -> Self {
+    pub fn new(evm_spec: &EvmSpec, base_fee_floor: u64) -> Self {
         Self {
             inners: evm_spec
                 .chain_specs()
                 .iter()
                 .cloned()
-                .map(FlooredConsensus::new)
+                .map(|chain_spec| FlooredConsensus::new(chain_spec, base_fee_floor))
                 .collect(),
         }
     }
@@ -251,11 +256,15 @@ impl FullConsensus<EthPrimitives> for AlpenConsensus {
 #[derive(Debug, Clone)]
 pub struct AlpenConsensusBuilder {
     evm_spec: EvmSpec,
+    base_fee_floor: u64,
 }
 
 impl AlpenConsensusBuilder {
-    pub fn new(evm_spec: EvmSpec) -> Self {
-        Self { evm_spec }
+    pub fn new(evm_spec: EvmSpec, base_fee_floor: u64) -> Self {
+        Self {
+            evm_spec,
+            base_fee_floor,
+        }
     }
 }
 
@@ -266,15 +275,17 @@ where
     type Consensus = Arc<AlpenConsensus>;
 
     async fn build_consensus(self, _ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
-        Ok(Arc::new(AlpenConsensus::new(&self.evm_spec)))
+        Ok(Arc::new(AlpenConsensus::new(
+            &self.evm_spec,
+            self.base_fee_floor,
+        )))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use alloy_primitives::Bytes;
-    use alpen_ee_params::{AlpenSpecId, EvmSpec, HeaderExtra};
-    use alpen_reth_evm::base_fee::BASE_FEE_FLOOR;
+    use alpen_ee_params::{AlpenSpecId, EvmSpec, HeaderExtra, DEFAULT_BASE_FEE_FLOOR};
     use reth_consensus::HeaderValidator;
     use reth_errors::ConsensusError;
     use reth_primitives::{Header, SealedHeader};
@@ -283,7 +294,7 @@ mod tests {
 
     fn test_consensus() -> AlpenConsensus {
         let evm_spec: EvmSpec = serde_json::from_str("{}").expect("empty genesis document parses");
-        AlpenConsensus::new(&evm_spec)
+        AlpenConsensus::new(&evm_spec, DEFAULT_BASE_FEE_FLOOR)
     }
 
     fn sealed_header(number: u64, extra_data: Bytes) -> SealedHeader {
@@ -350,19 +361,21 @@ mod tests {
     /// version, where stock consensus would demand the pure EIP-1559 value.
     #[test]
     fn the_base_fee_floor_applies_under_every_version() {
+        const CUSTOM_BASE_FEE_FLOOR: u64 = 7;
+
         // London must be active for the base-fee-against-parent rule to run
         // at all; the empty genesis document never activates it.
         let evm_spec: EvmSpec =
             serde_json::from_str(r#"{"config":{"chainId":2892,"londonBlock":0,"shanghaiTime":0}}"#)
                 .expect("genesis document parses");
-        let consensus = AlpenConsensus::new(&evm_spec);
+        let consensus = AlpenConsensus::new(&evm_spec, CUSTOM_BASE_FEE_FLOOR);
 
         for version in [AlpenSpecId::V0, AlpenSpecId::V1] {
             let parent = SealedHeader::seal_slow(Header {
                 number: 1,
                 gas_limit: 30_000_000,
                 gas_used: 0,
-                base_fee_per_gas: Some(BASE_FEE_FLOOR),
+                base_fee_per_gas: Some(CUSTOM_BASE_FEE_FLOOR),
                 extra_data: HeaderExtra::new(version, 0).encode().into(),
                 ..Default::default()
             });
@@ -373,7 +386,7 @@ mod tests {
                 parent_hash: parent.hash(),
                 gas_limit: 30_000_000,
                 timestamp: 1,
-                base_fee_per_gas: Some(BASE_FEE_FLOOR),
+                base_fee_per_gas: Some(CUSTOM_BASE_FEE_FLOOR),
                 extra_data: HeaderExtra::new(version, 0).encode().into(),
                 ..Default::default()
             });

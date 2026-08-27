@@ -296,6 +296,8 @@ def main(argv: list[str]) -> int:
             fullnode_count=0,
             pre_generate_blocks=110,
             batch_sealing_block_count=5,
+            custom_chain="eest",
+            base_fee_floor=7,
         ),
         "alpen_ee_discovery": AlpenClientEnv(enable_discovery=True, pure_discovery=True),
         "alpen_ee_multi": AlpenClientEnv(fullnode_count=3, forward_tx=False),

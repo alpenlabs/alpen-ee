@@ -70,7 +70,7 @@ pub fn build_genesis_exec_block(
 mod tests {
     use std::fs;
 
-    use alpen_ee_params::AlpenParams;
+    use alpen_ee_params::{AlpenParams, AlpenSpecId};
     use strata_acct_types::tree_hash::{Sha256Hasher, TreeHash};
 
     use super::build_genesis_ee_account_state;
@@ -89,6 +89,10 @@ mod tests {
         (
             "alpen-dev-chain",
             "a0a5f13344251d480f42dc85cabe0ca6dffa168e67ad32a9224970383baa63be",
+        ),
+        (
+            "alpen-eest-chain",
+            "7ec9df7c5a5d8177672e9e6e498353f92cd9e30ca902ab9bb989557675166058",
         ),
         (
             "devnet-chain",
@@ -132,5 +136,13 @@ mod tests {
                  GENESIS_INNER_STATE_ROOTS here and in functional-tests/common/datatool.py"
             );
         }
+    }
+
+    #[test]
+    fn eest_genesis_starts_at_seven_wei() {
+        let params = params_for_chain("alpen-eest-chain");
+        let genesis = params.chain_spec(AlpenSpecId::V0).genesis_header();
+
+        assert_eq!(genesis.base_fee_per_gas, Some(7));
     }
 }

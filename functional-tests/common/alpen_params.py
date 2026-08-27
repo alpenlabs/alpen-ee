@@ -12,6 +12,8 @@ grows ``gen-alpen-params``, this composition moves there.
 import json
 from pathlib import Path
 
+DEFAULT_BASE_FEE_FLOOR = 1_000_000_000
+
 # Repo-relative chain spec documents (the same files the old --custom-chain
 # flag resolved by name). Named in-repo chains only: the old flag also
 # accepted arbitrary chain-spec paths, but a bare chain spec is no longer a
@@ -21,6 +23,7 @@ _CHAINSPEC_DIR = (
 )
 CHAIN_SPEC_FILES = {
     "dev": _CHAINSPEC_DIR / "alpen-dev-chain.json",
+    "eest": _CHAINSPEC_DIR / "alpen-eest-chain.json",
     "devnet": _CHAINSPEC_DIR / "devnet-chain.json",
     "testnet": _CHAINSPEC_DIR / "testnet-chain.json",
     "testnet3": _CHAINSPEC_DIR / "testnet3-chain.json",
@@ -35,6 +38,7 @@ def compose_alpen_params(
     max_withdrawal_amount: int | None = 1_000_000_000,
     max_withdrawal_descriptor_len: int = 81,
     da_magic_bytes: str = "ALPN",
+    base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR,
 ) -> Path:
     """Writes ``alpen-params.json`` into ``datadir`` and returns its path.
 
@@ -45,12 +49,23 @@ def compose_alpen_params(
             cap. The old CLI sentinel ``0`` is rejected: ``BridgeParams``
             requires a set cap to be a positive multiple of the denomination,
             so ``0`` would fail node startup far from the mistake.
+        base_fee_floor: consensus minimum EIP-1559 base fee, in wei.
     """
     if max_withdrawal_amount == 0:
         raise ValueError("max_withdrawal_amount=0 is not a valid cap; pass None to disable it")
+    if isinstance(base_fee_floor, bool) or not isinstance(base_fee_floor, int):
+        raise TypeError("base_fee_floor must be an integer number of wei")
+    if not 0 <= base_fee_floor <= 2**64 - 1:
+        raise ValueError("base_fee_floor must fit in an unsigned 64-bit integer")
+
+    try:
+        chain_spec_path = CHAIN_SPEC_FILES[chain]
+    except KeyError as err:
+        supported = ", ".join(sorted(CHAIN_SPEC_FILES))
+        raise ValueError(f"unknown Alpen chain {chain!r}; expected one of: {supported}") from err
 
     ee_params = json.loads(Path(ee_params_path).read_text())
-    evm_spec = json.loads(CHAIN_SPEC_FILES[chain].read_text())
+    evm_spec = json.loads(chain_spec_path.read_text())
 
     params = {
         "strata_exec_account_id": ee_params["account_id"],
@@ -61,6 +76,7 @@ def compose_alpen_params(
         },
         "blob_spec": {"magic_bytes": da_magic_bytes},
         "spec_schedule": {"v0": 0},
+        "base_fee_floor": base_fee_floor,
         "evm_spec": evm_spec,
     }
 

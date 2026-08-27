@@ -8,6 +8,7 @@ use std::{
 };
 
 use alloy_consensus::{Header, Transaction};
+use alpen_ee_params::DEFAULT_BASE_FEE_FLOOR;
 use alpen_reth_evm::{
     base_fee::apply_base_fee_floor,
     constants::BRIDGEOUT_PRECOMPILE_ADDRESS,
@@ -54,9 +55,11 @@ use crate::{
 const MIN_TX_GAS_LIMIT: u64 = 21_000;
 
 /// A custom payload service builder that supports the custom engine types
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct AlpenPayloadBuilderBuilder {
+    /// Consensus minimum EIP-1559 base fee, in wei.
+    pub base_fee_floor: u64,
     /// Live DA rate (wei per byte), shared with the payload builder.
     ///
     /// Shared and atomic — not because it changes *within* a block, but because the
@@ -65,6 +68,15 @@ pub struct AlpenPayloadBuilderBuilder {
     /// once and freezes that value into the block, so a single relaxed load/store on
     /// an [`AtomicU64`] is all the synchronization the hand-off needs.
     pub live_da_rate: Arc<AtomicU64>,
+}
+
+impl Default for AlpenPayloadBuilderBuilder {
+    fn default() -> Self {
+        Self {
+            base_fee_floor: DEFAULT_BASE_FEE_FLOOR,
+            live_da_rate: Arc::new(AtomicU64::new(0)),
+        }
+    }
 }
 
 impl<Node, Pool> PayloadBuilderBuilder<Node, Pool, AlpenEvmConfig> for AlpenPayloadBuilderBuilder
@@ -97,6 +109,7 @@ where
             pool,
             evm_config,
             EthereumBuilderConfig::new().with_gas_limit(gas_limit),
+            self.base_fee_floor,
             self.live_da_rate,
         ))
     }
@@ -115,6 +128,8 @@ pub struct AlpenPayloadBuilder<Pool, Client> {
     evm_config: AlpenEvmConfig,
     /// Payload builder configuration.
     builder_config: EthereumBuilderConfig,
+    /// Consensus minimum EIP-1559 base fee, in wei.
+    base_fee_floor: u64,
     /// Live DA rate (wei per byte) sampled and frozen per block.
     live_da_rate: Arc<AtomicU64>,
 }
@@ -126,6 +141,7 @@ impl<Pool, Client> AlpenPayloadBuilder<Pool, Client> {
         pool: Pool,
         evm_config: AlpenEvmConfig,
         builder_config: EthereumBuilderConfig,
+        base_fee_floor: u64,
         live_da_rate: Arc<AtomicU64>,
     ) -> Self {
         Self {
@@ -133,6 +149,7 @@ impl<Pool, Client> AlpenPayloadBuilder<Pool, Client> {
             pool,
             evm_config,
             builder_config,
+            base_fee_floor,
             live_da_rate,
         }
     }
@@ -153,12 +170,12 @@ where
         &self,
         args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
-        try_build_payload(
+        try_build_payload::<Pool, Client, _>(
             self.evm_config.clone(),
             self.live_da_rate.clone(),
             self.client.clone(),
-            self.pool.clone(),
             self.builder_config.clone(),
+            self.base_fee_floor,
             args,
             |attributes| self.pool.best_transactions_with_attributes(attributes),
         )
@@ -169,12 +186,12 @@ where
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
         let args = BuildArguments::new(Default::default(), config, Default::default(), None);
-        try_build_payload(
+        try_build_payload::<Pool, Client, _>(
             self.evm_config.clone(),
             self.live_da_rate.clone(),
             self.client.clone(),
-            self.pool.clone(),
             self.builder_config.clone(),
+            self.base_fee_floor,
             args,
             |attributes| self.pool.best_transactions_with_attributes(attributes),
         )?
@@ -200,8 +217,8 @@ fn try_build_payload<Pool, Client, F>(
     evm_config: AlpenEvmConfig,
     live_da_rate: Arc<AtomicU64>,
     client: Client,
-    _pool: Pool,
     builder_config: EthereumBuilderConfig,
+    base_fee_floor: u64,
     args: BuildArguments<AlpenPayloadBuilderAttributes, AlpenBuiltPayload>,
     best_txs: F,
 ) -> Result<BuildOutcome<AlpenBuiltPayload>, PayloadBuilderError>
@@ -261,10 +278,10 @@ where
     };
 
     // Build the next block's EVM env and apply the base-fee floor. `next_evm_env`
-    // computes the pure EIP-1559 base fee; clamp it to `max(BASE_FEE_FLOOR, .)`. The sealed
+    // computes the pure EIP-1559 base fee; clamp it to `max(base_fee_floor, .)`. The sealed
     // header takes its base fee from this env, so flooring here keeps the header and the
-    // executed base fee consistent, and matches the host consensus + guest, which recompute
-    // the same floored value from the parent. This inlines `builder_for_next_block_with_version`
+    // executed base fee consistent and matches host consensus, which recomputes the same
+    // floored value from the parent. This inlines `builder_for_next_block_with_version`
     // so the floor can be inserted between `next_evm_env` and block-builder construction,
     // keeping the floor logic in the builder rather than inside `AlpenEvmConfig`.
     //
@@ -274,7 +291,7 @@ where
     let mut evm_env = versioned_config
         .next_evm_env(&parent_header, &next_block_attrs)
         .map_err(PayloadBuilderError::other)?;
-    evm_env.block_env.basefee = apply_base_fee_floor(evm_env.block_env.basefee);
+    evm_env.block_env.basefee = apply_base_fee_floor(evm_env.block_env.basefee, base_fee_floor);
 
     let evm = evm_config.evm_with_env(&mut db, evm_env);
     let block_ctx = evm_config.context_for_next_block_with_version(

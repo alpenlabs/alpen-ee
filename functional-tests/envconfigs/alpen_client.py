@@ -8,6 +8,7 @@ from typing import cast
 
 import flexitest
 
+from common.alpen_params import DEFAULT_BASE_FEE_FLOOR
 from common.config import EeDaConfig, ServiceType
 from common.prover_backend import NATIVE_BACKEND, ProverBackend
 from common.services.bitcoin import BitcoinService
@@ -36,6 +37,8 @@ class AlpenClientEnvParams:
     enable_discovery: bool
     pure_discovery: bool
     mesh_bootnodes: bool
+    custom_chain: str = "dev"
+    base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR
     da_magic_bytes: bytes = b"ALPN"
     l1_reorg_safe_depth: int = 2
     batch_sealing_block_count: int = 10
@@ -76,12 +79,16 @@ class AlpenClientEnv(flexitest.EnvConfig):
         beneficiary_address: str | None = None,
         da_rate_wei_per_byte: int = 0,
         forward_tx: bool = True,
+        custom_chain: str = "dev",
+        base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR,
     ):
         self.env_params = AlpenClientEnvParams(
             fullnode_count=fullnode_count,
             enable_discovery=enable_discovery,
             pure_discovery=pure_discovery,
             mesh_bootnodes=mesh_bootnodes,
+            custom_chain=custom_chain,
+            base_fee_floor=base_fee_floor,
             da_magic_bytes=da_magic_bytes,
             l1_reorg_safe_depth=l1_reorg_safe_depth,
             batch_sealing_block_count=batch_sealing_block_count,
@@ -172,6 +179,8 @@ class AlpenClientEnv(flexitest.EnvConfig):
             beneficiary_address=envparams.beneficiary_address,
             prover=envparams.prover,
             da_rate_wei_per_byte=envparams.da_rate_wei_per_byte,
+            custom_chain=envparams.custom_chain,
+            base_fee_floor=envparams.base_fee_floor,
         )
         sequencer.wait_for_ready(timeout=60)
         seq_enode = sequencer.get_enode()
@@ -200,6 +209,8 @@ class AlpenClientEnv(flexitest.EnvConfig):
                 sequencer_http=seq_http_url if envparams.forward_tx else None,
                 ol_endpoint=ol_endpoint,
                 ee_params_path=ee_params_path,
+                custom_chain=envparams.custom_chain,
+                base_fee_floor=envparams.base_fee_floor,
             )
             fullnode.wait_for_ready(timeout=60)
             fullnodes.append(fullnode)
