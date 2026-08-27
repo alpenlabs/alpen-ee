@@ -1,4 +1,3 @@
-use core::mem;
 use std::{
     ops::{Deref, DerefMut},
     sync::{atomic::AtomicU64, Arc},
@@ -17,9 +16,9 @@ use revm::{
     },
     inspector::InspectorEvmTr,
     interpreter::{interpreter::EthInterpreter, interpreter_action::FrameInit},
-    Context, ExecuteEvm, InspectEvm, Inspector,
+    Context, ExecuteEvm, InspectEvm, Inspector, SystemCallEvm,
 };
-use revm_primitives::{hardfork::SpecId, Address, Bytes, TxKind, U256};
+use revm_primitives::{hardfork::SpecId, Address, Bytes, U256};
 
 mod exec;
 pub mod handler;
@@ -177,61 +176,7 @@ where
         contract: Address,
         data: Bytes,
     ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
-        let tx = TxEnv {
-            caller,
-            kind: TxKind::Call(contract),
-            // Explicitly set nonce to 0 so revm does not do any nonce checks
-            nonce: 0,
-            gas_limit: 36_000_000,
-            value: U256::ZERO,
-            data,
-            // Setting the gas price to zero enforces that no value is transferred as part of the
-            // call, and that the call will not count against the block's gas limit
-            gas_price: 0,
-            // The chain ID check is not relevant here and is disabled if set to None
-            chain_id: None,
-            // Setting the gas priority fee to None ensures the effective gas price is derived from
-            // the `gas_price` field, which we need to be zero
-            gas_priority_fee: None,
-            access_list: Default::default(),
-            // blob fields can be None for this tx
-            blob_hashes: Vec::new(),
-            max_fee_per_blob_gas: 0,
-            tx_type: 0,
-            authorization_list: Default::default(),
-        };
-
-        let mut gas_limit = tx.gas_limit;
-        let mut basefee = 0;
-        let mut disable_nonce_check = true;
-
-        // ensure the block gas limit is >= the tx
-        mem::swap(&mut self.block.gas_limit, &mut gas_limit);
-        // disable the base fee check for this call by setting the base fee to zero
-        mem::swap(&mut self.block.basefee, &mut basefee);
-        // disable the nonce check
-        mem::swap(&mut self.cfg.disable_nonce_check, &mut disable_nonce_check);
-
-        let mut res = ExecuteEvm::transact(self, tx);
-
-        // swap back to the previous gas limit
-        mem::swap(&mut self.block.gas_limit, &mut gas_limit);
-        // swap back to the previous base fee
-        mem::swap(&mut self.block.basefee, &mut basefee);
-        // swap back to the previous nonce check flag
-        mem::swap(&mut self.cfg.disable_nonce_check, &mut disable_nonce_check);
-
-        // NOTE: We assume that only the contract storage is modified. Revm currently marks the
-        // caller and block beneficiary accounts as "touched" when we do the above transact calls,
-        // and includes them in the result.
-        //
-        // We're doing this state cleanup to make sure that changeset only includes the changed
-        // contract storage.
-        if let Ok(res) = &mut res {
-            res.state.retain(|addr, _| *addr == contract);
-        }
-
-        res
+        self.inner.system_call_with_caller(caller, contract, data)
     }
 
     fn db_mut(&mut self) -> &mut Self::DB {
