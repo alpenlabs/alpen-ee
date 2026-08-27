@@ -107,6 +107,14 @@ jobs:
             panics on untrusted input (watch Rust `unsafe`), input-validation gaps, unsafe error handling,
             resource exhaustion / DoS. Favor precision over recall.
 
+            TRUST MODEL — before classifying anything, Read `docs/security/trust-model.md` and apply its
+            classification rules in order. Report a finding only when the attacker sits outside a documented
+            trust boundary, or when rule 6 (fund safety / proof soundness) applies. Panics, unwraps, or
+            missing validation on data from a Trusted source (own databases, config, bitcoind, the paired OL
+            client) are correctness bugs, not security findings: drop them silently. Skip anything listed
+            under "Known accepted risks". If the diff modifies `docs/security/trust-model.md` or the
+            "Security Review Guidance" section of `AGENTS.md`, say so in the review comment.
+
             TOOLS — this is the complete set you have. Every call outside it is denied and burns a
             turn for nothing, so do not guess or retry with a different command:
             - Read, Grep, Glob — use these for ALL file reading and searching. Grep replaces `rg`,
