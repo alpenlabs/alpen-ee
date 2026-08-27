@@ -635,6 +635,26 @@ Key SPS (Strata Protocol Specification) documents:
 Full specification index available in the team Notion workspace.
 If you have the Notion MCP/connector enabled, access it by searching the team workspace for the SPS number or the "Strata Protocol Specification" index.
 
+## Security Review Guidance
+
+Before reporting a security finding, read `docs/security/trust-model.md` and apply its
+classification rules. Do not report issues where the attacker sits inside a trust boundary.
+Summary (the document is authoritative):
+
+- Trusted: the node's own databases, config, key files, bitcoind RPC, and the paired OL client
+  (`ol.client_url`, `ol_submit_url`). Malformed data from these sources is a correctness bug,
+  usually protocol drift, and belongs in a bug report, not a security finding.
+- Untrusted: L1 block contents and DA payloads, public JSON-RPC callers, P2P peers, user
+  transactions, and any sequencer RPC method reachable from outside the operator.
+- Sequencer-signed gossip is trusted for ordering and liveness only; full nodes re-execute
+  every block, so a signed block that fails execution has to be rejected.
+- Fund safety and proof soundness override the above. Any path that mints native token without
+  an OL deposit, credits a deposit twice or drops one, emits a withdrawal intent without an
+  equal burn, or lets the proof runtime accept an invalid transition is critical regardless of
+  input source.
+- Secrets (private keys, RPC tokens, bitcoind credentials) are in scope everywhere.
+- Do not re-report items listed under "Known accepted risks" in the trust model.
+
 ## Important Notes
 
 - **Security**: Never commit secrets or keys to the repository
