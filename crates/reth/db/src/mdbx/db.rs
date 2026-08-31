@@ -37,13 +37,9 @@ impl WitnessDbMdbx {
 
 impl StateDiffProvider for WitnessDbMdbx {
     fn get_state_diff_by_hash(&self, block_hash: B256) -> DbResult<Option<BlockStateChanges>> {
-        let raw = self
-            .env
+        self.env
             .view(|r| r.get::<BlockStateChangesSchema>(&block_hash))
-            .map_err(to_db_error)?;
-        raw.map(|bytes| bincode::deserialize(&bytes))
-            .transpose()
-            .map_err(|err| DbError::CodecError(err.to_string()))
+            .map_err(to_db_error)
     }
 
     fn get_state_diff_by_number(&self, block_number: u64) -> DbResult<Option<BlockStateChanges>> {
@@ -51,10 +47,10 @@ impl StateDiffProvider for WitnessDbMdbx {
             .env
             .view(|r| r.get::<BlockHashByNumber>(&block_number))
             .map_err(to_db_error)?;
-        let Some(bytes) = block_hash else {
+        let Some(block_hash) = block_hash else {
             return Ok(None);
         };
-        self.get_state_diff_by_hash(B256::from_slice(&bytes))
+        self.get_state_diff_by_hash(block_hash)
     }
 }
 
@@ -65,12 +61,10 @@ impl StateDiffStore for WitnessDbMdbx {
         block_number: u64,
         state_diff: &BlockStateChanges,
     ) -> DbResult<()> {
-        let serialized =
-            bincode::serialize(state_diff).map_err(|err| DbError::Other(err.to_string()))?;
         self.env
             .update(|w| {
-                w.put::<BlockHashByNumber>(&block_number, &block_hash.to_vec())?;
-                w.put::<BlockStateChangesSchema>(&block_hash, &serialized)?;
+                w.put::<BlockHashByNumber>(&block_number, &block_hash)?;
+                w.put::<BlockStateChangesSchema>(&block_hash, state_diff)?;
                 Ok(())
             })
             .map_err(to_db_error)

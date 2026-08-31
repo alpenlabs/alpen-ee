@@ -108,6 +108,27 @@ macro_rules! impl_raw_value_codec {
     };
 }
 
+/// bincode [`ValueCodec`](crate::ValueCodec), using bincode's default
+/// configuration, for `serde`-serializable values that are not borsh.
+#[macro_export]
+macro_rules! impl_bincode_value_codec {
+    ($schema:ty, $value:ty) => {
+        impl $crate::ValueCodec<$schema> for $value {
+            fn encode_value(
+                &self,
+            ) -> ::core::result::Result<::std::vec::Vec<u8>, $crate::CodecError> {
+                ::bincode::serialize(self)
+                    .map_err(|e| $crate::CodecError::encode(<$schema as $crate::Schema>::NAME, e))
+            }
+
+            fn decode_value(bytes: &[u8]) -> ::core::result::Result<Self, $crate::CodecError> {
+                ::bincode::deserialize(bytes)
+                    .map_err(|e| $crate::CodecError::decode(<$schema as $crate::Schema>::NAME, e))
+            }
+        }
+    };
+}
+
 /// Big-endian, fixed-width [`KeyCodec`](crate::KeyCodec) via bincode. Preserves
 /// numeric ordering under MDBX's lexicographic key comparison, so use it for
 /// integer keys queried by range or `first`/`last`.
@@ -200,6 +221,18 @@ macro_rules! define_table_be_key {
         $crate::define_table!($(#[$docs])* ($name) $key => $value);
         $crate::impl_be_key_codec!($name, $key);
         $crate::impl_borsh_value_codec!($name, $value);
+    };
+}
+
+/// Defines a table with a big-endian integer or fixed-width key and a
+/// bincode-encoded value — for `serde`-only value types such as the reth
+/// state-diff records.
+#[macro_export]
+macro_rules! define_table_bincode_be_key {
+    ($(#[$docs:meta])* ($name:ident) $key:ty => $value:ty) => {
+        $crate::define_table!($(#[$docs])* ($name) $key => $value);
+        $crate::impl_be_key_codec!($name, $key);
+        $crate::impl_bincode_value_codec!($name, $value);
     };
 }
 
