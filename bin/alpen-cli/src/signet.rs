@@ -10,10 +10,12 @@ use std::{
     sync::Arc,
 };
 
-use backend::{ScanError, SignetBackend, SyncError, UpdateError, WalletUpdate};
+use backend::{
+    GetFeeRateError, InvalidFee, ScanError, SignetBackend, SyncError, UpdateError, WalletUpdate,
+};
 use bdk_esplora::esplora_client::{self, AsyncClient};
 use bdk_wallet::{
-    bitcoin::{FeeRate, Network},
+    bitcoin::{constants::genesis_block, BlockHash, FeeRate, Network},
     rusqlite::{self, Connection},
     PersistedWallet, Wallet,
 };
@@ -22,6 +24,8 @@ use terrors::OneOf;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 use crate::seed::Seed;
+
+const MAX_AUTOMATIC_FEE_RATE_SATS_PER_VB: u64 = 1_000;
 
 pub fn log_fee_rate(fr: &FeeRate) {
     println!(
@@ -33,24 +37,34 @@ pub fn log_fee_rate(fr: &FeeRate) {
 pub async fn get_fee_rate(
     user_provided_sats_per_vb: Option<u64>,
     signet_backend: &dyn SignetBackend,
-) -> FeeRate {
+) -> Result<FeeRate, OneOf<(InvalidFee, GetFeeRateError)>> {
     let fee_rate = match user_provided_sats_per_vb {
-        Some(fr) => FeeRate::from_sat_per_vb(fr).expect("valid fee rate"),
-        None => signet_backend
-            .get_fee_rate(1)
-            .await
-            .expect("valid fee rate")
-            .unwrap_or(FeeRate::BROADCAST_MIN),
+        Some(fr) => FeeRate::from_sat_per_vb(fr).ok_or(OneOf::new(InvalidFee))?,
+        None => {
+            let fee_rate = signet_backend
+                .get_fee_rate(1)
+                .await?
+                .unwrap_or(FeeRate::BROADCAST_MIN);
+            if fee_rate.to_sat_per_vb_ceil() > MAX_AUTOMATIC_FEE_RATE_SATS_PER_VB {
+                return Err(OneOf::new(GetFeeRateError::from_err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "automatic fee estimate exceeds {MAX_AUTOMATIC_FEE_RATE_SATS_PER_VB} sat/vB; pass --fee-rate to override"
+                    ),
+                ))));
+            }
+            fee_rate
+        }
     };
 
-    fee_rate.max(FeeRate::BROADCAST_MIN)
+    Ok(fee_rate.max(FeeRate::BROADCAST_MIN))
 }
 
 #[cfg(test)]
 mod tests {
     use async_trait::async_trait;
     use bdk_wallet::{
-        bitcoin::{FeeRate, Transaction},
+        bitcoin::{constants::genesis_block, BlockHash, FeeRate, Network, Transaction},
         chain::{
             spk_client::{FullScanRequestBuilder, SyncRequestBuilder},
             CheckPoint,
@@ -60,8 +74,11 @@ mod tests {
     use terrors::OneOf;
 
     use super::{
-        backend::{BroadcastTxError, GetFeeRateError, InvalidFee, ScanError, UpdateSender},
-        get_fee_rate, SignetBackend, SyncError,
+        backend::{
+            BroadcastTxError, GetFeeRateError, GetGenesisHashError, InvalidFee, ScanError,
+            UpdateSender,
+        },
+        get_fee_rate, SignetBackend, SyncError, MAX_AUTOMATIC_FEE_RATE_SATS_PER_VB,
     };
 
     #[derive(Debug)]
@@ -71,6 +88,10 @@ mod tests {
 
     #[async_trait]
     impl SignetBackend for TestSignetBackend {
+        async fn get_genesis_hash(&self) -> Result<BlockHash, GetGenesisHashError> {
+            Ok(genesis_block(Network::Signet).block_hash())
+        }
+
         async fn sync_wallet(
             &self,
             _req: SyncRequestBuilder<(KeychainKind, u32)>,
@@ -107,7 +128,7 @@ mod tests {
             fee_rate: Some(FeeRate::ZERO),
         };
 
-        let fee_rate = get_fee_rate(None, &backend).await;
+        let fee_rate = get_fee_rate(None, &backend).await.unwrap();
 
         assert_eq!(fee_rate, FeeRate::BROADCAST_MIN);
     }
@@ -116,7 +137,7 @@ mod tests {
     async fn test_get_fee_rate_uses_broadcast_minimum_when_backend_has_no_estimate() {
         let backend = TestSignetBackend { fee_rate: None };
 
-        let fee_rate = get_fee_rate(None, &backend).await;
+        let fee_rate = get_fee_rate(None, &backend).await.unwrap();
 
         assert_eq!(fee_rate, FeeRate::BROADCAST_MIN);
     }
@@ -125,9 +146,23 @@ mod tests {
     async fn test_get_fee_rate_clamps_user_zero_to_broadcast_minimum() {
         let backend = TestSignetBackend { fee_rate: None };
 
-        let fee_rate = get_fee_rate(Some(0), &backend).await;
+        let fee_rate = get_fee_rate(Some(0), &backend).await.unwrap();
 
         assert_eq!(fee_rate, FeeRate::BROADCAST_MIN);
+    }
+
+    #[tokio::test]
+    async fn automatic_fee_rate_has_a_safety_limit() {
+        let backend = TestSignetBackend {
+            fee_rate: FeeRate::from_sat_per_vb(MAX_AUTOMATIC_FEE_RATE_SATS_PER_VB + 1),
+        };
+
+        assert!(get_fee_rate(None, &backend).await.is_err());
+        assert!(
+            get_fee_rate(Some(MAX_AUTOMATIC_FEE_RATE_SATS_PER_VB + 1), &backend)
+                .await
+                .is_ok()
+        );
     }
 }
 
@@ -161,15 +196,20 @@ impl EsploraClient {
 pub struct SignetWallet {
     wallet: PersistedWallet<Persister>,
     sync_backend: Arc<dyn SignetBackend>,
+    network: Network,
 }
 
 impl SignetWallet {
-    fn db_path(wallet: &str, data_dir: &Path) -> PathBuf {
+    pub(crate) fn db_path(wallet: &str, data_dir: &Path, network: Network) -> PathBuf {
+        let wallet = match network {
+            Network::Bitcoin => format!("{wallet}-bitcoin"),
+            _ => wallet.to_string(),
+        };
         data_dir.join(wallet).with_extension("sqlite")
     }
 
-    pub fn persister(data_dir: &Path) -> Result<Connection, rusqlite::Error> {
-        Connection::open(Self::db_path("default", data_dir))
+    pub fn persister(data_dir: &Path, network: Network) -> Result<Connection, rusqlite::Error> {
+        Connection::open(Self::db_path("default", data_dir, network))
     }
 
     pub fn new(
@@ -177,7 +217,7 @@ impl SignetWallet {
         network: Network,
         sync_backend: Arc<dyn SignetBackend>,
     ) -> io::Result<Self> {
-        let (load, create) = seed.signet_wallet().split();
+        let (load, create) = seed.bitcoin_wallet(network).split();
         Ok(Self {
             wallet: load
                 .check_network(network)
@@ -190,16 +230,31 @@ impl SignetWallet {
                         .expect("wallet creation to succeed")
                 }),
             sync_backend,
+            network,
         })
     }
 
     pub async fn sync(&mut self) -> Result<(), OneOf<(UpdateError, SyncError, rusqlite::Error)>> {
+        let genesis = self
+            .sync_backend
+            .get_genesis_hash()
+            .await
+            .map_err(|error| OneOf::new(SyncError::from_err(error)))?;
+        validate_backend_network(self.network, genesis)
+            .map_err(|error| OneOf::new(SyncError::from_err(error)))?;
         sync_wallet(&mut self.wallet, self.sync_backend.clone()).await?;
         self.persist().map_err(OneOf::new)?;
         Ok(())
     }
 
     pub async fn scan(&mut self) -> Result<(), OneOf<(UpdateError, ScanError, rusqlite::Error)>> {
+        let genesis = self
+            .sync_backend
+            .get_genesis_hash()
+            .await
+            .map_err(|error| OneOf::new(ScanError::from_err(error)))?;
+        validate_backend_network(self.network, genesis)
+            .map_err(|error| OneOf::new(ScanError::from_err(error)))?;
         scan_wallet(&mut self.wallet, self.sync_backend.clone()).await?;
         self.persist().map_err(OneOf::new)?;
         Ok(())
@@ -208,6 +263,17 @@ impl SignetWallet {
     pub fn persist(&mut self) -> Result<bool, rusqlite::Error> {
         self.wallet.persist(&mut Persister)
     }
+}
+
+fn validate_backend_network(network: Network, actual: BlockHash) -> io::Result<()> {
+    let expected = genesis_block(network).block_hash();
+    if actual != expected {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Bitcoin backend network mismatch: expected {expected}, received {actual}"),
+        ));
+    }
+    Ok(())
 }
 
 pub async fn scan_wallet(

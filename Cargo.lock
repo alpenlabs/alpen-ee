@@ -1027,6 +1027,7 @@ dependencies = [
  "strata-primitives",
  "strata-test-utils-btcio",
  "terrors",
+ "thiserror 2.0.18",
  "tokio",
  "toml 0.5.11",
  "zeroize",

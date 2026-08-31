@@ -16,7 +16,7 @@ impl FromStr for NetworkType {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "signet" => Ok(Self::Signet),
+            "bitcoin" | "l1" | "signet" => Ok(Self::Signet),
             "alpen" => Ok(Self::Alpen),
             _ => Err(InvalidNetwork),
         }

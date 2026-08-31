@@ -11,7 +11,7 @@ use crate::{
 #[derive(FromArgs, PartialEq, Debug)]
 #[argh(subcommand, name = "receive")]
 pub struct ReceiveArgs {
-    /// either "signet" or "alpen"
+    /// either "bitcoin" ("signet" alias) or "alpen"
     #[argh(positional)]
     network_type: String,
 }
@@ -46,8 +46,9 @@ pub async fn receive(
             address_info.address.to_string()
         }
         NetworkType::Alpen => {
-            let l2w = AlpenWallet::new(&seed, &settings.alpen_endpoint)
-                .user_error("Invalid Alpen endpoint URL. Check the config file")?;
+            let l2w = AlpenWallet::new(&seed, &settings)
+                .await
+                .user_error("Failed to connect to the configured Alpen network")?;
             l2w.default_signer_address().to_string()
         }
     };

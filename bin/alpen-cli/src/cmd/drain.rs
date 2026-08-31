@@ -107,7 +107,9 @@ pub async fn drain(
                 "You have pending funds on signet that won't be included in the drain".yellow()
             );
         }
-        let fee_rate = get_fee_rate(fee_rate, settings.signet_backend.as_ref()).await;
+        let fee_rate = get_fee_rate(fee_rate, settings.signet_backend.as_ref())
+            .await
+            .internal_error("Failed to determine Bitcoin fee rate")?;
         log_fee_rate(&fee_rate);
 
         let mut psbt = {
@@ -145,8 +147,9 @@ pub async fn drain(
     }
 
     if let Some(address) = alpen_address {
-        let l2w = AlpenWallet::new(&seed, &settings.alpen_endpoint)
-            .user_error("Invalid Alpen endpoint URL. Check the config file")?;
+        let l2w = AlpenWallet::new(&seed, &settings)
+            .await
+            .user_error("Failed to connect to the configured Alpen network")?;
         let balance = l2w
             .get_balance(l2w.default_signer_address())
             .await

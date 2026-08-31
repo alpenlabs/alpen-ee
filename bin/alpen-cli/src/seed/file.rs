@@ -1,6 +1,7 @@
 use std::{
     fs::{remove_file, File},
     io::{ErrorKind, Read, Write},
+    os::unix::fs::OpenOptionsExt,
     path::PathBuf,
 };
 
@@ -25,6 +26,7 @@ impl EncryptedSeedPersister for FilePersister {
             .create(true)
             .truncate(true)
             .write(true)
+            .mode(0o600)
             .open(&self.file)?;
         file.write_all(&seed.0)?;
         file.sync_all()?;

@@ -64,7 +64,9 @@ pub async fn recover(
         return Ok(());
     }
 
-    let fee_rate = get_fee_rate(args.fee_rate, settings.signet_backend.as_ref()).await;
+    let fee_rate = get_fee_rate(args.fee_rate, settings.signet_backend.as_ref())
+        .await
+        .internal_error("Failed to determine Bitcoin fee rate")?;
     log_fee_rate(&fee_rate);
 
     for (key, desc) in descs {

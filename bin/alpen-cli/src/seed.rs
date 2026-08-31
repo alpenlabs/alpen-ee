@@ -101,9 +101,11 @@ impl Seed {
         Ok(EncryptedSeed(buf))
     }
 
-    pub fn signet_wallet(&self) -> BaseWallet {
-        let rootpriv = Xpriv::new_master(Network::Signet, self.0.as_ref()).expect("valid xpriv");
-        let base_desc = format!("tr({rootpriv}/86h/0h/0h");
+    pub fn bitcoin_wallet(&self, network: Network) -> BaseWallet {
+        let rootpriv = Xpriv::new_master(network, self.0.as_ref()).expect("valid xpriv");
+        // Preserve legacy testnet keys while isolating real funds on a hardened account.
+        let account = if network == Network::Bitcoin { 1 } else { 0 };
+        let base_desc = format!("tr({rootpriv}/86h/0h/{account}h");
         let external_desc = format!("{base_desc}/0/*)");
         let internal_desc = format!("{base_desc}/1/*)");
         BaseWallet(
@@ -297,6 +299,7 @@ pub mod password;
 
 #[cfg(test)]
 mod test {
+    use bdk_wallet::KeychainKind;
     use rand_core::OsRng;
     use sha2::digest::generic_array::GenericArray;
 
@@ -430,5 +433,21 @@ mod test {
         // and BIP44 derivation path m/44'/60'/0'/0/0.
         let expected_address = "0x4eEE6B504Bc2c47650bAa7d135DA10F2A469E582".to_string();
         assert_eq!(address, expected_address);
+    }
+
+    #[test]
+    fn mainnet_wallet_uses_a_separate_key_domain() {
+        let seed = Seed([0u8; SEED_LEN].into());
+        let script = |network| {
+            let (_, builder) = seed.bitcoin_wallet(network).split();
+            builder
+                .network(network)
+                .create_wallet_no_persist()
+                .unwrap()
+                .reveal_next_address(KeychainKind::External)
+                .address
+                .script_pubkey()
+        };
+        assert_ne!(script(Network::Bitcoin), script(Network::Signet));
     }
 }

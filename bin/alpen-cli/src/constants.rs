@@ -1,8 +1,12 @@
 use std::time::Duration;
 
-use alloy::consensus::constants::ETH_TO_WEI;
+use alloy::{
+    consensus::constants::ETH_TO_WEI,
+    primitives::{address, b256, hex, Address, B256},
+};
 use bdk_wallet::bitcoin::{bip32::ChildNumber, Amount, Network};
 use strata_identifiers::{AccountSerial, SYSTEM_RESERVED_ACCTS};
+use strata_l1_txfmt::MagicBytes;
 
 /// Number of blocks that the wallet considers a transaction "buried" or final taking into account
 /// reorgs that might happen.
@@ -40,6 +44,19 @@ pub const MAGIC_BYTES_LEN: usize = 4;
 pub const DEFAULT_NETWORK: Network = Network::Signet;
 pub const DEFAULT_BRIDGE_ALPEN_ADDRESS: &str = "0x5400000000000000000000000000000000000001";
 pub const SIGNET_BLOCK_TIME: Duration = Duration::from_secs(10 * 60); // 10 minutes
+
+// Pinned to alpenlabs/deployments@a38a25c9ed4241f4b26332c4c4966ba254ab6df5.
+pub const MAINNET_ALPEN_CHAIN_ID: u64 = 29_032;
+pub const MAINNET_ALPEN_GENESIS_HASH: B256 =
+    b256!("2785f8534f56bf747229181292088ef98f521d4785fb7f4a84cfb59372951c10");
+pub const MAINNET_MAGIC_BYTES: MagicBytes = MagicBytes::new(*b"STRA");
+pub const MAINNET_BRIDGE_PUBKEY: [u8; 32] =
+    hex!("19c633a53bd7fd35d497e92a61888f6076ccad5c24fef782c0985f7634804cfc");
+pub const MAINNET_BRIDGE_ALPEN_ADDRESS: Address =
+    address!("5400000000000000000000000000000000000001");
+pub const MAINNET_BRIDGE_DENOMINATION_SATS: u64 = 200_000_000;
+pub const MAINNET_BRIDGE_FEE_SATS: u64 = 264;
+pub const MAINNET_RECOVERY_DELAY: u16 = 36;
 
 /// Serial of the Alpen EE account used in deposit descriptors.
 ///

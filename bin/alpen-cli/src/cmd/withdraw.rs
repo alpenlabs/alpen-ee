@@ -70,8 +70,9 @@ pub async fn withdraw(
     l1w.sync()
         .await
         .internal_error("Failed to sync signet wallet")?;
-    let l2w = AlpenWallet::new(&seed, &settings.alpen_endpoint)
-        .user_error("Invalid Alpen endpoint URL. Check the configuration")?;
+    let l2w = AlpenWallet::new(&seed, &settings)
+        .await
+        .user_error("Failed to connect to the configured Alpen network")?;
 
     let address = match address {
         Some(a) => a,

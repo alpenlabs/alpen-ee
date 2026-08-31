@@ -15,7 +15,7 @@ use bdk_bitcoind_rpc::{
 };
 use bdk_esplora::EsploraAsyncExt;
 use bdk_wallet::{
-    bitcoin::{consensus::encode, Block, FeeRate, Transaction},
+    bitcoin::{consensus::encode, Block, BlockHash, FeeRate, Transaction},
     chain::{
         spk_client::{FullScanRequestBuilder, FullScanResponse, SyncRequestBuilder, SyncResponse},
         CheckPoint,
@@ -91,6 +91,10 @@ pub struct GetFeeRateError(BoxedErr);
 boxed_err!(GetFeeRateError);
 
 #[derive(Debug)]
+pub struct GetGenesisHashError(BoxedErr);
+boxed_err!(GetGenesisHashError);
+
+#[derive(Debug)]
 pub enum WalletUpdate {
     SpkSync(SyncResponse),
     SpkScan(FullScanResponse<KeychainKind>),
@@ -102,6 +106,7 @@ pub type UpdateSender = UnboundedSender<WalletUpdate>;
 
 #[async_trait]
 pub trait SignetBackend: Debug + Send + Sync {
+    async fn get_genesis_hash(&self) -> Result<BlockHash, GetGenesisHashError>;
     async fn sync_wallet(
         &self,
         req: SyncRequestBuilder<(KeychainKind, u32)>,
@@ -123,6 +128,12 @@ pub trait SignetBackend: Debug + Send + Sync {
 
 #[async_trait]
 impl SignetBackend for EsploraClient {
+    async fn get_genesis_hash(&self) -> Result<BlockHash, GetGenesisHashError> {
+        self.get_block_hash(0)
+            .await
+            .map_err(GetGenesisHashError::from_err)
+    }
+
     async fn sync_wallet(
         &self,
         req: SyncRequestBuilder<(KeychainKind, u32)>,
@@ -236,6 +247,12 @@ impl SignetBackend for EsploraClient {
 
 #[async_trait]
 impl SignetBackend for Arc<bitcoincore_rpc::Client> {
+    async fn get_genesis_hash(&self) -> Result<BlockHash, GetGenesisHashError> {
+        spawn_bitcoin_core(self.clone(), |client| client.get_block_hash(0))
+            .await
+            .map_err(GetGenesisHashError::from_err)
+    }
+
     async fn sync_wallet(
         &self,
         _req: SyncRequestBuilder<(KeychainKind, u32)>,

@@ -2,7 +2,10 @@ use std::{fmt, str::FromStr};
 
 use alloy::{primitives::Address as AlpenAddress, providers::WalletProvider};
 use argh::FromArgs;
-use bdk_wallet::{bitcoin::Address, KeychainKind};
+use bdk_wallet::{
+    bitcoin::{Address, Network},
+    KeychainKind,
+};
 use indicatif::ProgressBar;
 use reqwest::{StatusCode, Url};
 use serde::{Deserialize, Serialize};
@@ -18,7 +21,7 @@ use crate::{
 #[derive(FromArgs, PartialEq, Debug)]
 #[argh(subcommand, name = "faucet")]
 pub struct FaucetArgs {
-    /// either "signet" or "alpen"
+    /// either "bitcoin" ("signet" alias) or "alpen"
     #[argh(positional)]
     network_type: String,
     /// address that funds will be sent to. defaults to internal wallet address
@@ -65,6 +68,13 @@ pub async fn faucet(
     seed: Seed,
     settings: Settings,
 ) -> Result<(), DisplayedError> {
+    if settings.network == Network::Bitcoin {
+        return Err(DisplayedError::UserError(
+            "The faucet is unavailable on Bitcoin mainnet".to_string(),
+            Box::new(settings.network),
+        ));
+    }
+
     let network_type = args
         .network_type
         .parse()
@@ -98,8 +108,9 @@ pub async fn faucet(
             (addr.to_string(), "claim_l1")
         }
         NetworkType::Alpen => {
-            let l2w = AlpenWallet::new(&seed, &settings.alpen_endpoint)
-                .user_error("Invalid Alpen endpoint URL. Check the config file")?;
+            let l2w = AlpenWallet::new(&seed, &settings)
+                .await
+                .user_error("Failed to connect to the configured Alpen network")?;
             let addr = match &args.address {
                 Some(a) => AlpenAddress::from_str(a).user_error(format!(
                     "Invalid Alpen address {a}. Must be an EVM-compatible address"
@@ -113,8 +124,14 @@ pub async fn faucet(
     println!("Fetching challenge from faucet");
 
     let client = reqwest::Client::new();
-    let mut base_url = Url::from_str(&settings.faucet_endpoint)
-        .user_error("Invalid faucet endopoint. Check the config file")?;
+    let faucet_endpoint = settings.faucet_endpoint.as_deref().ok_or_else(|| {
+        DisplayedError::UserError(
+            "No faucet is configured for this network".to_string(),
+            Box::new(settings.network),
+        )
+    })?;
+    let mut base_url = Url::from_str(faucet_endpoint)
+        .user_error("Invalid faucet endpoint. Check the config file")?;
     base_url = ensure_trailing_slash(base_url);
 
     let chain = Chain::from_network_type(network_type.clone()).user_error(format!(

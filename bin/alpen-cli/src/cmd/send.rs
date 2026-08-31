@@ -27,7 +27,7 @@ use crate::{
 #[derive(FromArgs, PartialEq, Debug)]
 #[argh(subcommand, name = "send")]
 pub struct SendArgs {
-    /// either "signet" or "alpen"
+    /// either "bitcoin" ("signet" alias) or "alpen"
     #[argh(positional)]
     network_type: String,
 
@@ -69,7 +69,9 @@ pub async fn send(args: SendArgs, seed: Seed, settings: Settings) -> Result<(), 
             l1w.sync()
                 .await
                 .internal_error("Failed to sync signet wallet")?;
-            let fee_rate = get_fee_rate(args.fee_rate, settings.signet_backend.as_ref()).await;
+            let fee_rate = get_fee_rate(args.fee_rate, settings.signet_backend.as_ref())
+                .await
+                .internal_error("Failed to determine Bitcoin fee rate")?;
             log_fee_rate(&fee_rate);
             let mut psbt = {
                 let mut builder = l1w.build_tx();
@@ -103,8 +105,9 @@ pub async fn send(args: SendArgs, seed: Seed, settings: Settings) -> Result<(), 
             );
         }
         NetworkType::Alpen => {
-            let l2w = AlpenWallet::new(&seed, &settings.alpen_endpoint)
-                .user_error("Invalid Alpen endpoint URL. Check the configuration.")?;
+            let l2w = AlpenWallet::new(&seed, &settings)
+                .await
+                .user_error("Failed to connect to the configured Alpen network")?;
             let address = AlpenAddress::from_str(&args.address).user_error(format!(
                 "Invalid Alpen address {}. Must be an EVM-compatible address",
                 args.address

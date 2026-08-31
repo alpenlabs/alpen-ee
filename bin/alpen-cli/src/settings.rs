@@ -1,8 +1,11 @@
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::{
     env::var,
-    fs::{create_dir_all, File},
-    io,
-    path::PathBuf,
+    fs::{create_dir_all, File, OpenOptions},
+    io::{self, Read},
+    net::IpAddr,
+    path::{Path, PathBuf},
     str::FromStr,
     sync::{Arc, LazyLock},
 };
@@ -10,20 +13,22 @@ use std::{
 use alloy::primitives::Address as AlpenAddress;
 use bdk_bitcoind_rpc::bitcoincore_rpc::{Auth, Client};
 use bdk_wallet::bitcoin::{Amount, Network, XOnlyPublicKey};
-use config::{Config, ConfigError};
+use config::{Config, ConfigError, File as ConfigFile, FileFormat};
 use directories::ProjectDirs;
+use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use shrex::Hex;
 use strata_bridge_params::BridgeParams;
 use strata_l1_txfmt::MagicBytes;
 use terrors::OneOf;
 
+use crate::{
+    alpen::AlpenRpcAuth,
+    constants::*,
+    signet::{backend::SignetBackend, EsploraClient, SignetWallet},
+};
 #[cfg(feature = "test-mode")]
 use crate::{constants::SEED_LEN, seed::Seed};
-use crate::{
-    constants::*,
-    signet::{backend::SignetBackend, EsploraClient},
-};
 
 /// Environment variable overriding the project directories root.
 const PROJ_DIRS_ENV: &str = "PROJ_DIRS";
@@ -33,7 +38,8 @@ const CONFIG_FILE_ENV: &str = "CLI_CONFIG";
 const DEFAULT_CONFIG_FILENAME: &str = "config.toml";
 
 /// Settings deserialized from the config file.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
+#[expect(missing_debug_implementations, reason = "contains RPC credentials")]
 pub struct SettingsFromFile {
     /// Esplora server endpoint.
     pub esplora: Option<String>,
@@ -47,8 +53,11 @@ pub struct SettingsFromFile {
     pub bitcoind_rpc_endpoint: Option<String>,
     /// Alpen network RPC endpoint.
     pub alpen_endpoint: String,
-    /// Faucet service endpoint.
-    pub faucet_endpoint: String,
+    /// Optional HTTP Basic credentials for the Alpen RPC endpoint.
+    pub alpen_rpc_user: Option<String>,
+    pub alpen_rpc_password: Option<String>,
+    /// Faucet service endpoint. Mainnet has no faucet.
+    pub faucet_endpoint: Option<String>,
     /// Mempool explorer endpoint.
     pub mempool_endpoint: Option<String>,
     /// Blockscout explorer endpoint.
@@ -100,8 +109,9 @@ pub struct SettingsFromFile {
 pub struct Settings {
     pub esplora: Option<String>,
     pub alpen_endpoint: String,
+    pub alpen_rpc_auth: Option<AlpenRpcAuth>,
     pub data_dir: PathBuf,
-    pub faucet_endpoint: String,
+    pub faucet_endpoint: Option<String>,
     pub bridge_musig2_pubkey: XOnlyPublicKey,
     pub descriptor_db: PathBuf,
     pub mempool_space_endpoint: Option<String>,
@@ -140,20 +150,35 @@ impl Settings {
     pub fn load() -> Result<Self, OneOf<(io::Error, config::ConfigError)>> {
         let proj_dirs = &PROJ_DIRS;
         let config_file = CONFIG_FILE.as_path();
-        let descriptor_file = proj_dirs.data_dir().to_owned().join("descriptors");
         let linux_seed_file = proj_dirs.data_dir().to_owned().join("seed");
 
         create_dir_all(proj_dirs.config_dir()).map_err(OneOf::new)?;
         create_dir_all(proj_dirs.data_dir()).map_err(OneOf::new)?;
 
-        // create config file if not exists
-        let _ = File::create_new(config_file);
+        let mut config_handle = open_file(config_file).map_err(OneOf::new)?;
+        ensure_owner_only(&config_handle, config_file).map_err(OneOf::new)?;
+        let mut config_contents = String::new();
+        config_handle
+            .read_to_string(&mut config_contents)
+            .map_err(OneOf::new)?;
         let from_file: SettingsFromFile = Config::builder()
-            .add_source(config::File::from(config_file))
+            .add_source(ConfigFile::from_str(&config_contents, FileFormat::Toml))
             .build()
             .map_err(OneOf::new)?
             .try_deserialize::<SettingsFromFile>()
             .map_err(OneOf::new)?;
+
+        if from_file.network == Network::Bitcoin {
+            validate_mainnet_endpoint("Alpen RPC", &from_file.alpen_endpoint)
+                .map_err(OneOf::new)?;
+            if let Some(endpoint) = from_file
+                .esplora
+                .as_deref()
+                .or(from_file.bitcoind_rpc_endpoint.as_deref())
+            {
+                validate_mainnet_endpoint("Bitcoin backend", endpoint).map_err(OneOf::new)?;
+            }
+        }
 
         let sync_backend: Arc<dyn SignetBackend> = match (
             from_file.esplora.clone(),
@@ -163,16 +188,31 @@ impl Settings {
             from_file.bitcoind_rpc_endpoint,
         ) {
             (Some(url), None, None, None, None) => {
-                Arc::new(EsploraClient::new(&url).expect("valid esplora url"))
+                Arc::new(EsploraClient::new(&url).map_err(|error| {
+                    OneOf::new(ConfigError::Message(format!(
+                        "invalid esplora URL: {error}"
+                    )))
+                })?)
             }
-            (None, Some(user), Some(pw), None, Some(url)) => Arc::new(Arc::new(
-                Client::new(&url, Auth::UserPass(user, pw)).expect("valid bitcoin core client"),
+            (None, Some(user), Some(password), None, Some(url)) => Arc::new(Arc::new(
+                Client::new(&url, Auth::UserPass(user, password)).map_err(|error| {
+                    OneOf::new(ConfigError::Message(format!(
+                        "invalid Bitcoin Core RPC configuration: {error}"
+                    )))
+                })?,
             )),
             (None, None, None, Some(cookie_file), Some(url)) => Arc::new(Arc::new(
-                Client::new(&url, Auth::CookieFile(cookie_file))
-                    .expect("valid bitcoin core client"),
+                Client::new(&url, Auth::CookieFile(cookie_file)).map_err(|error| {
+                    OneOf::new(ConfigError::Message(format!(
+                        "invalid Bitcoin Core RPC configuration: {error}"
+                    )))
+                })?,
             )),
-            _ => panic!("invalid config for signet - configure for esplora or bitcoind"),
+            _ => {
+                return Err(OneOf::new(ConfigError::Message(
+                    "configure exactly one Bitcoin backend".into(),
+                )))
+            }
         };
 
         // These fields are hand-merged into config.toml by operators, so a bad
@@ -183,11 +223,15 @@ impl Settings {
                     "bridge_pubkey is not a valid x-only public key: {e}"
                 )))
             })?;
-        let bridge_params = BridgeParams::new_with_descriptor_limit(
-            from_file.bridge_denomination_sats,
-            from_file
+        let max_withdrawal_amount = match from_file.network {
+            Network::Bitcoin => from_file.max_withdrawal_amount_sats,
+            _ => from_file
                 .max_withdrawal_amount_sats
                 .or(Some(DEFAULT_MAX_WITHDRAWAL_SATS)),
+        };
+        let bridge_params = BridgeParams::new_with_descriptor_limit(
+            from_file.bridge_denomination_sats,
+            max_withdrawal_amount,
             from_file
                 .max_withdrawal_descriptor_len
                 .unwrap_or(DEFAULT_MAX_WITHDRAWAL_DESCRIPTOR_LEN),
@@ -197,31 +241,76 @@ impl Settings {
                 "invalid withdrawal params in config: {e}"
             )))
         })?;
+        let bridge_alpen_address = AlpenAddress::from_str(
+            from_file
+                .bridge_alpen_address
+                .as_deref()
+                .unwrap_or(DEFAULT_BRIDGE_ALPEN_ADDRESS),
+        )
+        .map_err(|error| {
+            OneOf::new(ConfigError::Message(format!(
+                "bridge_alpen_address is not a valid EVM address: {error}"
+            )))
+        })?;
+        let bridge_fee = from_file
+            .bridge_fee_sats
+            .map(Amount::from_sat)
+            .unwrap_or(DEFAULT_BRIDGE_FEE);
+        let finality_depth = from_file.finality_depth.unwrap_or(DEFAULT_FINALITY_DEPTH);
+        validate_mainnet_profile(
+            (
+                from_file.network,
+                from_file.magic_bytes,
+                from_file.recovery_delay,
+            ),
+            bridge_musig2_pubkey,
+            bridge_alpen_address,
+            &bridge_params,
+            bridge_fee,
+            finality_depth,
+        )
+        .map_err(OneOf::new)?;
+
+        let alpen_rpc_auth = match (from_file.alpen_rpc_user, from_file.alpen_rpc_password) {
+            (None, None) => None,
+            (Some(username), Some(password)) => Some(AlpenRpcAuth::new(username, password)),
+            _ => {
+                return Err(OneOf::new(ConfigError::Message(
+                    "alpen_rpc_user and alpen_rpc_password must be configured together".into(),
+                )))
+            }
+        };
+        let descriptor_file = proj_dirs.data_dir().join(match from_file.network {
+            Network::Bitcoin => "descriptors-bitcoin",
+            _ => "descriptors",
+        });
+        if from_file.network == Network::Bitcoin {
+            #[cfg(target_os = "linux")]
+            open_owner_only(&linux_seed_file).map_err(OneOf::new)?;
+            open_owner_only(&SignetWallet::db_path(
+                "default",
+                proj_dirs.data_dir(),
+                from_file.network,
+            ))
+            .map_err(OneOf::new)?;
+        }
 
         Ok(Settings {
             esplora: from_file.esplora,
             alpen_endpoint: from_file.alpen_endpoint,
+            alpen_rpc_auth,
             data_dir: proj_dirs.data_dir().to_owned(),
             faucet_endpoint: from_file.faucet_endpoint,
             bridge_musig2_pubkey,
             descriptor_db: descriptor_file,
             mempool_space_endpoint: from_file.mempool_endpoint,
             blockscout_endpoint: from_file.blockscout_endpoint,
-            bridge_alpen_address: AlpenAddress::from_str(
-                from_file
-                    .bridge_alpen_address
-                    .as_deref()
-                    .unwrap_or(DEFAULT_BRIDGE_ALPEN_ADDRESS),
-            )
-            .expect("valid Alpen address"),
+            bridge_alpen_address,
             linux_seed_file,
             config_file: CONFIG_FILE.clone(),
             signet_backend: sync_backend,
-            bridge_fee: from_file
-                .bridge_fee_sats
-                .map(Amount::from_sat)
-                .unwrap_or(DEFAULT_BRIDGE_FEE),
-            finality_depth: from_file.finality_depth.unwrap_or(DEFAULT_FINALITY_DEPTH),
+            bridge_fee,
+            finality_depth,
             bridge_params,
             network: from_file.network,
             magic_bytes: from_file.magic_bytes,
@@ -232,11 +321,110 @@ impl Settings {
     }
 }
 
+fn validate_mainnet_endpoint(name: &str, endpoint: &str) -> Result<(), ConfigError> {
+    let url = Url::parse(endpoint)
+        .map_err(|error| ConfigError::Message(format!("invalid {name} URL: {error}")))?;
+    let loopback = url.host_str().is_some_and(|host| {
+        host == "localhost"
+            || host
+                .parse::<IpAddr>()
+                .is_ok_and(|address| address.is_loopback())
+    });
+    if url.scheme() == "https" || url.scheme() == "http" && loopback {
+        Ok(())
+    } else {
+        Err(ConfigError::Message(format!(
+            "mainnet {name} must use HTTPS unless it is a loopback endpoint"
+        )))
+    }
+}
+
+fn validate_mainnet_profile(
+    network_fields: (Network, MagicBytes, u16),
+    bridge_pubkey: XOnlyPublicKey,
+    bridge_address: AlpenAddress,
+    bridge_params: &BridgeParams,
+    bridge_fee: Amount,
+    finality_depth: u32,
+) -> Result<(), ConfigError> {
+    let (network, magic_bytes, recovery_delay) = network_fields;
+    if network != Network::Bitcoin {
+        return Ok(());
+    }
+
+    let matches_deployment = magic_bytes == MAINNET_MAGIC_BYTES
+        && bridge_pubkey.serialize() == MAINNET_BRIDGE_PUBKEY
+        && bridge_address == MAINNET_BRIDGE_ALPEN_ADDRESS
+        && bridge_params.denomination() == MAINNET_BRIDGE_DENOMINATION_SATS
+        && bridge_fee.to_sat() == MAINNET_BRIDGE_FEE_SATS
+        && recovery_delay == MAINNET_RECOVERY_DELAY
+        && bridge_params.max_withdrawal_amount().is_none()
+        && bridge_params.max_withdrawal_descriptor_len() == DEFAULT_MAX_WITHDRAWAL_DESCRIPTOR_LEN
+        && finality_depth == DEFAULT_FINALITY_DEPTH;
+    if matches_deployment {
+        Ok(())
+    } else {
+        Err(ConfigError::Message(
+            "mainnet settings do not match the deployed network profile".into(),
+        ))
+    }
+}
+
+fn open_owner_only(path: &Path) -> io::Result<File> {
+    let file = open_file(path)?;
+    ensure_owner_only(&file, path)?;
+    Ok(file)
+}
+
+fn open_file(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    options.open(path)
+}
+
+fn ensure_owner_only(file: &File, path: &Path) -> io::Result<()> {
+    #[cfg(not(unix))]
+    let _ = (file, path);
+    #[cfg(unix)]
+    {
+        let mode = file.metadata()?.permissions().mode() & 0o777;
+        if mode & 0o077 != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!(
+                    "{} has insecure permissions {mode:#o}; expected 0600",
+                    path.display()
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use toml;
 
     use super::*;
+
+    #[cfg(not(feature = "test-mode"))]
+    #[test]
+    fn parses_deployed_mainnet_profile() {
+        let parsed: SettingsFromFile =
+            toml::from_str(include_str!("../configs/mainnet.toml.example")).unwrap();
+        assert_eq!(parsed.network, Network::Bitcoin);
+        assert_eq!(parsed.magic_bytes, MAINNET_MAGIC_BYTES);
+        assert_eq!(parsed.bridge_fee_sats, Some(MAINNET_BRIDGE_FEE_SATS));
+    }
+
+    #[test]
+    fn mainnet_endpoints_require_https_or_loopback() {
+        assert!(validate_mainnet_endpoint("test", "https://example.com").is_ok());
+        assert!(validate_mainnet_endpoint("test", "http://127.0.0.1:8332").is_ok());
+        assert!(validate_mainnet_endpoint("test", "http://example.com").is_err());
+    }
 
     #[test]
     fn test_parses_datatool_network_profile_snippet() {

@@ -144,8 +144,9 @@ pub async fn deposit(
 ) -> Result<(), DisplayedError> {
     let mut l1w = SignetWallet::new(&seed, settings.network, settings.signet_backend.clone())
         .internal_error("Failed to load signet wallet")?;
-    let l2w = AlpenWallet::new(&seed, &settings.alpen_endpoint)
-        .user_error("Invalid Alpen endpoint URL. Check the config file")?;
+    let l2w = AlpenWallet::new(&seed, &settings)
+        .await
+        .user_error("Failed to connect to the configured Alpen network")?;
 
     l1w.sync()
         .await
@@ -195,7 +196,9 @@ pub async fn deposit(
         bridge_in_address.to_string().yellow()
     );
 
-    let fee_rate = get_fee_rate(fee_rate, settings.signet_backend.as_ref()).await;
+    let fee_rate = get_fee_rate(fee_rate, settings.signet_backend.as_ref())
+        .await
+        .internal_error("Failed to determine Bitcoin fee rate")?;
     log_fee_rate(&fee_rate);
 
     let tx = build_deposit_request_tx(
