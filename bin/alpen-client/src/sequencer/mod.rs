@@ -8,6 +8,7 @@
 //! brings up the DA/btcio pipeline, the provers, and the batch/chunk
 //! builders.
 
+mod da_fee_rate;
 mod da_pipeline;
 mod gas_data_provider;
 mod header_summary;
@@ -66,7 +67,11 @@ use strata_primitives::buf::Buf32;
 use tokio::sync::{mpsc, watch};
 use tracing::{error, info, info_span, Instrument};
 
-use self::{gas_data_provider::RethGasDataProvider, payload_builder::AlpenRethPayloadEngine};
+use self::{
+    da_fee_rate::{DaFeeRatePolicy, FixedDaFeeRatePolicy, RateAdjustment},
+    gas_data_provider::RethGasDataProvider,
+    payload_builder::AlpenRethPayloadEngine,
+};
 use crate::{
     config::SequencerMode,
     gossip::GossipConfig,
@@ -268,7 +273,12 @@ pub(crate) async fn run(
             eyre::bail!("invalid ALPEN_DA_RATE_WEI_PER_BYTE: {err}");
         }
     };
-    let live_da_rate = Arc::new(AtomicU64::new(da_rate_seed));
+    // Route the existing static seed through the policy boundary before the
+    // writer-backed policy and controller replace this startup-only path.
+    let policy = FixedDaFeeRatePolicy::new(da_rate_seed);
+    let policy_rate = policy.fetch_rate().await?;
+    let adjusted_rate = RateAdjustment::default().apply(policy_rate)?;
+    let live_da_rate = Arc::new(AtomicU64::new(adjusted_rate.wei_per_byte()));
     let node = AlpenEthereumNode::new(
         evm_factory,
         common.params.evm_spec().clone(),
