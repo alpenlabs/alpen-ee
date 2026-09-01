@@ -80,10 +80,10 @@ versioned_value! {
 
 crate::define_table!(
     /// Accounts, version-dispatched on read and written at the current version.
-    (Accounts) Hash => Account
+    (Accounts) Hash => AccountV3
 );
 impl_borsh_key_codec!(Accounts, Hash);
-crate::impl_versioned_value_codec!(Accounts, Account);
+crate::impl_versioned_value_codec!(Accounts, AccountV3 as Account);
 
 define_table_borsh! {
     /// Owner to code hash, read by the v2 -> v3 up-converter.
@@ -142,10 +142,10 @@ versioned_value! {
 
 crate::define_table!(
     /// Table backing the cycle test.
-    (Loopies) Hash => Loopy
+    (Loopies) Hash => LoopyV2
 );
 impl_borsh_key_codec!(Loopies, Hash);
-crate::impl_versioned_value_codec!(Loopies, Loopy);
+crate::impl_versioned_value_codec!(Loopies, LoopyV2 as Loopy);
 
 // --- Helpers --------------------------------------------------------------
 
@@ -364,7 +364,7 @@ fn a_detached_context_refuses_a_table_read() {
         },
     );
 
-    let err = Account::decode_tagged(&bytes, &ctx).unwrap_err();
+    let err = <Account as VersionedValue>::decode_tagged(&bytes, &ctx).unwrap_err();
     assert!(
         matches!(err, CodecError::NoUpgradeContext { .. }),
         "expected a no-context error, got {err:?}"
@@ -372,7 +372,7 @@ fn a_detached_context_refuses_a_table_read() {
 
     // A converter that only defaults still works without a transaction.
     let v1 = tagged(1, &AccountV1 { balance: 4 });
-    let err = Account::decode_tagged(&v1, &ctx).unwrap_err();
+    let err = <Account as VersionedValue>::decode_tagged(&v1, &ctx).unwrap_err();
     assert!(
         matches!(err, CodecError::NoUpgradeContext { .. }),
         "the v1 value folds through v2 -> v3, which does read a table: {err:?}"
@@ -482,7 +482,7 @@ fn golden_fixtures_replay_every_shipped_version() {
         GoldenFixture::new(3, &v3),
     ];
 
-    let decoded: Vec<Account> = env
+    let decoded: Vec<AccountV3> = env
         .view::<_, DbError>(|r| Ok(check_fixtures::<Account>(&fixtures, &r.upgrade_ctx()).unwrap()))
         .unwrap();
 
@@ -540,9 +540,9 @@ fn a_mislabelled_fixture_fails_the_check() {
 
 #[test]
 fn the_family_reports_its_version_chain() {
-    assert_eq!(Account::FAMILY, "Account");
-    assert_eq!(Account::CURRENT_VERSION, 3);
-    assert_eq!(Account::VERSIONS, &[1, 2, 3]);
+    assert_eq!(<Account as VersionedValue>::FAMILY, "Account");
+    assert_eq!(<Account as VersionedValue>::CURRENT_VERSION, 3);
+    assert_eq!(<Account as VersionedValue>::VERSIONS, &[1, 2, 3]);
 }
 
 #[test]

@@ -320,13 +320,15 @@ macro_rules! impl_raw_key_codec {
 
 // --- Schema versioning ---------------------------------------------------
 
-/// Binds a chain of shipped versions into one versioned value.
+/// Declares a value family: a marker type plus the chain of versions it has
+/// shipped.
 ///
 /// Each `tag => Type` entry names a version that has shipped, ascending; the
-/// last one is current, and the macro emits a type alias of the family name
-/// pointing at it. Reading dispatches on the on-disk tag and folds the value up
-/// to current through [`UpConvert`](crate::UpConvert); writing always emits the
-/// current version. A missing `N -> N+1` converter is a compile error.
+/// last one is current, and becomes the family's
+/// [`VersionedValue::Value`](crate::VersionedValue::Value). Reading dispatches
+/// on the on-disk tag and folds the value up to current through
+/// [`UpConvert`](crate::UpConvert); writing always emits the current version. A
+/// missing `N -> N+1` converter is a compile error.
 ///
 /// Bumping a version means *adding* an entry and *adding* one converter — the
 /// already-shipped structs and converters are never edited, because bytes
@@ -342,22 +344,27 @@ macro_rules! versioned_value {
         }
     ) => {
         $(#[$docs])*
-        $vis type $family = $crate::versioned_value!(@last_ty $($ver),+);
+        #[derive(Clone, Copy, Debug, Default)]
+        $vis struct $family;
 
         // Each version's declared tag must match the one bound here, so the
         // dispatch table and the encoder can never disagree.
         const _: () = {
             $(
                 ::core::assert!(
-                    <$ver as $crate::SchemaVersion>::VERSION == $tag,
+                    <$ver as $crate::SchemaVersion<$family>>::VERSION == $tag,
                     "version tag does not match the type's `SchemaVersion::VERSION`",
                 );
             )+
         };
 
-        $crate::versioned_value!(@chain $family; $($ver),+);
+        $crate::versioned_value!(
+            @chain $family, $crate::versioned_value!(@last_ty $($ver),+); $($ver),+
+        );
 
         impl $crate::VersionedValue for $family {
+            type Value = $crate::versioned_value!(@last_ty $($ver),+);
+
             const FAMILY: &'static str = ::core::stringify!($family);
             const CURRENT_VERSION: u8 = $crate::versioned_value!(@last_tag $($tag),+);
             const VERSIONS: &'static [u8] = &[$($tag),+];
@@ -365,14 +372,17 @@ macro_rules! versioned_value {
             fn decode_tagged(
                 bytes: &[u8],
                 ctx: &$crate::UpgradeCtx<'_>,
-            ) -> ::core::result::Result<Self, $crate::CodecError> {
+            ) -> ::core::result::Result<Self::Value, $crate::CodecError> {
                 let family = <Self as $crate::VersionedValue>::FAMILY;
                 let (tag, payload) = $crate::split_version_tag(family, bytes)?;
                 match tag {
                     $(
                         $tag => {
-                            let value = <$ver as $crate::SchemaVersion>::decode_payload(payload)?;
-                            <$ver as $crate::LiftToCurrent<Self>>::lift_to_current(value, ctx)
+                            let value =
+                                <$ver as $crate::SchemaVersion<$family>>::decode_payload(payload)?;
+                            <$ver as $crate::LiftToCurrent<$family, Self::Value>>::lift_to_current(
+                                value, ctx,
+                            )
                         }
                     )+
                     other => ::core::result::Result::Err($crate::unknown_version_error(
@@ -384,12 +394,12 @@ macro_rules! versioned_value {
             }
 
             fn encode_tagged(
-                &self,
+                value: &Self::Value,
             ) -> ::core::result::Result<::std::vec::Vec<u8>, $crate::CodecError> {
                 let mut out = ::std::vec::Vec::new();
                 out.push(<Self as $crate::VersionedValue>::CURRENT_VERSION);
                 out.extend_from_slice(
-                    &<Self as $crate::SchemaVersion>::encode_payload(self)?,
+                    &<Self::Value as $crate::SchemaVersion<$family>>::encode_payload(value)?,
                 );
                 ::core::result::Result::Ok(out)
             }
@@ -406,8 +416,8 @@ macro_rules! versioned_value {
     };
 
     // --- the fold to current: one `UpConvert` hop per consecutive pair ---
-    (@chain $current:ty; $last:ty) => {
-        impl $crate::LiftToCurrent<$current> for $last {
+    (@chain $family:ty, $current:ty; $last:ty) => {
+        impl $crate::LiftToCurrent<$family, $current> for $last {
             fn lift_to_current(
                 self,
                 _ctx: &$crate::UpgradeCtx<'_>,
@@ -416,25 +426,25 @@ macro_rules! versioned_value {
             }
         }
     };
-    (@chain $current:ty; $from:ty, $to:ty $(, $rest:ty)*) => {
-        impl $crate::LiftToCurrent<$current> for $from {
+    (@chain $family:ty, $current:ty; $from:ty, $to:ty $(, $rest:ty)*) => {
+        impl $crate::LiftToCurrent<$family, $current> for $from {
             fn lift_to_current(
                 self,
                 ctx: &$crate::UpgradeCtx<'_>,
             ) -> ::core::result::Result<$current, $crate::CodecError> {
                 let next: $to = <$from as $crate::UpConvert<$to>>::up_convert(self, ctx)?;
-                <$to as $crate::LiftToCurrent<$current>>::lift_to_current(next, ctx)
+                <$to as $crate::LiftToCurrent<$family, $current>>::lift_to_current(next, ctx)
             }
         }
-        $crate::versioned_value!(@chain $current; $to $(, $rest)*);
+        $crate::versioned_value!(@chain $family, $current; $to $(, $rest)*);
     };
 }
 
 /// borsh [`SchemaVersion`](crate::SchemaVersion) for one shipped version.
 #[macro_export]
 macro_rules! impl_schema_version_borsh {
-    ($family:ident, $ver:ty, $tag:literal) => {
-        impl $crate::SchemaVersion for $ver {
+    ($family:ty, $ver:ty, $tag:literal) => {
+        impl $crate::SchemaVersion<$family> for $ver {
             const FAMILY: &'static str = ::core::stringify!($family);
             const VERSION: u8 = $tag;
 
@@ -457,8 +467,8 @@ macro_rules! impl_schema_version_borsh {
 /// version.
 #[macro_export]
 macro_rules! impl_schema_version_codec {
-    ($family:ident, $ver:ty, $tag:literal) => {
-        impl $crate::SchemaVersion for $ver {
+    ($family:ty, $ver:ty, $tag:literal) => {
+        impl $crate::SchemaVersion<$family> for $ver {
             const FAMILY: &'static str = ::core::stringify!($family);
             const VERSION: u8 = $tag;
 
@@ -482,8 +492,8 @@ macro_rules! impl_schema_version_codec {
 /// CBOR [`SchemaVersion`](crate::SchemaVersion) for one shipped version.
 #[macro_export]
 macro_rules! impl_schema_version_cbor {
-    ($family:ident, $ver:ty, $tag:literal) => {
-        impl $crate::SchemaVersion for $ver {
+    ($family:ty, $ver:ty, $tag:literal) => {
+        impl $crate::SchemaVersion<$family> for $ver {
             const FAMILY: &'static str = ::core::stringify!($family);
             const VERSION: u8 = $tag;
 
@@ -507,8 +517,8 @@ macro_rules! impl_schema_version_cbor {
 /// bincode [`SchemaVersion`](crate::SchemaVersion) for one shipped version.
 #[macro_export]
 macro_rules! impl_schema_version_bincode {
-    ($family:ident, $ver:ty, $tag:literal) => {
-        impl $crate::SchemaVersion for $ver {
+    ($family:ty, $ver:ty, $tag:literal) => {
+        impl $crate::SchemaVersion<$family> for $ver {
             const FAMILY: &'static str = ::core::stringify!($family);
             const VERSION: u8 = $tag;
 
@@ -527,24 +537,29 @@ macro_rules! impl_schema_version_bincode {
     };
 }
 
-/// [`ValueCodec`](crate::ValueCodec) delegating to a value's
-/// [`VersionedValue`](crate::VersionedValue) impl — the version-dispatching read
-/// path, and the current format on write.
+/// [`ValueCodec`](crate::ValueCodec) routing a table's value through a family's
+/// [`VersionedValue`](crate::VersionedValue) impl — version-dispatching on read,
+/// current format on write.
+///
+/// `$value` must be the family's current version; a stale one fails the build.
 #[macro_export]
 macro_rules! impl_versioned_value_codec {
-    ($schema:ty, $value:ty) => {
+    ($schema:ty, $value:ty as $family:ty) => {
+        // The table must name the family's *current* version, never a past one.
+        const _: fn(<$family as $crate::VersionedValue>::Value) -> $value = |value| value;
+
         impl $crate::ValueCodec<$schema> for $value {
             fn encode_value(
                 &self,
             ) -> ::core::result::Result<::std::vec::Vec<u8>, $crate::CodecError> {
-                <$value as $crate::VersionedValue>::encode_tagged(self)
+                <$family as $crate::VersionedValue>::encode_tagged(self)
             }
 
             fn decode_value(
                 bytes: &[u8],
                 ctx: &$crate::UpgradeCtx<'_>,
             ) -> ::core::result::Result<Self, $crate::CodecError> {
-                <$value as $crate::VersionedValue>::decode_tagged(bytes, ctx)
+                <$family as $crate::VersionedValue>::decode_tagged(bytes, ctx)
             }
         }
     };
@@ -553,19 +568,25 @@ macro_rules! impl_versioned_value_codec {
 /// Defines a table with a borsh key and a version-dispatched value.
 #[macro_export]
 macro_rules! define_table_versioned {
-    ($(#[$docs:meta])* ($name:ident $(, $flag:ident)*) $key:ty => $value:ty) => {
+    (
+        $(#[$docs:meta])* ($name:ident $(, $flag:ident)*)
+        $key:ty => $value:ty as $family:ty
+    ) => {
         $crate::define_table!($(#[$docs])* ($name $(, $flag)*) $key => $value);
         $crate::impl_borsh_key_codec!($name, $key);
-        $crate::impl_versioned_value_codec!($name, $value);
+        $crate::impl_versioned_value_codec!($name, $value as $family);
     };
 }
 
 /// Defines a table with a big-endian integer key and a version-dispatched value.
 #[macro_export]
 macro_rules! define_table_versioned_be_key {
-    ($(#[$docs:meta])* ($name:ident $(, $flag:ident)*) $key:ty => $value:ty) => {
+    (
+        $(#[$docs:meta])* ($name:ident $(, $flag:ident)*)
+        $key:ty => $value:ty as $family:ty
+    ) => {
         $crate::define_table!($(#[$docs])* ($name $(, $flag)*) $key => $value);
         $crate::impl_be_key_codec!($name, $key);
-        $crate::impl_versioned_value_codec!($name, $value);
+        $crate::impl_versioned_value_codec!($name, $value as $family);
     };
 }

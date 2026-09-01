@@ -13,6 +13,7 @@ mod db;
 mod envelope_db;
 mod prover_db;
 mod schema;
+mod versions;
 
 pub(crate) use broadcast_db::L1BroadcastDbMdbx;
 pub use db::EeNodeDbMdbx;

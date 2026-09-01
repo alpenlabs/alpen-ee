@@ -5,8 +5,9 @@
 //! (relied on by `first`/`last`/range queries).
 
 use alpen_db_store_mdbx::{
-    define_table, define_table_be_key, define_table_borsh, impl_be_key_codec, impl_borsh_key_codec,
-    impl_cbor_value_codec, impl_raw_key_codec, tables, CodecError, KeyCodec, Schema, TableSpec,
+    define_table, define_table_be_key, define_table_borsh, define_table_versioned,
+    define_table_versioned_be_key, impl_be_key_codec, impl_cbor_value_codec, impl_raw_key_codec,
+    impl_versioned_value_codec, tables, CodecError, KeyCodec, Schema, TableSpec,
 };
 use alpen_ee_common::AccessedStateRecord;
 use strata_acct_types::Hash;
@@ -19,6 +20,11 @@ use strata_identifiers::Buf32;
 use strata_paas::TaskRecordData;
 use zkaleido::ProofReceiptWithMetadata;
 
+use super::versions::{
+    StoredAccessedState, StoredAccountStateAtEpoch, StoredBatch, StoredChunk,
+    StoredChunkedEnvelopeEntry, StoredExecBlockRecord, StoredL1TxEntry, StoredProofReceipt,
+    StoredProverTask, StoredTxNodeRecord,
+};
 use crate::serialization_types::{
     DBAccountStateAtEpoch, DBBatchId, DBBatchWithStatus, DBChunkId, DBChunkWithStatus,
     DBExecBlockRecord, DBOLBlockId,
@@ -51,14 +57,17 @@ define_table_be_key! {
     (OLBlockAtEpochSchema) u32 => DBOLBlockId
 }
 
-define_table_borsh! {
+define_table_versioned! {
     /// EE account state at a specific OL block.
-    (AccountStateAtOLEpochSchema) DBOLBlockId => DBAccountStateAtEpoch
+    (AccountStateAtOLEpochSchema) DBOLBlockId => DBAccountStateAtEpoch as StoredAccountStateAtEpoch
 }
 
-define_table_borsh! {
+define_table_versioned! {
     /// Exec block by block hash.
-    (ExecBlockSchema) Hash => DBExecBlockRecord
+    ///
+    /// Content-addressed and inserted once (`save_exec_block` skips a hash it
+    /// already holds), so the record is fixed for the life of the block.
+    (ExecBlockSchema, immutable) Hash => DBExecBlockRecord as StoredExecBlockRecord
 }
 
 define_table_be_key! {
@@ -73,12 +82,16 @@ define_table_be_key! {
 
 define_table_borsh! {
     /// Exec block payloads by block hash.
-    (ExecBlockPayloadSchema) Hash => Vec<u8>
+    ///
+    /// An opaque engine payload, written alongside its exec block and never
+    /// rewritten. The blob's own framing is the engine's, not this store's, so
+    /// it carries no version tag.
+    (ExecBlockPayloadSchema, immutable) Hash => Vec<u8>
 }
 
-define_table_be_key! {
+define_table_versioned_be_key! {
     /// Batch by sequential idx to `(Batch, Status)`.
-    (BatchByIdxSchema) u64 => DBBatchWithStatus
+    (BatchByIdxSchema) u64 => DBBatchWithStatus as StoredBatch
 }
 
 define_table_borsh! {
@@ -86,9 +99,9 @@ define_table_borsh! {
     (BatchIdToIdxSchema) DBBatchId => u64
 }
 
-define_table_be_key! {
+define_table_versioned_be_key! {
     /// Chunk by sequential idx to `(Chunk, Status)`.
-    (ChunkByIdxSchema) u64 => DBChunkWithStatus
+    (ChunkByIdxSchema) u64 => DBChunkWithStatus as StoredChunk
 }
 
 define_table_borsh! {
@@ -101,19 +114,27 @@ define_table_borsh! {
     (BatchChunksSchema) DBBatchId => Vec<DBChunkId>
 }
 
-define_table_borsh! {
+define_table_versioned! {
     /// Per-block accessed-state record, keyed by execution block hash.
-    (BlockAccessedStateSchema) Hash => AccessedStateRecord
+    (BlockAccessedStateSchema) Hash => AccessedStateRecord as StoredAccessedState
 }
 
 define_table_borsh! {
     /// Content-addressed bytecode cache, keyed by code hash.
-    (BytecodeSchema) Hash => Vec<u8>
+    ///
+    /// The key is the hash of the value, so a stored entry can never legitimately
+    /// change. Bytecode has no framing of its own to version.
+    (BytecodeSchema, immutable) Hash => Vec<u8>
 }
 
 define_table_borsh! {
     /// Per-block proof-witness (codec-encoded `EvmPartialState`), keyed by
     /// execution block hash.
+    ///
+    /// Stored as an opaque blob: the witness encoding belongs to whatever builds
+    /// it, so versioning it is that producer's concern, not this table's. It
+    /// stays mutable because a re-derived witness may legitimately differ once
+    /// that encoding changes.
     (BlockWitnessSchema) Hash => Vec<u8>
 }
 
@@ -123,20 +144,20 @@ define_table! {
     /// Shared prover task store, keyed by tag-prefixed `ProofSpec::Task` bytes.
     ///
     /// The key is stored verbatim so the documented kind-tag prefixes sort as
-    /// written; [`TaskRecordData`] is serde-only, hence the CBOR value.
+    /// written; the record is serde-only, hence the CBOR payload.
     (ProverTaskSchema) Vec<u8> => TaskRecordData
 }
 impl_raw_key_codec!(ProverTaskSchema);
-impl_cbor_value_codec!(ProverTaskSchema, TaskRecordData);
+impl_versioned_value_codec!(ProverTaskSchema, TaskRecordData as StoredProverTask);
 
-define_table_borsh! {
+define_table_versioned! {
     /// Chunk proof receipts, keyed by chunk task bytes.
-    (ChunkProofReceiptSchema) Vec<u8> => ProofReceiptWithMetadata
+    (ChunkProofReceiptSchema) Vec<u8> => ProofReceiptWithMetadata as StoredProofReceipt
 }
 
-define_table_borsh! {
+define_table_versioned! {
     /// Acct (outer/update) proof receipts keyed by [`DBBatchId`].
-    (AcctProofReceiptSchema) DBBatchId => ProofReceiptWithMetadata
+    (AcctProofReceiptSchema) DBBatchId => ProofReceiptWithMetadata as StoredProofReceipt
 }
 
 define_table_borsh! {
@@ -152,12 +173,10 @@ define_table_be_key! {
     (L1BroadcastTxIdSchema) u64 => Buf32
 }
 
-define_table! {
-    /// L1 broadcast: transaction id to its [`L1TxEntry`].
-    (L1BroadcastTxSchema) Buf32 => L1TxEntry
+define_table_versioned! {
+    /// L1 broadcast: transaction id to its entry.
+    (L1BroadcastTxSchema) Buf32 => L1TxEntry as StoredL1TxEntry
 }
-impl_borsh_key_codec!(L1BroadcastTxSchema, Buf32);
-impl_cbor_value_codec!(L1BroadcastTxSchema, L1TxEntry);
 
 define_table! {
     /// L1 broadcast: logical transaction replacement chains, keyed by the
@@ -165,13 +184,14 @@ define_table! {
     (L1BroadcastTxNodeSchema) TxNodeId => TxNodeRecord
 }
 impl_node_id_key_codec!(L1BroadcastTxNodeSchema);
-impl_cbor_value_codec!(L1BroadcastTxNodeSchema, TxNodeRecord);
+impl_versioned_value_codec!(L1BroadcastTxNodeSchema, TxNodeRecord as StoredTxNodeRecord);
 
 define_table! {
     /// Presence marker: this replacement chain may still need fee bumping.
     ///
     /// The replacement pass scans this set instead of the whole node table,
-    /// whose records are kept forever for crash-recovery point lookups.
+    /// whose records are kept forever for crash-recovery point lookups. The
+    /// value is empty, so there is nothing to version.
     (L1BroadcastActiveTxNodeSchema) TxNodeId => ()
 }
 impl_node_id_key_codec!(L1BroadcastActiveTxNodeSchema);
@@ -182,7 +202,10 @@ define_table! {
     (L1ChunkedEnvelopeSchema) u64 => ChunkedEnvelopeEntry
 }
 impl_be_key_codec!(L1ChunkedEnvelopeSchema, u64);
-impl_cbor_value_codec!(L1ChunkedEnvelopeSchema, ChunkedEnvelopeEntry);
+impl_versioned_value_codec!(
+    L1ChunkedEnvelopeSchema,
+    ChunkedEnvelopeEntry as StoredChunkedEnvelopeEntry
+);
 
 /// The full set of tables backing the EE node database, for
 /// [`MdbxEnv::open`](alpen_db_store_mdbx::MdbxEnv::open).
