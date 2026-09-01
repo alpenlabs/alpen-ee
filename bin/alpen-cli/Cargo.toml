@@ -20,7 +20,7 @@ strata-l1-txfmt.workspace = true
 strata-ol-bridge-types.workspace = true
 strata-primitives.workspace = true
 
-aes-gcm-siv = "0.11.1"
+aes-gcm-siv = "0.12.0"
 alloy = { workspace = true, features = [
   "std",
   "rpc-client-ws",
