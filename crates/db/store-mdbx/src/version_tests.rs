@@ -13,8 +13,8 @@ use crate::{
     define_table_borsh, impl_borsh_key_codec, impl_raw_value_codec, impl_schema_version_borsh,
     tables,
     version::fixtures::{check_fixtures, FixtureError, GoldenFixture},
-    versioned_value, CodecError, DbError, MdbxConfig, MdbxEnv, Regime, Schema, UpConvert,
-    UpgradeCtx, VersionedValue, MAX_UPGRADE_DEPTH,
+    versioned_value, CodecError, DbError, MdbxConfig, MdbxEnv, Schema, UpConvert, UpgradeCtx,
+    VersionedValue, MAX_UPGRADE_DEPTH,
 };
 
 type Hash = [u8; 32];
@@ -103,13 +103,6 @@ impl Schema for AccountsRaw {
 impl_borsh_key_codec!(AccountsRaw, Hash);
 impl_raw_value_codec!(AccountsRaw);
 
-// --- An immutable table ---------------------------------------------------
-
-define_table_borsh! {
-    /// Records that are fixed once written: existing values are frozen.
-    (Records, immutable) u64 => Vec<u8>
-}
-
 // --- A value whose up-converter reads its own table (a forbidden cycle) ---
 
 #[derive(Clone, Debug, BorshSerialize, BorshDeserialize)]
@@ -154,7 +147,7 @@ fn open() -> (tempfile::TempDir, MdbxEnv) {
     let env = MdbxEnv::open(
         dir.path(),
         &MdbxConfig::small(),
-        &tables![Accounts, Codes, Records, Loopies],
+        &tables![Accounts, Codes, Loopies],
     )
     .unwrap();
     (dir, env)
@@ -410,46 +403,6 @@ impl Schema for LoopiesRaw {
 }
 impl_borsh_key_codec!(LoopiesRaw, Hash);
 impl_raw_value_codec!(LoopiesRaw);
-
-// --- Regimes --------------------------------------------------------------
-
-#[test]
-fn regimes_are_declared_on_the_table() {
-    assert_eq!(<Records as Schema>::REGIME, Regime::Immutable);
-    assert_eq!(<Accounts as Schema>::REGIME, Regime::Mutable);
-}
-
-#[test]
-fn an_immutable_table_refuses_to_rewrite_an_existing_value() {
-    let (_dir, env) = open();
-    env.update(|w| w.put::<Records>(&1, &vec![1, 2, 3]))
-        .unwrap();
-
-    // Re-putting the same content is idempotent, not an error.
-    env.update(|w| w.put::<Records>(&1, &vec![1, 2, 3]))
-        .unwrap();
-
-    let err = env.update(|w| w.put::<Records>(&1, &vec![9])).unwrap_err();
-    assert!(
-        matches!(err, DbError::ImmutableOverwrite { .. }),
-        "expected an immutable-overwrite refusal, got {err:?}"
-    );
-    assert_eq!(
-        env.view(|r| r.get::<Records>(&1)).unwrap(),
-        Some(vec![1, 2, 3]),
-        "the refused write must leave the value untouched"
-    );
-}
-
-#[test]
-fn an_immutable_table_still_allows_insert_and_delete() {
-    let (_dir, env) = open();
-    env.update(|w| w.put::<Records>(&1, &vec![1])).unwrap();
-    assert!(env.update(|w| w.delete::<Records>(&1)).unwrap());
-    // Deleted, so this is an insert rather than a rewrite.
-    env.update(|w| w.put::<Records>(&1, &vec![2])).unwrap();
-    assert_eq!(env.view(|r| r.get::<Records>(&1)).unwrap(), Some(vec![2]));
-}
 
 // --- Golden fixtures ------------------------------------------------------
 

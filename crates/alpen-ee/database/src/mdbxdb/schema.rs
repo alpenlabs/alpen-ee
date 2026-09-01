@@ -65,9 +65,9 @@ define_table_versioned! {
 define_table_versioned! {
     /// Exec block by block hash.
     ///
-    /// Content-addressed and inserted once (`save_exec_block` skips a hash it
-    /// already holds), so the record is fixed for the life of the block.
-    (ExecBlockSchema, immutable) Hash => DBExecBlockRecord as StoredExecBlockRecord
+    /// Content-addressed and inserted once: `save_exec_block` skips a hash it
+    /// already holds, so the record is fixed for the life of the block.
+    (ExecBlockSchema) Hash => DBExecBlockRecord as StoredExecBlockRecord
 }
 
 define_table_be_key! {
@@ -86,7 +86,7 @@ define_table_borsh! {
     /// An opaque engine payload, written alongside its exec block and never
     /// rewritten. The blob's own framing is the engine's, not this store's, so
     /// it carries no version tag.
-    (ExecBlockPayloadSchema, immutable) Hash => Vec<u8>
+    (ExecBlockPayloadSchema) Hash => Vec<u8>
 }
 
 define_table_versioned_be_key! {
@@ -124,7 +124,7 @@ define_table_borsh! {
     ///
     /// The key is the hash of the value, so a stored entry can never legitimately
     /// change. Bytecode has no framing of its own to version.
-    (BytecodeSchema, immutable) Hash => Vec<u8>
+    (BytecodeSchema) Hash => Vec<u8>
 }
 
 define_table_borsh! {

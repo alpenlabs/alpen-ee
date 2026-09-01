@@ -35,8 +35,6 @@ define_table_bincode_be_key! {
 
 define_table_raw_be_key! {
     /// Set of contract code hashes already published to DA (presence-only).
-    ///
-    /// The value is always empty, so there is nothing to version.
     (PublishedCodeHashSchema) B256 => Vec<u8>
 }
 

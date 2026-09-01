@@ -17,7 +17,7 @@
 //!
 //! Writes always emit the current version with the current tag. Reads never
 //! write back, so a read stays a read: cold keys keep their old format on disk
-//! until the application naturally writes them again (see [`Regime`]).
+//! until the application naturally writes them again.
 //!
 //! # Declaring a versioned value
 //!

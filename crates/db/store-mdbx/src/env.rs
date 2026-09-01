@@ -20,7 +20,7 @@ use signet_libmdbx::{
 };
 
 use crate::{
-    codec::{BoxError, KeyCodec, Regime, Schema, ValueCodec},
+    codec::{BoxError, KeyCodec, Schema, ValueCodec},
     config::{MdbxConfig, MdbxSyncMode},
     error::{DbError, DbResult},
     version::{RawGet, UpgradeCtx},
@@ -303,28 +303,10 @@ impl<'txn> Writer<'txn> {
     }
 
     /// Inserts or overwrites the value for `key`, in the current format.
-    ///
-    /// On a [`Regime::Immutable`] table an existing key may only be re-put with
-    /// byte-identical content, so idempotent writes still succeed but changing
-    /// such a value in place is refused with [`DbError::ImmutableOverwrite`].
-    /// Inserting and deleting stay allowed; only rewriting is refused.
     pub fn put<S: Schema>(&self, key: &S::Key, value: &S::Value) -> DbResult<()> {
         let db = self.txn.open_db(Some(S::NAME))?;
         let key_bytes = key.encode_key()?;
         let value_bytes = value.encode_value()?;
-
-        // A DUP_SORT table holds several values per key, which this
-        // single-value comparison cannot express, so the two are not combined.
-        if S::REGIME == Regime::Immutable && !S::DUP_SORT {
-            if let Some(existing) = self.txn.get::<Vec<u8>>(db.dbi(), &key_bytes)? {
-                return if existing == value_bytes {
-                    Ok(())
-                } else {
-                    Err(DbError::ImmutableOverwrite { schema: S::NAME })
-                };
-            }
-        }
-
         self.txn
             .put(db, key_bytes, value_bytes, WriteFlags::UPSERT)?;
         Ok(())

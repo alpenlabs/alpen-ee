@@ -18,31 +18,6 @@ use crate::version::UpgradeCtx;
 /// Boxed, thread-safe error used as the source of a [`CodecError`].
 pub type BoxError = Box<dyn Error + Send + Sync + 'static>;
 
-/// Whether a table's stored values may be rewritten in place.
-///
-/// The regime is a property of the data a table holds, decided per table: a
-/// value is [`Regime::Immutable`] when what it records is fixed once written
-/// and later reads must see exactly the bytes that were stored, and
-/// [`Regime::Mutable`] when it is state the node owns and may re-encode
-/// (indices, caches, operational metadata).
-///
-/// Both regimes read the same way (version-dispatch on read). The regime
-/// governs only the write side.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Regime {
-    /// Data that is fixed once written. Existing values are frozen: every
-    /// format the table has ever held stays valid forever and no decoder may be
-    /// retired. A key may be inserted or deleted, but never overwritten with
-    /// different bytes.
-    Immutable,
-
-    /// Operational data. A value is read through a version-dispatching decoder
-    /// and lands in the current format whenever the application naturally
-    /// writes it back. Cold keys stay in their old format indefinitely; there is
-    /// no background sweep.
-    Mutable,
-}
-
 /// Failure to encode or decode a key or value for a [`Schema`].
 #[derive(Debug, thiserror::Error)]
 pub enum CodecError {
@@ -184,13 +159,6 @@ pub trait Schema: Sized + Send + Sync + 'static {
 
     /// Whether the table stores multiple values per key (MDBX `DUP_SORT`).
     const DUP_SORT: bool = false;
-
-    /// Whether the table's values may be rewritten in place.
-    ///
-    /// Defaults to [`Regime::Mutable`], which is what operational tables want.
-    /// A table whose values are fixed once written declares
-    /// [`Regime::Immutable`].
-    const REGIME: Regime = Regime::Mutable;
 
     /// The key type; encoded via its [`KeyCodec`] impl.
     type Key: KeyCodec<Self>;

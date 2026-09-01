@@ -42,16 +42,12 @@
 //! Stored formats change across binary releases, under rolling upgrades with no
 //! drain and no maintenance window, so nothing here blocks startup: a value
 //! carries its own version tag and is decoded through the chain of decoders this
-//! binary retains (see [`version`]). Two rules follow from
-//! [`Schema::REGIME`]:
+//! binary retains (see [`version`]).
 //!
-//! - [`Regime::Immutable`] — values fixed once written. Every format the table has ever held stays
-//!   valid forever, values are never rewritten, and a decoder is never retired.
-//! - [`Regime::Mutable`] — state the node owns. A value is read through the same dispatching
-//!   decoder and lands in the current format whenever the application naturally writes it back.
-//!   Cold keys stay old; there is no background sweep, so decoders are kept here too.
-//!
-//! A value written by a *newer* binary is refused with a typed
+//! A read never writes back, so a stored value keeps its old format until the
+//! application naturally writes that key again, at which point it lands in the
+//! current one. Nothing sweeps the cold keys, so every decoder is kept
+//! indefinitely. A value written by a *newer* binary is refused with a typed
 //! [`CodecError::NewerVersion`] rather than misread.
 
 // These crates are used only inside exported macros, whose bodies expand in
@@ -73,7 +69,7 @@ mod tests;
 #[cfg(test)]
 mod version_tests;
 
-pub use codec::{BoxError, CodecError, KeyCodec, Regime, Schema, ValueCodec};
+pub use codec::{BoxError, CodecError, KeyCodec, Schema, ValueCodec};
 pub use config::{MdbxConfig, MdbxSyncMode, GIB, TIB};
 pub use env::{MdbxEnv, Reader, TableSpec, Writer};
 pub use error::{DbError, DbResult};

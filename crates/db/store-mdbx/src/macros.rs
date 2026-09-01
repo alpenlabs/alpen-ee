@@ -13,12 +13,8 @@
 /// Codecs are attached separately (see the `impl_*_codec` macros), or use a
 /// bundling macro such as [`define_table_borsh!`](crate::define_table_borsh).
 ///
-/// Flags may follow the table name, in any order:
-///
-/// - `dup_sort` — open the table with MDBX `DUP_SORT`.
-/// - `immutable` — the table's values are fixed once written, so an existing key may never be
-///   overwritten with different bytes (see [`Regime`](crate::Regime)). Tables are
-///   [`Regime::Mutable`](crate::Regime::Mutable) by default.
+/// Append the `dup_sort` flag after the table name to open it with MDBX
+/// `DUP_SORT`.
 #[macro_export]
 macro_rules! define_table {
     ($(#[$docs:meta])* ($name:ident $(, $flag:ident)*) $key:ty => $value:ty) => {
@@ -29,20 +25,15 @@ macro_rules! define_table {
         impl $crate::Schema for $name {
             const NAME: &'static str = ::core::stringify!($name);
             const DUP_SORT: bool = $crate::define_table!(@dup_sort $($flag)*);
-            const REGIME: $crate::Regime = $crate::define_table!(@regime $($flag)*);
             type Key = $key;
             type Value = $value;
         }
     };
 
-    // --- flag lookups: match the flag ident literally, else keep scanning ---
+    // --- flag lookup: match the flag ident literally, else keep scanning ---
     (@dup_sort) => { false };
     (@dup_sort dup_sort $($rest:ident)*) => { true };
     (@dup_sort $other:ident $($rest:ident)*) => { $crate::define_table!(@dup_sort $($rest)*) };
-
-    (@regime) => { $crate::Regime::Mutable };
-    (@regime immutable $($rest:ident)*) => { $crate::Regime::Immutable };
-    (@regime $other:ident $($rest:ident)*) => { $crate::define_table!(@regime $($rest)*) };
 }
 
 /// Builds a `Vec<TableSpec>` from a list of [`Schema`](crate::Schema) types, for

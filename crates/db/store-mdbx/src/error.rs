@@ -23,19 +23,6 @@ pub enum DbError {
     #[error(transparent)]
     Codec(#[from] CodecError),
 
-    /// A write tried to change an existing value on a table declared
-    /// [`Regime::Immutable`](crate::Regime).
-    ///
-    /// Such a table's values are fixed once written: every format it has ever
-    /// held stays valid forever and existing values are frozen. A key may be
-    /// inserted, re-put byte-identically, or deleted — never rewritten with
-    /// different content.
-    #[error("table `{schema}` is immutable: an existing value cannot be rewritten")]
-    ImmutableOverwrite {
-        /// The table that refused the write.
-        schema: &'static str,
-    },
-
     /// Environment setup failed (e.g. creating the data directory).
     #[error("mdbx environment: {0}")]
     Env(String),
