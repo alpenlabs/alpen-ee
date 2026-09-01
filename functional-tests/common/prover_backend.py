@@ -45,6 +45,7 @@ _GENERATED_DIR = _REPO_ROOT / "provers" / "sp1" / "generated"
 CHUNK_ELF = _GENERATED_DIR / "guest-alpen-chunk.elf"
 ACCT_ELF = _GENERATED_DIR / "guest-alpen-acct.elf"
 ACCT_PREDICATE = _GENERATED_DIR / "alpen-acct.predicate"
+SP1_PROOF_DEADLINE_ENV = "ALPEN_SP1_PROOF_DEADLINE_SECS"
 
 # The v0 pair, committed rather than built. A build only ever produces one
 # version -- the guests bake in the version they prove under, and current
@@ -237,10 +238,12 @@ class Sp1Backend(ProverBackend):
     """Spec version -> its (chunk ELF, acct ELF) pair."""
     predicates: dict[str, str]
     """Spec version -> the predicate that pair's acct guest proves under."""
+    deadline_secs: int | None = None
 
     def prover_config(self, datadir: Path) -> AlpenProverConfig:
         return AlpenProverConfig(
             backend=self.backend,
+            deadline_secs=self.deadline_secs,
             programs={
                 spec_version: AlpenProverProgram(
                     chunk_path=str(chunk_elf),
@@ -295,6 +298,19 @@ _SP1_ARTIFACTS: dict[str, tuple[Path, Path, Path]] = {
 }
 
 
+def _optional_positive_int_env(name: str) -> int | None:
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return None
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a positive integer, got {raw_value!r}") from exc
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive integer, got {value}")
+    return value
+
+
 def _sp1_backend(spec_versions: tuple[str, ...]) -> Sp1Backend:
     """Builds the sp1 backend for `spec_versions`."""
     unknown = [v for v in spec_versions if v not in _SP1_ARTIFACTS]
@@ -316,6 +332,7 @@ def _sp1_backend(spec_versions: tuple[str, ...]) -> Sp1Backend:
         ee_params_path=_require_built(EE_PARAMS),
         programs=programs,
         predicates=predicates,
+        deadline_secs=_optional_positive_int_env(SP1_PROOF_DEADLINE_ENV),
     )
 
 
