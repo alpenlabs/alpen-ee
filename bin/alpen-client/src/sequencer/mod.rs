@@ -8,6 +8,7 @@
 //! brings up the DA/btcio pipeline, the provers, and the batch/chunk
 //! builders.
 
+mod bitcoin_fee_rate;
 mod da_fee_rate;
 mod da_pipeline;
 mod gas_data_provider;

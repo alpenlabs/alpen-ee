@@ -23,7 +23,7 @@ pub(crate) const fn u256_from(val: u128) -> U256 {
 pub(crate) const WEI_PER_BTC: u128 = 1_000_000_000_000_000_000u128;
 
 /// Number of wei per satoshi (1e10).
-pub(crate) const WEI_PER_SAT: u64 = 10_000_000_000;
+pub const WEI_PER_SAT: u64 = 10_000_000_000;
 
 /// Converts wei to satoshis.
 /// Returns a tuple of (satoshis, remainder_in_wei).
