@@ -1070,6 +1070,7 @@ dependencies = [
  "jsonrpsee",
  "k256",
  "proptest",
+ "reqwest 0.12.28",
  "reth-chainspec",
  "reth-cli-commands",
  "reth-cli-runner",

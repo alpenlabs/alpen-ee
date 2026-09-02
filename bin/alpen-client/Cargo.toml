@@ -25,6 +25,7 @@ sequencer = [
   "dep:k256",
   "dep:reth-payload-builder",
   "dep:reth-primitives-traits",
+  "dep:reqwest",
   "dep:strata-btcio",
   "dep:strata-codec",
   "dep:strata-db-types",
@@ -134,6 +135,7 @@ reth-primitives.workspace = true
 reth-primitives-traits = { workspace = true, optional = true }
 reth-provider.workspace = true
 reth-tasks.workspace = true
+reqwest = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 sp1-verifier = { workspace = true, optional = true }
