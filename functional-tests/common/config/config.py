@@ -164,6 +164,29 @@ class AlpenProverProgram:
 
 
 @dataclass
+class AlpenDaFeeRateConfig:
+    """``[sequencer.da_fee_rate]`` table."""
+
+    policy: str = field(default="fixed")  # "writer_backed" | "fixed"
+    fixed_rate_wei_per_byte: int | None = field(default=0)
+    fallback_policy_rate_wei_per_byte: int = field(default=0)
+    refresh_interval_seconds: int = field(default=60)
+    stale_after_seconds: int = field(default=300)
+    multiplier_bps: int = field(default=10_000)
+    offset_wei_per_byte: int = field(default=0)
+
+    def as_toml_dict(self) -> dict:
+        """Serializes only fields belonging to the selected policy."""
+        config = asdict(self)
+        if self.policy == "writer_backed":
+            config.pop("fixed_rate_wei_per_byte")
+        elif self.policy == "fixed":
+            config.pop("min_rate_wei_per_byte")
+            config.pop("max_rate_wei_per_byte")
+        return config
+
+
+@dataclass
 class AlpenProverConfig:
     """``[sequencer.prover]`` table, tagged on ``backend``.
 
@@ -194,6 +217,7 @@ class AlpenSequencerConfig:
     chunk_sealing_gas_limit: int | None = field(default=None)
     l1_fee_policy: AlpenL1FeePolicyConfig = field(default_factory=AlpenL1FeePolicyConfig)
     broadcaster: BroadcasterConfig = field(default_factory=BroadcasterConfig)
+    da_fee_rate: AlpenDaFeeRateConfig = field(default_factory=AlpenDaFeeRateConfig)
 
 
 @dataclass
@@ -230,7 +254,10 @@ class AlpenClientConfig:
     def as_toml_string(self) -> str:
         # `toml.dumps` skips `None` values at every level, so unset optional
         # fields drop out on their own and Rust sees them as absent.
-        return toml.dumps(asdict(self))
+        config = asdict(self)
+        if self.sequencer is not None:
+            config["sequencer"]["da_fee_rate"] = self.sequencer.da_fee_rate.as_toml_dict()
+        return toml.dumps(config)
 
 
 @dataclass

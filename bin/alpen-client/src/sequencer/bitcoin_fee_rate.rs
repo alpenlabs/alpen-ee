@@ -64,8 +64,7 @@ struct MempoolExplorerClient {
 
 impl MempoolExplorerClient {
     fn new(base_url: &str) -> anyhow::Result<Self> {
-        let mut url = Url::parse(base_url)
-            .with_context(|| format!("invalid mempool_base_url: {base_url}"))?;
+        let mut url = Url::parse(base_url).context("invalid mempool_base_url")?;
 
         if !url.path().ends_with('/') {
             let path = format!("{}/", url.path());
@@ -79,18 +78,20 @@ impl MempoolExplorerClient {
         let url = self
             .base_url
             .join(path)
-            .with_context(|| format!("invalid path URL for base: {}", self.base_url))?;
+            .context("invalid mempool fee endpoint path")?;
 
         SHARED_HTTP_CLIENT
             .get(url)
             .send()
             .await
-            .context("failed to call mempool recommended fees endpoint")?
+            .map_err(|_| anyhow::anyhow!("failed to call mempool recommended fees endpoint"))?
             .error_for_status()
-            .context("mempool recommended fees endpoint returned an error status")?
+            .map_err(|_| {
+                anyhow::anyhow!("mempool recommended fees endpoint returned an error status")
+            })?
             .json::<MempoolRecommendedFees>()
             .await
-            .context("failed to decode mempool recommended fees response")
+            .map_err(|_| anyhow::anyhow!("failed to decode mempool recommended fees response"))
     }
 
     async fn fetch_recommended_fees(&self) -> anyhow::Result<MempoolRecommendedFees> {
@@ -151,7 +152,6 @@ where
         Ok(fees) => fees.select(mempool_fee_policy),
         Err(err) => {
             warn!(
-                %base_url,
                 %err,
                 fallback_conf_target,
                 "mempool fee lookup failed, falling back to bitcoind's estimatesmartfee"

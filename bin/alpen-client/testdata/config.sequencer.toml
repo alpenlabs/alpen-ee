@@ -40,3 +40,9 @@ fixed_fee_rate = 1.0
 [sequencer.broadcaster]
 poll_interval_ms = 5000
 max_fee_rate_sat_vb = 1000
+
+[sequencer.da_fee_rate]
+policy = "writer_backed"
+fallback_policy_rate_wei_per_byte = 10000000000
+refresh_interval_seconds = 60
+stale_after_seconds = 300
