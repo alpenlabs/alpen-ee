@@ -258,12 +258,16 @@ pub(crate) async fn run(
     });
     log_writer_config(&writer_config);
     let btc_client = da_pipeline::connect_bitcoin(&sequencer_config.bitcoind).await?;
-    let da_fee_rate_controller = da_fee_rate::controller_from_config(
+    let da_fee_rate_state = da_fee_rate::service_state_from_config(
         &sequencer_config.da_fee_rate,
         btc_client.clone(),
         sequencer_config.l1_fee_policy.clone(),
     )?;
-    let da_fee_rate_handle = da_fee_rate_controller.start(&common.sequencer.service_executor);
+    let da_fee_rate_service =
+        da_fee_rate::start(da_fee_rate_state, &common.sequencer.service_executor)
+            .await
+            .map_err(|error| eyre::eyre!("failed to start DA fee-rate service: {error}"))?;
+    let da_fee_rate_handle = da_fee_rate_service.rate_handle();
     let btcio = BtcioResources {
         client: btc_client,
         writer_config,
@@ -391,7 +395,7 @@ pub(crate) async fn run(
 ///
 /// Resolves the block-builder config and boot state itself. The shared
 /// Bitcoin client and writer config arrive from [`run`], which creates them
-/// before the payload builder and fee-rate controller are launched.
+/// before the payload builder and fee-rate service are launched.
 async fn start_services<N>(
     common: &NodeBootstrap,
     mode: &SequencerMode,

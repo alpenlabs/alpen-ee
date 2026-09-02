@@ -1,26 +1,28 @@
 //! Produces the DA fee rate used by sequencer payload builds.
 //!
-//! A policy recommends a rate in wei per DA byte. The controller applies
+//! A policy recommends a rate in wei per DA byte. The service applies
 //! [`RateAdjustment`] and publishes the result without exposing the selected
 //! policy to payload construction.
+
+mod service;
+mod state;
 
 use std::{sync::Arc, time::Duration};
 
 use alpen_reth_evm::WEI_PER_SAT;
-use alpen_reth_node::{da_fee_rate_channel, DaFeeRateHandle, DaFeeRateUpdater};
 use async_trait::async_trait;
 use bitcoind_async_client::Client as BtcClient;
 use strata_config::btcio::L1FeePolicyConfig;
-use strata_service::{AsyncExecutor, AsyncGuard};
 use thiserror::Error;
-use tokio::time::{interval, timeout, Instant, MissedTickBehavior};
-use tracing::{debug, info, warn};
 
+pub(crate) use self::service::start;
+#[cfg(test)]
+use self::service::{DaFeeRateService, DaFeeRateStatus};
+use self::state::*;
 use super::bitcoin_fee_rate::resolve_fee_rate;
 use crate::config::{DaFeeRateConfig, DaFeeRatePolicyConfig};
 
 const BASIS_POINTS_DENOMINATOR: u128 = 10_000;
-const POLICY_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A rate in wei per DA byte returned by a [`DaFeeRatePolicy`], before operator adjustment.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -188,271 +190,12 @@ impl DaFeeRatePolicy for WriterBackedDaFeeRatePolicy {
     }
 }
 
-/// Controls policy refreshes and publication of the latest usable DA fee rate.
-pub(crate) struct DaFeeRateController {
-    /// Resolves unadjusted rates from the configured source.
-    policy: Box<dyn DaFeeRatePolicy>,
-    /// Applies the operator's multiplier and offset before publication.
-    adjustment: RateAdjustment,
-    /// Owns the capability to publish a new cached rate.
-    updater: DaFeeRateUpdater,
-    /// Provides read-only access to the currently published rate.
-    handle: DaFeeRateHandle,
-    /// Controls how often the policy is queried.
-    refresh_interval: Duration,
-    /// Marks the controller stale after this long without a successful publication.
-    stale_after: Duration,
-    /// Bounds one policy query so refreshes cannot hang indefinitely.
-    fetch_timeout: Duration,
-    /// Tracks freshness from fallback activation or the latest successful publication.
-    last_success_at: Instant,
-    /// Records whether the controller has crossed its stale threshold.
-    is_stale: bool,
-}
-
-/// Runtime settings used by [`DaFeeRateController`].
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct DaFeeRateControllerConfig {
-    /// Seeds the cache until the policy produces its first usable rate.
-    fallback_policy_rate: PolicyRate,
-    /// Applies to both the fallback and every fetched policy rate.
-    adjustment: RateAdjustment,
-    /// Controls how often the controller queries its policy.
-    refresh_interval: Duration,
-    /// Defines how long the controller may go without a successful publication.
-    stale_after: Duration,
-    /// Bounds the duration of one policy query.
-    fetch_timeout: Duration,
-}
-
-impl DaFeeRateControllerConfig {
-    /// Creates controller settings with the built-in policy-fetch timeout.
-    pub(crate) const fn new(
-        fallback_policy_rate: PolicyRate,
-        adjustment: RateAdjustment,
-        refresh_interval: Duration,
-        stale_after: Duration,
-    ) -> Self {
-        Self {
-            fallback_policy_rate,
-            adjustment,
-            refresh_interval,
-            stale_after,
-            fetch_timeout: POLICY_FETCH_TIMEOUT,
-        }
-    }
-
-    #[cfg(test)]
-    const fn with_fetch_timeout(mut self, fetch_timeout: Duration) -> Self {
-        self.fetch_timeout = fetch_timeout;
-        self
-    }
-}
-
-/// Reports invalid controller startup settings.
-#[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
-pub(crate) enum DaFeeRateControllerError {
-    #[error("DA fee-rate refresh interval must be nonzero")]
-    ZeroRefreshInterval,
-    #[error("DA fee-rate stale threshold must be at least the refresh interval")]
-    StaleBeforeRefresh,
-    #[error("DA fee-rate fetch timeout must be nonzero")]
-    ZeroFetchTimeout,
-    #[error("adjusted fallback DA fee rate is invalid")]
-    InvalidFallback(#[source] RateAdjustmentError),
-}
-
-/// Reports why a refresh attempt did not publish a new rate.
-#[derive(Debug, Error)]
-enum ControllerRefreshError {
-    /// The configured policy could not resolve a rate.
-    #[error(transparent)]
-    Policy(#[from] DaFeeRatePolicyError),
-    /// The policy query exceeded the configured timeout.
-    #[error("DA fee-rate policy fetch timed out")]
-    Timeout,
-    /// The operator adjustment could not represent the final rate.
-    #[error(transparent)]
-    Adjustment(#[from] RateAdjustmentError),
-}
-
-/// Describes a successfully published policy rate.
-#[derive(Debug)]
-struct ControllerUpdate {
-    /// Contains the rate returned directly by the policy.
-    policy_rate: PolicyRate,
-    /// Contains the final rate made visible to payload construction.
-    adjusted_rate: AdjustedRate,
-    /// Indicates whether publication changed the cached numeric value.
-    changed: bool,
-    /// Indicates whether this success transitioned the controller from stale to fresh.
-    recovered: bool,
-}
-
-impl DaFeeRateController {
-    /// Initializes the handle with the adjusted fallback policy rate.
-    pub(crate) fn new(
-        policy: Box<dyn DaFeeRatePolicy>,
-        config: DaFeeRateControllerConfig,
-    ) -> Result<Self, DaFeeRateControllerError> {
-        if config.refresh_interval.is_zero() {
-            return Err(DaFeeRateControllerError::ZeroRefreshInterval);
-        }
-        if config.stale_after < config.refresh_interval {
-            return Err(DaFeeRateControllerError::StaleBeforeRefresh);
-        }
-        if config.fetch_timeout.is_zero() {
-            return Err(DaFeeRateControllerError::ZeroFetchTimeout);
-        }
-
-        let fallback = config
-            .adjustment
-            .apply(config.fallback_policy_rate)
-            .map_err(DaFeeRateControllerError::InvalidFallback)?;
-        let (updater, handle) = da_fee_rate_channel(fallback.wei_per_byte());
-
-        Ok(Self {
-            policy,
-            adjustment: config.adjustment,
-            updater,
-            handle,
-            refresh_interval: config.refresh_interval,
-            stale_after: config.stale_after,
-            fetch_timeout: config.fetch_timeout,
-            last_success_at: Instant::now(),
-            is_stale: false,
-        })
-    }
-
-    /// Starts the supervised refresh loop and returns its read-only rate handle.
-    pub(crate) fn start<E>(mut self, executor: &E) -> DaFeeRateHandle
-    where
-        E: AsyncExecutor,
-    {
-        self.last_success_at = Instant::now();
-        let handle = self.handle.clone();
-        info!(
-            fallback_rate_wei_per_byte = handle.current_rate(),
-            "DA fee-rate controller activated fallback"
-        );
-        executor.spawn_async("da_fee_rate_controller", move |shutdown| self.run(shutdown));
-        handle
-    }
-
-    /// Refreshes the cached rate until the service receives a shutdown signal.
-    async fn run<G>(mut self, shutdown: G) -> anyhow::Result<()>
-    where
-        G: AsyncGuard,
-    {
-        let mut refresh = interval(self.refresh_interval);
-        refresh.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
-        loop {
-            tokio::select! {
-                _ = shutdown.wait_for_shutdown() => return Ok(()),
-                _ = refresh.tick() => {}
-            }
-
-            let fetch_result = tokio::select! {
-                _ = shutdown.wait_for_shutdown() => return Ok(()),
-                result = timeout(self.fetch_timeout, self.policy.fetch_rate()) => {
-                    match result {
-                        Ok(result) => result.map_err(ControllerRefreshError::Policy),
-                        Err(_) => Err(ControllerRefreshError::Timeout),
-                    }
-                }
-            };
-            let now = Instant::now();
-            match fetch_result.and_then(|rate| self.apply_policy_rate(now, rate)) {
-                Ok(update) => self.log_update(&update),
-                Err(error) => warn!(
-                    %error,
-                    current_rate_wei_per_byte = self.handle.current_rate(),
-                    "DA fee-rate refresh failed; retaining the last usable rate"
-                ),
-            }
-
-            if self.mark_stale_if_needed(now) {
-                warn!(
-                    current_rate_wei_per_byte = self.handle.current_rate(),
-                    stale_after_seconds = self.stale_after.as_secs(),
-                    "DA fee rate became stale; retaining the last usable rate"
-                );
-            }
-        }
-    }
-
-    /// Adjusts and publishes a successfully fetched policy rate.
-    ///
-    /// Successful publication refreshes [`Self::last_success_at`] and clears
-    /// [`Self::is_stale`]. The returned recovery flag preserves whether the
-    /// controller was stale immediately before that transition.
-    fn apply_policy_rate(
-        &mut self,
-        now: Instant,
-        rate: PolicyRate,
-    ) -> Result<ControllerUpdate, ControllerRefreshError> {
-        let adjusted_rate = self.adjustment.apply(rate)?;
-        let changed =
-            self.updater.publish(adjusted_rate.wei_per_byte()) != adjusted_rate.wei_per_byte();
-
-        let recovered = self.is_stale;
-        self.is_stale = false;
-        self.last_success_at = now;
-
-        Ok(ControllerUpdate {
-            policy_rate: rate,
-            adjusted_rate,
-            changed,
-            recovered,
-        })
-    }
-
-    /// Marks the controller stale and returns `true` only on the fresh-to-stale transition.
-    fn mark_stale_if_needed(&mut self, now: Instant) -> bool {
-        if !self.is_stale && now.duration_since(self.last_success_at) > self.stale_after {
-            self.is_stale = true;
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Records a successful rate publication and any state transition it caused.
-    fn log_update(&self, update: &ControllerUpdate) {
-        let ControllerUpdate {
-            policy_rate,
-            adjusted_rate,
-            changed,
-            recovered,
-        } = update;
-
-        if *changed || *recovered {
-            info!(
-                policy_rate_wei_per_byte = policy_rate.wei_per_byte(),
-                adjusted_rate_wei_per_byte = adjusted_rate.wei_per_byte(),
-                changed = *changed,
-                recovered = *recovered,
-                "DA fee rate refreshed"
-            );
-        } else {
-            debug!(
-                policy_rate_wei_per_byte = policy_rate.wei_per_byte(),
-                adjusted_rate_wei_per_byte = adjusted_rate.wei_per_byte(),
-                changed = *changed,
-                recovered = *recovered,
-                "DA fee rate refreshed"
-            );
-        }
-    }
-}
-
-/// Builds the configured controller without starting its refresh loop.
-pub(crate) fn controller_from_config(
+/// Builds the configured service state without starting its refresh loop.
+pub(crate) fn service_state_from_config(
     config: &DaFeeRateConfig,
     btc_client: Arc<BtcClient>,
     writer_fee_policy_config: L1FeePolicyConfig,
-) -> Result<DaFeeRateController, DaFeeRateControllerError> {
+) -> Result<DaFeeRateServiceState, DaFeeRateServiceError> {
     let policy: Box<dyn DaFeeRatePolicy> = match config.policy {
         DaFeeRatePolicyConfig::WriterBacked => Box::new(WriterBackedDaFeeRatePolicy::new(
             btc_client,
@@ -463,23 +206,32 @@ pub(crate) fn controller_from_config(
         }
     };
     let adjustment = RateAdjustment::new(config.multiplier_bps, config.offset_wei_per_byte);
-    let controller_config = DaFeeRateControllerConfig::new(
+    let service_config = DaFeeRateServiceConfig::new(
         PolicyRate::new(config.fallback_policy_rate_wei_per_byte),
         adjustment,
         Duration::from_secs(config.refresh_interval_seconds.get()),
         Duration::from_secs(config.stale_after_seconds.get()),
     );
 
-    DaFeeRateController::new(policy, controller_config)
+    DaFeeRateServiceState::new(policy, service_config)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::VecDeque, future::pending, num::NonZeroU64, sync::Mutex};
+    use std::{
+        collections::VecDeque,
+        future::{pending, Future},
+        num::NonZeroU64,
+        sync::Mutex,
+    };
 
     use bitcoind_async_client::{corepc_types::bitcoin::FeeRate, Auth};
     use strata_config::btcio::{FeePolicy, MempoolExplorerFeePolicy};
-    use tokio::{sync::watch, task::yield_now, time::advance};
+    use strata_service::{AsyncExecutor, AsyncGuard, AsyncService, Response, Service};
+    use tokio::{
+        task::{yield_now, JoinHandle},
+        time::{advance, timeout},
+    };
 
     use super::*;
 
@@ -516,26 +268,52 @@ mod tests {
         }
     }
 
-    struct TestShutdownGuard {
-        shutdown_rx: watch::Receiver<bool>,
-    }
+    struct NeverShutdown;
 
-    impl AsyncGuard for TestShutdownGuard {
+    impl AsyncGuard for NeverShutdown {
         async fn wait_for_shutdown(&self) {
-            let mut shutdown_rx = self.shutdown_rx.clone();
-            if *shutdown_rx.borrow() {
-                return;
-            }
-            while shutdown_rx.changed().await.is_ok() {
-                if *shutdown_rx.borrow() {
-                    return;
-                }
-            }
+            pending().await
         }
     }
 
-    fn controller_config(fallback_policy_rate: u64) -> DaFeeRateControllerConfig {
-        DaFeeRateControllerConfig::new(
+    #[derive(Default)]
+    struct TestExecutor {
+        task: Mutex<Option<JoinHandle<anyhow::Result<()>>>>,
+    }
+
+    impl TestExecutor {
+        async fn join(&self) -> anyhow::Result<()> {
+            let task = self
+                .task
+                .lock()
+                .unwrap()
+                .take()
+                .expect("service task should have been spawned");
+            task.await.expect("service task should not panic")
+        }
+    }
+
+    impl AsyncExecutor for TestExecutor {
+        type ShutdownGuard = NeverShutdown;
+
+        fn spawn_async<F>(
+            &self,
+            _name: &'static str,
+            worker: impl FnOnce(Self::ShutdownGuard) -> F + Send + 'static,
+        ) where
+            F: Future<Output = anyhow::Result<()>> + Send + 'static,
+        {
+            let previous = self
+                .task
+                .lock()
+                .unwrap()
+                .replace(tokio::spawn(worker(NeverShutdown)));
+            assert!(previous.is_none(), "test executor only supports one task");
+        }
+    }
+
+    fn service_config(fallback_policy_rate: u64) -> DaFeeRateServiceConfig {
+        DaFeeRateServiceConfig::new(
             PolicyRate::new(fallback_policy_rate),
             RateAdjustment::default(),
             Duration::from_secs(5),
@@ -543,11 +321,11 @@ mod tests {
         )
     }
 
-    fn controller_with_policy(
+    fn service_state_with_policy(
         policy: impl DaFeeRatePolicy,
-        config: DaFeeRateControllerConfig,
-    ) -> DaFeeRateController {
-        DaFeeRateController::new(Box::new(policy), config).unwrap()
+        config: DaFeeRateServiceConfig,
+    ) -> DaFeeRateServiceState {
+        DaFeeRateServiceState::new(Box::new(policy), config).unwrap()
     }
 
     fn writer_policy(fee_policy: FeePolicy) -> WriterBackedDaFeeRatePolicy {
@@ -642,11 +420,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fixed_config_builds_controller_with_adjusted_fallback_and_policy() {
+    async fn fixed_config_builds_service_state_with_adjusted_fallback_and_policy() {
         let config = configured_rate(DaFeeRatePolicyConfig::Fixed {
             rate_wei_per_byte: 7,
         });
-        let controller = controller_from_config(
+        let state = service_state_from_config(
             &config,
             disconnected_bitcoin_client(),
             L1FeePolicyConfig::new(FeePolicy::Fixed {
@@ -655,19 +433,16 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(controller.handle.current_rate(), 11);
-        assert_eq!(controller.refresh_interval, Duration::from_secs(7));
-        assert_eq!(controller.stale_after, Duration::from_secs(21));
-        assert_eq!(
-            controller.policy.fetch_rate().await.unwrap(),
-            PolicyRate::new(7)
-        );
+        assert_eq!(state.handle.current_rate(), 11);
+        assert_eq!(state.refresh_interval, Duration::from_secs(7));
+        assert_eq!(state.stale_after, Duration::from_secs(21));
+        assert_eq!(state.policy.fetch_rate().await.unwrap(), PolicyRate::new(7));
     }
 
     #[tokio::test]
     async fn writer_backed_config_reuses_writer_fee_policy() {
         let config = configured_rate(DaFeeRatePolicyConfig::WriterBacked);
-        let controller = controller_from_config(
+        let state = service_state_from_config(
             &config,
             disconnected_bitcoin_client(),
             L1FeePolicyConfig::new(FeePolicy::Fixed {
@@ -677,7 +452,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            controller.policy.fetch_rate().await.unwrap(),
+            state.policy.fetch_rate().await.unwrap(),
             PolicyRate::new(1_250_000_000)
         );
     }
@@ -734,205 +509,255 @@ mod tests {
     }
 
     #[test]
-    fn controller_starts_with_adjusted_fallback() {
-        let config = DaFeeRateControllerConfig::new(
+    fn service_state_starts_with_adjusted_fallback() {
+        let config = DaFeeRateServiceConfig::new(
             PolicyRate::new(5),
             RateAdjustment::new(15_000, 3),
             Duration::from_secs(5),
             Duration::from_secs(10),
         );
-        let controller = controller_with_policy(ScriptedPolicy::new([]), config);
+        let state = service_state_with_policy(ScriptedPolicy::new([]), config);
 
-        assert_eq!(controller.handle.current_rate(), 11);
+        assert_eq!(state.handle.current_rate(), 11);
     }
 
     #[test]
-    fn controller_rejects_invalid_timing_and_fallback_settings() {
+    fn service_state_rejects_invalid_timing_and_fallback_settings() {
         let policy = || Box::new(ScriptedPolicy::new([])) as Box<dyn DaFeeRatePolicy>;
 
-        let zero_refresh = DaFeeRateControllerConfig::new(
+        let zero_refresh = DaFeeRateServiceConfig::new(
             PolicyRate::new(1),
             RateAdjustment::default(),
             Duration::ZERO,
             Duration::from_secs(1),
         );
         assert!(matches!(
-            DaFeeRateController::new(policy(), zero_refresh),
-            Err(DaFeeRateControllerError::ZeroRefreshInterval)
+            DaFeeRateServiceState::new(policy(), zero_refresh),
+            Err(DaFeeRateServiceError::ZeroRefreshInterval)
         ));
 
-        let stale_before_refresh = DaFeeRateControllerConfig::new(
+        let stale_before_refresh = DaFeeRateServiceConfig::new(
             PolicyRate::new(1),
             RateAdjustment::default(),
             Duration::from_secs(2),
             Duration::from_secs(1),
         );
         assert!(matches!(
-            DaFeeRateController::new(policy(), stale_before_refresh),
-            Err(DaFeeRateControllerError::StaleBeforeRefresh)
+            DaFeeRateServiceState::new(policy(), stale_before_refresh),
+            Err(DaFeeRateServiceError::StaleBeforeRefresh)
         ));
 
-        let zero_timeout = controller_config(1).with_fetch_timeout(Duration::ZERO);
+        let zero_timeout = service_config(1).with_fetch_timeout(Duration::ZERO);
         assert!(matches!(
-            DaFeeRateController::new(policy(), zero_timeout),
-            Err(DaFeeRateControllerError::ZeroFetchTimeout)
+            DaFeeRateServiceState::new(policy(), zero_timeout),
+            Err(DaFeeRateServiceError::ZeroFetchTimeout)
         ));
 
-        let overflowing_fallback = DaFeeRateControllerConfig::new(
+        let overflowing_fallback = DaFeeRateServiceConfig::new(
             PolicyRate::new(u64::MAX),
             RateAdjustment::new(10_000, 1),
             Duration::from_secs(1),
             Duration::from_secs(1),
         );
         assert!(matches!(
-            DaFeeRateController::new(policy(), overflowing_fallback),
-            Err(DaFeeRateControllerError::InvalidFallback(_))
+            DaFeeRateServiceState::new(policy(), overflowing_fallback),
+            Err(DaFeeRateServiceError::InvalidFallback(_))
         ));
     }
 
     #[test]
     fn successful_fetch_publishes_only_the_fully_adjusted_rate() {
-        let config = DaFeeRateControllerConfig::new(
+        let config = DaFeeRateServiceConfig::new(
             PolicyRate::new(5),
             RateAdjustment::new(15_000, 3),
             Duration::from_secs(5),
             Duration::from_secs(10),
         );
-        let mut controller = controller_with_policy(ScriptedPolicy::new([]), config);
-        let previous_success = controller.last_success_at;
+        let mut state = service_state_with_policy(ScriptedPolicy::new([]), config);
+        let previous_success = state.last_success_at;
         let now = previous_success + Duration::from_secs(2);
 
-        let update = controller.apply_policy_rate(now, PolicyRate::new(7));
+        let update = state.apply_policy_rate(now, PolicyRate::new(7));
 
         assert!(matches!(
             update,
-            Ok(ControllerUpdate {
+            Ok(RateUpdate {
                 policy_rate: PolicyRate(7),
                 adjusted_rate: AdjustedRate(14),
                 changed: true,
                 recovered: false,
             })
         ));
-        assert_eq!(controller.handle.current_rate(), 14);
-        assert_eq!(controller.last_success_at, now);
-        assert!(!controller.is_stale);
+        assert_eq!(state.handle.current_rate(), 14);
+        assert_eq!(state.last_success_at, now);
+        assert!(!state.is_stale);
     }
 
     #[test]
     fn unchanged_success_still_refreshes_freshness() {
-        let mut controller = controller_with_policy(ScriptedPolicy::new([]), controller_config(10));
-        let previous_success = controller.last_success_at;
+        let mut state = service_state_with_policy(ScriptedPolicy::new([]), service_config(10));
+        let previous_success = state.last_success_at;
         let now = previous_success + Duration::from_secs(7);
 
-        let update = controller.apply_policy_rate(now, PolicyRate::new(10));
+        let update = state.apply_policy_rate(now, PolicyRate::new(10));
 
         assert!(matches!(
             update,
-            Ok(ControllerUpdate {
+            Ok(RateUpdate {
                 changed: false,
                 recovered: false,
                 ..
             })
         ));
-        assert_eq!(controller.handle.current_rate(), 10);
-        assert_eq!(controller.last_success_at, now);
-        assert!(!controller.is_stale);
+        assert_eq!(state.handle.current_rate(), 10);
+        assert_eq!(state.last_success_at, now);
+        assert!(!state.is_stale);
     }
 
     #[test]
     fn adjustment_failure_retains_the_current_rate_and_success_time() {
-        let config = DaFeeRateControllerConfig::new(
+        let config = DaFeeRateServiceConfig::new(
             PolicyRate::new(1),
             RateAdjustment::new(10_001, 0),
             Duration::from_secs(5),
             Duration::from_secs(10),
         );
-        let mut controller = controller_with_policy(ScriptedPolicy::new([]), config);
-        let previous_success = controller.last_success_at;
+        let mut state = service_state_with_policy(ScriptedPolicy::new([]), config);
+        let previous_success = state.last_success_at;
         let now = previous_success + Duration::from_secs(7);
 
-        let update = controller.apply_policy_rate(now, PolicyRate::new(u64::MAX));
+        let update = state.apply_policy_rate(now, PolicyRate::new(u64::MAX));
 
-        assert!(matches!(update, Err(ControllerRefreshError::Adjustment(_))));
-        assert_eq!(controller.handle.current_rate(), 2);
-        assert_eq!(controller.last_success_at, previous_success);
+        assert!(matches!(update, Err(RefreshError::Adjustment(_))));
+        assert_eq!(state.handle.current_rate(), 2);
+        assert_eq!(state.last_success_at, previous_success);
     }
 
     #[test]
     fn stale_boundary_is_strict_and_success_recovers() {
-        let mut controller = controller_with_policy(ScriptedPolicy::new([]), controller_config(10));
-        let activated_at = controller.last_success_at;
+        let mut state = service_state_with_policy(ScriptedPolicy::new([]), service_config(10));
+        let activated_at = state.last_success_at;
 
-        assert!(!controller.mark_stale_if_needed(activated_at + Duration::from_secs(10)));
-        assert!(!controller.is_stale);
-        assert!(controller.mark_stale_if_needed(
+        assert!(!state.mark_stale_if_needed(activated_at + Duration::from_secs(10)));
+        assert!(!state.is_stale);
+        assert!(state.mark_stale_if_needed(
             activated_at + Duration::from_secs(10) + Duration::from_nanos(1)
         ));
-        assert!(controller.is_stale);
+        assert!(state.is_stale);
 
         let recovered_at = activated_at + Duration::from_secs(11);
-        let update = controller.apply_policy_rate(recovered_at, PolicyRate::new(10));
+        let update = state.apply_policy_rate(recovered_at, PolicyRate::new(10));
 
         assert!(matches!(
             update,
-            Ok(ControllerUpdate {
+            Ok(RateUpdate {
                 changed: false,
                 recovered: true,
                 ..
             })
         ));
-        assert!(!controller.is_stale);
-        assert_eq!(controller.last_success_at, recovered_at);
+        assert!(!state.is_stale);
+        assert_eq!(state.last_success_at, recovered_at);
     }
 
-    #[tokio::test(start_paused = true)]
-    async fn controller_loop_retains_fallback_on_policy_failure() {
-        let controller = controller_with_policy(
+    #[test]
+    fn service_status_reports_current_rate_and_freshness() {
+        let mut state = service_state_with_policy(ScriptedPolicy::new([]), service_config(10));
+        let stale_at = state.last_success_at + state.stale_after + Duration::from_nanos(1);
+        assert!(state.mark_stale_if_needed(stale_at));
+
+        assert_eq!(
+            DaFeeRateService::get_status(&state),
+            DaFeeRateStatus {
+                current_rate_wei_per_byte: 10,
+                is_stale: true,
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn service_tick_retains_fallback_on_policy_failure() {
+        let mut state = service_state_with_policy(
             ScriptedPolicy::new([Err("unavailable")]),
-            controller_config(10),
+            service_config(10),
         );
-        let handle = controller.handle.clone();
-        let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let task = tokio::spawn(controller.run(TestShutdownGuard { shutdown_rx }));
 
-        yield_now().await;
-        assert_eq!(handle.current_rate(), 10);
+        let response = DaFeeRateService::process_input(&mut state, ())
+            .await
+            .unwrap();
 
-        shutdown_tx.send(true).unwrap();
-        task.await.unwrap().unwrap();
+        assert_eq!(response, Response::Continue);
+        assert_eq!(state.handle.current_rate(), 10);
     }
 
     #[tokio::test(start_paused = true)]
-    async fn controller_loop_fetches_immediately_and_stops_cleanly() {
-        let controller = controller_with_policy(
+    async fn service_tick_marks_stale_after_failed_fetch() {
+        let mut state = service_state_with_policy(
+            ScriptedPolicy::new([Err("unavailable")]),
+            service_config(10),
+        );
+        advance(Duration::from_secs(10) + Duration::from_nanos(1)).await;
+
+        let response = DaFeeRateService::process_input(&mut state, ())
+            .await
+            .unwrap();
+
+        assert_eq!(response, Response::Continue);
+        assert_eq!(state.handle.current_rate(), 10);
+        assert!(state.is_stale);
+    }
+
+    #[tokio::test]
+    async fn service_tick_publishes_successful_fetch() {
+        let mut state = service_state_with_policy(
             ScriptedPolicy::new([Ok(PolicyRate::new(23))]),
-            controller_config(10),
+            service_config(10),
         );
-        let handle = controller.handle.clone();
-        let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let task = tokio::spawn(controller.run(TestShutdownGuard { shutdown_rx }));
 
-        yield_now().await;
-        assert_eq!(handle.current_rate(), 23);
+        let response = DaFeeRateService::process_input(&mut state, ())
+            .await
+            .unwrap();
 
-        shutdown_tx.send(true).unwrap();
-        task.await.unwrap().unwrap();
+        assert_eq!(response, Response::Continue);
+        assert_eq!(state.handle.current_rate(), 23);
     }
 
     #[tokio::test(start_paused = true)]
-    async fn controller_loop_times_out_without_replacing_fallback() {
-        let config = controller_config(10).with_fetch_timeout(Duration::from_secs(2));
-        let controller = controller_with_policy(PendingPolicy, config);
-        let handle = controller.handle.clone();
-        let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let task = tokio::spawn(controller.run(TestShutdownGuard { shutdown_rx }));
+    async fn service_tick_times_out_without_replacing_fallback() {
+        let config = service_config(10).with_fetch_timeout(Duration::from_secs(2));
+        let mut state = service_state_with_policy(PendingPolicy, config);
+        let task = tokio::spawn(async move {
+            let response = DaFeeRateService::process_input(&mut state, ()).await;
+            (response, state.handle.current_rate())
+        });
 
         yield_now().await;
         advance(Duration::from_secs(2)).await;
-        yield_now().await;
-        assert_eq!(handle.current_rate(), 10);
+        let (response, current_rate) = task.await.unwrap();
 
-        shutdown_tx.send(true).unwrap();
-        task.await.unwrap().unwrap();
+        assert_eq!(response.unwrap(), Response::Continue);
+        assert_eq!(current_rate, 10);
+    }
+
+    #[tokio::test]
+    async fn service_start_fetches_immediately_and_stops_cleanly() {
+        let state = service_state_with_policy(
+            ScriptedPolicy::new([Ok(PolicyRate::new(23))]),
+            service_config(10),
+        );
+        let executor = TestExecutor::default();
+
+        let service_handle = start(state, &executor).await.unwrap();
+        let rate_handle = service_handle.rate_handle();
+        timeout(Duration::from_secs(1), async {
+            while rate_handle.current_rate() != 23 {
+                yield_now().await;
+            }
+        })
+        .await
+        .expect("service should process its immediate first tick");
+
+        assert!(service_handle.stop());
+        executor.join().await.unwrap();
     }
 }
