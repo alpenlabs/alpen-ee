@@ -16,9 +16,12 @@ use alloy_primitives::{address, Address};
 use alpen_ee_ol_tracker::EpochTrackingMode;
 #[cfg(feature = "sequencer")]
 use alpen_ee_params::AlpenParams;
-use serde::{de::Error as DeError, Deserialize, Deserializer, Serialize};
+use serde::{de::Error as DeError, Deserialize, Deserializer, Serialize, Serializer};
 use strata_config::{btcio::L1FeePolicyConfig, BitcoindConfig};
 use strata_primitives::{buf::Buf32, L1Height};
+
+#[cfg(feature = "sequencer")]
+use crate::sequencer::da_fee_rate::validate_config;
 
 // Applied when the matching TOML field is omitted.
 const DEFAULT_HEALTH_CHECK_HOST: &str = "0.0.0.0";
@@ -295,6 +298,138 @@ pub(crate) struct FullNodeConfig {
     pub(crate) sequencer_http_url: Option<String>,
 }
 
+/// Selects the source that recommends the sequencer's DA fee rate.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum DaFeeRatePolicyConfig {
+    /// Reuses the Bitcoin writer's configured L1 fee policy.
+    WriterBacked,
+    /// Returns one operator-configured rate without consulting Bitcoin.
+    Fixed { rate_wei_per_byte: u64 },
+}
+
+/// Validated contents of `[sequencer.da_fee_rate]`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct DaFeeRateConfig {
+    /// Chooses the policy that supplies unadjusted rate recommendations.
+    pub(crate) policy: DaFeeRatePolicyConfig,
+    /// Seeds the controller until its first successful policy fetch.
+    pub(crate) fallback_policy_rate_wei_per_byte: u64,
+    /// Controls how often the selected policy is queried.
+    pub(crate) refresh_interval_seconds: NonZeroU64,
+    /// Marks a dynamic rate stale after this long without a successful fetch.
+    pub(crate) stale_after_seconds: NonZeroU64,
+    /// Scales policy rates in basis points before applying the offset.
+    pub(crate) multiplier_bps: u64,
+    /// Adds a fixed wei-per-byte amount after scaling.
+    pub(crate) offset_wei_per_byte: u64,
+}
+
+/// Serde representation of [`DaFeeRateConfig`].
+///
+/// The checked runtime type uses an enum so `fixed_rate_wei_per_byte` cannot
+/// exist for a writer-backed policy and cannot be absent for a fixed policy.
+#[derive(Serialize, Deserialize)]
+struct DaFeeRateConfigFile {
+    #[serde(default)]
+    policy: DaFeeRatePolicyTag,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fixed_rate_wei_per_byte: Option<u64>,
+    fallback_policy_rate_wei_per_byte: u64,
+    refresh_interval_seconds: NonZeroU64,
+    stale_after_seconds: NonZeroU64,
+    #[serde(default = "default_da_fee_rate_multiplier_bps")]
+    multiplier_bps: u64,
+    #[serde(default)]
+    offset_wei_per_byte: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum DaFeeRatePolicyTag {
+    #[default]
+    WriterBacked,
+    Fixed,
+}
+
+const fn default_da_fee_rate_multiplier_bps() -> u64 {
+    10_000
+}
+
+impl TryFrom<DaFeeRateConfigFile> for DaFeeRateConfig {
+    type Error = String;
+
+    fn try_from(raw: DaFeeRateConfigFile) -> Result<Self, Self::Error> {
+        let policy = match (raw.policy, raw.fixed_rate_wei_per_byte) {
+            (DaFeeRatePolicyTag::WriterBacked, None) => DaFeeRatePolicyConfig::WriterBacked,
+            (DaFeeRatePolicyTag::WriterBacked, Some(_)) => {
+                return Err(
+                    "fixed_rate_wei_per_byte is only valid when policy = \"fixed\"".to_owned(),
+                );
+            }
+            (DaFeeRatePolicyTag::Fixed, Some(rate_wei_per_byte)) => {
+                DaFeeRatePolicyConfig::Fixed { rate_wei_per_byte }
+            }
+            (DaFeeRatePolicyTag::Fixed, None) => {
+                return Err(
+                    "fixed_rate_wei_per_byte is required when policy = \"fixed\"".to_owned(),
+                );
+            }
+        };
+        if raw.stale_after_seconds < raw.refresh_interval_seconds {
+            return Err("stale_after_seconds must be at least refresh_interval_seconds".to_owned());
+        }
+
+        Ok(Self {
+            policy,
+            fallback_policy_rate_wei_per_byte: raw.fallback_policy_rate_wei_per_byte,
+            refresh_interval_seconds: raw.refresh_interval_seconds,
+            stale_after_seconds: raw.stale_after_seconds,
+            multiplier_bps: raw.multiplier_bps,
+            offset_wei_per_byte: raw.offset_wei_per_byte,
+        })
+    }
+}
+
+impl From<&DaFeeRateConfig> for DaFeeRateConfigFile {
+    fn from(config: &DaFeeRateConfig) -> Self {
+        let (policy, fixed_rate_wei_per_byte) = match config.policy {
+            DaFeeRatePolicyConfig::WriterBacked => (DaFeeRatePolicyTag::WriterBacked, None),
+            DaFeeRatePolicyConfig::Fixed { rate_wei_per_byte } => {
+                (DaFeeRatePolicyTag::Fixed, Some(rate_wei_per_byte))
+            }
+        };
+        Self {
+            policy,
+            fixed_rate_wei_per_byte,
+            fallback_policy_rate_wei_per_byte: config.fallback_policy_rate_wei_per_byte,
+            refresh_interval_seconds: config.refresh_interval_seconds,
+            stale_after_seconds: config.stale_after_seconds,
+            multiplier_bps: config.multiplier_bps,
+            offset_wei_per_byte: config.offset_wei_per_byte,
+        }
+    }
+}
+
+impl Serialize for DaFeeRateConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        DaFeeRateConfigFile::from(self).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for DaFeeRateConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        DaFeeRateConfigFile::deserialize(deserializer)?
+            .try_into()
+            .map_err(DeError::custom)
+    }
+}
+
 // The `sequencer` feature gate sits on `SequencerMode`, not on this struct or its fields.
 // The definition stays unconditional because `AlpenClientConfigFile` names it in every build,
 // the same way it names `BitcoindConfig` and `L1FeePolicyConfig`. A slim build can therefore
@@ -339,6 +474,8 @@ pub(crate) struct SequencerConfig {
     pub(crate) bitcoind: BitcoindConfig,
     /// `[sequencer.l1_fee_policy]` — reused verbatim from `strata_config::btcio`.
     pub(crate) l1_fee_policy: L1FeePolicyConfig,
+    /// `[sequencer.da_fee_rate]` — policy selection and controller timing.
+    pub(crate) da_fee_rate: DaFeeRateConfig,
 }
 
 // Only the sequencer path calls these, so they can be gated even though the
@@ -416,6 +553,7 @@ impl TryFrom<AlpenClientConfigFile> for AlpenClientConfig {
                     let seq = raw.sequencer.ok_or_else(|| {
                         eyre::eyre!("[sequencer] table required when mode = \"sequencer\"")
                     })?;
+                    validate_config(&seq.da_fee_rate)?;
                     NodeMode::Sequencer(SequencerMode {
                         config: seq,
                         l1_reorg_safe_depth: raw.l1_reorg_safe_depth,
@@ -581,6 +719,10 @@ mod tests {
             network = "regtest"
             [sequencer.l1_fee_policy]
             fee_policy = "bitcoind"
+            [sequencer.da_fee_rate]
+            fallback_policy_rate_wei_per_byte = 0
+            refresh_interval_seconds = 60
+            stale_after_seconds = 300
         "#;
         let err = AlpenClientConfig::from_toml_str(full_node_with_sequencer).unwrap_err();
         assert!(err.to_string().contains("[sequencer] table"), "{err}");
@@ -603,6 +745,10 @@ mod tests {
             network = "regtest"
             [sequencer.l1_fee_policy]
             fee_policy = "bitcoind"
+            [sequencer.da_fee_rate]
+            fallback_policy_rate_wei_per_byte = 0
+            refresh_interval_seconds = 60
+            stale_after_seconds = 300
         "#;
         let err = AlpenClientConfig::from_toml_str(sequencer_with_full_node).unwrap_err();
         assert!(err.to_string().contains("[full_node] table"), "{err}");
@@ -643,6 +789,161 @@ mod tests {
         assert_eq!(seq.config.blocktime_ms.get(), 5_000);
         assert_eq!(seq.config.batch_sealing_block_count, 100);
         assert_eq!(seq.config.chunk_sealing_block_count(), 100);
+        assert_eq!(
+            seq.config.da_fee_rate.policy,
+            DaFeeRatePolicyConfig::WriterBacked
+        );
+        assert_eq!(seq.config.da_fee_rate.multiplier_bps, 10_000);
+        assert_eq!(seq.config.da_fee_rate.offset_wei_per_byte, 0);
+    }
+
+    #[test]
+    fn da_fee_rate_policy_shape_is_checked_during_deserialization() {
+        let fixed: DaFeeRateConfig = toml::from_str(
+            r#"
+            policy = "fixed"
+            fixed_rate_wei_per_byte = 17
+            fallback_policy_rate_wei_per_byte = 11
+            refresh_interval_seconds = 5
+            stale_after_seconds = 10
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            fixed.policy,
+            DaFeeRatePolicyConfig::Fixed {
+                rate_wei_per_byte: 17
+            }
+        );
+
+        for (config, expected) in [
+            (
+                r#"
+                policy = "fixed"
+                fallback_policy_rate_wei_per_byte = 11
+                refresh_interval_seconds = 5
+                stale_after_seconds = 10
+                "#,
+                "fixed_rate_wei_per_byte is required",
+            ),
+            (
+                r#"
+                policy = "writer_backed"
+                fixed_rate_wei_per_byte = 17
+                fallback_policy_rate_wei_per_byte = 11
+                refresh_interval_seconds = 5
+                stale_after_seconds = 10
+                "#,
+                "fixed_rate_wei_per_byte is only valid",
+            ),
+            (
+                r#"
+                policy = "writer_backed"
+                fallback_policy_rate_wei_per_byte = 11
+                refresh_interval_seconds = 10
+                stale_after_seconds = 5
+                "#,
+                "stale_after_seconds must be at least",
+            ),
+        ] {
+            let error = toml::from_str::<DaFeeRateConfig>(config).unwrap_err();
+            assert!(error.to_string().contains(expected), "{error}");
+        }
+    }
+
+    #[test]
+    fn da_fee_rate_nonzero_and_policy_values_are_checked_by_serde() {
+        for (name, config) in [
+            (
+                "refresh_interval_seconds",
+                r#"
+                policy = "writer_backed"
+                fallback_policy_rate_wei_per_byte = 11
+                refresh_interval_seconds = 0
+                stale_after_seconds = 10
+                "#,
+            ),
+            (
+                "stale_after_seconds",
+                r#"
+                policy = "writer_backed"
+                fallback_policy_rate_wei_per_byte = 11
+                refresh_interval_seconds = 5
+                stale_after_seconds = 0
+                "#,
+            ),
+            (
+                "policy",
+                r#"
+                policy = "unsupported"
+                fallback_policy_rate_wei_per_byte = 11
+                refresh_interval_seconds = 5
+                stale_after_seconds = 10
+                "#,
+            ),
+        ] {
+            assert!(toml::from_str::<DaFeeRateConfig>(config).is_err(), "{name}");
+        }
+    }
+
+    #[cfg(feature = "sequencer")]
+    #[test]
+    fn configured_startup_rates_must_fit_after_adjustment() {
+        fn with_da_fee_rate(table: &str) -> String {
+            let prefix = SEQUENCER_TOML
+                .split_once("[sequencer.da_fee_rate]")
+                .expect("fixture contains DA fee-rate config")
+                .0;
+            format!("{prefix}[sequencer.da_fee_rate]\n{table}")
+        }
+
+        let fallback_overflow = with_da_fee_rate(
+            r#"
+            policy = "writer_backed"
+            fallback_policy_rate_wei_per_byte = 9223372036854775807
+            refresh_interval_seconds = 5
+            stale_after_seconds = 10
+            multiplier_bps = 20001
+            "#,
+        );
+        let error = AlpenClientConfig::from_toml_str(&fallback_overflow).unwrap_err();
+        assert!(error.to_string().contains("fallback"), "{error}");
+
+        let fixed_overflow = with_da_fee_rate(
+            r#"
+            policy = "fixed"
+            fixed_rate_wei_per_byte = 9223372036854775807
+            fallback_policy_rate_wei_per_byte = 0
+            refresh_interval_seconds = 5
+            stale_after_seconds = 10
+            multiplier_bps = 20001
+            "#,
+        );
+        let error = AlpenClientConfig::from_toml_str(&fixed_overflow).unwrap_err();
+        assert!(error.to_string().contains("fixed"), "{error}");
+    }
+
+    #[cfg(feature = "sequencer")]
+    #[test]
+    fn da_fee_rate_table_is_required_and_rejects_unknown_fields() {
+        let without_table = SEQUENCER_TOML
+            .split_once("[sequencer.da_fee_rate]")
+            .expect("fixture contains DA fee-rate config")
+            .0;
+        let error = AlpenClientConfig::from_toml_str(without_table).unwrap_err();
+        assert!(error.to_string().contains("da_fee_rate"), "{error}");
+
+        let with_unknown = SEQUENCER_TOML.replace(
+            "stale_after_seconds = 300",
+            "stale_after_seconds = 300\nrefresh_intervals_seconds = 5",
+        );
+        let error = AlpenClientConfig::from_toml_str(&with_unknown).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("sequencer.da_fee_rate.refresh_intervals_seconds"),
+            "{error}"
+        );
     }
 
     /// Each backend names only its own fields, so serde rejects a config
@@ -666,6 +967,10 @@ mod tests {
                 network = "regtest"
                 [sequencer.l1_fee_policy]
                 fee_policy = "bitcoind"
+                [sequencer.da_fee_rate]
+                fallback_policy_rate_wei_per_byte = 0
+                refresh_interval_seconds = 60
+                stale_after_seconds = 300
             "#
             )
         }
@@ -756,6 +1061,10 @@ mod tests {
             network = "regtest"
             [sequencer.l1_fee_policy]
             fee_policy = "bitcoind"
+            [sequencer.da_fee_rate]
+            fallback_policy_rate_wei_per_byte = 0
+            refresh_interval_seconds = 60
+            stale_after_seconds = 300
         "#;
         let err = AlpenClientConfig::from_toml_str(toml).unwrap_err();
         assert!(err.to_string().contains("ol_submit_url"));
@@ -809,6 +1118,10 @@ mod tests {
                 network = "regtest"
                 [sequencer.l1_fee_policy]
                 fee_policy = "bitcoind"
+                [sequencer.da_fee_rate]
+                fallback_policy_rate_wei_per_byte = 0
+                refresh_interval_seconds = 60
+                stale_after_seconds = 300
             "#
             );
             let err = AlpenClientConfig::from_toml_str(&toml)
@@ -838,6 +1151,10 @@ mod tests {
             network = "regtest"
             [sequencer.l1_fee_policy]
             fee_policy = "fixed"
+            [sequencer.da_fee_rate]
+            fallback_policy_rate_wei_per_byte = 0
+            refresh_interval_seconds = 60
+            stale_after_seconds = 300
         "#;
         let err = toml::from_str::<AlpenClientConfigFile>(toml).unwrap_err();
         assert!(err.to_string().contains("fixed_fee_rate") || err.to_string().contains("missing"));

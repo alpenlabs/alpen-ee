@@ -30,3 +30,9 @@ network = "regtest"
 [sequencer.l1_fee_policy]
 fee_policy = "fixed"
 fixed_fee_rate = 1.0
+
+[sequencer.da_fee_rate]
+policy = "writer_backed"
+fallback_policy_rate_wei_per_byte = 10000000000
+refresh_interval_seconds = 60
+stale_after_seconds = 300

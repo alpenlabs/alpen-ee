@@ -24,8 +24,6 @@ use reth_evm::{eth::EthEvmContext, Database};
 use revm::state::EvmState;
 use revm_primitives::{Bytes, KECCAK_EMPTY, U256};
 
-use crate::utils::WEI_PER_SAT;
-
 // The constants below are deliberate **upper bounds** on the DA-encoded size of each
 // field (`statediff` `AccountDiff` / `StorageDiff` and their codecs). The DA charge must
 // never *underestimate* the bytes a transaction pushes to L1 — undercharging means the
@@ -175,35 +173,6 @@ pub fn da_rate_from_extra_data(extra_data: &Bytes) -> u64 {
     HeaderExtra::decode(extra_data)
         .map(|extra| extra.da_rate())
         .unwrap_or(0)
-}
-
-/// SegWit witness discount: DA payload rides in witness data, weighted at 1/4 of a vByte.
-const SEGWIT_WITNESS_DIVISOR: u64 = 4;
-
-/// Default Bitcoin fee rate (sat/vByte) the live DA rate is seeded from when no explicit
-/// `ALPEN_DA_RATE_WEI_PER_BYTE` override is set.
-///
-/// 4 sat/vByte is a conservative normal-conditions rate; after the SegWit witness discount
-/// it is exactly 1 satoshi per DA byte. It is only a seed — the live rate is expected to
-/// track the sequencer's actual Bitcoin fee rate later (see [`btc_fee_rate_to_da_rate`]).
-pub const DEFAULT_DA_BTC_FEE_RATE_SAT_PER_VBYTE: u64 = 4;
-
-/// Default live DA rate (wei per DA byte): [`DEFAULT_DA_BTC_FEE_RATE_SAT_PER_VBYTE`] mapped
-/// through the SegWit witness discount (`WEI_PER_SAT` wei, i.e. 1 sat per DA byte).
-pub const DEFAULT_DA_RATE_WEI_PER_BYTE: u64 =
-    DEFAULT_DA_BTC_FEE_RATE_SAT_PER_VBYTE * WEI_PER_SAT / SEGWIT_WITNESS_DIVISOR;
-
-/// Converts a Bitcoin fee rate (satoshis per virtual byte) to the DA rate (wei per byte).
-///
-/// `da_rate = btc_fee_rate[sat/vB] * 10^10[wei/sat] / 4` (the SegWit witness discount).
-///
-/// NOTE: for now this reuses the sequencer's Bitcoin publication fee rate
-/// (`btcio::writer::fees::resolve_fee_rate`). The DA fee-model rate is expected to be
-/// decoupled from the publication rate — and smoothed/cached — in a later revision.
-pub fn btc_fee_rate_to_da_rate(sat_per_vbyte: u64) -> u64 {
-    sat_per_vbyte
-        .saturating_mul(WEI_PER_SAT)
-        .saturating_div(SEGWIT_WITNESS_DIVISOR)
 }
 
 /// Computes the DA fee to charge, bounded by the caller's unused authorized gas value.

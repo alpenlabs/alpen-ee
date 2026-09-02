@@ -17,6 +17,7 @@ use tokio::time::{interval, timeout, Instant, MissedTickBehavior};
 use tracing::{debug, info, warn};
 
 use super::bitcoin_fee_rate::resolve_fee_rate;
+use crate::config::{DaFeeRateConfig, DaFeeRatePolicyConfig};
 
 const BASIS_POINTS_DENOMINATOR: u128 = 10_000;
 const POLICY_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
@@ -108,6 +109,29 @@ impl Default for RateAdjustment {
 pub(crate) enum RateAdjustmentError {
     #[error("adjusted DA fee rate exceeds u64: {0}")]
     Overflow(u128),
+}
+
+/// Reports a configured startup rate that cannot be adjusted into [`u64`].
+#[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
+pub(crate) enum DaFeeRateConfigError {
+    #[error("adjusted fallback DA fee rate is invalid")]
+    InvalidFallback(#[source] RateAdjustmentError),
+    #[error("adjusted fixed DA fee rate is invalid")]
+    InvalidFixedRate(#[source] RateAdjustmentError),
+}
+
+/// Checks every configured rate that is known at startup.
+pub(crate) fn validate_config(config: &DaFeeRateConfig) -> Result<(), DaFeeRateConfigError> {
+    let adjustment = RateAdjustment::new(config.multiplier_bps, config.offset_wei_per_byte);
+    adjustment
+        .apply(PolicyRate::new(config.fallback_policy_rate_wei_per_byte))
+        .map_err(DaFeeRateConfigError::InvalidFallback)?;
+    if let DaFeeRatePolicyConfig::Fixed { rate_wei_per_byte } = config.policy {
+        adjustment
+            .apply(PolicyRate::new(rate_wei_per_byte))
+            .map_err(DaFeeRateConfigError::InvalidFixedRate)?;
+    }
+    Ok(())
 }
 
 /// Returns one configured policy rate without consulting an external source.
@@ -301,13 +325,6 @@ impl DaFeeRateController {
     }
 
     /// Starts the supervised refresh loop and returns its read-only rate handle.
-    #[cfg_attr(
-        test,
-        expect(
-            dead_code,
-            reason = "called by sequencer integration in a later checkpoint"
-        )
-    )]
     pub(crate) fn start<E>(mut self, executor: &E) -> DaFeeRateHandle
     where
         E: AsyncExecutor,
@@ -430,9 +447,35 @@ impl DaFeeRateController {
     }
 }
 
+/// Builds the configured controller without starting its refresh loop.
+pub(crate) fn controller_from_config(
+    config: &DaFeeRateConfig,
+    btc_client: Arc<BtcClient>,
+    writer_fee_policy_config: L1FeePolicyConfig,
+) -> Result<DaFeeRateController, DaFeeRateControllerError> {
+    let policy: Box<dyn DaFeeRatePolicy> = match config.policy {
+        DaFeeRatePolicyConfig::WriterBacked => Box::new(WriterBackedDaFeeRatePolicy::new(
+            btc_client,
+            writer_fee_policy_config,
+        )),
+        DaFeeRatePolicyConfig::Fixed { rate_wei_per_byte } => {
+            Box::new(FixedDaFeeRatePolicy::new(rate_wei_per_byte))
+        }
+    };
+    let adjustment = RateAdjustment::new(config.multiplier_bps, config.offset_wei_per_byte);
+    let controller_config = DaFeeRateControllerConfig::new(
+        PolicyRate::new(config.fallback_policy_rate_wei_per_byte),
+        adjustment,
+        Duration::from_secs(config.refresh_interval_seconds.get()),
+        Duration::from_secs(config.stale_after_seconds.get()),
+    );
+
+    DaFeeRateController::new(policy, controller_config)
+}
+
 #[cfg(test)]
 mod tests {
-    use std::{collections::VecDeque, future::pending, sync::Mutex};
+    use std::{collections::VecDeque, future::pending, num::NonZeroU64, sync::Mutex};
 
     use bitcoind_async_client::{corepc_types::bitcoin::FeeRate, Auth};
     use strata_config::btcio::{FeePolicy, MempoolExplorerFeePolicy};
@@ -529,6 +572,30 @@ mod tests {
             .map(AdjustedRate::wei_per_byte)
     }
 
+    fn configured_rate(policy: DaFeeRatePolicyConfig) -> DaFeeRateConfig {
+        DaFeeRateConfig {
+            policy,
+            fallback_policy_rate_wei_per_byte: 5,
+            refresh_interval_seconds: NonZeroU64::new(7).unwrap(),
+            stale_after_seconds: NonZeroU64::new(21).unwrap(),
+            multiplier_bps: 15_000,
+            offset_wei_per_byte: 3,
+        }
+    }
+
+    fn disconnected_bitcoin_client() -> Arc<BtcClient> {
+        Arc::new(
+            BtcClient::new(
+                "http://127.0.0.1:1".to_string(),
+                Auth::UserPass("test-user".to_string(), "test-password".to_string()),
+                Some(1),
+                Some(0),
+                Some(1),
+            )
+            .expect("test Bitcoin client should be constructed"),
+        )
+    }
+
     #[test]
     fn default_adjustment_is_identity() {
         assert_eq!(
@@ -572,6 +639,47 @@ mod tests {
         let policy = FixedDaFeeRatePolicy::new(73);
 
         assert_eq!(policy.fetch_rate().await.unwrap().wei_per_byte(), 73);
+    }
+
+    #[tokio::test]
+    async fn fixed_config_builds_controller_with_adjusted_fallback_and_policy() {
+        let config = configured_rate(DaFeeRatePolicyConfig::Fixed {
+            rate_wei_per_byte: 7,
+        });
+        let controller = controller_from_config(
+            &config,
+            disconnected_bitcoin_client(),
+            L1FeePolicyConfig::new(FeePolicy::Fixed {
+                fee_rate: FeeRate::from_sat_per_kwu(1),
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(controller.handle.current_rate(), 11);
+        assert_eq!(controller.refresh_interval, Duration::from_secs(7));
+        assert_eq!(controller.stale_after, Duration::from_secs(21));
+        assert_eq!(
+            controller.policy.fetch_rate().await.unwrap(),
+            PolicyRate::new(7)
+        );
+    }
+
+    #[tokio::test]
+    async fn writer_backed_config_reuses_writer_fee_policy() {
+        let config = configured_rate(DaFeeRatePolicyConfig::WriterBacked);
+        let controller = controller_from_config(
+            &config,
+            disconnected_bitcoin_client(),
+            L1FeePolicyConfig::new(FeePolicy::Fixed {
+                fee_rate: FeeRate::from_sat_per_kwu(125),
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(
+            controller.policy.fetch_rate().await.unwrap(),
+            PolicyRate::new(1_250_000_000)
+        );
     }
 
     #[test]
