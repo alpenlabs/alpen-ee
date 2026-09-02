@@ -32,10 +32,7 @@ mod prover;
 mod provers;
 mod services;
 
-use std::{
-    env,
-    sync::{atomic::AtomicU64, Arc},
-};
+use std::{env, sync::Arc};
 
 use alpen_ee_common::{require_latest_batch, BlockNumHash, SequencerOLClient};
 use alpen_ee_database::{EeDb, EeNodeStorage, SequencerDatabases};
@@ -60,7 +57,7 @@ use alpen_reth_evm::{da_fee::DEFAULT_DA_RATE_WEI_PER_BYTE, evm::AlpenEvmFactory}
 use alpen_reth_exex::{AccessedStateGenerator, StateDiffGenerator};
 use alpen_reth_node::{
     AlpenEngineTypes, AlpenEthereumNode, AlpenGossipProtocolHandler, AlpenGossipState,
-    AlpenNodeMode,
+    AlpenNodeMode, DaFeeRateHandle,
 };
 use alpen_reth_rpc::AlpenFeeApiServer;
 use bitcoind_async_client::corepc_types::bitcoin::{
@@ -293,12 +290,12 @@ pub(crate) async fn run(
     let policy = FixedDaFeeRatePolicy::new(da_rate_seed);
     let policy_rate = policy.fetch_rate().await?;
     let adjusted_rate = RateAdjustment::default().apply(policy_rate)?;
-    let live_da_rate = Arc::new(AtomicU64::new(adjusted_rate.wei_per_byte()));
+    let da_fee_rate_handle = DaFeeRateHandle::fixed(adjusted_rate.wei_per_byte());
     let node = AlpenEthereumNode::new(
         evm_factory,
         common.params.evm_spec().clone(),
         AlpenNodeMode::sequencer(),
-        live_da_rate,
+        da_fee_rate_handle,
     );
 
     let consensus_watcher = common.ol_tracker.consensus_watcher();
