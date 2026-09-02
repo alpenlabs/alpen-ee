@@ -147,3 +147,4 @@ zkaleido-sp1-groth16-verifier = { workspace = true, optional = true }
 
 [dev-dependencies]
 proptest.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
