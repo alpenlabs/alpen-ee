@@ -8,7 +8,21 @@
 //! brings up the DA/btcio pipeline, the provers, and the batch/chunk
 //! builders.
 
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "fee-rate controller integration is added in a later checkpoint"
+    )
+)]
 mod bitcoin_fee_rate;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "fee-rate controller integration is added in a later checkpoint"
+    )
+)]
 mod da_fee_rate;
 mod da_pipeline;
 mod gas_data_provider;
