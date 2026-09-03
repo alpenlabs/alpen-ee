@@ -9,7 +9,7 @@ use strata_service::{
 use tokio::time::{timeout, Instant};
 use tracing::{debug, info, warn};
 
-use super::state::{DaFeeRateServiceState, RateUpdate, RefreshError};
+use super::state::{DaFeeRateServiceState, RateUpdate, RefreshError, POLICY_FETCH_TIMEOUT};
 
 /// Runs [`DaFeeRateServiceState`] from periodic framework ticks.
 #[derive(Debug)]
@@ -107,7 +107,7 @@ impl Service for DaFeeRateService {
 
 impl AsyncService for DaFeeRateService {
     async fn process_input(state: &mut Self::State, _input: Self::Msg) -> anyhow::Result<Response> {
-        let fetch_result = match timeout(state.fetch_timeout, state.policy.fetch_rate()).await {
+        let fetch_result = match timeout(POLICY_FETCH_TIMEOUT, state.policy.fetch_rate()).await {
             Ok(result) => result.map_err(RefreshError::Policy),
             Err(_) => Err(RefreshError::Timeout),
         };

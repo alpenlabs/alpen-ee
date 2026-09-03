@@ -546,10 +546,10 @@ mod tests {
     use crate::{da_fee_rate_channel, payload::AlpenPayloadAttributes};
 
     #[test]
-    fn payload_attempt_samples_current_rate_and_freezes_it() {
+    fn payload_attempts_sample_the_rate_independently() {
         const INITIAL_RATE: u64 = 17;
-        const ATTEMPT_RATE: u64 = 29;
-        const LATER_RATE: u64 = 41;
+        const FIRST_ATTEMPT_RATE: u64 = 29;
+        const SECOND_ATTEMPT_RATE: u64 = 41;
 
         let evm_spec: EvmSpec =
             serde_json::from_str(r#"{"config":{"chainId":2892,"shanghaiTime":0}}"#)
@@ -563,33 +563,43 @@ mod tests {
             EthereumBuilderConfig::default(),
             handle,
         );
-        let parent = SealedHeader::seal_slow(Header {
+        let parent = Arc::new(SealedHeader::seal_slow(Header {
             gas_limit: 30_000_000,
             base_fee_per_gas: Some(7),
             ..Default::default()
-        });
-        let attributes = AlpenPayloadBuilderAttributes::try_new(
-            parent.hash(),
-            AlpenPayloadAttributes::new_from_eth(
-                EthPayloadAttributes {
-                    timestamp: 1,
-                    withdrawals: Some(Vec::new()),
-                    ..Default::default()
-                },
-                AlpenSpecId::V0,
-            ),
-            0,
-        )
-        .expect("payload attributes are valid");
+        }));
+        let attributes = |timestamp| {
+            AlpenPayloadBuilderAttributes::try_new(
+                parent.hash(),
+                AlpenPayloadAttributes::new_from_eth(
+                    EthPayloadAttributes {
+                        timestamp,
+                        withdrawals: Some(Vec::new()),
+                        ..Default::default()
+                    },
+                    AlpenSpecId::V0,
+                ),
+                0,
+            )
+            .expect("payload attributes are valid")
+        };
 
-        updater.publish(ATTEMPT_RATE);
-        let payload = builder
-            .build_empty_payload(PayloadConfig::new(Arc::new(parent), attributes))
+        updater.publish(FIRST_ATTEMPT_RATE);
+        let first_payload = builder
+            .build_empty_payload(PayloadConfig::new(parent.clone(), attributes(1)))
             .expect("empty payload builds");
-        updater.publish(LATER_RATE);
+        updater.publish(SECOND_ATTEMPT_RATE);
+        let second_payload = builder
+            .build_empty_payload(PayloadConfig::new(parent.clone(), attributes(2)))
+            .expect("empty payload builds");
 
-        let header_extra = HeaderExtra::decode(&payload.block().header().extra_data)
-            .expect("built payload carries valid header extra data");
-        assert_eq!(header_extra.da_rate(), ATTEMPT_RATE);
+        for (payload, expected_rate) in [
+            (first_payload, FIRST_ATTEMPT_RATE),
+            (second_payload, SECOND_ATTEMPT_RATE),
+        ] {
+            let header_extra = HeaderExtra::decode(&payload.block().header().extra_data)
+                .expect("built payload carries valid header extra data");
+            assert_eq!(header_extra.da_rate(), expected_rate);
+        }
     }
 }

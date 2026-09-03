@@ -5,10 +5,10 @@ use std::sync::{
     Arc,
 };
 
-/// Reads the latest controller-published DA fee rate.
+/// Reads the latest service-published DA fee rate.
 ///
 /// The handle deliberately exposes no update operation. Reading returns an
-/// owned snapshot so a later controller update cannot affect an in-progress
+/// owned snapshot so a later service update cannot affect an in-progress
 /// payload build.
 #[derive(Clone, Debug)]
 pub struct DaFeeRateHandle {
@@ -33,7 +33,7 @@ impl DaFeeRateHandle {
 
 /// Publishes rates that become visible through a [`DaFeeRateHandle`].
 ///
-/// The controller owns this capability and does not share it with payload
+/// The producing service owns this capability and does not share it with payload
 /// construction.
 #[derive(Debug)]
 pub struct DaFeeRateUpdater {
@@ -47,7 +47,7 @@ impl DaFeeRateUpdater {
     }
 }
 
-/// Creates the controller's update capability and its read-only consumer handle.
+/// Creates the service's update capability and its read-only consumer handle.
 pub fn da_fee_rate_channel(initial_rate_wei_per_byte: u64) -> (DaFeeRateUpdater, DaFeeRateHandle) {
     let current_rate = Arc::new(AtomicU64::new(initial_rate_wei_per_byte));
     (
@@ -77,17 +77,6 @@ mod tests {
         assert_eq!(updater.publish(29), 17);
         assert_eq!(handle.current_rate(), 29);
         assert_eq!(cloned_handle.current_rate(), 29);
-    }
-
-    #[test]
-    fn previously_read_snapshot_does_not_change() {
-        let (updater, handle) = da_fee_rate_channel(17);
-        let snapshot = handle.current_rate();
-
-        updater.publish(29);
-
-        assert_eq!(snapshot, 17);
-        assert_eq!(handle.current_rate(), 29);
     }
 
     #[test]
