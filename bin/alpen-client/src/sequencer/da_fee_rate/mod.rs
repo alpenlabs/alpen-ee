@@ -1,7 +1,7 @@
 //! Produces the DA fee rate used by sequencer payload builds.
 //!
 //! A policy recommends a rate in wei per DA byte. The service applies
-//! [`RateAdjustment`] and publishes the result without exposing the selected
+//! [`AffineAdjustment`] and publishes the result without exposing the selected
 //! policy to payload construction.
 
 mod service;
@@ -73,12 +73,12 @@ pub(crate) trait DaFeeRatePolicy: Send + Sync + 'static {
 
 /// Applies the operator-configured multiplier and per-byte offset.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct RateAdjustment {
+pub(crate) struct AffineAdjustment {
     multiplier_bps: u64,
     offset_wei_per_byte: u64,
 }
 
-impl RateAdjustment {
+impl AffineAdjustment {
     /// Creates an adjustment expressed in basis points and wei per DA byte.
     pub(crate) const fn new(multiplier_bps: u64, offset_wei_per_byte: u64) -> Self {
         Self {
@@ -91,18 +91,18 @@ impl RateAdjustment {
     pub(crate) fn apply(
         self,
         policy_rate: PolicyRate,
-    ) -> Result<AdjustedRate, RateAdjustmentError> {
+    ) -> Result<AdjustedRate, AffineAdjustmentError> {
         let raw_rate = policy_rate.wei_per_byte() as u128;
         let adjusted = (raw_rate * self.multiplier_bps as u128).div_ceil(BASIS_POINTS_DENOMINATOR)
             + self.offset_wei_per_byte as u128;
         adjusted
             .try_into()
             .map(AdjustedRate)
-            .map_err(|_| RateAdjustmentError::Overflow(adjusted))
+            .map_err(|_| AffineAdjustmentError::Overflow(adjusted))
     }
 }
 
-impl Default for RateAdjustment {
+impl Default for AffineAdjustment {
     fn default() -> Self {
         Self::new(10_000, 0)
     }
@@ -110,7 +110,7 @@ impl Default for RateAdjustment {
 
 /// Reports that an adjusted DA fee rate cannot be represented as [`u64`].
 #[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
-pub(crate) enum RateAdjustmentError {
+pub(crate) enum AffineAdjustmentError {
     #[error("adjusted DA fee rate exceeds u64: {0}")]
     Overflow(u128),
 }
@@ -345,8 +345,8 @@ mod tests {
         policy_rate: u64,
         multiplier_bps: u64,
         offset_wei_per_byte: u64,
-    ) -> Result<u64, RateAdjustmentError> {
-        RateAdjustment::new(multiplier_bps, offset_wei_per_byte)
+    ) -> Result<u64, AffineAdjustmentError> {
+        AffineAdjustment::new(multiplier_bps, offset_wei_per_byte)
             .apply(PolicyRate::new(policy_rate))
             .map(AdjustedRate::wei_per_byte)
     }
@@ -371,7 +371,7 @@ mod tests {
     #[test]
     fn default_adjustment_is_identity() {
         assert_eq!(
-            RateAdjustment::default()
+            AffineAdjustment::default()
                 .apply(PolicyRate::new(42))
                 .unwrap()
                 .wei_per_byte(),
@@ -394,7 +394,7 @@ mod tests {
     fn adjustment_rejects_scaled_rate_that_exceeds_u64() {
         assert!(matches!(
             adjusted_rate(u64::MAX, 10_001, 0),
-            Err(RateAdjustmentError::Overflow(_))
+            Err(AffineAdjustmentError::Overflow(_))
         ));
     }
 
@@ -402,7 +402,7 @@ mod tests {
     fn adjustment_rejects_offset_addition_that_exceeds_u64() {
         assert!(matches!(
             adjusted_rate(u64::MAX, 10_000, 1),
-            Err(RateAdjustmentError::Overflow(_))
+            Err(AffineAdjustmentError::Overflow(_))
         ));
     }
 
