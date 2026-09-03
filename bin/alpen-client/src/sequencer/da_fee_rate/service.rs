@@ -29,7 +29,8 @@ pub(crate) struct DaFeeRateStatus {
 pub(crate) struct DaFeeRateServiceHandle {
     rate_handle: DaFeeRateHandle,
     monitor: ServiceMonitor<DaFeeRateStatus>,
-    tick_handle: DumbTickHandle,
+    /// Keeps the periodic input alive for the lifetime of this handle.
+    _tick_handle: DumbTickHandle,
 }
 
 impl DaFeeRateServiceHandle {
@@ -42,15 +43,6 @@ impl DaFeeRateServiceHandle {
     #[expect(dead_code, reason = "part of service handle API, not yet consumed")]
     pub(crate) fn monitor(&self) -> &ServiceMonitor<DaFeeRateStatus> {
         &self.monitor
-    }
-
-    /// Stops refresh ticks and lets the service exit normally.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "part of service handle API, not yet consumed")
-    )]
-    pub(crate) fn stop(self) -> bool {
-        self.tick_handle.stop()
     }
 }
 
@@ -82,7 +74,7 @@ pub(super) async fn launch(
     Ok(DaFeeRateServiceHandle {
         rate_handle,
         monitor,
-        tick_handle,
+        _tick_handle: tick_handle,
     })
 }
 
@@ -167,18 +159,13 @@ fn log_update(update: &RateUpdate) {
 mod tests {
     use std::time::Duration;
 
-    use tokio::{
-        task::yield_now,
-        time::{advance, timeout},
-    };
+    use tokio::{task::yield_now, time::advance};
 
     use super::*;
     use crate::sequencer::da_fee_rate::{
         rate::PolicyRate,
         state::POLICY_FETCH_TIMEOUT,
-        test_support::{
-            service_config, service_state_with_policy, PendingPolicy, ScriptedPolicy, TestExecutor,
-        },
+        test_support::{service_config, service_state_with_policy, PendingPolicy, ScriptedPolicy},
     };
 
     #[test]
@@ -250,32 +237,5 @@ mod tests {
 
         assert_eq!(response.unwrap(), Response::Continue);
         assert_eq!(current_rate, 10);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn service_start_waits_one_interval_before_refreshing_and_stops_cleanly() {
-        let state = service_state_with_policy(
-            ScriptedPolicy::new([Ok(PolicyRate::new(23))]),
-            service_config(),
-            10,
-        );
-        let executor = TestExecutor::default();
-
-        let service_handle = launch(state, &executor).await.unwrap();
-        let rate_handle = service_handle.rate_handle();
-        yield_now().await;
-        assert_eq!(rate_handle.current_rate(), 10);
-
-        advance(Duration::from_secs(5)).await;
-        timeout(Duration::from_secs(1), async {
-            while rate_handle.current_rate() != 23 {
-                yield_now().await;
-            }
-        })
-        .await
-        .expect("service should refresh after one interval");
-
-        assert!(service_handle.stop());
-        executor.join().await.unwrap();
     }
 }

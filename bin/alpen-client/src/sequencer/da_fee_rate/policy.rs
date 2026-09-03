@@ -102,6 +102,13 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fixed_policy_returns_its_configured_rate() {
+        let policy = FixedDaFeeRatePolicy::new(73);
+
+        assert_eq!(policy.fetch_rate().await.unwrap().wei_per_byte(), 73);
+    }
+
+    #[tokio::test]
     async fn writer_policy_converts_sat_per_kwu_to_wei_per_da_byte() {
         for (sat_per_kwu, expected_wei_per_byte) in [
             (1, 10_000_000),
