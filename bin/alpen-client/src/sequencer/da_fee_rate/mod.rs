@@ -10,12 +10,14 @@ mod state;
 use std::sync::Arc;
 
 use alpen_reth_evm::WEI_PER_SAT;
+use anyhow::Context;
 use async_trait::async_trait;
 use bitcoind_async_client::Client as BtcClient;
 use strata_config::btcio::L1FeePolicyConfig;
+use strata_service::AsyncExecutor;
 use thiserror::Error;
 
-pub(crate) use self::service::start;
+pub(crate) use self::service::DaFeeRateServiceHandle;
 #[cfg(test)]
 use self::service::{DaFeeRateService, DaFeeRateStatus};
 use self::state::*;
@@ -113,21 +115,6 @@ pub(crate) enum RateAdjustmentError {
     Overflow(u128),
 }
 
-/// Reports that an adjusted fixed DA fee rate cannot be represented as [`u64`].
-#[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
-#[error("adjusted fixed DA fee rate is invalid")]
-pub(crate) struct DaFeeRateConfigError(#[source] RateAdjustmentError);
-
-/// Checks the fixed policy rate while parsing configuration.
-pub(crate) fn validate_fixed_rate(config: &DaFeeRateConfig) -> Result<(), DaFeeRateConfigError> {
-    if let DaFeeRatePolicyConfig::Fixed { rate_wei_per_byte } = config.policy() {
-        RateAdjustment::new(config.multiplier_bps(), config.offset_wei_per_byte())
-            .apply(PolicyRate::new(rate_wei_per_byte))
-            .map_err(DaFeeRateConfigError)?;
-    }
-    Ok(())
-}
-
 /// Returns one configured policy rate without consulting an external source.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct FixedDaFeeRatePolicy {
@@ -182,12 +169,13 @@ impl DaFeeRatePolicy for WriterBackedDaFeeRatePolicy {
     }
 }
 
-/// Resolves the initial configured rate and builds service state around it.
-pub(crate) async fn service_state_from_config(
+/// Resolves the initial configured rate and starts its refresh service.
+pub(crate) async fn start(
     config: &DaFeeRateConfig,
     btc_client: Arc<BtcClient>,
     writer_fee_policy_config: L1FeePolicyConfig,
-) -> Result<DaFeeRateServiceState, RateResolutionError> {
+    executor: &impl AsyncExecutor,
+) -> anyhow::Result<DaFeeRateServiceHandle> {
     let policy: Box<dyn DaFeeRatePolicy> = match config.policy() {
         DaFeeRatePolicyConfig::WriterBacked => Box::new(WriterBackedDaFeeRatePolicy::new(
             btc_client,
@@ -197,7 +185,10 @@ pub(crate) async fn service_state_from_config(
             Box::new(FixedDaFeeRatePolicy::new(rate_wei_per_byte))
         }
     };
-    DaFeeRateServiceState::initialize(policy, config).await
+    let state = DaFeeRateServiceState::initialize(policy, config)
+        .await
+        .context("failed to initialize DA fee rate")?;
+    service::launch(state, executor).await
 }
 
 #[cfg(test)]
@@ -211,7 +202,7 @@ mod tests {
 
     use bitcoind_async_client::{corepc_types::bitcoin::FeeRate, Auth};
     use strata_config::btcio::{FeePolicy, MempoolExplorerFeePolicy};
-    use strata_service::{AsyncExecutor, AsyncGuard, AsyncService, Response, Service};
+    use strata_service::{AsyncGuard, AsyncService, Response, Service};
     use tokio::{
         task::{yield_now, JoinHandle},
         time::{advance, timeout},
@@ -423,44 +414,74 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fixed_config_initializes_service_state_with_adjusted_policy_rate() {
+    async fn fixed_config_starts_with_adjusted_policy_rate() {
         let config = configured_rate(DaFeeRatePolicyConfig::Fixed {
             rate_wei_per_byte: 7,
         });
-        let state = service_state_from_config(
+        let executor = TestExecutor::default();
+        let service_handle = start(
             &config,
             disconnected_bitcoin_client(),
             L1FeePolicyConfig::new(FeePolicy::Fixed {
                 fee_rate: FeeRate::from_sat_per_kwu(1),
             }),
+            &executor,
         )
         .await
         .unwrap();
 
-        assert_eq!(state.handle.current_rate(), 14);
-        assert_eq!(state.refresh_interval, Duration::from_secs(7));
-        assert_eq!(state.stale_after, Duration::from_secs(21));
-        assert_eq!(state.policy.fetch_rate().await.unwrap(), PolicyRate::new(7));
+        assert_eq!(service_handle.rate_handle().current_rate(), 14);
+        assert!(service_handle.stop());
+        executor.join().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn fixed_config_rejects_an_adjusted_rate_that_overflows() {
+        let config = rate_config(
+            DaFeeRatePolicyConfig::Fixed {
+                rate_wei_per_byte: i64::MAX as u64,
+            },
+            5,
+            10,
+            20_001,
+            0,
+        );
+        let executor = TestExecutor::default();
+
+        let error = start(
+            &config,
+            disconnected_bitcoin_client(),
+            L1FeePolicyConfig::new(FeePolicy::Fixed {
+                fee_rate: FeeRate::from_sat_per_kwu(1),
+            }),
+            &executor,
+        )
+        .await
+        .unwrap_err();
+
+        let message = format!("{error:#}");
+        assert!(message.contains("failed to initialize"), "{message}");
+        assert!(message.contains("exceeds u64"), "{message}");
     }
 
     #[tokio::test]
     async fn writer_backed_config_reuses_writer_fee_policy() {
         let config = configured_rate(DaFeeRatePolicyConfig::WriterBacked);
-        let state = service_state_from_config(
+        let executor = TestExecutor::default();
+        let service_handle = start(
             &config,
             disconnected_bitcoin_client(),
             L1FeePolicyConfig::new(FeePolicy::Fixed {
                 fee_rate: FeeRate::from_sat_per_kwu(125),
             }),
+            &executor,
         )
         .await
         .unwrap();
 
-        assert_eq!(state.handle.current_rate(), 1_875_000_003);
-        assert_eq!(
-            state.policy.fetch_rate().await.unwrap(),
-            PolicyRate::new(1_250_000_000)
-        );
+        assert_eq!(service_handle.rate_handle().current_rate(), 1_875_000_003);
+        assert!(service_handle.stop());
+        executor.join().await.unwrap();
     }
 
     #[tokio::test]
@@ -723,7 +744,7 @@ mod tests {
         );
         let executor = TestExecutor::default();
 
-        let service_handle = start(state, &executor).await.unwrap();
+        let service_handle = service::launch(state, &executor).await.unwrap();
         let rate_handle = service_handle.rate_handle();
         yield_now().await;
         assert_eq!(rate_handle.current_rate(), 10);

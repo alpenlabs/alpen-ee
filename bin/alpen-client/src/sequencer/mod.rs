@@ -258,17 +258,14 @@ pub(crate) async fn run(
     });
     log_writer_config(&writer_config);
     let btc_client = da_pipeline::connect_bitcoin(&sequencer_config.bitcoind).await?;
-    let da_fee_rate_state = da_fee_rate::service_state_from_config(
+    let da_fee_rate_service = da_fee_rate::start(
         &sequencer_config.da_fee_rate,
         btc_client.clone(),
         sequencer_config.l1_fee_policy.clone(),
+        &common.sequencer.service_executor,
     )
     .await
-    .map_err(|error| eyre::eyre!("failed to initialize DA fee rate: {error}"))?;
-    let da_fee_rate_service =
-        da_fee_rate::start(da_fee_rate_state, &common.sequencer.service_executor)
-            .await
-            .map_err(|error| eyre::eyre!("failed to start DA fee-rate service: {error}"))?;
+    .map_err(|error| eyre::eyre!("failed to start DA fee-rate service: {error}"))?;
     let da_fee_rate_handle = da_fee_rate_service.rate_handle();
     let btcio = BtcioResources {
         client: btc_client,
