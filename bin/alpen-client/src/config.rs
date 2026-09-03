@@ -29,7 +29,7 @@ use strata_config::{
 use strata_primitives::{buf::Buf32, L1Height};
 
 #[cfg(feature = "sequencer")]
-use crate::sequencer::da_fee_rate::validate_config;
+use crate::sequencer::da_fee_rate::validate_startup_rates;
 
 // Applied when the matching TOML field is omitted.
 const DEFAULT_HEALTH_CHECK_HOST: &str = "0.0.0.0";
@@ -411,17 +411,50 @@ pub(crate) enum DaFeeRatePolicyConfig {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct DaFeeRateConfig {
     /// Chooses the policy that supplies unadjusted rate recommendations.
-    pub(crate) policy: DaFeeRatePolicyConfig,
-    /// Seeds the controller until its first successful policy fetch.
-    pub(crate) fallback_policy_rate_wei_per_byte: u64,
+    policy: DaFeeRatePolicyConfig,
+    /// Seeds the service until its first successful policy fetch.
+    fallback_policy_rate_wei_per_byte: u64,
     /// Controls how often the selected policy is queried.
-    pub(crate) refresh_interval_seconds: NonZeroU64,
+    refresh_interval_seconds: NonZeroU64,
     /// Marks a dynamic rate stale after this long without a successful fetch.
-    pub(crate) stale_after_seconds: NonZeroU64,
+    stale_after_seconds: NonZeroU64,
     /// Scales policy rates in basis points before applying the offset.
-    pub(crate) multiplier_bps: u64,
+    multiplier_bps: u64,
     /// Adds a fixed wei-per-byte amount after scaling.
-    pub(crate) offset_wei_per_byte: u64,
+    offset_wei_per_byte: u64,
+}
+
+#[cfg(feature = "sequencer")]
+impl DaFeeRateConfig {
+    /// Returns the checked policy selection.
+    pub(crate) const fn policy(&self) -> DaFeeRatePolicyConfig {
+        self.policy
+    }
+
+    /// Returns the unadjusted fallback rate in wei per DA byte.
+    pub(crate) const fn fallback_policy_rate_wei_per_byte(&self) -> u64 {
+        self.fallback_policy_rate_wei_per_byte
+    }
+
+    /// Returns the non-zero refresh interval in seconds.
+    pub(crate) const fn refresh_interval_seconds(&self) -> NonZeroU64 {
+        self.refresh_interval_seconds
+    }
+
+    /// Returns the checked stale threshold in seconds.
+    pub(crate) const fn stale_after_seconds(&self) -> NonZeroU64 {
+        self.stale_after_seconds
+    }
+
+    /// Returns the rate multiplier in basis points.
+    pub(crate) const fn multiplier_bps(&self) -> u64 {
+        self.multiplier_bps
+    }
+
+    /// Returns the post-multiplier offset in wei per DA byte.
+    pub(crate) const fn offset_wei_per_byte(&self) -> u64 {
+        self.offset_wei_per_byte
+    }
 }
 
 /// Serde representation of [`DaFeeRateConfig`].
@@ -479,14 +512,18 @@ impl TryFrom<DaFeeRateConfigFile> for DaFeeRateConfig {
             return Err("stale_after_seconds must be at least refresh_interval_seconds".to_owned());
         }
 
-        Ok(Self {
+        let config = Self {
             policy,
             fallback_policy_rate_wei_per_byte: raw.fallback_policy_rate_wei_per_byte,
             refresh_interval_seconds: raw.refresh_interval_seconds,
             stale_after_seconds: raw.stale_after_seconds,
             multiplier_bps: raw.multiplier_bps,
             offset_wei_per_byte: raw.offset_wei_per_byte,
-        })
+        };
+        #[cfg(feature = "sequencer")]
+        validate_startup_rates(&config).map_err(|error| error.to_string())?;
+
+        Ok(config)
     }
 }
 
@@ -577,7 +614,7 @@ pub(crate) struct SequencerConfig {
     /// `[sequencer.broadcaster]` — L1 transaction broadcast policy.
     #[serde(default)]
     pub(crate) broadcaster: BroadcasterConfig,
-    /// `[sequencer.da_fee_rate]` — policy selection and controller timing.
+    /// `[sequencer.da_fee_rate]` — policy selection and service timing.
     pub(crate) da_fee_rate: DaFeeRateConfig,
 }
 
@@ -675,7 +712,6 @@ impl TryFrom<AlpenClientConfigFile> for AlpenClientConfig {
                     })?;
                     seq.prover.validate()?;
                     seq.validate_l1_fee_config()?;
-                    validate_config(&seq.da_fee_rate)?;
                     NodeMode::Sequencer(SequencerMode {
                         config: seq,
                         l1_reorg_safe_depth: raw.l1_reorg_safe_depth,
