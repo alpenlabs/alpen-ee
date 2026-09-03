@@ -7,8 +7,8 @@ use thiserror::Error;
 use tokio::time::{timeout, Instant};
 
 use super::{
-    AdjustedRate, DaFeeRatePolicy, DaFeeRatePolicyError, PolicyRate, RateAdjustment,
-    RateAdjustmentError,
+    AdjustedRate, AffineAdjustment, AffineAdjustmentError, DaFeeRatePolicy, DaFeeRatePolicyError,
+    PolicyRate,
 };
 use crate::config::DaFeeRateConfig;
 
@@ -19,7 +19,7 @@ pub(crate) struct DaFeeRateServiceState {
     /// Resolves unadjusted rates from the configured source.
     pub(super) policy: Box<dyn DaFeeRatePolicy>,
     /// Applies the operator's multiplier and offset before publication.
-    adjustment: RateAdjustment,
+    adjustment: AffineAdjustment,
     /// Owns the capability to publish a new cached rate.
     updater: DaFeeRateUpdater,
     /// Provides read-only access to the currently published rate.
@@ -59,7 +59,7 @@ pub(crate) enum RateResolutionError {
     Timeout,
     /// The operator adjustment could not represent the final rate.
     #[error(transparent)]
-    Adjustment(#[from] RateAdjustmentError),
+    Adjustment(#[from] AffineAdjustmentError),
 }
 
 /// Describes a successfully published policy rate.
@@ -91,7 +91,8 @@ impl DaFeeRateServiceState {
         config: &DaFeeRateConfig,
         policy_rate: PolicyRate,
     ) -> Result<Self, RateResolutionError> {
-        let adjustment = RateAdjustment::new(config.multiplier_bps(), config.offset_wei_per_byte());
+        let adjustment =
+            AffineAdjustment::new(config.multiplier_bps(), config.offset_wei_per_byte());
         let adjusted_rate = adjustment.apply(policy_rate)?;
         let (updater, handle) = da_fee_rate_channel(adjusted_rate.wei_per_byte());
 
