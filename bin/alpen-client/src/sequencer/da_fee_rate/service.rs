@@ -54,8 +54,8 @@ impl DaFeeRateServiceHandle {
     }
 }
 
-/// Starts periodic DA fee-rate refreshes through the service framework.
-pub(crate) async fn start(
+/// Launches periodic DA fee-rate refreshes through the service framework.
+pub(super) async fn launch(
     state: DaFeeRateServiceState,
     executor: &impl AsyncExecutor,
 ) -> anyhow::Result<DaFeeRateServiceHandle> {
