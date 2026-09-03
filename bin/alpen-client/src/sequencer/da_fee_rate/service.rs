@@ -3,13 +3,13 @@
 use alpen_reth_node::DaFeeRateHandle;
 use serde::Serialize;
 use strata_service::{
-    AsyncExecutor, AsyncService, DumbTickHandle, DumbTickingInput, Response, Service,
-    ServiceBuilder, ServiceMonitor, ServiceState,
+    AsyncExecutor, AsyncService, AsyncServiceInput, DumbTickHandle, DumbTickingInput, Response,
+    Service, ServiceBuilder, ServiceMonitor, ServiceState,
 };
-use tokio::time::{timeout, Instant};
+use tokio::time::Instant;
 use tracing::{debug, info, warn};
 
-use super::state::{DaFeeRateServiceState, RateUpdate, RefreshError, POLICY_FETCH_TIMEOUT};
+use super::state::{fetch_policy_rate, DaFeeRateServiceState, RateUpdate};
 
 /// Runs [`DaFeeRateServiceState`] from periodic framework ticks.
 #[derive(Debug)]
@@ -56,19 +56,23 @@ impl DaFeeRateServiceHandle {
 
 /// Starts periodic DA fee-rate refreshes through the service framework.
 pub(crate) async fn start(
-    mut state: DaFeeRateServiceState,
+    state: DaFeeRateServiceState,
     executor: &impl AsyncExecutor,
 ) -> anyhow::Result<DaFeeRateServiceHandle> {
-    state.last_success_at = Instant::now();
     let rate_handle = state.handle.clone();
     info!(
-        fallback_rate_wei_per_byte = rate_handle.current_rate(),
-        "DA fee-rate service activated fallback"
+        initial_rate_wei_per_byte = rate_handle.current_rate(),
+        "DA fee-rate service initialized"
     );
 
-    // DumbTickingInput emits an immediate first tick and skips missed ticks,
-    // preserving the previous refresh loop's refresh cadence.
-    let (tick_handle, input) = DumbTickingInput::new(state.refresh_interval);
+    let (tick_handle, mut input) = DumbTickingInput::new(state.refresh_interval);
+    // Tokio intervals emit once immediately. Initialization already fetched a
+    // rate, so consume that tick and let the service first refresh one full
+    // interval from now.
+    input
+        .recv_next()
+        .await?
+        .expect("a newly created ticking input must emit its initial tick");
     let monitor = ServiceBuilder::<DaFeeRateService, _>::new()
         .with_state(state)
         .with_input(input)
@@ -107,10 +111,7 @@ impl Service for DaFeeRateService {
 
 impl AsyncService for DaFeeRateService {
     async fn process_input(state: &mut Self::State, _input: Self::Msg) -> anyhow::Result<Response> {
-        let fetch_result = match timeout(POLICY_FETCH_TIMEOUT, state.policy.fetch_rate()).await {
-            Ok(result) => result.map_err(RefreshError::Policy),
-            Err(_) => Err(RefreshError::Timeout),
-        };
+        let fetch_result = fetch_policy_rate(state.policy.as_ref()).await;
         let now = Instant::now();
 
         match fetch_result.and_then(|rate| state.apply_policy_rate(now, rate)) {

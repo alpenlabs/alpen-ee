@@ -29,7 +29,7 @@ use strata_config::{
 use strata_primitives::{buf::Buf32, L1Height};
 
 #[cfg(feature = "sequencer")]
-use crate::sequencer::da_fee_rate::validate_startup_rates;
+use crate::sequencer::da_fee_rate::validate_fixed_rate;
 
 // Applied when the matching TOML field is omitted.
 const DEFAULT_HEALTH_CHECK_HOST: &str = "0.0.0.0";
@@ -412,8 +412,6 @@ pub(crate) enum DaFeeRatePolicyConfig {
 pub(crate) struct DaFeeRateConfig {
     /// Chooses the policy that supplies unadjusted rate recommendations.
     policy: DaFeeRatePolicyConfig,
-    /// Seeds the service until its first successful policy fetch.
-    fallback_policy_rate_wei_per_byte: u64,
     /// Controls how often the selected policy is queried.
     refresh_interval_seconds: NonZeroU64,
     /// Marks a dynamic rate stale after this long without a successful fetch.
@@ -429,11 +427,6 @@ impl DaFeeRateConfig {
     /// Returns the checked policy selection.
     pub(crate) const fn policy(&self) -> DaFeeRatePolicyConfig {
         self.policy
-    }
-
-    /// Returns the unadjusted fallback rate in wei per DA byte.
-    pub(crate) const fn fallback_policy_rate_wei_per_byte(&self) -> u64 {
-        self.fallback_policy_rate_wei_per_byte
     }
 
     /// Returns the non-zero refresh interval in seconds.
@@ -467,7 +460,6 @@ struct DaFeeRateConfigFile {
     policy: DaFeeRatePolicyTag,
     #[serde(skip_serializing_if = "Option::is_none")]
     fixed_rate_wei_per_byte: Option<u64>,
-    fallback_policy_rate_wei_per_byte: u64,
     refresh_interval_seconds: NonZeroU64,
     stale_after_seconds: NonZeroU64,
     #[serde(default = "default_da_fee_rate_multiplier_bps")]
@@ -514,14 +506,13 @@ impl TryFrom<DaFeeRateConfigFile> for DaFeeRateConfig {
 
         let config = Self {
             policy,
-            fallback_policy_rate_wei_per_byte: raw.fallback_policy_rate_wei_per_byte,
             refresh_interval_seconds: raw.refresh_interval_seconds,
             stale_after_seconds: raw.stale_after_seconds,
             multiplier_bps: raw.multiplier_bps,
             offset_wei_per_byte: raw.offset_wei_per_byte,
         };
         #[cfg(feature = "sequencer")]
-        validate_startup_rates(&config).map_err(|error| error.to_string())?;
+        validate_fixed_rate(&config).map_err(|error| error.to_string())?;
 
         Ok(config)
     }
@@ -538,7 +529,6 @@ impl From<&DaFeeRateConfig> for DaFeeRateConfigFile {
         Self {
             policy,
             fixed_rate_wei_per_byte,
-            fallback_policy_rate_wei_per_byte: config.fallback_policy_rate_wei_per_byte,
             refresh_interval_seconds: config.refresh_interval_seconds,
             stale_after_seconds: config.stale_after_seconds,
             multiplier_bps: config.multiplier_bps,
@@ -925,7 +915,6 @@ mod tests {
             [sequencer.l1_fee_policy]
             fee_policy = "bitcoind"
             [sequencer.da_fee_rate]
-            fallback_policy_rate_wei_per_byte = 0
             refresh_interval_seconds = 60
             stale_after_seconds = 300
         "#;
@@ -952,7 +941,6 @@ mod tests {
             [sequencer.l1_fee_policy]
             fee_policy = "bitcoind"
             [sequencer.da_fee_rate]
-            fallback_policy_rate_wei_per_byte = 0
             refresh_interval_seconds = 60
             stale_after_seconds = 300
         "#;
@@ -1009,7 +997,6 @@ mod tests {
             r#"
             policy = "fixed"
             fixed_rate_wei_per_byte = 17
-            fallback_policy_rate_wei_per_byte = 11
             refresh_interval_seconds = 5
             stale_after_seconds = 10
             "#,
@@ -1026,7 +1013,6 @@ mod tests {
             (
                 r#"
                 policy = "fixed"
-                fallback_policy_rate_wei_per_byte = 11
                 refresh_interval_seconds = 5
                 stale_after_seconds = 10
                 "#,
@@ -1036,7 +1022,6 @@ mod tests {
                 r#"
                 policy = "writer_backed"
                 fixed_rate_wei_per_byte = 17
-                fallback_policy_rate_wei_per_byte = 11
                 refresh_interval_seconds = 5
                 stale_after_seconds = 10
                 "#,
@@ -1045,7 +1030,6 @@ mod tests {
             (
                 r#"
                 policy = "writer_backed"
-                fallback_policy_rate_wei_per_byte = 11
                 refresh_interval_seconds = 10
                 stale_after_seconds = 5
                 "#,
@@ -1064,7 +1048,6 @@ mod tests {
                 "refresh_interval_seconds",
                 r#"
                 policy = "writer_backed"
-                fallback_policy_rate_wei_per_byte = 11
                 refresh_interval_seconds = 0
                 stale_after_seconds = 10
                 "#,
@@ -1073,7 +1056,6 @@ mod tests {
                 "stale_after_seconds",
                 r#"
                 policy = "writer_backed"
-                fallback_policy_rate_wei_per_byte = 11
                 refresh_interval_seconds = 5
                 stale_after_seconds = 0
                 "#,
@@ -1082,7 +1064,6 @@ mod tests {
                 "policy",
                 r#"
                 policy = "unsupported"
-                fallback_policy_rate_wei_per_byte = 11
                 refresh_interval_seconds = 5
                 stale_after_seconds = 10
                 "#,
@@ -1094,7 +1075,7 @@ mod tests {
 
     #[cfg(feature = "sequencer")]
     #[test]
-    fn configured_startup_rates_must_fit_after_adjustment() {
+    fn configured_fixed_rate_must_fit_after_adjustment() {
         fn with_da_fee_rate(table: &str) -> String {
             let prefix = SEQUENCER_TOML
                 .split_once("[sequencer.da_fee_rate]")
@@ -1103,23 +1084,10 @@ mod tests {
             format!("{prefix}[sequencer.da_fee_rate]\n{table}")
         }
 
-        let fallback_overflow = with_da_fee_rate(
-            r#"
-            policy = "writer_backed"
-            fallback_policy_rate_wei_per_byte = 9223372036854775807
-            refresh_interval_seconds = 5
-            stale_after_seconds = 10
-            multiplier_bps = 20001
-            "#,
-        );
-        let error = AlpenClientConfig::from_toml_str(&fallback_overflow).unwrap_err();
-        assert!(error.to_string().contains("fallback"), "{error}");
-
         let fixed_overflow = with_da_fee_rate(
             r#"
             policy = "fixed"
             fixed_rate_wei_per_byte = 9223372036854775807
-            fallback_policy_rate_wei_per_byte = 0
             refresh_interval_seconds = 5
             stale_after_seconds = 10
             multiplier_bps = 20001
@@ -1174,7 +1142,6 @@ mod tests {
                 [sequencer.l1_fee_policy]
                 fee_policy = "bitcoind"
                 [sequencer.da_fee_rate]
-                fallback_policy_rate_wei_per_byte = 0
                 refresh_interval_seconds = 60
                 stale_after_seconds = 300
             "#
@@ -1332,7 +1299,6 @@ mod tests {
             [sequencer.l1_fee_policy]
             fee_policy = "bitcoind"
             [sequencer.da_fee_rate]
-            fallback_policy_rate_wei_per_byte = 0
             refresh_interval_seconds = 60
             stale_after_seconds = 300
         "#;
@@ -1390,7 +1356,6 @@ mod tests {
                 [sequencer.l1_fee_policy]
                 fee_policy = "bitcoind"
                 [sequencer.da_fee_rate]
-                fallback_policy_rate_wei_per_byte = 0
                 refresh_interval_seconds = 60
                 stale_after_seconds = 300
             "#
@@ -1424,7 +1389,6 @@ mod tests {
             [sequencer.l1_fee_policy]
             fee_policy = "fixed"
             [sequencer.da_fee_rate]
-            fallback_policy_rate_wei_per_byte = 0
             refresh_interval_seconds = 60
             stale_after_seconds = 300
         "#;
