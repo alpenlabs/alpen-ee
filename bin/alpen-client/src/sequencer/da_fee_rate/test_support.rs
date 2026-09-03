@@ -1,15 +1,8 @@
 //! Shared fixtures for DA fee-rate unit tests.
 
-use std::{
-    collections::VecDeque,
-    future::{pending, Future},
-    sync::{Arc, Mutex},
-};
+use std::{collections::VecDeque, future::pending, sync::Mutex};
 
 use async_trait::async_trait;
-use bitcoind_async_client::{Auth, Client as BtcClient};
-use strata_service::{AsyncExecutor, AsyncGuard};
-use tokio::task::JoinHandle;
 
 use super::{
     policy::{DaFeeRatePolicy, DaFeeRatePolicyError},
@@ -53,50 +46,6 @@ impl DaFeeRatePolicy for PendingPolicy {
     }
 }
 
-pub(super) struct NeverShutdown;
-
-impl AsyncGuard for NeverShutdown {
-    async fn wait_for_shutdown(&self) {
-        pending().await
-    }
-}
-
-#[derive(Default)]
-pub(super) struct TestExecutor {
-    task: Mutex<Option<JoinHandle<anyhow::Result<()>>>>,
-}
-
-impl TestExecutor {
-    pub(super) async fn join(&self) -> anyhow::Result<()> {
-        let task = self
-            .task
-            .lock()
-            .unwrap()
-            .take()
-            .expect("service task should have been spawned");
-        task.await.expect("service task should not panic")
-    }
-}
-
-impl AsyncExecutor for TestExecutor {
-    type ShutdownGuard = NeverShutdown;
-
-    fn spawn_async<F>(
-        &self,
-        _name: &'static str,
-        worker: impl FnOnce(Self::ShutdownGuard) -> F + Send + 'static,
-    ) where
-        F: Future<Output = anyhow::Result<()>> + Send + 'static,
-    {
-        let previous = self
-            .task
-            .lock()
-            .unwrap()
-            .replace(tokio::spawn(worker(NeverShutdown)));
-        assert!(previous.is_none(), "test executor only supports one task");
-    }
-}
-
 pub(super) fn rate_config(
     policy: DaFeeRatePolicyConfig,
     refresh_interval_seconds: u64,
@@ -126,10 +75,6 @@ pub(super) fn service_config() -> DaFeeRateConfig {
     rate_config(DaFeeRatePolicyConfig::WriterBacked, 5, 10, 10_000, 0)
 }
 
-pub(super) fn configured_rate(policy: DaFeeRatePolicyConfig) -> DaFeeRateConfig {
-    rate_config(policy, 7, 21, 15_000, 3)
-}
-
 pub(super) fn service_state_with_policy(
     policy: impl DaFeeRatePolicy,
     config: DaFeeRateConfig,
@@ -141,17 +86,4 @@ pub(super) fn service_state_with_policy(
         PolicyRate::new(initial_policy_rate),
     )
     .expect("test initial rate should be valid")
-}
-
-pub(super) fn disconnected_bitcoin_client() -> Arc<BtcClient> {
-    Arc::new(
-        BtcClient::new(
-            "http://127.0.0.1:1".to_string(),
-            Auth::UserPass("test-user".to_string(), "test-password".to_string()),
-            Some(1),
-            Some(0),
-            Some(1),
-        )
-        .expect("test Bitcoin client should be constructed"),
-    )
 }
