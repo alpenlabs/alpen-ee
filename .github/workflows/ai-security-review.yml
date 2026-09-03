@@ -110,10 +110,13 @@ jobs:
             TRUST MODEL — before classifying anything, Read `docs/security/trust-model.md` and apply its
             classification rules in order. Report a finding only when the attacker sits outside a documented
             trust boundary, or when rule 6 (fund safety / proof soundness) applies. Panics, unwraps, or
-            missing validation on data from a Trusted source (own databases, config, bitcoind, the paired OL
-            client) are correctness bugs, not security findings: drop them silently. Skip anything listed
-            under "Known accepted risks". If the diff modifies `docs/security/trust-model.md` or the
-            "Security Review Guidance" section of `AGENTS.md`, say so in the review comment.
+            missing validation on data from a Trusted source (own databases, config, bitcoind's view of the
+            chain, the paired OL client) are correctness bugs, not security findings: drop them silently.
+            Bitcoin block contents and DA payloads are NOT covered by that: bitcoind is trusted to relay
+            them honestly, but the bytes themselves come from anyone who pays L1 fees and stay untrusted.
+            Skip anything listed under "Known accepted risks". If the diff modifies
+            `docs/security/trust-model.md` or the "Security Review Guidance" section of `AGENTS.md`, add
+            the notice line described in the OUTPUT RULES.
 
             TOOLS — this is the complete set you have. Every call outside it is denied and burns a
             turn for nothing, so do not guess or retry with a different command:
@@ -130,6 +133,10 @@ jobs:
             - Always start with the heading "## 🔒 AI Security Review (${{ steps.pick.outputs.model }})".
             - If you found NO real issues: the ENTIRE body is that heading plus one line — "✅ No security issues found."
               Do NOT add a "scope reviewed" list, a "what I checked / cleared" section, or any reasoning. Reviewers do not want it.
+            - Trust-model notice (the ONLY permitted addition to a no-findings body): if the diff modifies
+              `docs/security/trust-model.md` or the "Security Review Guidance" section of `AGENTS.md`, append one line —
+              "⚠️ This PR changes the trust model / review guidance that governs what this review suppresses; review those edits on their merits."
+              With findings, put the same line directly under the heading, before the list.
             - If you found real issues: list them most-severe-first. For each: a bold one-line title with the severity,
               then `file:line`, a 1–2 sentence exploit scenario, and a concrete fix. Be concise and actionable —
               no style/formatting/speculative nits, no "what I cleared" prose.
