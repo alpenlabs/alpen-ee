@@ -7,6 +7,8 @@
 //! entry point between the two; [`AlpenClientConfigFile`] never leaves this
 //! module.
 
+#[cfg(feature = "sequencer")]
+use std::time::Duration;
 use std::{
     num::{NonZeroU64, NonZeroUsize},
     path::PathBuf,
@@ -30,6 +32,10 @@ const DEFAULT_DB_RETRY_COUNT: u16 = 5;
 const DEFAULT_BLOCKTIME_MS: NonZeroU64 = NonZeroU64::new(5_000).expect("5000 is always NonZero");
 const DEFAULT_BATCH_EVENT_CHANNEL_CAPACITY: NonZeroUsize =
     NonZeroUsize::new(64).expect("64 is always NonZero");
+const DEFAULT_DA_FEE_RATE_EXPLORER_TIMEOUT_SECONDS: NonZeroU64 =
+    NonZeroU64::new(10).expect("10 is always NonZero");
+const DEFAULT_DA_FEE_RATE_BITCOIND_TIMEOUT_SECONDS: NonZeroU64 =
+    NonZeroU64::new(10).expect("10 is always NonZero");
 
 fn default_health_check_host() -> String {
     DEFAULT_HEALTH_CHECK_HOST.to_owned()
@@ -61,6 +67,14 @@ fn default_batch_sealing_block_count() -> u64 {
 
 fn default_batch_event_channel_capacity() -> NonZeroUsize {
     DEFAULT_BATCH_EVENT_CHANNEL_CAPACITY
+}
+
+fn default_da_fee_rate_explorer_timeout_seconds() -> NonZeroU64 {
+    DEFAULT_DA_FEE_RATE_EXPLORER_TIMEOUT_SECONDS
+}
+
+fn default_da_fee_rate_bitcoind_timeout_seconds() -> NonZeroU64 {
+    DEFAULT_DA_FEE_RATE_BITCOIND_TIMEOUT_SECONDS
 }
 
 /// Deserializes a [`Buf32`] from hex, with or without an `0x` prefix.
@@ -318,6 +332,12 @@ pub(crate) struct DaFeeRateConfig {
     refresh_interval_seconds: NonZeroU64,
     /// Marks a dynamic rate stale after this long without a successful fetch.
     stale_after_seconds: NonZeroU64,
+    /// Bounds the complete mempool explorer lookup, including precise-to-recommended fallback.
+    #[serde(default = "default_da_fee_rate_explorer_timeout_seconds")]
+    explorer_timeout_seconds: NonZeroU64,
+    /// Bounds a direct or fallback Bitcoin Core fee-rate lookup.
+    #[serde(default = "default_da_fee_rate_bitcoind_timeout_seconds")]
+    bitcoind_timeout_seconds: NonZeroU64,
     /// Scales policy rates in basis points before applying the offset.
     #[serde(default = "default_da_fee_rate_multiplier_bps")]
     multiplier_bps: u64,
@@ -341,6 +361,22 @@ impl DaFeeRateConfig {
     /// Returns the checked stale threshold in seconds.
     pub(crate) const fn stale_after_seconds(&self) -> NonZeroU64 {
         self.stale_after_seconds
+    }
+
+    /// Returns the timeout for the complete mempool explorer lookup.
+    pub(crate) const fn explorer_timeout(&self) -> Duration {
+        Duration::from_secs(self.explorer_timeout_seconds.get())
+    }
+
+    /// Returns the timeout for a direct or fallback Bitcoin Core lookup.
+    pub(crate) const fn bitcoind_timeout(&self) -> Duration {
+        Duration::from_secs(self.bitcoind_timeout_seconds.get())
+    }
+
+    /// Returns the final watchdog for a complete external policy resolution.
+    pub(crate) const fn policy_fetch_timeout(&self) -> Duration {
+        self.explorer_timeout()
+            .saturating_add(self.bitcoind_timeout())
     }
 
     /// Returns the rate multiplier in basis points.
@@ -741,6 +777,9 @@ mod tests {
         );
         assert_eq!(seq.config.da_fee_rate.multiplier_bps, 10_000);
         assert_eq!(seq.config.da_fee_rate.offset_wei_per_byte, 0);
+        assert_eq!(seq.config.da_fee_rate.explorer_timeout().as_secs(), 10);
+        assert_eq!(seq.config.da_fee_rate.bitcoind_timeout().as_secs(), 10);
+        assert_eq!(seq.config.da_fee_rate.policy_fetch_timeout().as_secs(), 20);
     }
 
     #[test]
@@ -760,6 +799,12 @@ mod tests {
                 rate_wei_per_byte: 17
             }
         );
+        #[cfg(feature = "sequencer")]
+        {
+            assert_eq!(fixed.explorer_timeout(), Duration::from_secs(10));
+            assert_eq!(fixed.bitcoind_timeout(), Duration::from_secs(10));
+            assert_eq!(fixed.policy_fetch_timeout(), Duration::from_secs(20));
+        }
 
         let missing_fixed_rate = toml::from_str::<DaFeeRateConfig>(
             r#"
@@ -775,6 +820,25 @@ mod tests {
                 .contains("fixed_rate_wei_per_byte"),
             "{missing_fixed_rate}"
         );
+    }
+
+    #[cfg(feature = "sequencer")]
+    #[test]
+    fn da_fee_rate_source_timeouts_are_configurable() {
+        let config: DaFeeRateConfig = toml::from_str(
+            r#"
+            policy = "writer_backed"
+            refresh_interval_seconds = 5
+            stale_after_seconds = 10
+            explorer_timeout_seconds = 4
+            bitcoind_timeout_seconds = 7
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(config.explorer_timeout(), Duration::from_secs(4));
+        assert_eq!(config.bitcoind_timeout(), Duration::from_secs(7));
+        assert_eq!(config.policy_fetch_timeout(), Duration::from_secs(11));
     }
 
     #[test]
@@ -794,6 +858,24 @@ mod tests {
                 policy = "writer_backed"
                 refresh_interval_seconds = 5
                 stale_after_seconds = 0
+                "#,
+            ),
+            (
+                "explorer_timeout_seconds",
+                r#"
+                policy = "writer_backed"
+                refresh_interval_seconds = 5
+                stale_after_seconds = 10
+                explorer_timeout_seconds = 0
+                "#,
+            ),
+            (
+                "bitcoind_timeout_seconds",
+                r#"
+                policy = "writer_backed"
+                refresh_interval_seconds = 5
+                stale_after_seconds = 10
+                bitcoind_timeout_seconds = 0
                 "#,
             ),
             (

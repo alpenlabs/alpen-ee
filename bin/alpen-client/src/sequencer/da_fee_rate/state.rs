@@ -4,15 +4,13 @@ use std::{fmt, time::Duration};
 
 use alpen_reth_node::{da_fee_rate_channel, DaFeeRateHandle, DaFeeRateUpdater};
 use thiserror::Error;
-use tokio::time::{timeout, Instant};
+use tokio::time::{error::Elapsed, timeout, Instant};
 
 use super::{
     policy::{DaFeeRatePolicy, DaFeeRatePolicyError},
     rate::{AdjustedRate, AffineAdjustment, AffineAdjustmentError, PolicyRate},
 };
 use crate::config::DaFeeRateConfig;
-
-pub(super) const POLICY_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Holds the mutable state owned by [`super::service::DaFeeRateService`].
 pub(super) struct DaFeeRateServiceState {
@@ -24,6 +22,8 @@ pub(super) struct DaFeeRateServiceState {
     updater: DaFeeRateUpdater,
     /// Provides read-only access to the currently published rate.
     pub(super) handle: DaFeeRateHandle,
+    /// Bounds a complete policy fetch as a final watchdog.
+    pub(super) policy_fetch_timeout: Duration,
     /// Controls how often the policy is queried.
     pub(super) refresh_interval: Duration,
     /// Marks the service stale after this long without a successful publication.
@@ -40,6 +40,7 @@ impl fmt::Debug for DaFeeRateServiceState {
             .debug_struct("DaFeeRateServiceState")
             .field("adjustment", &self.adjustment)
             .field("current_rate", &self.handle.current_rate())
+            .field("policy_fetch_timeout", &self.policy_fetch_timeout)
             .field("refresh_interval", &self.refresh_interval)
             .field("stale_after", &self.stale_after)
             .field("last_success_at", &self.last_success_at)
@@ -62,6 +63,17 @@ pub(super) enum RateResolutionError {
     Adjustment(#[from] AffineAdjustmentError),
 }
 
+impl RateResolutionError {
+    /// Returns whether an outer watchdog or configured source timeout expired.
+    pub(super) fn is_timeout(&self) -> bool {
+        match self {
+            Self::Timeout => true,
+            Self::Policy(DaFeeRatePolicyError::Source(error)) => error.is::<Elapsed>(),
+            Self::Policy(_) | Self::Adjustment(_) => false,
+        }
+    }
+}
+
 /// Describes a successfully published policy rate.
 #[derive(Debug)]
 pub(super) struct RateUpdate {
@@ -81,7 +93,7 @@ impl DaFeeRateServiceState {
         policy: Box<dyn DaFeeRatePolicy>,
         config: &DaFeeRateConfig,
     ) -> Result<Self, RateResolutionError> {
-        let policy_rate = fetch_policy_rate(policy.as_ref()).await?;
+        let policy_rate = fetch_policy_rate(policy.as_ref(), config.policy_fetch_timeout()).await?;
         Self::new(policy, config, policy_rate)
     }
 
@@ -101,6 +113,7 @@ impl DaFeeRateServiceState {
             adjustment,
             updater,
             handle,
+            policy_fetch_timeout: config.policy_fetch_timeout(),
             refresh_interval: Duration::from_secs(config.refresh_interval_seconds().get()),
             stale_after: Duration::from_secs(config.stale_after_seconds().get()),
             last_success_at: Instant::now(),
@@ -148,8 +161,9 @@ impl DaFeeRateServiceState {
 /// Fetches a policy rate within the service's source timeout.
 pub(super) async fn fetch_policy_rate(
     policy: &dyn DaFeeRatePolicy,
+    fetch_timeout: Duration,
 ) -> Result<PolicyRate, RateResolutionError> {
-    match timeout(POLICY_FETCH_TIMEOUT, policy.fetch_rate()).await {
+    match timeout(fetch_timeout, policy.fetch_rate()).await {
         Ok(result) => result.map_err(RateResolutionError::Policy),
         Err(_) => Err(RateResolutionError::Timeout),
     }

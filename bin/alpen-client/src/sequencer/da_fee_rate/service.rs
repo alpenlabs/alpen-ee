@@ -10,7 +10,7 @@ use strata_service::{
 use tokio::time::Instant;
 use tracing::{debug, info, warn};
 
-use super::state::{fetch_policy_rate, DaFeeRateServiceState, RateResolutionError, RateUpdate};
+use super::state::{fetch_policy_rate, DaFeeRateServiceState, RateUpdate};
 
 const CURRENT_RATE_METRIC: &str = "alpen_da_fee_rate_current_wei_per_byte";
 const STALE_METRIC: &str = "alpen_da_fee_rate_stale";
@@ -110,7 +110,8 @@ impl Service for DaFeeRateService {
 
 impl AsyncService for DaFeeRateService {
     async fn process_input(state: &mut Self::State, _input: Self::Msg) -> anyhow::Result<Response> {
-        let fetch_result = fetch_policy_rate(state.policy.as_ref()).await;
+        let fetch_result =
+            fetch_policy_rate(state.policy.as_ref(), state.policy_fetch_timeout).await;
         let now = Instant::now();
 
         match fetch_result.and_then(|rate| state.apply_policy_rate(now, rate)) {
@@ -121,7 +122,7 @@ impl AsyncService for DaFeeRateService {
                 counter!(REFRESHES_METRIC, "outcome" => "success").increment(1);
             }
             Err(error) => {
-                let outcome = if matches!(&error, RateResolutionError::Timeout) {
+                let outcome = if error.is_timeout() {
                     "timeout"
                 } else {
                     "failure"
@@ -193,7 +194,6 @@ mod tests {
     use super::*;
     use crate::sequencer::da_fee_rate::{
         rate::PolicyRate,
-        state::POLICY_FETCH_TIMEOUT,
         test_support::{service_config, service_state_with_policy, PendingPolicy, ScriptedPolicy},
     };
 
@@ -255,13 +255,14 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn service_tick_times_out_without_replacing_last_successful_rate() {
         let mut state = service_state_with_policy(PendingPolicy, service_config(), 10);
+        let policy_fetch_timeout = state.policy_fetch_timeout;
         let task = tokio::spawn(async move {
             let response = DaFeeRateService::process_input(&mut state, ()).await;
             (response, state.handle.current_rate())
         });
 
         yield_now().await;
-        advance(POLICY_FETCH_TIMEOUT).await;
+        advance(policy_fetch_timeout).await;
         let (response, current_rate) = task.await.unwrap();
 
         assert_eq!(response.unwrap(), Response::Continue);

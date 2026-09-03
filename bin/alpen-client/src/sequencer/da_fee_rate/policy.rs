@@ -8,7 +8,10 @@ use bitcoind_async_client::Client as BtcClient;
 use strata_config::btcio::L1FeePolicyConfig;
 use thiserror::Error;
 
-use super::{super::bitcoin_fee_rate::resolve_fee_rate, rate::PolicyRate};
+use super::{
+    super::bitcoin_fee_rate::{resolve_fee_rate, FeeRateResolutionTimeouts},
+    rate::PolicyRate,
+};
 
 /// Reports a failure to produce a usable policy rate.
 #[derive(Debug, Error)]
@@ -54,14 +57,20 @@ impl DaFeeRatePolicy for FixedDaFeeRatePolicy {
 pub(super) struct WriterBackedDaFeeRatePolicy {
     client: Arc<BtcClient>,
     fee_policy_config: L1FeePolicyConfig,
+    timeouts: FeeRateResolutionTimeouts,
 }
 
 impl WriterBackedDaFeeRatePolicy {
     /// Creates a policy backed by the configured Bitcoin fee-rate source.
-    pub(super) fn new(client: Arc<BtcClient>, fee_policy_config: L1FeePolicyConfig) -> Self {
+    pub(super) fn new(
+        client: Arc<BtcClient>,
+        fee_policy_config: L1FeePolicyConfig,
+        timeouts: FeeRateResolutionTimeouts,
+    ) -> Self {
         Self {
             client,
             fee_policy_config,
+            timeouts,
         }
     }
 }
@@ -69,9 +78,10 @@ impl WriterBackedDaFeeRatePolicy {
 #[async_trait]
 impl DaFeeRatePolicy for WriterBackedDaFeeRatePolicy {
     async fn fetch_rate(&self) -> Result<PolicyRate, DaFeeRatePolicyError> {
-        let fee_rate = resolve_fee_rate(self.client.as_ref(), &self.fee_policy_config)
-            .await
-            .map_err(DaFeeRatePolicyError::Source)?;
+        let fee_rate =
+            resolve_fee_rate(self.client.as_ref(), &self.fee_policy_config, self.timeouts)
+                .await
+                .map_err(DaFeeRatePolicyError::Source)?;
         let fee_kwu = fee_rate.to_sat_per_kwu();
         const WEIGHT_UNITS_PER_KWU: u64 = 1000;
         let rate_per_da =
@@ -84,6 +94,8 @@ impl DaFeeRatePolicy for WriterBackedDaFeeRatePolicy {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use bitcoind_async_client::{corepc_types::bitcoin::FeeRate, Auth};
     use strata_config::btcio::{FeePolicy, MempoolExplorerFeePolicy};
 
@@ -98,7 +110,11 @@ mod tests {
             Some(1),
         )
         .expect("test Bitcoin client should be constructed");
-        WriterBackedDaFeeRatePolicy::new(Arc::new(client), L1FeePolicyConfig::new(fee_policy))
+        WriterBackedDaFeeRatePolicy::new(
+            Arc::new(client),
+            L1FeePolicyConfig::new(fee_policy),
+            FeeRateResolutionTimeouts::new(Duration::from_secs(10), Duration::from_secs(10)),
+        )
     }
 
     #[tokio::test]

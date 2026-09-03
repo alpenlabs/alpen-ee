@@ -35,3 +35,5 @@ fixed_fee_rate = 1.0
 policy = "writer_backed"
 refresh_interval_seconds = 60
 stale_after_seconds = 300
+explorer_timeout_seconds = 10
+bitcoind_timeout_seconds = 10

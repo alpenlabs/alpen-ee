@@ -157,6 +157,8 @@ class AlpenDaFeeRateConfig:
     fixed_rate_wei_per_byte: int | None = field(default=0)
     refresh_interval_seconds: int = field(default=60)
     stale_after_seconds: int = field(default=300)
+    explorer_timeout_seconds: int = field(default=10)
+    bitcoind_timeout_seconds: int = field(default=10)
     multiplier_bps: int = field(default=10_000)
     offset_wei_per_byte: int = field(default=0)
 

@@ -23,6 +23,7 @@ use self::{
     policy::{DaFeeRatePolicy, FixedDaFeeRatePolicy, WriterBackedDaFeeRatePolicy},
     state::DaFeeRateServiceState,
 };
+use super::bitcoin_fee_rate::FeeRateResolutionTimeouts;
 use crate::config::{DaFeeRateConfig, DaFeeRatePolicyConfig};
 
 /// Resolves the initial configured rate and starts its refresh service.
@@ -36,6 +37,7 @@ pub(crate) async fn start(
         DaFeeRatePolicyConfig::WriterBacked => Box::new(WriterBackedDaFeeRatePolicy::new(
             btc_client,
             writer_fee_policy_config,
+            FeeRateResolutionTimeouts::new(config.explorer_timeout(), config.bitcoind_timeout()),
         )),
         DaFeeRatePolicyConfig::Fixed { rate_wei_per_byte } => {
             Box::new(FixedDaFeeRatePolicy::new(rate_wei_per_byte))
