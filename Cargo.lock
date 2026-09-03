@@ -1069,6 +1069,7 @@ dependencies = [
  "http 1.4.0",
  "jsonrpsee",
  "k256",
+ "metrics",
  "proptest",
  "reqwest 0.12.28",
  "reth-chainspec",

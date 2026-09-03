@@ -1,6 +1,7 @@
 //! `strata_service` lifecycle and periodic input handling for DA fee rates.
 
 use alpen_reth_node::DaFeeRateHandle;
+use metrics::{counter, gauge};
 use serde::Serialize;
 use strata_service::{
     AsyncExecutor, AsyncService, AsyncServiceInput, DumbTickHandle, DumbTickingInput, Response,
@@ -9,7 +10,11 @@ use strata_service::{
 use tokio::time::Instant;
 use tracing::{debug, info, warn};
 
-use super::state::{fetch_policy_rate, DaFeeRateServiceState, RateUpdate};
+use super::state::{fetch_policy_rate, DaFeeRateServiceState, RateResolutionError, RateUpdate};
+
+const CURRENT_RATE_METRIC: &str = "alpen_da_fee_rate_current_wei_per_byte";
+const STALE_METRIC: &str = "alpen_da_fee_rate_stale";
+const REFRESHES_METRIC: &str = "alpen_da_fee_rate_refreshes_total";
 
 /// Runs [`DaFeeRateServiceState`] from periodic framework ticks.
 #[derive(Debug)]
@@ -52,6 +57,8 @@ pub(super) async fn launch(
     executor: &impl AsyncExecutor,
 ) -> anyhow::Result<DaFeeRateServiceHandle> {
     let rate_handle = state.handle.clone();
+    set_current_rate_metric(rate_handle.current_rate());
+    gauge!(STALE_METRIC).set(u8::from(state.is_stale));
     info!(
         initial_rate_wei_per_byte = rate_handle.current_rate(),
         "DA fee-rate service initialized"
@@ -107,15 +114,29 @@ impl AsyncService for DaFeeRateService {
         let now = Instant::now();
 
         match fetch_result.and_then(|rate| state.apply_policy_rate(now, rate)) {
-            Ok(update) => log_update(&update),
-            Err(error) => warn!(
-                %error,
-                current_rate_wei_per_byte = state.handle.current_rate(),
-                "DA fee-rate refresh failed; retaining the last usable rate"
-            ),
+            Ok(update) => {
+                log_update(&update);
+                set_current_rate_metric(update.adjusted_rate.wei_per_byte());
+                gauge!(STALE_METRIC).set(0);
+                counter!(REFRESHES_METRIC, "outcome" => "success").increment(1);
+            }
+            Err(error) => {
+                let outcome = if matches!(&error, RateResolutionError::Timeout) {
+                    "timeout"
+                } else {
+                    "failure"
+                };
+                counter!(REFRESHES_METRIC, "outcome" => outcome).increment(1);
+                warn!(
+                    %error,
+                    current_rate_wei_per_byte = state.handle.current_rate(),
+                    "DA fee-rate refresh failed; retaining the last usable rate"
+                );
+            }
         }
 
         if state.mark_stale_if_needed(now) {
+            gauge!(STALE_METRIC).set(1);
             warn!(
                 current_rate_wei_per_byte = state.handle.current_rate(),
                 stale_after_seconds = state.stale_after.as_secs(),
@@ -125,6 +146,14 @@ impl AsyncService for DaFeeRateService {
 
         Ok(Response::Continue)
     }
+}
+
+fn set_current_rate_metric(rate_wei_per_byte: u64) {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "metrics gauges represent values as f64"
+    )]
+    gauge!(CURRENT_RATE_METRIC).set(rate_wei_per_byte as f64);
 }
 
 /// Records a successful rate publication and any state transition it caused.
