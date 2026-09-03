@@ -136,32 +136,6 @@ impl<Pool, Client> AlpenPayloadBuilder<Pool, Client> {
             base_fee_floor,
         }
     }
-
-    /// Samples one DA rate and uses that owned value throughout this payload attempt.
-    fn try_build_with_sampled_rate(
-        &self,
-        args: BuildArguments<AlpenPayloadBuilderAttributes, AlpenBuiltPayload>,
-    ) -> Result<BuildOutcome<AlpenBuiltPayload>, PayloadBuilderError>
-    where
-        Client: StateProviderFactory
-            + ChainSpecProvider<ChainSpec = ChainSpec>
-            + HeaderProvider<Header = Header>
-            + Clone,
-        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
-    {
-        let da_rate = self.da_fee_rate_handle.current_rate();
-
-        try_build_payload(
-            self.evm_config.clone(),
-            da_rate,
-            self.base_fee_floor,
-            self.client.clone(),
-            self.pool.clone(),
-            self.builder_config.clone(),
-            args,
-            |attributes| self.pool.best_transactions_with_attributes(attributes),
-        )
-    }
 }
 
 impl<Pool, Client> PayloadBuilder for AlpenPayloadBuilder<Pool, Client>
@@ -179,7 +153,18 @@ where
         &self,
         args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
-        self.try_build_with_sampled_rate(args)
+        let da_rate = self.da_fee_rate_handle.current_rate();
+
+        try_build_payload(
+            self.evm_config.clone(),
+            da_rate,
+            self.base_fee_floor,
+            self.client.clone(),
+            self.pool.clone(),
+            self.builder_config.clone(),
+            args,
+            |attributes| self.pool.best_transactions_with_attributes(attributes),
+        )
     }
 
     fn build_empty_payload(
@@ -194,7 +179,7 @@ where
             Default::default(),
             None,
         );
-        self.try_build_with_sampled_rate(args)?
+        self.try_build(args)?
             .into_payload()
             .ok_or_else(|| PayloadBuilderError::MissingPayload)
     }
