@@ -262,7 +262,9 @@ pub(crate) async fn run(
         &sequencer_config.da_fee_rate,
         btc_client.clone(),
         sequencer_config.l1_fee_policy.clone(),
-    );
+    )
+    .await
+    .map_err(|error| eyre::eyre!("failed to initialize DA fee rate: {error}"))?;
     let da_fee_rate_service =
         da_fee_rate::start(da_fee_rate_state, &common.sequencer.service_executor)
             .await

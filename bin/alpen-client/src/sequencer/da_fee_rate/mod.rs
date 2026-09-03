@@ -113,25 +113,17 @@ pub(crate) enum RateAdjustmentError {
     Overflow(u128),
 }
 
-/// Reports a configured startup rate that cannot be adjusted into [`u64`].
+/// Reports that an adjusted fixed DA fee rate cannot be represented as [`u64`].
 #[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
-pub(crate) enum DaFeeRateConfigError {
-    #[error("adjusted fallback DA fee rate is invalid")]
-    InvalidFallback(#[source] RateAdjustmentError),
-    #[error("adjusted fixed DA fee rate is invalid")]
-    InvalidFixedRate(#[source] RateAdjustmentError),
-}
+#[error("adjusted fixed DA fee rate is invalid")]
+pub(crate) struct DaFeeRateConfigError(#[source] RateAdjustmentError);
 
-/// Checks every configured rate that is known at startup.
-pub(crate) fn validate_startup_rates(config: &DaFeeRateConfig) -> Result<(), DaFeeRateConfigError> {
-    let adjustment = RateAdjustment::new(config.multiplier_bps(), config.offset_wei_per_byte());
-    adjustment
-        .apply(PolicyRate::new(config.fallback_policy_rate_wei_per_byte()))
-        .map_err(DaFeeRateConfigError::InvalidFallback)?;
+/// Checks the fixed policy rate while parsing configuration.
+pub(crate) fn validate_fixed_rate(config: &DaFeeRateConfig) -> Result<(), DaFeeRateConfigError> {
     if let DaFeeRatePolicyConfig::Fixed { rate_wei_per_byte } = config.policy() {
-        adjustment
+        RateAdjustment::new(config.multiplier_bps(), config.offset_wei_per_byte())
             .apply(PolicyRate::new(rate_wei_per_byte))
-            .map_err(DaFeeRateConfigError::InvalidFixedRate)?;
+            .map_err(DaFeeRateConfigError)?;
     }
     Ok(())
 }
@@ -190,12 +182,12 @@ impl DaFeeRatePolicy for WriterBackedDaFeeRatePolicy {
     }
 }
 
-/// Builds the configured service state without starting its refresh loop.
-pub(crate) fn service_state_from_config(
+/// Resolves the initial configured rate and builds service state around it.
+pub(crate) async fn service_state_from_config(
     config: &DaFeeRateConfig,
     btc_client: Arc<BtcClient>,
     writer_fee_policy_config: L1FeePolicyConfig,
-) -> DaFeeRateServiceState {
+) -> Result<DaFeeRateServiceState, RateResolutionError> {
     let policy: Box<dyn DaFeeRatePolicy> = match config.policy() {
         DaFeeRatePolicyConfig::WriterBacked => Box::new(WriterBackedDaFeeRatePolicy::new(
             btc_client,
@@ -205,7 +197,7 @@ pub(crate) fn service_state_from_config(
             Box::new(FixedDaFeeRatePolicy::new(rate_wei_per_byte))
         }
     };
-    DaFeeRateServiceState::new(policy, config)
+    DaFeeRateServiceState::initialize(policy, config).await
 }
 
 #[cfg(test)]
@@ -306,7 +298,6 @@ mod tests {
 
     fn rate_config(
         policy: DaFeeRatePolicyConfig,
-        fallback_policy_rate: u64,
         refresh_interval_seconds: u64,
         stale_after_seconds: u64,
         multiplier_bps: u64,
@@ -321,7 +312,6 @@ mod tests {
         toml::from_str(&format!(
             r#"
             {policy_fields}
-            fallback_policy_rate_wei_per_byte = {fallback_policy_rate}
             refresh_interval_seconds = {refresh_interval_seconds}
             stale_after_seconds = {stale_after_seconds}
             multiplier_bps = {multiplier_bps}
@@ -331,22 +321,21 @@ mod tests {
         .expect("test DA fee-rate config should be valid")
     }
 
-    fn service_config(fallback_policy_rate: u64) -> DaFeeRateConfig {
-        rate_config(
-            DaFeeRatePolicyConfig::WriterBacked,
-            fallback_policy_rate,
-            5,
-            10,
-            10_000,
-            0,
-        )
+    fn service_config() -> DaFeeRateConfig {
+        rate_config(DaFeeRatePolicyConfig::WriterBacked, 5, 10, 10_000, 0)
     }
 
     fn service_state_with_policy(
         policy: impl DaFeeRatePolicy,
         config: DaFeeRateConfig,
+        initial_policy_rate: u64,
     ) -> DaFeeRateServiceState {
-        DaFeeRateServiceState::new(Box::new(policy), &config)
+        DaFeeRateServiceState::new(
+            Box::new(policy),
+            &config,
+            PolicyRate::new(initial_policy_rate),
+        )
+        .expect("test initial rate should be valid")
     }
 
     fn writer_policy(fee_policy: FeePolicy) -> WriterBackedDaFeeRatePolicy {
@@ -372,7 +361,7 @@ mod tests {
     }
 
     fn configured_rate(policy: DaFeeRatePolicyConfig) -> DaFeeRateConfig {
-        rate_config(policy, 5, 7, 21, 15_000, 3)
+        rate_config(policy, 7, 21, 15_000, 3)
     }
 
     fn disconnected_bitcoin_client() -> Arc<BtcClient> {
@@ -434,7 +423,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fixed_config_builds_service_state_with_adjusted_fallback_and_policy() {
+    async fn fixed_config_initializes_service_state_with_adjusted_policy_rate() {
         let config = configured_rate(DaFeeRatePolicyConfig::Fixed {
             rate_wei_per_byte: 7,
         });
@@ -444,9 +433,11 @@ mod tests {
             L1FeePolicyConfig::new(FeePolicy::Fixed {
                 fee_rate: FeeRate::from_sat_per_kwu(1),
             }),
-        );
+        )
+        .await
+        .unwrap();
 
-        assert_eq!(state.handle.current_rate(), 11);
+        assert_eq!(state.handle.current_rate(), 14);
         assert_eq!(state.refresh_interval, Duration::from_secs(7));
         assert_eq!(state.stale_after, Duration::from_secs(21));
         assert_eq!(state.policy.fetch_rate().await.unwrap(), PolicyRate::new(7));
@@ -461,8 +452,11 @@ mod tests {
             L1FeePolicyConfig::new(FeePolicy::Fixed {
                 fee_rate: FeeRate::from_sat_per_kwu(125),
             }),
-        );
+        )
+        .await
+        .unwrap();
 
+        assert_eq!(state.handle.current_rate(), 1_875_000_003);
         assert_eq!(
             state.policy.fetch_rate().await.unwrap(),
             PolicyRate::new(1_250_000_000)
@@ -516,10 +510,44 @@ mod tests {
         ));
     }
 
+    #[tokio::test]
+    async fn initialization_requires_a_successful_policy_fetch() {
+        let error = DaFeeRateServiceState::initialize(
+            Box::new(ScriptedPolicy::new([Err("unavailable")])),
+            &service_config(),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(error, RateResolutionError::Policy(_)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn initialization_times_out_when_the_policy_does_not_respond() {
+        let error = DaFeeRateServiceState::initialize(Box::new(PendingPolicy), &service_config())
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, RateResolutionError::Timeout));
+    }
+
+    #[tokio::test]
+    async fn initialization_rejects_an_adjusted_rate_that_overflows() {
+        let config = rate_config(DaFeeRatePolicyConfig::WriterBacked, 5, 10, 10_001, 0);
+        let error = DaFeeRateServiceState::initialize(
+            Box::new(ScriptedPolicy::new([Ok(PolicyRate::new(u64::MAX))])),
+            &config,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(error, RateResolutionError::Adjustment(_)));
+    }
+
     #[test]
     fn successful_fetch_publishes_only_the_fully_adjusted_rate() {
-        let config = rate_config(DaFeeRatePolicyConfig::WriterBacked, 5, 5, 10, 15_000, 3);
-        let mut state = service_state_with_policy(ScriptedPolicy::new([]), config);
+        let config = rate_config(DaFeeRatePolicyConfig::WriterBacked, 5, 10, 15_000, 3);
+        let mut state = service_state_with_policy(ScriptedPolicy::new([]), config, 5);
         let previous_success = state.last_success_at;
         let now = previous_success + Duration::from_secs(2);
 
@@ -541,7 +569,7 @@ mod tests {
 
     #[test]
     fn unchanged_success_still_refreshes_freshness() {
-        let mut state = service_state_with_policy(ScriptedPolicy::new([]), service_config(10));
+        let mut state = service_state_with_policy(ScriptedPolicy::new([]), service_config(), 10);
         let previous_success = state.last_success_at;
         let now = previous_success + Duration::from_secs(7);
 
@@ -562,21 +590,21 @@ mod tests {
 
     #[test]
     fn adjustment_failure_retains_the_current_rate_and_success_time() {
-        let config = rate_config(DaFeeRatePolicyConfig::WriterBacked, 1, 5, 10, 10_001, 0);
-        let mut state = service_state_with_policy(ScriptedPolicy::new([]), config);
+        let config = rate_config(DaFeeRatePolicyConfig::WriterBacked, 5, 10, 10_001, 0);
+        let mut state = service_state_with_policy(ScriptedPolicy::new([]), config, 1);
         let previous_success = state.last_success_at;
         let now = previous_success + Duration::from_secs(7);
 
         let update = state.apply_policy_rate(now, PolicyRate::new(u64::MAX));
 
-        assert!(matches!(update, Err(RefreshError::Adjustment(_))));
+        assert!(matches!(update, Err(RateResolutionError::Adjustment(_))));
         assert_eq!(state.handle.current_rate(), 2);
         assert_eq!(state.last_success_at, previous_success);
     }
 
     #[test]
     fn stale_boundary_is_strict_and_success_recovers() {
-        let mut state = service_state_with_policy(ScriptedPolicy::new([]), service_config(10));
+        let mut state = service_state_with_policy(ScriptedPolicy::new([]), service_config(), 10);
         let activated_at = state.last_success_at;
 
         assert!(!state.mark_stale_if_needed(activated_at + Duration::from_secs(10)));
@@ -603,7 +631,7 @@ mod tests {
 
     #[test]
     fn service_status_reports_current_rate_and_freshness() {
-        let mut state = service_state_with_policy(ScriptedPolicy::new([]), service_config(10));
+        let mut state = service_state_with_policy(ScriptedPolicy::new([]), service_config(), 10);
         let stale_at = state.last_success_at + state.stale_after + Duration::from_nanos(1);
         assert!(state.mark_stale_if_needed(stale_at));
 
@@ -617,11 +645,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn service_tick_retains_fallback_on_policy_failure() {
-        let mut state = service_state_with_policy(
-            ScriptedPolicy::new([Err("unavailable")]),
-            service_config(10),
-        );
+    async fn service_tick_retains_last_successful_rate_on_policy_failure() {
+        let mut state = DaFeeRateServiceState::initialize(
+            Box::new(ScriptedPolicy::new([
+                Ok(PolicyRate::new(10)),
+                Err("unavailable"),
+            ])),
+            &service_config(),
+        )
+        .await
+        .unwrap();
 
         let response = DaFeeRateService::process_input(&mut state, ())
             .await
@@ -635,7 +668,8 @@ mod tests {
     async fn service_tick_marks_stale_after_failed_fetch() {
         let mut state = service_state_with_policy(
             ScriptedPolicy::new([Err("unavailable")]),
-            service_config(10),
+            service_config(),
+            10,
         );
         advance(Duration::from_secs(10) + Duration::from_nanos(1)).await;
 
@@ -652,7 +686,8 @@ mod tests {
     async fn service_tick_publishes_successful_fetch() {
         let mut state = service_state_with_policy(
             ScriptedPolicy::new([Ok(PolicyRate::new(23))]),
-            service_config(10),
+            service_config(),
+            10,
         );
 
         let response = DaFeeRateService::process_input(&mut state, ())
@@ -664,8 +699,8 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn service_tick_times_out_without_replacing_fallback() {
-        let mut state = service_state_with_policy(PendingPolicy, service_config(10));
+    async fn service_tick_times_out_without_replacing_last_successful_rate() {
+        let mut state = service_state_with_policy(PendingPolicy, service_config(), 10);
         let task = tokio::spawn(async move {
             let response = DaFeeRateService::process_input(&mut state, ()).await;
             (response, state.handle.current_rate())
@@ -679,23 +714,28 @@ mod tests {
         assert_eq!(current_rate, 10);
     }
 
-    #[tokio::test]
-    async fn service_start_fetches_immediately_and_stops_cleanly() {
+    #[tokio::test(start_paused = true)]
+    async fn service_start_waits_one_interval_before_refreshing_and_stops_cleanly() {
         let state = service_state_with_policy(
             ScriptedPolicy::new([Ok(PolicyRate::new(23))]),
-            service_config(10),
+            service_config(),
+            10,
         );
         let executor = TestExecutor::default();
 
         let service_handle = start(state, &executor).await.unwrap();
         let rate_handle = service_handle.rate_handle();
+        yield_now().await;
+        assert_eq!(rate_handle.current_rate(), 10);
+
+        advance(Duration::from_secs(5)).await;
         timeout(Duration::from_secs(1), async {
             while rate_handle.current_rate() != 23 {
                 yield_now().await;
             }
         })
         .await
-        .expect("service should process its immediate first tick");
+        .expect("service should refresh after one interval");
 
         assert!(service_handle.stop());
         executor.join().await.unwrap();

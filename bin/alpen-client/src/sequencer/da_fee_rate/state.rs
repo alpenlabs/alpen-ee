@@ -4,7 +4,7 @@ use std::{fmt, time::Duration};
 
 use alpen_reth_node::{da_fee_rate_channel, DaFeeRateHandle, DaFeeRateUpdater};
 use thiserror::Error;
-use tokio::time::Instant;
+use tokio::time::{timeout, Instant};
 
 use super::{
     AdjustedRate, DaFeeRatePolicy, DaFeeRatePolicyError, PolicyRate, RateAdjustment,
@@ -28,7 +28,7 @@ pub(crate) struct DaFeeRateServiceState {
     pub(super) refresh_interval: Duration,
     /// Marks the service stale after this long without a successful publication.
     pub(super) stale_after: Duration,
-    /// Tracks freshness from fallback activation or the latest successful publication.
+    /// Tracks freshness from the latest successful publication.
     pub(super) last_success_at: Instant,
     /// Records whether the service has crossed its stale threshold.
     pub(super) is_stale: bool,
@@ -48,9 +48,9 @@ impl fmt::Debug for DaFeeRateServiceState {
     }
 }
 
-/// Reports why a refresh attempt did not publish a new rate.
+/// Reports why an initial or periodic rate resolution failed.
 #[derive(Debug, Error)]
-pub(super) enum RefreshError {
+pub(crate) enum RateResolutionError {
     /// The configured policy could not resolve a rate.
     #[error(transparent)]
     Policy(#[from] DaFeeRatePolicyError),
@@ -76,15 +76,26 @@ pub(super) struct RateUpdate {
 }
 
 impl DaFeeRateServiceState {
-    /// Initializes the payload handle with the adjusted fallback policy rate.
-    pub(super) fn new(policy: Box<dyn DaFeeRatePolicy>, config: &DaFeeRateConfig) -> Self {
-        let adjustment = RateAdjustment::new(config.multiplier_bps(), config.offset_wei_per_byte());
-        let fallback = adjustment
-            .apply(PolicyRate::new(config.fallback_policy_rate_wei_per_byte()))
-            .expect("validated DA fee-rate fallback must fit in u64");
-        let (updater, handle) = da_fee_rate_channel(fallback.wei_per_byte());
+    /// Resolves an initial policy rate before creating the payload handle.
+    pub(super) async fn initialize(
+        policy: Box<dyn DaFeeRatePolicy>,
+        config: &DaFeeRateConfig,
+    ) -> Result<Self, RateResolutionError> {
+        let policy_rate = fetch_policy_rate(policy.as_ref()).await?;
+        Self::new(policy, config, policy_rate)
+    }
 
-        Self {
+    /// Builds initialized state from a policy rate that has already been resolved.
+    pub(super) fn new(
+        policy: Box<dyn DaFeeRatePolicy>,
+        config: &DaFeeRateConfig,
+        policy_rate: PolicyRate,
+    ) -> Result<Self, RateResolutionError> {
+        let adjustment = RateAdjustment::new(config.multiplier_bps(), config.offset_wei_per_byte());
+        let adjusted_rate = adjustment.apply(policy_rate)?;
+        let (updater, handle) = da_fee_rate_channel(adjusted_rate.wei_per_byte());
+
+        Ok(Self {
             policy,
             adjustment,
             updater,
@@ -93,7 +104,7 @@ impl DaFeeRateServiceState {
             stale_after: Duration::from_secs(config.stale_after_seconds().get()),
             last_success_at: Instant::now(),
             is_stale: false,
-        }
+        })
     }
 
     /// Adjusts and publishes a successfully fetched policy rate.
@@ -105,7 +116,7 @@ impl DaFeeRateServiceState {
         &mut self,
         now: Instant,
         rate: PolicyRate,
-    ) -> Result<RateUpdate, RefreshError> {
+    ) -> Result<RateUpdate, RateResolutionError> {
         let adjusted_rate = self.adjustment.apply(rate)?;
         let changed =
             self.updater.publish(adjusted_rate.wei_per_byte()) != adjusted_rate.wei_per_byte();
@@ -130,5 +141,15 @@ impl DaFeeRateServiceState {
         } else {
             false
         }
+    }
+}
+
+/// Fetches a policy rate within the service's source timeout.
+pub(super) async fn fetch_policy_rate(
+    policy: &dyn DaFeeRatePolicy,
+) -> Result<PolicyRate, RateResolutionError> {
+    match timeout(POLICY_FETCH_TIMEOUT, policy.fetch_rate()).await {
+        Ok(result) => result.map_err(RateResolutionError::Policy),
+        Err(_) => Err(RateResolutionError::Timeout),
     }
 }

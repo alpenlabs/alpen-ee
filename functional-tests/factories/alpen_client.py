@@ -165,7 +165,6 @@ class AlpenClientFactory(flexitest.Factory):
             da_fee_rate=AlpenDaFeeRateConfig(
                 policy="fixed",
                 fixed_rate_wei_per_byte=da_rate_wei_per_byte,
-                fallback_policy_rate_wei_per_byte=da_rate_wei_per_byte,
             ),
         )
 

@@ -155,7 +155,6 @@ class AlpenDaFeeRateConfig:
 
     policy: str = field(default="fixed")  # "writer_backed" | "fixed"
     fixed_rate_wei_per_byte: int | None = field(default=0)
-    fallback_policy_rate_wei_per_byte: int = field(default=0)
     refresh_interval_seconds: int = field(default=60)
     stale_after_seconds: int = field(default=300)
     multiplier_bps: int = field(default=10_000)
