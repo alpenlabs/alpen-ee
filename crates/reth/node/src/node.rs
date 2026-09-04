@@ -1,6 +1,11 @@
+use std::sync::Arc;
+
 use alpen_ee_params::EvmSpec;
 use alpen_reth_evm::evm::AlpenEvmFactory;
-use alpen_reth_rpc::{eth::AlpenEthApiBuilder, SequencerClient};
+use alpen_reth_rpc::{
+    eth::{AlpenEthApiBuilder, LiveDaFeeRateProvider},
+    SequencerClient,
+};
 use reth_chainspec::ChainSpec;
 use reth_evm::{ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes};
 use reth_node_api::{FullNodeComponents, NodeAddOns};
@@ -63,6 +68,17 @@ impl AlpenNodeMode {
             Self::Sequencer => None,
             Self::FullNode { sequencer_http } => sequencer_http.clone(),
         }
+    }
+
+    /// Returns whether this node builds payloads from a live DA fee rate.
+    const fn is_sequencer(&self) -> bool {
+        matches!(self, Self::Sequencer)
+    }
+}
+
+impl LiveDaFeeRateProvider for DaFeeRateHandle {
+    fn current_rate(&self) -> u64 {
+        Self::current_rate(self)
     }
 }
 
@@ -153,8 +169,13 @@ where
     }
 
     fn add_ons(&self) -> Self::AddOns {
+        let live_da_fee_rate_provider = self
+            .mode
+            .is_sequencer()
+            .then(|| Arc::new(self.da_fee_rate_handle.clone()) as Arc<dyn LiveDaFeeRateProvider>);
         Self::AddOns::builder()
             .with_sequencer(self.mode.forward_target())
+            .with_live_da_fee_rate_provider(live_da_fee_rate_provider)
             .build()
     }
 }
@@ -165,12 +186,23 @@ pub struct AlpenRethAddOnsBuilder {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
     sequencer_client: Option<SequencerClient>,
+    /// Live rate source installed only on the sequencer.
+    live_da_fee_rate_provider: Option<Arc<dyn LiveDaFeeRateProvider>>,
 }
 
 impl AlpenRethAddOnsBuilder {
     /// With a [`SequencerClient`].
     pub fn with_sequencer(mut self, sequencer_client: Option<String>) -> Self {
         self.sequencer_client = sequencer_client.map(SequencerClient::new);
+        self
+    }
+
+    /// Installs the live DA fee-rate source used by mutable-state estimation.
+    pub fn with_live_da_fee_rate_provider(
+        mut self,
+        provider: Option<Arc<dyn LiveDaFeeRateProvider>>,
+    ) -> Self {
+        self.live_da_fee_rate_provider = provider;
         self
     }
 }
@@ -182,12 +214,17 @@ impl AlpenRethAddOnsBuilder {
         N: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>,
         AlpenEthApiBuilder: EthApiBuilder<N>,
     {
-        let Self { sequencer_client } = self;
+        let Self {
+            sequencer_client,
+            live_da_fee_rate_provider,
+        } = self;
 
         let sequencer_client_clone = sequencer_client.clone();
         AlpenRethNodeAddOns {
             rpc_add_ons: RpcAddOns::new(
-                AlpenEthApiBuilder::default().with_sequencer(sequencer_client_clone),
+                AlpenEthApiBuilder::default()
+                    .with_sequencer(sequencer_client_clone)
+                    .with_live_da_fee_rate_provider(live_da_fee_rate_provider),
                 AlpenEngineValidatorBuilder::default(),
                 BasicEngineApiBuilder::default(),
                 BasicEngineValidatorBuilder::default(),

@@ -6,7 +6,7 @@ use alloy_rpc_types_eth::{state::StateOverride, BlockId};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_api::{
     helpers::{estimate::EstimateCall, Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking},
-    FromEvmError, RpcNodeCore,
+    EthApiTypes, FromEvmError, RpcNodeCore,
 };
 use reth_rpc_eth_types::EthApiError;
 
@@ -28,6 +28,86 @@ where
 {
 }
 
+impl<N, Rpc> AlpenEthApi<N, Rpc>
+where
+    N: RpcNodeCore,
+    EthApiError: FromEvmError<N::Evm>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError, Evm = N::Evm>,
+{
+    /// Estimates effective gas using one DA rate snapshot for every simulation pass.
+    pub(crate) async fn estimate_gas_at_with_da_rate(
+        &self,
+        request: RpcTxReq<
+            <<AlpenEthApi<N, Rpc> as EthApiTypes>::RpcConvert as RpcConvert>::Network,
+        >,
+        at: BlockId,
+        state_override: Option<StateOverride>,
+        da_rate: Option<u64>,
+    ) -> Result<U256, <AlpenEthApi<N, Rpc> as EthApiTypes>::Error>
+    where
+        Self: LoadPendingBlock,
+    {
+        // reth's standard binary-search estimate for the execution-gas component.
+        let (evm_env, resolved_at) = self.evm_env_at(at).await?;
+        let exec_request = request.clone();
+        let exec_override = state_override.clone();
+        let raw_gas = self
+            .spawn_blocking_io_fut(move |this| async move {
+                let state = this.state_at_block_id(resolved_at).await?;
+                EstimateCall::estimate_gas_with(&this, evm_env, exec_request, state, exec_override)
+            })
+            .await?;
+
+        // Fold in the DA-fee headroom so the signed gas limit reserves enough to cover
+        // the separate DA charge. Quote against `resolved_at` — the concrete block the
+        // raw-gas simulation ran on — not the caller's `at`, so a block landing between
+        // the awaits can't pair execution gas from one block with a DA diff, rate, and
+        // base fee from another.
+        //
+        // The DA fee is sized from the transaction's state diff, which for `gasleft()`-
+        // or EIP-150-sensitive contracts can depend on the gas limit. So the quote must
+        // simulate at the same limit the wallet will ultimately sign (`raw_gas +
+        // da_gas`), not a roomy default — otherwise a contract that branches on remaining
+        // gas could produce a different diff (and DA fee) at inclusion than was quoted.
+        // The signed limit itself depends on the DA gas, so iterate to a (capped)
+        // fixpoint.
+        // Track the largest DA headroom seen across the probed limits. A well-behaved
+        // contract reaches a fixpoint (the quote taken *at* `effective_gas` reproduces
+        // it) within a couple of passes; a pathological one whose diff size oscillates
+        // with the gas limit may not. If the loop exits without a verified fixpoint we
+        // fall back to `raw_gas + max_da_gas` — an upper bound over every limit probed —
+        // so the returned envelope is never smaller than any single pass required.
+        // Over-reserving only enlarges the signed gas *limit* (unused gas is refunded),
+        // whereas under-reserving would get the tx skipped as DA-undercovered at build.
+        let mut effective_gas = raw_gas;
+        let mut max_da_gas = 0u64;
+        let mut converged = false;
+        for _ in 0..DA_GAS_FIXPOINT_ITERS {
+            let mut quote_request = request.clone();
+            quote_request
+                .as_mut()
+                .set_gas_limit(effective_gas.saturating_to::<u64>());
+            let quote = self
+                .da_fee_quote(quote_request, resolved_at, state_override.clone(), da_rate)
+                .await?;
+            let da_gas = da_fee_to_gas(quote.da_fee, quote.base_fee);
+            max_da_gas = max_da_gas.max(da_gas);
+            let next = raw_gas.saturating_add(U256::from(da_gas));
+            // Fixpoint verified: the DA headroom quoted *at* `effective_gas` folds back
+            // to exactly `effective_gas`, so the signed limit covers its own diff.
+            if next == effective_gas {
+                converged = true;
+                break;
+            }
+            effective_gas = next;
+        }
+        if !converged {
+            effective_gas = raw_gas.saturating_add(U256::from(max_da_gas));
+        }
+        Ok(effective_gas)
+    }
+}
+
 impl<N, Rpc> EstimateCall for AlpenEthApi<N, Rpc>
 where
     N: RpcNodeCore,
@@ -42,12 +122,6 @@ where
     /// then authorizes the DA charge deducted in-EVM at inclusion. Execution is still
     /// billed on actual `gas_used` (unused gas refunded); the inflation is a reservation
     /// envelope, not extra gas spent.
-    // Match the trait's `-> impl Future + Send` signature exactly (as reth's own default
-    // does); `async fn` cannot restate the explicit `Send` bound the trait requires.
-    #[expect(
-        clippy::manual_async_fn,
-        reason = "must mirror the trait's impl-Future signature"
-    )]
     fn estimate_gas_at(
         &self,
         request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
@@ -57,72 +131,8 @@ where
     where
         Self: LoadPendingBlock,
     {
-        async move {
-            // reth's standard binary-search estimate for the execution-gas component.
-            let (evm_env, resolved_at) = self.evm_env_at(at).await?;
-            let exec_request = request.clone();
-            let exec_override = state_override.clone();
-            let raw_gas = self
-                .spawn_blocking_io_fut(move |this| async move {
-                    let state = this.state_at_block_id(resolved_at).await?;
-                    EstimateCall::estimate_gas_with(
-                        &this,
-                        evm_env,
-                        exec_request,
-                        state,
-                        exec_override,
-                    )
-                })
-                .await?;
-
-            // Fold in the DA-fee headroom so the signed gas limit reserves enough to cover
-            // the separate DA charge. Quote against `resolved_at` — the concrete block the
-            // raw-gas simulation ran on — not the caller's `at`, so a block landing between
-            // the awaits can't pair execution gas from one block with a DA diff, rate, and
-            // base fee from another.
-            //
-            // The DA fee is sized from the transaction's state diff, which for `gasleft()`-
-            // or EIP-150-sensitive contracts can depend on the gas limit. So the quote must
-            // simulate at the same limit the wallet will ultimately sign (`raw_gas +
-            // da_gas`), not a roomy default — otherwise a contract that branches on remaining
-            // gas could produce a different diff (and DA fee) at inclusion than was quoted.
-            // The signed limit itself depends on the DA gas, so iterate to a (capped)
-            // fixpoint.
-            // Track the largest DA headroom seen across the probed limits. A well-behaved
-            // contract reaches a fixpoint (the quote taken *at* `effective_gas` reproduces
-            // it) within a couple of passes; a pathological one whose diff size oscillates
-            // with the gas limit may not. If the loop exits without a verified fixpoint we
-            // fall back to `raw_gas + max_da_gas` — an upper bound over every limit probed —
-            // so the returned envelope is never smaller than any single pass required.
-            // Over-reserving only enlarges the signed gas *limit* (unused gas is refunded),
-            // whereas under-reserving would get the tx skipped as DA-undercovered at build.
-            let mut effective_gas = raw_gas;
-            let mut max_da_gas = 0u64;
-            let mut converged = false;
-            for _ in 0..DA_GAS_FIXPOINT_ITERS {
-                let mut quote_request = request.clone();
-                quote_request
-                    .as_mut()
-                    .set_gas_limit(effective_gas.saturating_to::<u64>());
-                let quote = self
-                    .da_fee_quote(quote_request, resolved_at, state_override.clone())
-                    .await?;
-                let da_gas = da_fee_to_gas(quote.da_fee, quote.base_fee);
-                max_da_gas = max_da_gas.max(da_gas);
-                let next = raw_gas.saturating_add(U256::from(da_gas));
-                // Fixpoint verified: the DA headroom quoted *at* `effective_gas` folds back
-                // to exactly `effective_gas`, so the signed limit covers its own diff.
-                if next == effective_gas {
-                    converged = true;
-                    break;
-                }
-                effective_gas = next;
-            }
-            if !converged {
-                effective_gas = raw_gas.saturating_add(U256::from(max_da_gas));
-            }
-            Ok(effective_gas)
-        }
+        let da_rate = self.live_da_fee_rate(at);
+        self.estimate_gas_at_with_da_rate(request, at, state_override, da_rate)
     }
 }
 
