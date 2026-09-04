@@ -98,15 +98,26 @@ impl MempoolExplorerClient {
             .map_err(|_| anyhow::anyhow!("failed to decode mempool recommended fees response"))
     }
 
-    async fn fetch_recommended_fees(&self) -> anyhow::Result<MempoolRecommendedFees> {
-        match self.fetch_fee_estimates("api/v1/fees/precise").await {
-            Ok(fees) => Ok(fees),
+    async fn fetch_fee_rate(
+        &self,
+        path: &str,
+        policy: MempoolExplorerFeePolicy,
+    ) -> anyhow::Result<FeeRate> {
+        self.fetch_fee_estimates(path).await?.select(policy)
+    }
+
+    async fn fetch_recommended_fee_rate(
+        &self,
+        policy: MempoolExplorerFeePolicy,
+    ) -> anyhow::Result<FeeRate> {
+        match self.fetch_fee_rate("api/v1/fees/precise", policy).await {
+            Ok(fee_rate) => Ok(fee_rate),
             Err(err) => {
                 warn!(
                     %err,
                     "mempool precise fee lookup failed, falling back to recommended endpoint"
                 );
-                self.fetch_fee_estimates("api/v1/fees/recommended").await
+                self.fetch_fee_rate("api/v1/fees/recommended", policy).await
             }
         }
     }
@@ -155,8 +166,13 @@ where
 {
     let explorer = MempoolExplorerClient::new(base_url)?;
 
-    let explorer_error = match timeout(timeouts.explorer, explorer.fetch_recommended_fees()).await {
-        Ok(Ok(fees)) => return fees.select(mempool_fee_policy),
+    let explorer_error = match timeout(
+        timeouts.explorer,
+        explorer.fetch_recommended_fee_rate(mempool_fee_policy),
+    )
+    .await
+    {
+        Ok(Ok(fee_rate)) => return Ok(fee_rate),
         Ok(Err(err)) => err,
         Err(err) => anyhow::Error::new(err).context(format!(
             "mempool fee lookup timed out after {:?}",
@@ -336,8 +352,12 @@ mod tests {
 
     #[tokio::test]
     async fn mempool_policy_uses_selected_recommendation() {
-        let body = r#"{"fastestFee":7,"halfHourFee":6,"hourFee":5,"economyFee":4,"minimumFee":3}"#;
-        let (server, _) = spawn_response_server(vec![("200 OK", body)]).await;
+        let invalid_precise =
+            r#"{"fastestFee":7,"halfHourFee":6,"hourFee":5,"economyFee":-1,"minimumFee":3}"#;
+        let recommended =
+            r#"{"fastestFee":7,"halfHourFee":6,"hourFee":5,"economyFee":4,"minimumFee":3}"#;
+        let (server, requests) =
+            spawn_response_server(vec![("200 OK", invalid_precise), ("200 OK", recommended)]).await;
         let client = disconnected_bitcoin_client();
         let config = mempool_config(MempoolExplorerFeePolicy::Economy, server);
 
@@ -347,15 +367,19 @@ mod tests {
                 .unwrap(),
             FeeRate::from_sat_per_vb_u32(4)
         );
+        let requests = requests.lock().unwrap();
+        assert!(requests[0].contains("/api/v1/fees/precise"));
+        assert!(requests[1].contains("/api/v1/fees/recommended"));
     }
 
     #[tokio::test]
     async fn mempool_failure_falls_back_to_bitcoind() {
-        let (mempool_server, _) = spawn_response_server(vec![
-            ("500 Internal Server Error", "{}"),
-            ("200 OK", "not-json"),
-        ])
-        .await;
+        let invalid =
+            r#"{"fastestFee":-1,"halfHourFee":6,"hourFee":5,"economyFee":4,"minimumFee":3}"#;
+        let overflowing =
+            r#"{"fastestFee":1e20,"halfHourFee":6,"hourFee":5,"economyFee":4,"minimumFee":3}"#;
+        let (mempool_server, _) =
+            spawn_response_server(vec![("200 OK", invalid), ("200 OK", overflowing)]).await;
         let response =
             r#"{"result":{"feerate":0.00002,"errors":null,"blocks":3},"error":null,"id":0}"#;
         let (bitcoin_server, requests) = spawn_response_server(vec![("200 OK", response)]).await;

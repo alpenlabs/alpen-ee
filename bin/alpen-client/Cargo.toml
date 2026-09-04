@@ -151,6 +151,7 @@ clap.workspace = true
 eyre.workspace = true
 http.workspace = true
 jsonrpsee = { workspace = true, features = ["http-client", "server", "macros"] }
+reqwest = { workspace = true, optional = true }
 reth-chainspec.workspace = true
 reth-cli-commands.workspace = true
 reth-cli-runner.workspace = true
@@ -164,7 +165,6 @@ reth-payload-builder = { workspace = true, optional = true }
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true
 reth-tasks.workspace = true
-reqwest = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 sp1-verifier = { workspace = true, optional = true }

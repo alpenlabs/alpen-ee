@@ -7,7 +7,7 @@ use strata_service::{
     AsyncExecutor, AsyncService, AsyncServiceInput, DumbTickHandle, DumbTickingInput, Response,
     Service, ServiceBuilder, ServiceMonitor, ServiceState,
 };
-use tokio::time::Instant;
+use tokio::time::{sleep_until, Instant};
 use tracing::{debug, info, warn};
 
 use super::state::{fetch_policy_rate, DaFeeRateServiceState, RateUpdate};
@@ -110,8 +110,25 @@ impl Service for DaFeeRateService {
 
 impl AsyncService for DaFeeRateService {
     async fn process_input(state: &mut Self::State, _input: Self::Msg) -> anyhow::Result<Response> {
-        let fetch_result =
-            fetch_policy_rate(state.policy.as_ref(), state.policy_fetch_timeout).await;
+        let fetch_result = if state.is_stale {
+            fetch_policy_rate(state.policy.as_ref(), state.policy_fetch_timeout).await
+        } else if let Some(stale_deadline) = state.last_success_at.checked_add(state.stale_after) {
+            tokio::select! {
+                result = fetch_policy_rate(state.policy.as_ref(), state.policy_fetch_timeout) => {
+                    result
+                }
+                () = sleep_until(stale_deadline) => {
+                    if state.mark_stale_if_needed(Instant::now()) {
+                        record_stale_transition(state);
+                    }
+                    return Ok(Response::Continue);
+                }
+            }
+        } else {
+            // The configured duration extends beyond Tokio's representable instant range,
+            // so it cannot become stale during this fetch.
+            fetch_policy_rate(state.policy.as_ref(), state.policy_fetch_timeout).await
+        };
         let now = Instant::now();
 
         match fetch_result.and_then(|rate| state.apply_policy_rate(now, rate)) {
@@ -137,16 +154,20 @@ impl AsyncService for DaFeeRateService {
         }
 
         if state.mark_stale_if_needed(now) {
-            gauge!(STALE_METRIC).set(1);
-            warn!(
-                current_rate_wei_per_byte = state.handle.current_rate(),
-                stale_after_seconds = state.stale_after.as_secs(),
-                "DA fee rate became stale; retaining the last usable rate"
-            );
+            record_stale_transition(state);
         }
 
         Ok(Response::Continue)
     }
+}
+
+fn record_stale_transition(state: &DaFeeRateServiceState) {
+    gauge!(STALE_METRIC).set(1);
+    warn!(
+        current_rate_wei_per_byte = state.handle.current_rate(),
+        stale_after_seconds = state.stale_after.as_secs(),
+        "DA fee rate became stale; retaining the last usable rate"
+    );
 }
 
 fn set_current_rate_metric(rate_wei_per_byte: u64) {
@@ -253,19 +274,20 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn service_tick_times_out_without_replacing_last_successful_rate() {
+    async fn pending_fetch_marks_the_rate_stale_at_its_deadline() {
         let mut state = service_state_with_policy(PendingPolicy, service_config(), 10);
-        let policy_fetch_timeout = state.policy_fetch_timeout;
+        let stale_after = state.stale_after;
         let task = tokio::spawn(async move {
             let response = DaFeeRateService::process_input(&mut state, ()).await;
-            (response, state.handle.current_rate())
+            (response, state.handle.current_rate(), state.is_stale)
         });
 
         yield_now().await;
-        advance(policy_fetch_timeout).await;
-        let (response, current_rate) = task.await.unwrap();
+        advance(stale_after).await;
+        let (response, current_rate, is_stale) = task.await.unwrap();
 
         assert_eq!(response.unwrap(), Response::Continue);
         assert_eq!(current_rate, 10);
+        assert!(is_stale);
     }
 }
