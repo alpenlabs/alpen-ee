@@ -157,7 +157,7 @@ impl DaFeeRateServiceState {
 
     /// Marks the service stale and returns `true` only on the fresh-to-stale transition.
     pub(super) fn mark_stale_if_needed(&mut self, now: Instant) -> bool {
-        if !self.is_stale && now.duration_since(self.last_success_at) > self.stale_after {
+        if !self.is_stale && now.duration_since(self.last_success_at) >= self.stale_after {
             self.is_stale = true;
             true
         } else {
@@ -326,15 +326,11 @@ mod tests {
     }
 
     #[test]
-    fn stale_boundary_is_strict_and_success_recovers() {
+    fn stale_boundary_and_successful_recovery() {
         let mut state = service_state_with_policy(ScriptedPolicy::new([]), service_config(), 10);
         let activated_at = state.last_success_at;
 
-        assert!(!state.mark_stale_if_needed(activated_at + Duration::from_secs(10)));
-        assert!(!state.is_stale);
-        assert!(state.mark_stale_if_needed(
-            activated_at + Duration::from_secs(10) + Duration::from_nanos(1)
-        ));
+        assert!(state.mark_stale_if_needed(activated_at + Duration::from_secs(10)));
         assert!(state.is_stale);
 
         let recovered_at = activated_at + Duration::from_secs(11);
