@@ -4,14 +4,14 @@
 //! Both provers use SP1 remote proving in production; native is dev-only
 //! via the proofimpl crates' `native_host()`, used by functional tests.
 //!
-//! Storage layout (sled-backed, own sled db under `<datadir>/sled` — fully
+//! Storage layout (MDBX-backed, own MDBX db under `<datadir>/mdbx` — fully
 //! separate from OL's; the prover trees live alongside the EE node trees):
 //! - `task_store` — shared across both provers; task keys carry a kind tag (`b'c'`/`b'a'`) so chunk
 //!   and batch entries don't collide in one tree.
 //! - `chunk_receipts` — chunk prover writes (via paas auto-store); acct `fetch_input` reads back.
 //! - `batch_proofs` — outer-proof store keyed by `BatchId`; outer hook writes, OL submission reads.
 //!
-//! All backed by `EeProverDbSled`; see `alpen_ee_database::sleddb::prover_db`
+//! All backed by `EeProverDbMdbx`; see `alpen_ee_database::mdbxdb`
 //! for schemas.
 
 use std::sync::Arc;

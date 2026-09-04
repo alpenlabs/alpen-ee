@@ -1,0 +1,19 @@
+[package]
+name = "alpen-db-store-mdbx"
+version = "0.1.0"
+edition = "2021"
+
+[lints]
+workspace = true
+
+[dependencies]
+ciborium.workspace = true
+signet-libmdbx.workspace = true
+strata-codec.workspace = true
+
+bincode.workspace = true
+borsh.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

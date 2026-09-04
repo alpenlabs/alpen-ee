@@ -161,7 +161,7 @@ Execution Environment implementation.
 | `alpen-ee/exec-chain` | Execution chain state and orphan tracking |
 | `alpen-ee/ol-tracker` | OL state tracking from EE perspective |
 | `alpen-ee/sequencer` | EE block building and OL chain tracking |
-| `alpen-ee/database` | EE-specific storage (SledDB) |
+| `alpen-ee/database` | EE-specific storage (MDBX) |
 | `alpen-ee/common` | Shared EE types and traits |
 | `alpen-ee/da` | EE data availability payload and inclusion helpers |
 | `alpen-ee/genesis` | EE genesis state |
@@ -221,7 +221,7 @@ Bitcoin primitive types, header verification, and related helpers are provided t
 |-------|-------------|
 | `storage` | Storage managers and interfaces |
 | `storage-common` | Shared storage abstractions |
-| `db/store-sled` | SledDB storage implementation |
+| `db/store-mdbx` | MDBX storage implementation |
 | `db/types` | Database type definitions |
 | `state` | Chain and client state management |
 

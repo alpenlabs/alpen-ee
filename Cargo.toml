@@ -24,6 +24,7 @@ members = [
   "crates/evm-ee",
   "crates/proof-impl/alpen-chunk",
   "crates/proof-impl/alpen-acct",
+  "crates/db/store-mdbx",
   "crates/reth/chainspec",
   "crates/reth/db",
   "crates/reth/evm",
@@ -66,6 +67,7 @@ rustdoc.all = "warn"
 
 [workspace.dependencies]
 alpen-chainspec = { path = "crates/reth/chainspec" }
+alpen-db-store-mdbx = { path = "crates/db/store-mdbx" }
 alpen-ee-block-assembly = { path = "crates/alpen-ee/block-assembly" }
 alpen-ee-common = { path = "crates/alpen-ee/common" }
 alpen-ee-da-provider = { path = "crates/alpen-ee/da/provider" }
@@ -108,7 +110,7 @@ strata-cli-common = { git = "https://github.com/alpenlabs/alpen.git", rev = "300
 strata-common = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
 strata-config = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
 strata-da-framework = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
-strata-db-store-sled = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
+strata-db-tests = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
 strata-db-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
 strata-ol-bridge-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
 strata-ol-msg-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
@@ -119,7 +121,6 @@ strata-paas = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f6
 strata-primitives = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
 strata-snark-acct-runtime = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
 strata-snark-acct-types = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
-strata-storage = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
 strata-storage-common = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
 strata-test-utils-btcio = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
 strata-test-utils-ssz = { git = "https://github.com/alpenlabs/alpen.git", rev = "300e021f67cc804b7b6d426183db47a9693214e9" }
@@ -173,9 +174,6 @@ strata-btc-verification = { git = "https://github.com/alpenlabs/asm", tag = "v0.
 strata-checkpoint-verification = { git = "https://github.com/alpenlabs/asm", tag = "v0.4.0-rc.2" }
 strata-test-utils-btc = { git = "https://github.com/alpenlabs/asm", tag = "v0.4.0-rc.2" }
 strata-test-utils-checkpoint = { git = "https://github.com/alpenlabs/asm", tag = "v0.4.0-rc.2" }
-
-# sled wrapper
-typed-sled = { git = "https://github.com/alpenlabs/typed-sled" }
 
 # zkaleido
 zkaleido = { git = "https://github.com/alpenlabs/zkaleido", features = [
@@ -371,7 +369,7 @@ serde_with = "3.18.0"
 sha2 = "0.10.8"
 shrex = { version = "1", features = ["serde"] }
 shrex_macros = "1"
-sled = "0.34.7"
+signet-libmdbx = "0.8.3"
 tempfile = "3.27.0"
 terrors = "0.3.0"
 thiserror = "2.0.11"
