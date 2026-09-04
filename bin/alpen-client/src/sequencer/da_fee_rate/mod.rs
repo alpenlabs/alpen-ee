@@ -34,7 +34,7 @@ pub(crate) async fn start(
     executor: &impl AsyncExecutor,
 ) -> anyhow::Result<DaFeeRateServiceHandle> {
     let policy: Box<dyn DaFeeRatePolicy> = match config.policy() {
-        DaFeeRatePolicyConfig::WriterBacked => Box::new(WriterBackedDaFeeRatePolicy::new(
+        DaFeeRatePolicyConfig::WriterBacked { .. } => Box::new(WriterBackedDaFeeRatePolicy::new(
             btc_client,
             writer_fee_policy_config,
             FeeRateResolutionTimeouts::new(config.explorer_timeout(), config.bitcoind_timeout()),

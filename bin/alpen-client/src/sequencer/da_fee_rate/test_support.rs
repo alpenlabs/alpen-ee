@@ -46,6 +46,13 @@ impl DaFeeRatePolicy for PendingPolicy {
     }
 }
 
+pub(super) const fn writer_backed_policy_config() -> DaFeeRatePolicyConfig {
+    DaFeeRatePolicyConfig::WriterBacked {
+        min_rate_wei_per_byte: 0,
+        max_rate_wei_per_byte: i64::MAX as u64,
+    }
+}
+
 pub(super) fn rate_config(
     policy: DaFeeRatePolicyConfig,
     refresh_interval_seconds: u64,
@@ -54,7 +61,12 @@ pub(super) fn rate_config(
     offset_wei_per_byte: u64,
 ) -> DaFeeRateConfig {
     let policy_fields = match policy {
-        DaFeeRatePolicyConfig::WriterBacked => "policy = \"writer_backed\"".to_owned(),
+        DaFeeRatePolicyConfig::WriterBacked {
+            min_rate_wei_per_byte,
+            max_rate_wei_per_byte,
+        } => format!(
+            "policy = \"writer_backed\"\nmin_rate_wei_per_byte = {min_rate_wei_per_byte}\nmax_rate_wei_per_byte = {max_rate_wei_per_byte}"
+        ),
         DaFeeRatePolicyConfig::Fixed { rate_wei_per_byte } => {
             format!("policy = \"fixed\"\nfixed_rate_wei_per_byte = {rate_wei_per_byte}")
         }
@@ -72,7 +84,7 @@ pub(super) fn rate_config(
 }
 
 pub(super) fn service_config() -> DaFeeRateConfig {
-    rate_config(DaFeeRatePolicyConfig::WriterBacked, 5, 10, 10_000, 0)
+    rate_config(writer_backed_policy_config(), 5, 10, 10_000, 0)
 }
 
 pub(super) fn service_state_with_policy(

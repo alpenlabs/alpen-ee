@@ -161,6 +161,8 @@ class AlpenDaFeeRateConfig:
     bitcoind_timeout_seconds: int = field(default=10)
     multiplier_bps: int = field(default=10_000)
     offset_wei_per_byte: int = field(default=0)
+    min_rate_wei_per_byte: int | None = field(default=None)
+    max_rate_wei_per_byte: int | None = field(default=None)
 
 
 @dataclass

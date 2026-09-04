@@ -314,7 +314,12 @@ pub(crate) struct FullNodeConfig {
 #[serde(tag = "policy", rename_all = "snake_case")]
 pub(crate) enum DaFeeRatePolicyConfig {
     /// Reuses the Bitcoin writer's configured L1 fee policy.
-    WriterBacked,
+    WriterBacked {
+        /// Rejects adjusted external rates below this operator-approved value.
+        min_rate_wei_per_byte: u64,
+        /// Rejects adjusted external rates above this operator-approved value.
+        max_rate_wei_per_byte: u64,
+    },
     /// Returns one operator-configured rate without consulting Bitcoin.
     Fixed {
         #[serde(rename = "fixed_rate_wei_per_byte")]
@@ -389,12 +394,29 @@ impl DaFeeRateConfig {
         self.offset_wei_per_byte
     }
 
-    /// Checks that the stale threshold is not shorter than the refresh interval.
+    /// Returns the inclusive bounds for an adjusted external rate.
+    pub(crate) const fn rate_bounds(&self) -> Option<(u64, u64)> {
+        match self.policy {
+            DaFeeRatePolicyConfig::WriterBacked {
+                min_rate_wei_per_byte,
+                max_rate_wei_per_byte,
+            } => Some((min_rate_wei_per_byte, max_rate_wei_per_byte)),
+            DaFeeRatePolicyConfig::Fixed { .. } => None,
+        }
+    }
+
+    /// Checks relationships between DA fee-rate settings.
     fn validate(&self) -> eyre::Result<()> {
         eyre::ensure!(
             self.stale_after_seconds >= self.refresh_interval_seconds,
             "stale_after_seconds must be at least refresh_interval_seconds"
         );
+        if let Some((min, max)) = self.rate_bounds() {
+            eyre::ensure!(
+                min <= max,
+                "min_rate_wei_per_byte must not exceed max_rate_wei_per_byte"
+            );
+        }
         Ok(())
     }
 }
@@ -705,6 +727,8 @@ mod tests {
             policy = "writer_backed"
             refresh_interval_seconds = 60
             stale_after_seconds = 300
+            min_rate_wei_per_byte = 0
+            max_rate_wei_per_byte = 9223372036854775807
         "#;
         let err = AlpenClientConfig::from_toml_str(full_node_with_sequencer).unwrap_err();
         assert!(err.to_string().contains("[sequencer] table"), "{err}");
@@ -731,6 +755,8 @@ mod tests {
             policy = "writer_backed"
             refresh_interval_seconds = 60
             stale_after_seconds = 300
+            min_rate_wei_per_byte = 0
+            max_rate_wei_per_byte = 9223372036854775807
         "#;
         let err = AlpenClientConfig::from_toml_str(sequencer_with_full_node).unwrap_err();
         assert!(err.to_string().contains("[full_node] table"), "{err}");
@@ -773,10 +799,17 @@ mod tests {
         assert_eq!(seq.config.chunk_sealing_block_count(), 100);
         assert_eq!(
             seq.config.da_fee_rate.policy,
-            DaFeeRatePolicyConfig::WriterBacked
+            DaFeeRatePolicyConfig::WriterBacked {
+                min_rate_wei_per_byte: 2_500_000_000,
+                max_rate_wei_per_byte: 2_500_000_000_000,
+            }
         );
         assert_eq!(seq.config.da_fee_rate.multiplier_bps, 10_000);
         assert_eq!(seq.config.da_fee_rate.offset_wei_per_byte, 0);
+        assert_eq!(
+            seq.config.da_fee_rate.rate_bounds(),
+            Some((2_500_000_000, 2_500_000_000_000))
+        );
         assert_eq!(seq.config.da_fee_rate.explorer_timeout().as_secs(), 10);
         assert_eq!(seq.config.da_fee_rate.bitcoind_timeout().as_secs(), 10);
         assert_eq!(seq.config.da_fee_rate.policy_fetch_timeout().as_secs(), 20);
@@ -804,6 +837,7 @@ mod tests {
             assert_eq!(fixed.explorer_timeout(), Duration::from_secs(10));
             assert_eq!(fixed.bitcoind_timeout(), Duration::from_secs(10));
             assert_eq!(fixed.policy_fetch_timeout(), Duration::from_secs(20));
+            assert_eq!(fixed.rate_bounds(), None);
         }
 
         let missing_fixed_rate = toml::from_str::<DaFeeRateConfig>(
@@ -832,6 +866,8 @@ mod tests {
             stale_after_seconds = 10
             explorer_timeout_seconds = 4
             bitcoind_timeout_seconds = 7
+            min_rate_wei_per_byte = 0
+            max_rate_wei_per_byte = 9223372036854775807
             "#,
         )
         .unwrap();
@@ -906,6 +942,8 @@ mod tests {
             policy = "writer_backed"
             refresh_interval_seconds = 10
             stale_after_seconds = 5
+            min_rate_wei_per_byte = 0
+            max_rate_wei_per_byte = 9223372036854775807
             "#,
         );
         let error = AlpenClientConfig::from_toml_str(&invalid_stale_threshold).unwrap_err();
@@ -913,6 +951,28 @@ mod tests {
             error
                 .to_string()
                 .contains("stale_after_seconds must be at least"),
+            "{error}"
+        );
+    }
+
+    #[cfg(feature = "sequencer")]
+    #[test]
+    fn da_fee_rate_bounds_are_ordered() {
+        let invalid_bounds = sequencer_toml_with_da_fee_rate(
+            r#"
+            policy = "writer_backed"
+            refresh_interval_seconds = 5
+            stale_after_seconds = 10
+            min_rate_wei_per_byte = 11
+            max_rate_wei_per_byte = 10
+            "#,
+        );
+        let error = AlpenClientConfig::from_toml_str(&invalid_bounds).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("min_rate_wei_per_byte must not exceed"),
             "{error}"
         );
     }
@@ -933,6 +993,8 @@ mod tests {
             fixed_rate_wei_per_byte = 17
             refresh_interval_seconds = 60
             stale_after_seconds = 300
+            min_rate_wei_per_byte = 0
+            max_rate_wei_per_byte = 9223372036854775807
             "#,
         );
         let error = AlpenClientConfig::from_toml_str(&with_fixed_rate_for_writer).unwrap_err();
@@ -981,6 +1043,8 @@ mod tests {
                 policy = "writer_backed"
                 refresh_interval_seconds = 60
                 stale_after_seconds = 300
+                min_rate_wei_per_byte = 0
+                max_rate_wei_per_byte = 9223372036854775807
             "#
             )
         }
@@ -1075,6 +1139,8 @@ mod tests {
             policy = "writer_backed"
             refresh_interval_seconds = 60
             stale_after_seconds = 300
+            min_rate_wei_per_byte = 0
+            max_rate_wei_per_byte = 9223372036854775807
         "#;
         let err = AlpenClientConfig::from_toml_str(toml).unwrap_err();
         assert!(err.to_string().contains("ol_submit_url"));
