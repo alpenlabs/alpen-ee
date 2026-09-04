@@ -6,13 +6,13 @@
 //! genesis work beyond what [`crate::node`] already did, no ExExes, and no
 //! services past the two every node runs.
 
-use std::sync::{atomic::AtomicU64, Arc};
+use std::sync::Arc;
 
 use alpen_ee_common::BlockNumHash;
 use alpen_ee_rpc_server::{AlpenEeRpcServer, EeRpcServer};
 use alpen_reth_evm::evm::AlpenEvmFactory;
 use alpen_reth_node::{
-    AlpenEthereumNode, AlpenGossipProtocolHandler, AlpenGossipState, AlpenNodeMode,
+    AlpenEthereumNode, AlpenGossipProtocolHandler, AlpenGossipState, AlpenNodeMode, DaFeeRateHandle,
 };
 use alpen_reth_rpc::AlpenFeeApiServer;
 use reth_chainspec::ChainSpec;
@@ -33,15 +33,15 @@ pub(crate) async fn run(
     config: &FullNodeConfig,
 ) -> eyre::Result<()> {
     let evm_factory = AlpenEvmFactory::from_bridge_params(common.params.bridge_params());
-    // A full node never builds blocks, so its live DA rate is never sampled: it
+    // A full node never builds blocks, so its DA fee rate handle is never sampled. It
     // recovers each block's frozen rate from the header `extra_data` instead.
     // The handle exists only to satisfy the shared node type.
-    let live_da_rate = Arc::new(AtomicU64::new(0));
+    let da_fee_rate_handle = DaFeeRateHandle::fixed(0);
     let node = AlpenEthereumNode::new(
         evm_factory,
         common.params.evm_spec().clone(),
         AlpenNodeMode::full_node(config.sequencer_http_url.clone()),
-        live_da_rate,
+        da_fee_rate_handle,
     );
 
     let consensus_watcher = common.ol_tracker.consensus_watcher();

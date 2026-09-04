@@ -8,6 +8,8 @@
 //! brings up the DA/btcio pipeline, the provers, and the batch/chunk
 //! builders.
 
+mod bitcoin_fee_rate;
+pub(crate) mod da_fee_rate;
 mod da_pipeline;
 mod gas_data_provider;
 mod header_summary;
@@ -16,10 +18,7 @@ mod prover;
 mod provers;
 mod services;
 
-use std::{
-    env,
-    sync::{atomic::AtomicU64, Arc},
-};
+use std::sync::Arc;
 
 use alpen_ee_common::{require_latest_batch, BlockNumHash, SequencerOLClient};
 use alpen_ee_database::{EeDb, EeNodeStorage, SequencerDatabases};
@@ -40,16 +39,19 @@ use alpen_ee_sequencer::{
     BatchBuilderEvent, BatchBuilderState, BatchLifecycleState, BlockBuilderConfig,
     OLChainTrackerState,
 };
-use alpen_reth_evm::{da_fee::DEFAULT_DA_RATE_WEI_PER_BYTE, evm::AlpenEvmFactory};
+use alpen_reth_evm::evm::AlpenEvmFactory;
 use alpen_reth_exex::{AccessedStateGenerator, StateDiffGenerator};
 use alpen_reth_node::{
     AlpenEngineTypes, AlpenEthereumNode, AlpenGossipProtocolHandler, AlpenGossipState,
     AlpenNodeMode,
 };
 use alpen_reth_rpc::AlpenFeeApiServer;
-use bitcoind_async_client::corepc_types::bitcoin::{
-    key::Keypair,
-    secp256k1::{Secp256k1, SecretKey},
+use bitcoind_async_client::{
+    corepc_types::bitcoin::{
+        key::Keypair,
+        secp256k1::{Secp256k1, SecretKey},
+    },
+    Client as BtcClient,
 };
 use eyre::Context;
 use reth_chainspec::ChainSpec;
@@ -103,6 +105,12 @@ struct SequencerBootState {
     batch_lifecycle: BatchLifecycleState,
 }
 
+/// Bitcoin resources constructed once and shared by fee lookup and DA publication.
+struct BtcioResources {
+    client: Arc<BtcClient>,
+    writer_config: Arc<WriterConfig>,
+}
+
 /// The sequencer's exec-chain tip, used to seed the p2p preconf head watch
 /// before the reth node (and therefore the engine-control task) is built.
 ///
@@ -141,7 +149,7 @@ fn log_writer_config(cfg: &WriterConfig) {
         }
         FeePolicy::MempoolExplorer {
             policy,
-            mempool_base_url,
+            mempool_base_url: _,
             fallback_conf_target,
         } => {
             info!(
@@ -149,7 +157,6 @@ fn log_writer_config(cfg: &WriterConfig) {
                 component = "alpen",
                 policy = "mempool",
                 tier = ?policy,
-                base_url = %mempool_base_url,
                 fallback_conf_target,
                 "btcio writer configured",
             );
@@ -244,36 +251,33 @@ pub(crate) async fn run(
     // start the engine-control task from the wrong fork-choice head.
     let initial_preconf_head = initial_preconf_head(common.storage.as_ref()).await?;
 
-    let evm_factory = AlpenEvmFactory::from_bridge_params(common.params.bridge_params());
-    // Live DA rate (wei per byte) consumed by the payload builder, frozen per
-    // block into the header `extra_data` and the in-EVM DA fee charge.
-    //
-    // Seeded from `ALPEN_DA_RATE_WEI_PER_BYTE`, defaulting to
-    // `DEFAULT_DA_RATE_WEI_PER_BYTE` (a sensible non-zero rate) so the DA charge is active
-    // out of the box; set the env var to 0 to keep it dormant.
-    // TODO(STR-4225): drive this dynamically from the sequencer's Bitcoin fee
-    // rate (`btcio::writer::fees::resolve_fee_rate`, gossiped from the OL via the
-    // fee config) instead of a static env seed, and decouple it from the
-    // publication rate. Tracked in a follow-up ticket.
-    // A malformed value (typo, or out of `u64` range) is a consensus-visible
-    // misconfiguration — the sequencer would commit and charge an unintended DA fee — so
-    // fail loudly rather than silently falling back. The default applies only when the
-    // variable is genuinely absent.
-    let da_rate_seed = match env::var("ALPEN_DA_RATE_WEI_PER_BYTE") {
-        Ok(raw) => raw
-            .parse::<u64>()
-            .with_context(|| format!("invalid ALPEN_DA_RATE_WEI_PER_BYTE: {raw:?}"))?,
-        Err(env::VarError::NotPresent) => DEFAULT_DA_RATE_WEI_PER_BYTE,
-        Err(err @ env::VarError::NotUnicode(_)) => {
-            eyre::bail!("invalid ALPEN_DA_RATE_WEI_PER_BYTE: {err}");
-        }
+    let sequencer_config = &mode.config;
+    let writer_config = Arc::new(WriterConfig {
+        l1_fee_policy_config: sequencer_config.l1_fee_policy.clone(),
+        ..Default::default()
+    });
+    log_writer_config(&writer_config);
+    let btc_client = da_pipeline::connect_bitcoin(&sequencer_config.bitcoind).await?;
+    let da_fee_rate_service = da_fee_rate::start(
+        &sequencer_config.da_fee_rate,
+        btc_client.clone(),
+        sequencer_config.l1_fee_policy.clone(),
+        &common.sequencer.service_executor,
+    )
+    .await
+    .map_err(|error| eyre::eyre!("failed to start DA fee-rate service: {error}"))?;
+    let da_fee_rate_handle = da_fee_rate_service.rate_handle();
+    let btcio = BtcioResources {
+        client: btc_client,
+        writer_config,
     };
-    let live_da_rate = Arc::new(AtomicU64::new(da_rate_seed));
+
+    let evm_factory = AlpenEvmFactory::from_bridge_params(common.params.bridge_params());
     let node = AlpenEthereumNode::new(
         evm_factory,
         common.params.evm_spec().clone(),
         AlpenNodeMode::sequencer(),
-        live_da_rate,
+        da_fee_rate_handle,
     );
 
     let consensus_watcher = common.ol_tracker.consensus_watcher();
@@ -377,6 +381,7 @@ pub(crate) async fn run(
         &sequencer_dbs,
         &launched,
         node.payload_builder_handle.clone(),
+        btcio,
     )
     .await?;
 
@@ -387,9 +392,9 @@ pub(crate) async fn run(
 /// OL chain tracker, the DA (btcio) pipeline, the EE chunk + acct provers,
 /// and the batch/chunk builder services.
 ///
-/// Resolves the btcio writer config, block-builder config, and boot state
-/// itself, so [`run`] only has to hand over what came from bootstrap and
-/// from the launched node.
+/// Resolves the block-builder config and boot state itself. The shared
+/// Bitcoin client and writer config arrive from [`run`], which creates them
+/// before the payload builder and fee-rate service are launched.
 async fn start_services<N>(
     common: &NodeBootstrap,
     mode: &SequencerMode,
@@ -397,6 +402,7 @@ async fn start_services<N>(
     sequencer_dbs: &SequencerDatabases,
     launched: &LaunchedNode<N>,
     payload_builder_handle: PayloadBuilderHandle<AlpenEngineTypes>,
+    btcio: BtcioResources,
 ) -> eyre::Result<()>
 where
     N: NodeTypesWithDB + ProviderNodeTypes,
@@ -417,6 +423,10 @@ where
     } = launched;
 
     let sequencer_config = &mode.config;
+    let BtcioResources {
+        client: btc_client,
+        writer_config,
+    } = btcio;
 
     let NodeBootstrap {
         storage,
@@ -435,12 +445,6 @@ where
     let genesis_info = params.genesis_block_info();
     let genesis_blocknumhash =
         BlockNumHash::new(genesis_info.blockhash().0.into(), genesis_info.blocknum());
-
-    let writer_config = Arc::new(WriterConfig {
-        l1_fee_policy_config: sequencer_config.l1_fee_policy.clone(),
-        ..Default::default()
-    });
-    log_writer_config(&writer_config);
 
     let block_builder_config =
         BlockBuilderConfig::default().with_blocktime_ms(sequencer_config.blocktime_ms.get());
@@ -522,7 +526,7 @@ where
         service_executor,
         task_executor,
         da_pipeline::DaPipelineInputs {
-            bitcoind: &sequencer_config.bitcoind,
+            btc_client: btc_client.clone(),
             l1_reorg_safe_depth: mode.l1_reorg_safe_depth,
             genesis_l1_height: mode.genesis_l1_height,
             dbs: sequencer_dbs,
@@ -542,7 +546,7 @@ where
         provers::EeProverInputs {
             storage: storage.clone(),
             node_provider: node_provider.clone(),
-            btc_client: da_pipeline.btc_client,
+            btc_client,
             backend: sequencer_config.prover.clone(),
             params: params.clone(),
         },

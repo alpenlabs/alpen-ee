@@ -17,6 +17,7 @@ use std::{
 
 use alloy_network::Ethereum;
 use alloy_primitives::U256;
+use alloy_rpc_types_eth::BlockId;
 use reth_chainspec::{EthereumHardforks, Hardforks};
 use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes};
@@ -47,6 +48,12 @@ pub type EthApiNodeBackend<N, Rpc> = EthApiInner<N, Rpc>;
 /// A helper trait with requirements for [`RpcNodeCore`] to be used in [`AlpenEthApi`].
 pub trait StrataNodeCore: RpcNodeCore<Provider: BlockReader> {}
 impl<T> StrataNodeCore for T where T: RpcNodeCore<Provider: BlockReader> {}
+
+/// Supplies the sequencer's latest DA fee rate to mutable-state fee estimation.
+pub trait LiveDaFeeRateProvider: fmt::Debug + Send + Sync + 'static {
+    /// Returns the rate a new payload build would currently sample.
+    fn current_rate(&self) -> u64;
+}
 
 /// Strata Eth API implementation.
 ///
@@ -82,10 +89,30 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> AlpenEthApi<N, Rpc> {
         self.inner.sequencer_client()
     }
 
+    /// Samples the live sequencer rate for estimates targeting mutable chain state.
+    pub(crate) fn live_da_fee_rate(&self, at: BlockId) -> Option<u64> {
+        sample_live_da_fee_rate(self.inner.live_da_fee_rate_provider(), at)
+    }
+
     /// Build a [`AlpenEthApi`] using [`AlpenEthApiBuilder`].
     pub const fn builder() -> AlpenEthApiBuilder {
         AlpenEthApiBuilder::new()
     }
+}
+
+/// Returns whether an estimate targets state whose next-block rate is not yet committed.
+const fn uses_live_da_fee_rate(at: BlockId) -> bool {
+    at.is_latest() || at.is_pending()
+}
+
+/// Reads the provider only for estimates targeting mutable chain state.
+fn sample_live_da_fee_rate(
+    provider: Option<&dyn LiveDaFeeRateProvider>,
+    at: BlockId,
+) -> Option<u64> {
+    uses_live_da_fee_rate(at)
+        .then(|| provider.map(LiveDaFeeRateProvider::current_rate))
+        .flatten()
 }
 
 impl<N, Rpc> EthApiTypes for AlpenEthApi<N, Rpc>
@@ -248,6 +275,8 @@ struct AlpenEthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
     sequencer_client: Option<SequencerClient>,
+    /// Live rate source installed only on the sequencer.
+    live_da_fee_rate_provider: Option<Arc<dyn LiveDaFeeRateProvider>>,
 }
 
 impl<N: RpcNodeCore, Rpc: RpcConvert> fmt::Debug for AlpenEthApiInner<N, Rpc> {
@@ -266,6 +295,11 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> AlpenEthApiInner<N, Rpc> {
     const fn sequencer_client(&self) -> Option<&SequencerClient> {
         self.sequencer_client.as_ref()
     }
+
+    /// Returns the live sequencer rate source, if configured.
+    fn live_da_fee_rate_provider(&self) -> Option<&dyn LiveDaFeeRateProvider> {
+        self.live_da_fee_rate_provider.as_deref()
+    }
 }
 
 #[expect(
@@ -276,6 +310,8 @@ pub struct AlpenEthApiBuilder<NetworkT = Ethereum> {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
     sequencer_client: Option<SequencerClient>,
+    /// Live rate source installed only on the sequencer.
+    live_da_fee_rate_provider: Option<Arc<dyn LiveDaFeeRateProvider>>,
     /// Marker for network types.
     _nt: PhantomData<NetworkT>,
 }
@@ -285,6 +321,7 @@ impl<NetworkT> AlpenEthApiBuilder<NetworkT> {
     pub const fn new() -> Self {
         Self {
             sequencer_client: None,
+            live_da_fee_rate_provider: None,
             _nt: PhantomData,
         }
     }
@@ -294,12 +331,22 @@ impl<NetworkT> AlpenEthApiBuilder<NetworkT> {
         self.sequencer_client = sequencer_client;
         self
     }
+
+    /// Installs the live DA fee-rate source used by mutable-state estimation.
+    pub fn with_live_da_fee_rate_provider(
+        mut self,
+        provider: Option<Arc<dyn LiveDaFeeRateProvider>>,
+    ) -> Self {
+        self.live_da_fee_rate_provider = provider;
+        self
+    }
 }
 
 impl<NetworkT> Default for AlpenEthApiBuilder<NetworkT> {
     fn default() -> Self {
         Self {
             sequencer_client: None,
+            live_da_fee_rate_provider: None,
             _nt: PhantomData,
         }
     }
@@ -329,7 +376,9 @@ where
 
     async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
         let Self {
-            sequencer_client, ..
+            sequencer_client,
+            live_da_fee_rate_provider,
+            ..
         } = self;
 
         let rpc_converter = RpcConverter::new(EthReceiptConverter::new(
@@ -345,7 +394,47 @@ where
             inner: Arc::new(AlpenEthApiInner {
                 eth_api,
                 sequencer_client,
+                live_da_fee_rate_provider,
             }),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug)]
+    struct FixedRate(u64);
+
+    impl LiveDaFeeRateProvider for FixedRate {
+        fn current_rate(&self) -> u64 {
+            self.0
+        }
+    }
+
+    #[test]
+    fn only_mutable_block_tags_use_the_live_rate() {
+        let provider = FixedRate(17);
+        let provider = Some(&provider as &dyn LiveDaFeeRateProvider);
+
+        assert_eq!(
+            sample_live_da_fee_rate(provider, BlockId::latest()),
+            Some(17)
+        );
+        assert_eq!(
+            sample_live_da_fee_rate(provider, BlockId::pending()),
+            Some(17)
+        );
+        assert_eq!(sample_live_da_fee_rate(None, BlockId::latest()), None);
+
+        for historical in [
+            BlockId::earliest(),
+            BlockId::safe(),
+            BlockId::finalized(),
+            BlockId::number(7),
+        ] {
+            assert_eq!(sample_live_da_fee_rate(provider, historical), None);
+        }
     }
 }

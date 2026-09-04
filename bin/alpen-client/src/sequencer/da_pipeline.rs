@@ -1,6 +1,5 @@
-//! The btcio DA pipeline: Bitcoin RPC client, tx broadcaster, chunked
-//! envelope reveal task, and the blob provider batches read/write DA
-//! payloads through.
+//! The btcio DA pipeline: transaction broadcaster, chunked-envelope reveal
+//! task, and the blob provider batches read/write DA payloads through.
 
 use std::sync::Arc;
 
@@ -34,7 +33,7 @@ const DEFAULT_BTCIO_RETRY_INTERVAL_MS: u64 = 1_000;
 
 /// Everything [`start`] needs to bring up the DA pipeline.
 pub(crate) struct DaPipelineInputs<'a, P> {
-    pub(crate) bitcoind: &'a BitcoindConfig,
+    pub(crate) btc_client: Arc<BtcClient>,
     /// Rollup-to-L1 facts, not sequencer config — see `AlpenClientConfig`'s
     /// doc comment for why these come from outside `SequencerConfig`.
     pub(crate) l1_reorg_safe_depth: u32,
@@ -50,43 +49,15 @@ pub(crate) struct DaPipelineInputs<'a, P> {
 /// Handles the rest of sequencer startup needs after the DA pipeline is up.
 pub(crate) struct DaPipeline {
     pub(crate) batch_da_provider: Arc<ChunkedEnvelopeDaProvider>,
-    /// The Bitcoin RPC client. Also needed by the account prover, which
-    /// resolves its L1 confirmation depth through it.
-    pub(crate) btc_client: Arc<BtcClient>,
 }
 
-/// Brings up the Bitcoin RPC client, the tx broadcaster, and the chunked
-/// envelope reveal task, then wires them into a [`ChunkedEnvelopeDaProvider`]
-/// batches read/write DA payloads through.
-pub(crate) async fn start<P>(
-    service_executor: &ServiceExecutor,
-    task_executor: &TaskExecutor,
-    inputs: DaPipelineInputs<'_, P>,
-) -> eyre::Result<DaPipeline>
-where
-    P: HeaderProvider<Header = reth_primitives::Header> + Send + Sync + 'static,
-{
-    let DaPipelineInputs {
-        bitcoind,
-        l1_reorg_safe_depth,
-        genesis_l1_height,
-        dbs,
-        storage,
-        node_provider,
-        params,
-        writer_config,
-        sequencer_keypair,
-    } = inputs;
-
-    let magic_bytes = params.blob_spec().magic_bytes();
-    let btcio_params = BtcioParams::new(l1_reorg_safe_depth, magic_bytes, genesis_l1_height);
-
+/// Constructs the shared Bitcoin client and verifies its configured network.
+pub(crate) async fn connect_bitcoin(bitcoind: &BitcoindConfig) -> eyre::Result<Arc<BtcClient>> {
     let retry_count = bitcoind.retry_count.unwrap_or(DEFAULT_BTCIO_RETRY_COUNT);
     let retry_interval = bitcoind
         .retry_interval
         .unwrap_or(DEFAULT_BTCIO_RETRY_INTERVAL_MS);
 
-    // Bitcoin RPC client.
     let btc_client = Arc::new(
         BtcClient::new(
             bitcoind.rpc_url.clone(),
@@ -103,9 +74,6 @@ where
         "btcio Bitcoin RPC retry policy configured",
     );
 
-    // Fail fast if the connected bitcoind is on a different network than
-    // configured — today alpen-client has no other check that it's pointed
-    // at the right chain, mirroring bin/strata's own startup network check.
     let live_network = btc_client
         .network()
         .await
@@ -116,6 +84,34 @@ where
          bitcoind reports {live_network:?}",
         bitcoind.network,
     );
+
+    Ok(btc_client)
+}
+
+/// Brings up the tx broadcaster and chunked-envelope reveal task around the
+/// shared Bitcoin client, then wires them into a [`ChunkedEnvelopeDaProvider`].
+pub(crate) async fn start<P>(
+    service_executor: &ServiceExecutor,
+    task_executor: &TaskExecutor,
+    inputs: DaPipelineInputs<'_, P>,
+) -> eyre::Result<DaPipeline>
+where
+    P: HeaderProvider<Header = reth_primitives::Header> + Send + Sync + 'static,
+{
+    let DaPipelineInputs {
+        btc_client,
+        l1_reorg_safe_depth,
+        genesis_l1_height,
+        dbs,
+        storage,
+        node_provider,
+        params,
+        writer_config,
+        sequencer_keypair,
+    } = inputs;
+
+    let magic_bytes = params.blob_spec().magic_bytes();
+    let btcio_params = BtcioParams::new(l1_reorg_safe_depth, magic_bytes, genesis_l1_height);
 
     // Sequencer address from bitcoin wallet.
     let sequencer_address = btc_client
@@ -177,8 +173,5 @@ where
 
     info!(target: "alpen-client", component = "alpen", "btcio DA pipeline started");
 
-    Ok(DaPipeline {
-        batch_da_provider,
-        btc_client,
-    })
+    Ok(DaPipeline { batch_da_provider })
 }

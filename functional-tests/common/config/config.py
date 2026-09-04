@@ -150,6 +150,22 @@ class AlpenL1FeePolicyConfig:
 
 
 @dataclass
+class AlpenDaFeeRateConfig:
+    """``[sequencer.da_fee_rate]`` table."""
+
+    policy: str = field(default="fixed")  # "writer_backed" | "fixed"
+    fixed_rate_wei_per_byte: int | None = field(default=0)
+    refresh_interval_seconds: int = field(default=60)
+    stale_after_seconds: int = field(default=300)
+    explorer_timeout_seconds: int = field(default=10)
+    bitcoind_timeout_seconds: int = field(default=10)
+    multiplier_bps: int = field(default=10_000)
+    offset_wei_per_byte: int = field(default=0)
+    min_rate_wei_per_byte: int | None = field(default=None)
+    max_rate_wei_per_byte: int | None = field(default=None)
+
+
+@dataclass
 class AlpenProverConfig:
     """``[sequencer.prover]`` table, tagged on ``backend``.
 
@@ -180,6 +196,7 @@ class AlpenSequencerConfig:
     chunk_sealing_block_count: int | None = field(default=None)
     chunk_sealing_gas_limit: int | None = field(default=None)
     l1_fee_policy: AlpenL1FeePolicyConfig = field(default_factory=AlpenL1FeePolicyConfig)
+    da_fee_rate: AlpenDaFeeRateConfig = field(default_factory=AlpenDaFeeRateConfig)
 
 
 @dataclass

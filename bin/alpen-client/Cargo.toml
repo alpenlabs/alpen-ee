@@ -23,8 +23,10 @@ sequencer = [
   "dep:alpen-reth-witness",
   "dep:bitcoind-async-client",
   "dep:k256",
+  "dep:metrics",
   "dep:reth-payload-builder",
   "dep:reth-primitives-traits",
+  "dep:reqwest",
   "dep:strata-btcio",
   "dep:strata-codec",
   "dep:strata-db-types",
@@ -83,6 +85,7 @@ alpen-reth-rpc.workspace = true
 alpen-reth-witness = { workspace = true, optional = true }
 bitcoind-async-client = { workspace = true, optional = true }
 k256 = { workspace = true, optional = true }
+metrics = { workspace = true, optional = true }
 ssz.workspace = true
 strata-acct-types.workspace = true
 strata-btcio = { workspace = true, optional = true }
@@ -134,6 +137,7 @@ reth-primitives.workspace = true
 reth-primitives-traits = { workspace = true, optional = true }
 reth-provider.workspace = true
 reth-tasks.workspace = true
+reqwest = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 sp1-verifier = { workspace = true, optional = true }
@@ -145,3 +149,4 @@ zkaleido-sp1-groth16-verifier = { workspace = true, optional = true }
 
 [dev-dependencies]
 proptest.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
