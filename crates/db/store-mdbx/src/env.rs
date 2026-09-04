@@ -20,9 +20,10 @@ use signet_libmdbx::{
 };
 
 use crate::{
-    codec::{KeyCodec, Schema, ValueCodec},
+    codec::{BoxError, KeyCodec, Schema, ValueCodec},
     config::{MdbxConfig, MdbxSyncMode},
     error::{DbError, DbResult},
+    version::{RawGet, UpgradeCtx},
 };
 
 /// Declares one table to pre-create when opening an [`MdbxEnv`].
@@ -138,6 +139,18 @@ impl MdbxEnv {
 
 // --- Free typed helpers, shared by `Reader` and `Writer` -----------------
 
+// Untyped read access, so an up-converter can reach other tables through the
+// ambient transaction without `UpgradeCtx` carrying the transaction's kind.
+impl<K> RawGet for TxUnsync<K>
+where
+    K: TransactionKind + SyncKind<Access = PtrUnsync>,
+{
+    fn get_raw(&self, table: &'static str, key: &[u8]) -> Result<Option<Vec<u8>>, BoxError> {
+        let db = self.open_db(Some(table))?;
+        Ok(self.get::<Vec<u8>>(db.dbi(), key)?)
+    }
+}
+
 // The read helpers are generic over the unsynchronized transaction kind so
 // both `Reader` (read-only) and `Writer` (read-write) can share them; the
 // `Access = PtrUnsync` bound restricts `K` to the unsynchronized `Ro`/`Rw`
@@ -151,6 +164,7 @@ where
     match txn.get::<Vec<u8>>(db.dbi(), &key_bytes)? {
         Some(value_bytes) => Ok(Some(<S::Value as ValueCodec<S>>::decode_value(
             &value_bytes,
+            &UpgradeCtx::new(txn),
         )?)),
         None => Ok(None),
     }
@@ -162,9 +176,10 @@ where
 {
     let db = txn.open_db(Some(S::NAME))?;
     let mut cursor = txn.cursor(db)?;
+    let ctx = UpgradeCtx::new(txn);
     cursor
         .first::<Vec<u8>, Vec<u8>>()?
-        .map(decode_entry::<S>)
+        .map(|entry| decode_entry::<S>(entry, &ctx))
         .transpose()
 }
 
@@ -174,9 +189,10 @@ where
 {
     let db = txn.open_db(Some(S::NAME))?;
     let mut cursor = txn.cursor(db)?;
+    let ctx = UpgradeCtx::new(txn);
     cursor
         .last::<Vec<u8>, Vec<u8>>()?
-        .map(decode_entry::<S>)
+        .map(|entry| decode_entry::<S>(entry, &ctx))
         .transpose()
 }
 
@@ -189,10 +205,11 @@ where
 {
     let db = txn.open_db(Some(S::NAME))?;
     let mut cursor = txn.cursor(db)?;
+    let ctx = UpgradeCtx::new(txn);
     for entry in cursor.iter_start::<Vec<u8>, Vec<u8>>()? {
         let (key_bytes, value_bytes) = entry?;
         let key = <S::Key as KeyCodec<S>>::decode_key(&key_bytes)?;
-        let value = <S::Value as ValueCodec<S>>::decode_value(&value_bytes)?;
+        let value = <S::Value as ValueCodec<S>>::decode_value(&value_bytes, &ctx)?;
         f(key, value)?;
     }
     Ok(())
@@ -200,10 +217,11 @@ where
 
 fn decode_entry<S: Schema>(
     (key_bytes, value_bytes): (Vec<u8>, Vec<u8>),
+    ctx: &UpgradeCtx<'_>,
 ) -> DbResult<(S::Key, S::Value)> {
     Ok((
         <S::Key as KeyCodec<S>>::decode_key(&key_bytes)?,
-        <S::Value as ValueCodec<S>>::decode_value(&value_bytes)?,
+        <S::Value as ValueCodec<S>>::decode_value(&value_bytes, ctx)?,
     ))
 }
 
@@ -213,7 +231,16 @@ pub struct Reader<'txn> {
     txn: &'txn RoTxUnsync,
 }
 
-impl Reader<'_> {
+impl<'txn> Reader<'txn> {
+    /// The up-convert context for this transaction.
+    ///
+    /// Decoding loose bytes — a golden-fixture replay, a `db verify` pass —
+    /// through the same context the normal read path uses, so their
+    /// up-converters see the same snapshot.
+    pub fn upgrade_ctx(&self) -> UpgradeCtx<'txn> {
+        UpgradeCtx::new(self.txn)
+    }
+
     /// Fetches the value for `key`, if present.
     pub fn get<S: Schema>(&self, key: &S::Key) -> DbResult<Option<S::Value>> {
         get_in::<S, _>(self.txn, key)
@@ -244,7 +271,14 @@ pub struct Writer<'txn> {
     txn: &'txn RwTxUnsync,
 }
 
-impl Writer<'_> {
+impl<'txn> Writer<'txn> {
+    /// The up-convert context for this transaction.
+    ///
+    /// See [`Reader::upgrade_ctx`].
+    pub fn upgrade_ctx(&self) -> UpgradeCtx<'txn> {
+        UpgradeCtx::new(self.txn)
+    }
+
     /// Fetches the value for `key`, if present.
     pub fn get<S: Schema>(&self, key: &S::Key) -> DbResult<Option<S::Value>> {
         get_in::<S, _>(self.txn, key)
@@ -268,7 +302,7 @@ impl Writer<'_> {
         for_each_in::<S, _>(self.txn, f)
     }
 
-    /// Inserts or overwrites the value for `key`.
+    /// Inserts or overwrites the value for `key`, in the current format.
     pub fn put<S: Schema>(&self, key: &S::Key, value: &S::Value) -> DbResult<()> {
         let db = self.txn.open_db(Some(S::NAME))?;
         let key_bytes = key.encode_key()?;

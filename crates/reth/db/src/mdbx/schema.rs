@@ -5,18 +5,31 @@
 //! domain types and never touch the encoding.
 
 use alpen_db_store_mdbx::{
-    define_table_bincode_be_key, define_table_raw_be_key, tables, TableSpec,
+    define_table_bincode_be_key, define_table_raw_be_key, define_table_versioned_be_key,
+    impl_schema_version_bincode, tables, versioned_value, TableSpec,
 };
 use alpen_reth_statediff::BlockStateChanges;
 use revm_primitives::alloy_primitives::B256;
 
-define_table_bincode_be_key! {
+impl_schema_version_bincode!(StoredBlockStateChanges, BlockStateChanges, 1);
+
+versioned_value! {
+    /// One block's state diff.
+    pub(crate) StoredBlockStateChanges {
+        1 => BlockStateChanges,
+    }
+}
+
+define_table_versioned_be_key! {
     /// Block state-diff data.
-    (BlockStateChangesSchema) B256 => BlockStateChanges
+    (BlockStateChangesSchema) B256 => BlockStateChanges as StoredBlockStateChanges
 }
 
 define_table_bincode_be_key! {
     /// Block number to hash mapping.
+    ///
+    /// A bare identifier, and the canonical hash at a height changes on a
+    /// reorg — nothing here to version.
     (BlockHashByNumber) u64 => B256
 }
 
