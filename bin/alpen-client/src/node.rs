@@ -79,7 +79,7 @@ pub(crate) async fn launch(
     // signing key/config?
     //
     // Resolve the sequencer identity before bootstrap connects to OL, opens
-    // Sled, initializes genesis state, or starts the OL tracker. A missing or
+    // MDBX, initializes genesis state, or starts the OL tracker. A missing or
     // malformed key is a configuration error and must not perform stateful
     // startup work first.
     #[cfg(feature = "sequencer")]
@@ -155,7 +155,7 @@ async fn bootstrap_node(
 
     // --- INITIALIZE STATE ---
 
-    // Sled locks its directory exclusively, so this is the one place the
+    // MDBX locks its directory exclusively, so this is the one place the
     // instance is opened. A sequencer takes its extra databases off the same
     // handle in `sequencer::run`; a full node never creates those trees.
     let db = open_ee_db(&datadir, alpen_config.db_retry_count)

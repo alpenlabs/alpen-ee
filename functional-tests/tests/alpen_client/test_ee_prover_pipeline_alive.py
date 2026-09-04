@@ -21,7 +21,7 @@ zk proof generation itself is bypassed. So this test exercises:
     `BlockWitnessRecord`, carried on the payload and persisted to the
     `BlockWitnessStore`. A capture failure fails the payload build, so this
     gates block acceptance.
-  - `ChunkSpec::fetch_input` (sled reads of the per-block `BlockWitnessRecord`s,
+  - `ChunkSpec::fetch_input` (MDBX reads of the per-block `BlockWitnessRecord`s,
     unioned into one chunk-level sparse state via
     `EvmPartialState::from_witness_parts` / rsp `from_execution_witness`)
   - `AccessedStateGenerator` exex (per-block accessed-state writes, feeding

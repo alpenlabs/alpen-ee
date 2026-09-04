@@ -76,7 +76,7 @@ use crate::{
 };
 
 /// What the sequencer path needs from [`crate::node`]'s bootstrap that a
-/// full node has no use for: the sled handle its extra databases come from,
+/// full node has no use for: the MDBX handle its extra databases come from,
 /// the OL client behind the tracker, and the genesis epoch both were seeded
 /// from.
 ///
@@ -108,7 +108,7 @@ struct SequencerBootState {
 ///
 /// Only loads the exec-chain piece of boot state; [`start_services`] loads
 /// the full [`SequencerBootState`] again once the node is up. Both reads are cheap,
-/// local, read-only sled reads with nothing else touching storage in
+/// local, read-only MDBX reads with nothing else touching storage in
 /// between, so re-reading is simpler than threading a boot-state value
 /// across the generic parts of node startup.
 async fn initial_preconf_head(storage: &EeNodeStorage) -> eyre::Result<BlockNumHash> {
@@ -215,7 +215,7 @@ pub(crate) async fn run(
     mode: &SequencerMode,
     privkey: Buf32,
 ) -> eyre::Result<()> {
-    // Creating these also creates their sled trees, which is why it happens
+    // Creating these also creates their MDBX environments, which is why it happens
     // here and not in bootstrap: a full node should never materialize them.
     let sequencer_dbs = common
         .sequencer

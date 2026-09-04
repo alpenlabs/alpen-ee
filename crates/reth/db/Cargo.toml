@@ -7,12 +7,10 @@ version = "0.3.0-alpha.1"
 workspace = true
 
 [dependencies]
+alpen-db-store-mdbx.workspace = true
 alpen-reth-statediff.workspace = true
-strata-db-store-sled.workspace = true
 strata-db-types.workspace = true
 
 bincode.workspace = true
 revm-primitives.workspace = true
-sled.workspace = true
 tracing.workspace = true
-typed-sled.workspace = true

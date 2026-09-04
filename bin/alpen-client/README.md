@@ -200,7 +200,7 @@ graph TB
             RethP2P[Block Sync]
         end
 
-        Storage[(SledDB)]
+        Storage[(MDBX)]
     end
 
     OL -->|chain status, epochs| OLT
@@ -437,7 +437,7 @@ DA and proof failures are non-fatal; the task retries on each poll.
 - **`sp1`** — production (`sp1` feature); needs `chunk_elf_path` and `acct_elf_path`; deadline via `deadline_secs`
 - **`native`** — skips real Groth16 proving, signing proofs with a Schnorr key instead. Needs `chunk_signing_key_path` / `acct_signing_key_path` (paths to hex-encoded key files). The acct key must match whatever the OL genesis `update_vk` expects, or the account prover predicate validation at startup fails — see `crates/proof-impl/alpen-acct`'s `test_signing_key`
 
-Proofs and prover tasks live in a dedicated SledDB instance, separate from OL storage.
+Proofs and prover tasks live in a dedicated MDBX instance, separate from OL storage.
 
 ---
 
@@ -679,7 +679,7 @@ Location: [crates/alpen-ee/common/src/types/](../../crates/alpen-ee/common/src/t
 
 ## Persistence
 
-State is persisted in SledDB. EE node state and the prover use separate database instances. Storage traits define the semantics and constraints.
+State is persisted in MDBX. EE node state and the prover use separate database instances. Storage traits define the semantics and constraints.
 
 ### EE Account State (`Storage`)
 
@@ -706,7 +706,7 @@ Tracks EE blocks, distinguishing finalized from unfinalized:
 ### Batches, Chunks & Proving
 
 - **Batch / Chunk storage** (`BatchStorage`, `ChunkStorage`) — sealed batches and chunks with their lifecycle status and associations.
-- **Proof store** (separate SledDB) — prover task state, chunk receipts, and outer batch proofs.
+- **Proof store** (separate MDBX instance) — prover task state, chunk receipts, and outer batch proofs.
 - **Witness / state-diff data** — per-block witnesses and state diffs captured during execution, consumed by proving and DA, plus a cross-batch dedup filter for already-published bytecodes.
 
 ---
