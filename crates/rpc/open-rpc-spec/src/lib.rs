@@ -1,6 +1,6 @@
 //! Alpen OpenRPC specification assembly.
 
-use alpen_ee_rpc_api::AlpenEeRpcOpenRpc;
+use alpen_ee_rpc_api::{AlpenAdminRpcOpenRpc, AlpenEeRpcOpenRpc};
 use strata_ol_rpc_api::{
     OLClientRpcOpenRpc, OLFullNodeRpcOpenRpc, OLSequencerRpcOpenRpc, OLSubmitRpcOpenRpc,
 };
@@ -24,6 +24,7 @@ pub fn alpen_rpc_project() -> Project {
     project.add_module(OLSequencerRpcOpenRpc::module_doc());
     project.add_module(OLSubmitRpcOpenRpc::module_doc());
     project.add_module(AlpenEeRpcOpenRpc::module_doc());
+    project.add_module(AlpenAdminRpcOpenRpc::module_doc());
 
     project
 }
@@ -64,6 +65,7 @@ mod tests {
             "strata_submitTransaction",
             "alpen_getBlockStatus",
             "alpen_getChunkProofCoverage",
+            "alpenadmin_getAdminStatus",
         ] {
             assert!(
                 method_names.contains(&expected_method),

@@ -3,7 +3,9 @@
 use std::borrow::Cow;
 
 use alloy_primitives::B256;
-pub use alpen_ee_rpc_types::{BlockStatus, BlockStatusResponse, ChunkProofCoverageResponse};
+pub use alpen_ee_rpc_types::{
+    AdminStatusResponse, BlockStatus, BlockStatusResponse, ChunkProofCoverageResponse,
+};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 
 /// RPC methods exposed by Alpen EE nodes.
@@ -21,6 +23,18 @@ pub trait AlpenEeRpc {
         start_block: u64,
         end_block: u64,
     ) -> RpcResult<ChunkProofCoverageResponse>;
+}
+
+/// Administrative RPC methods exposed by Alpen EE nodes.
+///
+/// Served on a dedicated JWT-authenticated endpoint, separate from the public
+/// RPC surface.
+#[cfg_attr(not(feature = "client"), rpc(server, namespace = "alpenadmin"))]
+#[cfg_attr(feature = "client", rpc(server, client, namespace = "alpenadmin"))]
+pub trait AlpenAdminRpc {
+    /// Returns basic node status for operators.
+    #[method(name = "getAdminStatus")]
+    async fn get_admin_status(&self) -> RpcResult<AdminStatusResponse>;
 }
 
 struct RpcB256;
@@ -84,6 +98,34 @@ impl AlpenEeRpcOpenRpc {
             result,
             "Reports whether proof-ready chunks cover the requested EE block interval.",
             Some("Alpen EE".to_string()),
+            false,
+        );
+
+        builder.build()
+    }
+}
+
+/// OpenRPC documentation for the Alpen EE admin RPC API.
+#[derive(Debug)]
+pub struct AlpenAdminRpcOpenRpc;
+
+impl AlpenAdminRpcOpenRpc {
+    pub fn module_doc() -> strata_open_rpc::Module {
+        let mut builder = strata_open_rpc::RpcModuleDocBuilder::default();
+
+        let result = Some(builder.create_content_descriptor::<AdminStatusResponse>(
+            "AdminStatusResponse",
+            None,
+            None,
+            true,
+        ));
+        builder.add_method(
+            "alpenadmin",
+            "getAdminStatus",
+            vec![],
+            result,
+            "Returns basic node status for operators.",
+            Some("Alpen EE Admin".to_string()),
             false,
         );
 

@@ -15,5 +15,13 @@ async-trait.workspace = true
 jsonrpsee = { workspace = true, features = ["server"] }
 reth-node-builder.workspace = true
 reth-provider.workspace = true
+reth-rpc-layer.workspace = true
 strata-identifiers.workspace = true
 tokio.workspace = true
+tower.workspace = true
+
+[dev-dependencies]
+alpen-ee-rpc-api = { workspace = true, features = ["client"] }
+http.workspace = true
+jsonrpsee = { workspace = true, features = ["http-client"] }
+tempfile.workspace = true
