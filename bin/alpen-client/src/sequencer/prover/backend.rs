@@ -9,7 +9,7 @@
 use std::{fs, path::Path, sync::Arc, time::Duration};
 
 use alpen_ee_common::{ChunkStorage, SequencerOLClient};
-use alpen_ee_params::AlpenParams;
+use alpen_ee_params::{AlpenParams, AlpenSpecId};
 use eyre::Context;
 use k256::schnorr::SigningKey;
 use strata_paas::{Prover, ProverBuilder, ProverHandle, ProverServiceBuilder};
@@ -33,6 +33,13 @@ use crate::{config::ProverBackendConfig, service_executor::ServiceExecutor};
 /// requests.
 #[cfg(feature = "sp1")]
 const DEFAULT_SP1_DEADLINE_SECS: u64 = 4 * 60 * 60;
+
+/// Spec version the single resident program is built for.
+///
+/// The backend serves one program, so the version it proves under is fixed
+/// here rather than derived per batch. Routing each batch to the program
+/// built for its own version comes later.
+const RESIDENT_SPEC_VERSION: AlpenSpecId = AlpenSpecId::V0;
 
 pub(crate) struct EeProverBuilders {
     pub(crate) chunk: ProverBuilder<ChunkSpec>,
@@ -109,7 +116,7 @@ async fn build_ee_prover_config(
             let chunk_host = {
                 let chunk_params = (*params).clone();
                 NativeHost::new(chunk_signing_key, move |zkvm| {
-                    process_ee_chunk(zkvm, &chunk_params)
+                    process_ee_chunk(zkvm, &chunk_params, RESIDENT_SPEC_VERSION)
                 })
             };
             let chunk = builders.chunk.native(chunk_host);
@@ -118,7 +125,12 @@ async fn build_ee_prover_config(
             let acct_host = {
                 let acct_params = (*params).clone();
                 NativeHost::new(acct_signing_key, move |zkvm| {
-                    process_ee_acct_update(zkvm, &acct_params, &chunk_predicate_key)
+                    process_ee_acct_update(
+                        zkvm,
+                        &acct_params,
+                        RESIDENT_SPEC_VERSION,
+                        &chunk_predicate_key,
+                    )
                 })
             };
             let account = builders.account.native(acct_host);
