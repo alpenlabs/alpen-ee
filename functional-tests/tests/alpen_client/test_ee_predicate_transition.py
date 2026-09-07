@@ -2,14 +2,11 @@
 
 Verifies the Alpen snark account's `update_vk` rotates via an admin
 `PredicateUpdate`, and exercises the boundary of the rotation <-> EE
-spec-version coupling (`AlpenSpecId` in
-`crates/alpen-ee/params/src/spec_activations.rs`): every consumed rotation
-unconditionally advances to the successor spec version
-(`build_next_exec_block` in `crates/alpen-ee/block-assembly/src/block.rs`),
-and this binary currently only defines `V0` and `V1` -- no `AlpenSpecId::V2`
-exists yet (TODO(STR-3997)). So the first rotation (V0 -> V1) must settle
-normally, and a second rotation (V1 -> V2) must be refused rather than
-silently misapplied.
+spec-version coupling: every consumed rotation unconditionally advances to
+the successor spec version, and this binary currently only supports spec
+versions V0 and V1 -- no V2 exists yet. So the first rotation (V0 -> V1)
+must settle normally, and a second rotation (V1 -> V2) must be refused
+rather than silently misapplied.
 """
 
 import logging
@@ -20,30 +17,35 @@ import flexitest
 
 from common.base_test import BaseTest
 from common.config.constants import ALPEN_ACCOUNT_ID, ServiceType
+from common.prover_backend import ROTATION_SPEC_VERSIONS, resolve_prover_backend
 from common.services.alpen_client import AlpenClientService
 from common.services.bitcoin import BitcoinService
 from common.services.strata import StrataService
 from common.test_cli import create_ee_predicate_update
 from common.wait import wait_until_with_value
+from envconfigs.el_ol import EeOLEnv
 
 logger = logging.getLogger(__name__)
 
 INITIAL_BLOCKS = 5
 POST_ADMIN_UPDATE_L1_BLOCKS = 5
-PREDICATE_SETTLE_TIMEOUT_SECONDS = 120
-UNSUPPORTED_ROTATION_TIMEOUT_SECONDS = 120
 
-# Initial Alpen account predicate matches `EeAcctProgram::test_predicate_key()`
-# (deterministic test SK = [0x02; 32] in strata_proofimpl_alpen_acct).
-INITIAL_ACCT_PREDICATE = (
-    "Bip340Schnorr:4d4b6cd1361032ca9bd2aeb9d900aa4d45d9ead80ac9423374c451a7254d0766"
-)
+# Resolved from EE_PROVER_BACKEND: both backends can serve a rotation now.
+# Native signs with a per-version key; sp1 holds the committed v0 pair beside
+# the v1 build. `PROVER` owns both the genesis predicate and the rotation
+# target, so the two cannot drift apart from the programs configured below.
+PROVER = resolve_prover_backend(ROTATION_SPEC_VERSIONS)
 
-# The only rotation this binary can honor: V0 -> V1 (Osaka).
-SUPPORTED_ROTATION_TARGET = "AlwaysAccept"
+# Every wait below blocks on a proof, so each scales with the backend.
+PREDICATE_SETTLE_TIMEOUT_SECONDS = 120 * PROVER.proof_wait_scale
+UNSUPPORTED_ROTATION_TIMEOUT_SECONDS = 120 * PROVER.proof_wait_scale
+V0_ACCT_PREDICATE = PROVER.genesis_predicate
+V1_ACCT_PREDICATE = PROVER.rotation_target_predicate
 
-# A further rotation would need V2, which has no `AlpenSpecId` variant.
-UNSUPPORTED_ROTATION_TARGET = "NeverAccept"
+# A further rotation target, standing in for spec version V2 -- which this
+# binary has no support for, so the rotation to it can't be handled and must
+# be refused.
+V2_ACCOUNT_PREDICATE = "NeverAccept"
 
 UNHONORABLE_ROTATION_LOG_PATTERN = r"consumed a rotation to unknown spec version"
 
@@ -73,7 +75,24 @@ def _count_log_matches(log_path: Path, pattern: str, after_offset: int = 0) -> i
 @flexitest.register
 class TestEePredicateTransition(BaseTest):
     def __init__(self, ctx: flexitest.InitContext):
-        ctx.set_env("el_ol_ee_predicate_transition")
+        ctx.set_env(
+            EeOLEnv(
+                pre_generate_blocks=110,
+                admin_confirmation_depth=2,
+                fund_test_cli_wallet=True,
+                # Two resident programs, keyed by the AlpenSpecId each is
+                # built for (see ProverProgramPaths in
+                # bin/alpen-client/src/config.rs): v1's acct key is the
+                # rotation target, v0's is the genesis-matching key. Both are
+                # validated and loaded at startup; the sequencer routes each
+                # batch's proof request to whichever program's version matches
+                # that batch's own governing spec version (see PaasBatchProver
+                # in bin/alpen-client/src/sequencer/prover/batch_prover.rs), so
+                # proving keeps working across the V0 -> V1 rotation below
+                # without a restart.
+                prover=PROVER,
+            )
+        )
 
     def main(self, ctx):
         alpen_seq: AlpenClientService = self.get_service(ServiceType.AlpenSequencer)
@@ -111,30 +130,30 @@ class TestEePredicateTransition(BaseTest):
         initial_vk = strata_rpc.strata_getSnarkAccountStateByTag(ALPEN_ACCOUNT_ID, "latest")[
             "update_vk"
         ]
-        if initial_vk != INITIAL_ACCT_PREDICATE:
+        if initial_vk != V0_ACCT_PREDICATE:
             raise AssertionError(
-                f"expected initial update_vk to be {INITIAL_ACCT_PREDICATE!r}, got {initial_vk!r}"
+                f"expected initial update_vk to be {V0_ACCT_PREDICATE!r}, got {initial_vk!r}"
             )
 
         # --- V0 -> V1: the one rotation this binary can honor -----------------
         result = create_ee_predicate_update(
             seq_no=1,
-            predicate=SUPPORTED_ROTATION_TARGET,
+            predicate=V1_ACCT_PREDICATE,
             admin_xpriv=admin_xpriv,
             btc_url=btc_url,
             btc_user=btc_user,
             btc_password=btc_password,
         )
-        logger.info("Applied %s update (seq 1): %s", SUPPORTED_ROTATION_TARGET, result)
+        logger.info("Applied %s update (seq 1): %s", V1_ACCT_PREDICATE, result)
         btc_rpc.proxy.generatetoaddress(POST_ADMIN_UPDATE_L1_BLOCKS, mine_addr)
 
         wait_until_with_value(
             fetch_update_vk_and_mine,
-            lambda vk: vk == SUPPORTED_ROTATION_TARGET,
-            error_with=f"update_vk did not transition to {SUPPORTED_ROTATION_TARGET} in OL state",
+            lambda vk: vk == V1_ACCT_PREDICATE,
+            error_with=f"update_vk did not transition to {V1_ACCT_PREDICATE} in OL state",
             timeout=PREDICATE_SETTLE_TIMEOUT_SECONDS,
         )
-        logger.info("update_vk transitioned to %s (V0 -> V1)", SUPPORTED_ROTATION_TARGET)
+        logger.info("update_vk transitioned to %s (V0 -> V1)", V1_ACCT_PREDICATE)
 
         # --- V1 -> V2: no `AlpenSpecId` variant exists for it ------------------
         #
@@ -146,13 +165,13 @@ class TestEePredicateTransition(BaseTest):
 
         result = create_ee_predicate_update(
             seq_no=2,
-            predicate=UNSUPPORTED_ROTATION_TARGET,
+            predicate=V2_ACCOUNT_PREDICATE,
             admin_xpriv=admin_xpriv,
             btc_url=btc_url,
             btc_user=btc_user,
             btc_password=btc_password,
         )
-        logger.info("Applied %s update (seq 2): %s", UNSUPPORTED_ROTATION_TARGET, result)
+        logger.info("Applied %s update (seq 2): %s", V2_ACCOUNT_PREDICATE, result)
 
         def mine_and_count_refused_rotations() -> int:
             btc_rpc.proxy.generatetoaddress(1, mine_addr)
@@ -175,8 +194,8 @@ class TestEePredicateTransition(BaseTest):
         stalled_vk = strata_rpc.strata_getSnarkAccountStateByTag(ALPEN_ACCOUNT_ID, "latest")[
             "update_vk"
         ]
-        assert stalled_vk == SUPPORTED_ROTATION_TARGET, (
-            f"update_vk should remain at {SUPPORTED_ROTATION_TARGET!r} after the refused "
+        assert stalled_vk == V1_ACCT_PREDICATE, (
+            f"update_vk should remain at {V1_ACCT_PREDICATE!r} after the refused "
             f"rotation, got {stalled_vk!r}"
         )
 
