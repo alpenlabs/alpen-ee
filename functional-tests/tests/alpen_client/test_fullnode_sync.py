@@ -16,6 +16,7 @@ import flexitest
 
 from common.base_test import AlpenClientTest
 from common.config.constants import ServiceType
+from common.prover_backend import NATIVE_BACKEND
 from common.wait import wait_until
 from envconfigs.alpen_client import AlpenClientEnv
 from factories.alpen_client import AlpenClientFactory, generate_sequencer_keypair
@@ -112,6 +113,7 @@ class TestFullnodeSync(AlpenClientTest):
                 enable_discovery=False,
                 instance_id=1,
                 datadir_override=str(tmpdir),
+                spec_schedule=NATIVE_BACKEND.genesis_spec_schedule,
             )
             ee_fullnode_1.wait_for_ready(timeout=30)
 

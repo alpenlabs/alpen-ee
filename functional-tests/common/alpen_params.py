@@ -27,6 +27,13 @@ CHAIN_SPEC_FILES = {
 }
 
 
+#: Spec schedule a chain launched from current source runs: every known
+#: version active from genesis (coordinate 0). A test rehearsing an upgrade
+#: launches further back instead, leaving the version it upgrades to
+#: unscheduled.
+LAUNCH_SPEC_SCHEDULE = {"v0": 0, "v1": 0}
+
+
 def compose_alpen_params(
     datadir: Path,
     ee_params_path: Path,
@@ -35,6 +42,7 @@ def compose_alpen_params(
     max_withdrawal_amount: int | None = 1_000_000_000,
     max_withdrawal_descriptor_len: int = 81,
     da_magic_bytes: str = "ALPN",
+    spec_schedule: dict[str, int] | None = None,
 ) -> Path:
     """Writes ``alpen-params.json`` into ``datadir`` and returns its path.
 
@@ -45,6 +53,12 @@ def compose_alpen_params(
             cap. The old CLI sentinel ``0`` is rejected: ``BridgeParams``
             requires a set cap to be a positive multiple of the denomination,
             so ``0`` would fail node startup far from the mistake.
+        spec_schedule: spec version -> activation coordinate. Everything
+            scheduled at 0 is active at genesis, so this decides which version
+            the chain launches on. Defaults to `LAUNCH_SPEC_SCHEDULE`.
+            Comes from the prover
+            backend, which owns the version-to-program mapping the chain has
+            to agree with -- see common/prover_backend.py.
     """
     if max_withdrawal_amount == 0:
         raise ValueError("max_withdrawal_amount=0 is not a valid cap; pass None to disable it")
@@ -60,7 +74,7 @@ def compose_alpen_params(
             "max_withdrawal_descriptor_len": max_withdrawal_descriptor_len,
         },
         "blob_spec": {"magic_bytes": da_magic_bytes},
-        "spec_schedule": {"v0": 0},
+        "spec_schedule": LAUNCH_SPEC_SCHEDULE if spec_schedule is None else spec_schedule,
         "evm_spec": evm_spec,
     }
 
