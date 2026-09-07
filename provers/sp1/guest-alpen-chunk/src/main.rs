@@ -9,12 +9,14 @@ use zkaleido_sp1_guest_env::Sp1ZkVmEnv;
 /// `build.rs` from the file at `SP1_ALPEN_PARAMS_PATH`. Not zkVM input — see
 /// `strata_proofimpl_alpen_chunk::process_ee_chunk` for why.
 mod alpen_params {
-    include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../generated/alpen_params.rs"));
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../generated/alpen_params.rs"
+    ));
 }
 
 fn embedded_alpen_params() -> AlpenParams {
-    serde_json::from_str(alpen_params::ALPEN_PARAMS_JSON)
-        .expect("embedded alpen params must parse")
+    serde_json::from_str(alpen_params::ALPEN_PARAMS_JSON).expect("embedded alpen params must parse")
 }
 
 fn main() {
