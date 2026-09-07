@@ -77,7 +77,7 @@ mod tests {
         let program = EeAcctProgram::new(
             PredicateKey::always_accept(),
             AlpenParams::default(),
-            AlpenSpecId::V0,
+            AlpenSpecId::V1,
         );
         let result = program.execute(&input).expect("native execution");
         assert_eq!(
