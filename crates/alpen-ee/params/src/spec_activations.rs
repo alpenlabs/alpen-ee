@@ -191,6 +191,22 @@ impl AlpenSpecSchedule {
             .is_some_and(|activation| coord >= activation)
     }
 
+    /// Returns the newest version active at `coord`.
+    ///
+    /// Versions activate in succession at nondecreasing coordinates, so the
+    /// count of activations at or before `coord` is the newest active
+    /// version's discriminant.
+    pub fn active_at(&self, coord: u64) -> AlpenSpecId {
+        let active = self
+            .upgrades
+            .iter()
+            .take_while(|&&activation| activation <= coord)
+            .count();
+        AlpenSpecId::try_from(active as u16).expect(
+            "AlpenSpecSchedule invariant: every scheduled version has an AlpenSpecId variant",
+        )
+    }
+
     /// Schedules the successor of the newest scheduled version at `coord`
     /// and returns which version that is.
     ///
@@ -324,6 +340,22 @@ mod tests {
         assert!(!schedule.is_active(AlpenSpecId::V1, 99));
         assert!(schedule.is_active(AlpenSpecId::V1, 100));
         assert!(schedule.is_active(AlpenSpecId::V1, 101));
+    }
+
+    #[test]
+    fn active_at_tracks_the_newest_reached_activation() {
+        assert_eq!(
+            AlpenSpecSchedule::genesis().active_at(u64::MAX),
+            AlpenSpecId::V0
+        );
+
+        let schedule = v1_at(100);
+        assert_eq!(schedule.active_at(99), AlpenSpecId::V0);
+        assert_eq!(schedule.active_at(100), AlpenSpecId::V1);
+
+        // A chain launching directly on v1 schedules it at coordinate 0, so
+        // it is the version active at genesis.
+        assert_eq!(v1_at(0).active_at(0), AlpenSpecId::V1);
     }
 
     #[test]
