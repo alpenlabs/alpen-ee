@@ -44,6 +44,13 @@ fn load_witness() -> EthClientExecutorInput {
 /// The dev-network `AlpenParams` this benchmark exercises `process_ee_chunk`
 /// against — chosen because `witness_params.json`'s embedded genesis
 /// (chain id 2892, all hardforks active from genesis) matches it.
+/// The spec version this fixture executes and proves under.
+///
+/// Shared by the witness execution below and by the program that replays it,
+/// so the benchmark cannot end up measuring a replay under rules the block
+/// was never executed with.
+const PERF_SPEC_VERSION: AlpenSpecId = AlpenSpecId::V1;
+
 pub(super) fn perf_alpen_params() -> AlpenParams {
     let evm_spec: EvmSpec =
         serde_json::from_str(alpen_chainspec::DEV_CHAIN_SPEC).expect("dev chain should parse");
@@ -96,10 +103,8 @@ pub(super) fn prepare_input() -> EeChunkProofInput {
     let tip_exec_header_summary = block.get_header().get_exec_header_summary();
 
     let params = perf_alpen_params();
-    // TODO(STR-4002): pin to v0 until per-chunk version resolution is
-    // threaded through the proof guests.
     let chain_spec: Arc<reth_chainspec::ChainSpec> =
-        params.evm_spec().chain_spec(AlpenSpecId::V0).clone();
+        params.evm_spec().chain_spec(PERF_SPEC_VERSION).clone();
     let ee = EvmExecutionEnvironment::new(chain_spec, AlpenEvmFactory::default());
     let header_intrinsics = block.get_header().get_intrinsics();
     let exec_payload = ExecPayload::new(&header_intrinsics, block.get_body());
@@ -152,7 +157,7 @@ mod tests {
     #[test]
     fn test_alpen_chunk_native_execution() {
         let input = prepare_input();
-        let output = EeChunkProgram::new(perf_alpen_params(), AlpenSpecId::V0)
+        let output = EeChunkProgram::new(perf_alpen_params(), PERF_SPEC_VERSION)
             .execute(&input)
             .unwrap();
         // The chunk transition's parent/tip blkids must match the block
