@@ -11,11 +11,17 @@ use zkaleido_sp1_guest_env::Sp1ZkVmEnv;
 /// zkVM input — see `strata_proofimpl_alpen_acct::process_ee_acct_update` for
 /// why.
 mod predicates {
-    include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../generated/predicates.rs"));
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../generated/predicates.rs"
+    ));
 }
 
 mod alpen_params {
-    include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../generated/alpen_params.rs"));
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../generated/alpen_params.rs"
+    ));
 }
 
 /// Constructs the chunk proof predicate key from the Groth16 predicate
@@ -29,8 +35,7 @@ fn chunk_predicate_key() -> PredicateKey {
 }
 
 fn embedded_alpen_params() -> AlpenParams {
-    serde_json::from_str(alpen_params::ALPEN_PARAMS_JSON)
-        .expect("embedded alpen params must parse")
+    serde_json::from_str(alpen_params::ALPEN_PARAMS_JSON).expect("embedded alpen params must parse")
 }
 
 fn main() {
