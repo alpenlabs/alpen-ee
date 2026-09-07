@@ -281,8 +281,16 @@ mod tests {
 
     use super::AlpenConsensus;
 
+    /// Mirrors the fork set every real Alpen chain spec ships (see
+    /// `crates/reth/chainspec/src/res/*.json`): London, Shanghai, Cancun and
+    /// Prague all at 0, with v1's Osaka layered on by its own delta. A
+    /// stripped-down document would leave Osaka sitting on no Cancun, a
+    /// combination no chain has and no header can satisfy.
+    const TEST_GENESIS: &str = r#"{"config":{"chainId":2892,"londonBlock":0,
+        "shanghaiTime":0,"cancunTime":0,"pragueTime":0}}"#;
+
     fn test_consensus() -> AlpenConsensus {
-        let evm_spec: EvmSpec = serde_json::from_str("{}").expect("empty genesis document parses");
+        let evm_spec: EvmSpec = serde_json::from_str(TEST_GENESIS).expect("genesis parses");
         AlpenConsensus::new(&evm_spec)
     }
 
@@ -292,6 +300,24 @@ mod tests {
             extra_data,
             ..Default::default()
         })
+    }
+
+    /// A header carrying every field [`TEST_GENESIS`]'s forks require, so
+    /// validation reaches the rules under test instead of stopping at a
+    /// missing field. Callers override what they actually care about.
+    fn valid_header(number: u64, extra_data: Bytes) -> Header {
+        Header {
+            number,
+            extra_data,
+            gas_limit: 30_000_000,
+            base_fee_per_gas: Some(BASE_FEE_FLOOR),
+            withdrawals_root: Some(Default::default()),
+            blob_gas_used: Some(0),
+            excess_blob_gas: Some(0),
+            parent_beacon_block_root: Some(Default::default()),
+            requests_hash: Some(Default::default()),
+            ..Default::default()
+        }
     }
 
     fn stamped_header(spec_version: AlpenSpecId) -> SealedHeader {
@@ -350,32 +376,17 @@ mod tests {
     /// version, where stock consensus would demand the pure EIP-1559 value.
     #[test]
     fn the_base_fee_floor_applies_under_every_version() {
-        // London must be active for the base-fee-against-parent rule to run
-        // at all; the empty genesis document never activates it.
-        let evm_spec: EvmSpec =
-            serde_json::from_str(r#"{"config":{"chainId":2892,"londonBlock":0,"shanghaiTime":0}}"#)
-                .expect("genesis document parses");
-        let consensus = AlpenConsensus::new(&evm_spec);
+        let consensus = test_consensus();
 
         for version in [AlpenSpecId::V0, AlpenSpecId::V1] {
-            let parent = SealedHeader::seal_slow(Header {
-                number: 1,
-                gas_limit: 30_000_000,
-                gas_used: 0,
-                base_fee_per_gas: Some(BASE_FEE_FLOOR),
-                extra_data: HeaderExtra::new(version, 0).encode().into(),
-                ..Default::default()
-            });
+            let stamp: Bytes = HeaderExtra::new(version, 0).encode().into();
+            let parent = SealedHeader::seal_slow(valid_header(1, stamp.clone()));
             // An empty parent drives EIP-1559 below the floor, so the pure
             // recurrence and the floored rule disagree here.
             let child = SealedHeader::seal_slow(Header {
-                number: 2,
                 parent_hash: parent.hash(),
-                gas_limit: 30_000_000,
                 timestamp: 1,
-                base_fee_per_gas: Some(BASE_FEE_FLOOR),
-                extra_data: HeaderExtra::new(version, 0).encode().into(),
-                ..Default::default()
+                ..valid_header(2, stamp)
             });
 
             assert_eq!(
@@ -391,7 +402,7 @@ mod tests {
     #[test]
     fn genesis_header_is_exempt_from_the_layout() {
         let consensus = test_consensus();
-        let genesis = sealed_header(0, Bytes::from_static(b"SC"));
+        let genesis = SealedHeader::seal_slow(valid_header(0, Bytes::from_static(b"SC")));
 
         assert_eq!(consensus.validate_header(&genesis), Ok(()));
     }
@@ -403,24 +414,16 @@ mod tests {
     fn stamped_child_validates_against_a_legacy_tip() {
         let consensus = test_consensus();
 
-        let legacy_parent = SealedHeader::seal_slow(Header {
-            number: 100,
-            gas_limit: 30_000_000,
-            extra_data: Default::default(),
-            ..Default::default()
-        });
+        let legacy_parent = SealedHeader::seal_slow(valid_header(100, Default::default()));
 
         // legacy tip validates on its own
         assert_eq!(consensus.validate_header(&legacy_parent), Ok(()));
 
         // legacy -> legacy
         let legacy_child = SealedHeader::seal_slow(Header {
-            number: 101,
             parent_hash: legacy_parent.hash(),
-            gas_limit: 30_000_000,
             timestamp: 1,
-            extra_data: Default::default(),
-            ..Default::default()
+            ..valid_header(101, Default::default())
         });
         assert_eq!(consensus.validate_header(&legacy_child), Ok(()));
         assert_eq!(
@@ -431,12 +434,9 @@ mod tests {
         // legacy -> first stamped child (the activation boundary)
         for version in [AlpenSpecId::V0, AlpenSpecId::V1] {
             let stamped_child = SealedHeader::seal_slow(Header {
-                number: 101,
                 parent_hash: legacy_parent.hash(),
-                gas_limit: 30_000_000,
                 timestamp: 1,
-                extra_data: HeaderExtra::new(version, 0).encode().into(),
-                ..Default::default()
+                ..valid_header(101, HeaderExtra::new(version, 0).encode().into())
             });
             assert_eq!(
                 consensus.validate_header(&stamped_child),
