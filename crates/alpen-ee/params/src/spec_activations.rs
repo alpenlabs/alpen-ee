@@ -9,7 +9,7 @@ use core::convert::identity;
 use std::{collections::BTreeMap, fmt};
 
 use num_enum::{IntoPrimitive, TryFromPrimitive};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use thiserror::Error;
 
 /// Identifies an Alpen protocol spec version.
@@ -41,7 +41,6 @@ use thiserror::Error;
     PartialOrd,
     Ord,
     Hash,
-    Serialize,
     Deserialize,
     IntoPrimitive,
     TryFromPrimitive,
@@ -66,6 +65,20 @@ impl AlpenSpecId {
     /// no variant for the successor — an upgrade this binary cannot execute.
     pub fn successor(self) -> Result<Self, u16> {
         Self::try_from(u16::from(self) + 1)
+    }
+}
+
+/// Serializes as the snake_case variant name, matching what the derived
+/// [`Deserialize`] accepts.
+///
+/// Written out rather than derived because a derived unit-variant impl
+/// serializes through `serialize_unit_variant`, which TOML refuses as a
+/// table key. Config files key their per-version tables by this type (see
+/// `[sequencer.prover.programs.<spec_version>]`), so it has to serialize as
+/// a plain string.
+impl Serialize for AlpenSpecId {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
     }
 }
 
