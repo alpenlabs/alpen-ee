@@ -19,8 +19,10 @@ batch_sealing_block_count = 5
 # key files are mounted by the compose file, next to the p2p key.
 [sequencer.prover]
 backend = "native"
-chunk_signing_key_path = "/app/keys/native-chunk-signing-key.hex"
-acct_signing_key_path = "/app/keys/native-acct-signing-key.hex"
+
+[sequencer.prover.programs.v0]
+chunk_path = "/app/keys/native-chunk-signing-key.hex"
+acct_path = "/app/keys/native-acct-signing-key.hex"
 
 [sequencer.bitcoind]
 # Throwaway regtest credentials, matching the bitcoind service in the compose
