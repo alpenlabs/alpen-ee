@@ -30,6 +30,7 @@ _GENERATED_DIR = _REPO_ROOT / "provers" / "sp1" / "generated"
 CHUNK_ELF = _GENERATED_DIR / "guest-alpen-chunk.elf"
 ACCT_ELF = _GENERATED_DIR / "guest-alpen-acct.elf"
 ACCT_PREDICATE = _GENERATED_DIR / "alpen-acct.predicate"
+SP1_PROOF_DEADLINE_ENV = "ALPEN_SP1_PROOF_DEADLINE_SECS"
 
 # Where scripts/gen_sp1_guest_params.py puts the params the guests bake in.
 GUEST_PARAMS_DIR = _REPO_ROOT / "target" / "sp1-guest-params"
@@ -95,12 +96,14 @@ class Sp1Backend(ProverBackend):
     ee_params_path: Path
     chunk_elf: Path
     acct_elf: Path
+    deadline_secs: int | None = None
 
     def prover_config(self, datadir: Path) -> AlpenProverConfig:
         return AlpenProverConfig(
             backend=self.backend,
             chunk_elf_path=str(self.chunk_elf),
             acct_elf_path=str(self.acct_elf),
+            deadline_secs=self.deadline_secs,
         )
 
 
@@ -117,6 +120,19 @@ def _require_built(path: Path) -> Path:
     return path
 
 
+def _optional_positive_int_env(name: str) -> int | None:
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return None
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a positive integer, got {raw_value!r}") from exc
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive integer, got {value}")
+    return value
+
+
 def resolve_prover_backend() -> ProverBackend:
     """Resolves the prover backend from ``EE_PROVER_BACKEND`` (default: native)."""
     backend = os.environ.get("EE_PROVER_BACKEND", "native")
@@ -128,5 +144,6 @@ def resolve_prover_backend() -> ProverBackend:
             ee_params_path=_require_built(EE_PARAMS),
             chunk_elf=_require_built(CHUNK_ELF),
             acct_elf=_require_built(ACCT_ELF),
+            deadline_secs=_optional_positive_int_env(SP1_PROOF_DEADLINE_ENV),
         )
     raise ValueError(f"Unknown EE_PROVER_BACKEND: {backend!r} (expected: native|sp1)")
