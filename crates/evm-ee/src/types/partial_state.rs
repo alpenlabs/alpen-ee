@@ -194,18 +194,17 @@ impl Codec for EvmPartialState {
 
         // Encode bytecodes count
         (self.bytecodes.len() as u32).encode(enc)?;
-        // Encode each bytecode: BOTH the bytes AND its pre-computed hash
-        for (hash, bytecode) in &self.bytecodes {
+        // Encode only the code. The map key is its hash, which the decoder
+        // recomputes rather than trusting -- see `decode`.
+        for bytecode in self.bytecodes.values() {
             encode_bytes_with_length(&bytecode.original_bytes(), enc)?;
-            enc.write_buf(hash.as_slice())?;
         }
 
         // Encode ancestor headers count
         (self.ancestor_headers.len() as u32).encode(enc)?;
-        // Encode each sealed header: BOTH the header (RLP) AND its pre-computed hash
+        // Encode only the header. Its hash is likewise recomputed on decode.
         for sealed_header in self.ancestor_headers.values() {
             encode_rlp_with_length(sealed_header.inner(), enc)?;
-            enc.write_buf(sealed_header.hash().as_slice())?;
         }
 
         Ok(())
@@ -215,35 +214,30 @@ impl Codec for EvmPartialState {
         // Decode EthereumState using custom deterministic decoding
         let ethereum_state = decode_ethereum_state(dec)?;
 
-        // Decode bytecodes with their pre-computed hashes
+        // Decode bytecodes, keying each one by the hash of the code itself.
+        //
+        // The key is what the EVM looks code up by, and the account's
+        // `code_hash` in the trie is the only thing committing to it. Taking
+        // the key from the encoding instead would let a prover serve any code
+        // it likes for a deployed contract, since the trie never commits to
+        // the code behind the hash.
         let bytecodes_count = u32::decode(dec)? as usize;
         let mut bytecodes = BTreeMap::new();
         for _ in 0..bytecodes_count {
-            // Decode the bytecode bytes
             let bytes = decode_bytes_with_length(dec)?;
             let bytecode = Bytecode::new_raw_checked(bytes.into())
                 .map_err(|_| CodecError::MalformedField("Bytecode decode failed"))?;
 
-            // Decode the pre-computed hash (32 bytes, no length prefix needed)
-            let mut hash_bytes = [0u8; 32];
-            dec.read_buf(&mut hash_bytes)?;
-            let hash = B256::from(hash_bytes);
-
-            bytecodes.insert(hash, bytecode);
+            bytecodes.insert(bytecode.hash_slow(), bytecode);
         }
 
-        // Decode ancestor headers with their pre-computed hashes
+        // Decode ancestor headers, sealing each with its own computed hash for
+        // the same reason: these hashes are what `BLOCKHASH` returns.
         let headers_count = u32::decode(dec)? as usize;
         let mut ancestor_headers_sealed = Vec::with_capacity(headers_count);
         for _ in 0..headers_count {
-            // Decode the header
             let header: Header = decode_rlp_with_length(dec)?;
-            // Decode the pre-computed hash (32 bytes, no length prefix needed)
-            let mut hash_bytes = [0u8; 32];
-            dec.read_buf(&mut hash_bytes)?;
-            let hash = B256::from(hash_bytes);
-            // Reconstruct Sealed<Header> without hashing (zero cost!)
-            ancestor_headers_sealed.push(Sealed::new_unchecked(header, hash));
+            ancestor_headers_sealed.push(header.seal_slow());
         }
 
         // Build ancestor_headers BTreeMap directly from sealed headers
