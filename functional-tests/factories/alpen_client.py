@@ -10,7 +10,7 @@ from pathlib import Path
 
 import flexitest
 
-from common.alpen_params import compose_alpen_params
+from common.alpen_params import DEFAULT_BASE_FEE_FLOOR, compose_alpen_params
 from common.config import (
     AlpenAdminRpcConfig,
     AlpenClientConfig,
@@ -86,6 +86,7 @@ class AlpenClientFactory(flexitest.Factory):
         max_withdrawal_amount: int | None = 1_000_000_000,
         beneficiary_address: str | None = None,
         da_rate_wei_per_byte: int = 0,
+        base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR,
         prover: ProverBackend = NATIVE_BACKEND,
         **kwargs,
     ) -> AlpenClientService:
@@ -140,6 +141,7 @@ class AlpenClientFactory(flexitest.Factory):
             max_withdrawal_amount=max_withdrawal_amount,
             da_magic_bytes=da_config.magic_bytes.decode("ascii"),
             spec_schedule=prover.genesis_spec_schedule,
+            base_fee_floor=base_fee_floor,
         )
 
         ol_config = (
@@ -275,6 +277,7 @@ class AlpenClientFactory(flexitest.Factory):
         bridge_denomination: int = 100_000_000,
         max_withdrawal_amount: int | None = 1_000_000_000,
         spec_schedule: dict[str, int] | None = None,
+        base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR,
         **kwargs,
     ) -> AlpenClientService:
         """
@@ -294,6 +297,7 @@ class AlpenClientFactory(flexitest.Factory):
             spec_schedule: which spec version the chain launches on; must
                 match the sequencer's, so it comes from the same prover
                 backend
+            base_fee_floor: minimum EIP-1559 base fee in wei
         """
         if datadir_override:
             datadir = Path(datadir_override)
@@ -335,6 +339,7 @@ class AlpenClientFactory(flexitest.Factory):
             bridge_denomination=bridge_denomination,
             max_withdrawal_amount=max_withdrawal_amount,
             spec_schedule=spec_schedule,
+            base_fee_floor=base_fee_floor,
         )
 
         alpen_config = AlpenClientConfig(
