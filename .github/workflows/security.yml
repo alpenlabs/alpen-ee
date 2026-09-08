@@ -14,33 +14,40 @@ permissions:
 
 jobs:
   supply-chain:
-    name: Run `cargo-audit`
+    name: Run `cargo-audit` (${{ matrix.lockfile }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # The sp1 guest crates are not workspace members, so they resolve their
+        # own lockfiles that the root Cargo.lock does not cover. Audit each one.
+        lockfile:
+          - Cargo.lock
+          - provers/sp1/guest-alpen-acct/Cargo.lock
+          - provers/sp1/guest-alpen-chunk/Cargo.lock
     steps:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
-      - name: Set up Rust
-        run: |
-          rustup toolchain install stable --profile minimal --component clippy
-          rustup default stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        with:
-          cache-on-failure: true
-
       - name: Install cargo-audit
-        run: cargo install cargo-audit --force --locked
+        uses: taiki-e/install-action@b8cecb83565409bcc297b2df6e77f030b2a468d5 # v2.82.0
+        with:
+          tool: cargo-audit
 
-        #  HACK: not denying warnings as we depend on `yaml-rust` via `format-serde-error` which is unmaintained
+        # HACK: the graph still carries unmaintained and unsound advisories we
+        # cannot clear yet (ansi_term, backoff, derivative, rand, ...), so this
+        # cannot gate. Run it anyway to keep those visible in the job log.
       - name: Check for audit warnings
-        run: cargo audit -D warnings --file audit.toml
+        run: cargo-audit audit -D warnings --file "$LOCKFILE"
+        env:
+          LOCKFILE: ${{ matrix.lockfile }}
         continue-on-error: true
 
-        # HACK: re-run without denying warnings so that we don't miss any vulnerabilities
+        # Re-run without denying warnings so a real vulnerability still fails.
       - name: Check for vulnerabilities
-        run: cargo audit --file audit.toml
+        run: cargo-audit audit --file "$LOCKFILE"
+        env:
+          LOCKFILE: ${{ matrix.lockfile }}
