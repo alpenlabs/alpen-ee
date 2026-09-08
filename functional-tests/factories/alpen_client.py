@@ -31,6 +31,38 @@ def generate_p2p_secret_key() -> str:
     return secrets.token_hex(32)
 
 
+def _required_eest_engine_file(name: str) -> Path:
+    """Return the runner-owned absolute file path for EEST Engine metadata."""
+    raw_path = os.environ.get(name, "").strip()
+    if not raw_path:
+        raise RuntimeError(f"{name} is required when eest_fixture_mode=True")
+    path = Path(raw_path)
+    if not path.is_absolute():
+        raise RuntimeError(f"{name} must be an absolute path, got {raw_path!r}")
+    if path.is_symlink():
+        raise RuntimeError(f"{name} must not be a symlink: {path}")
+    if not path.parent.is_dir():
+        raise RuntimeError(f"{name} parent directory does not exist: {path.parent}")
+    return path
+
+
+def _write_new_private_file(path: Path, contents: str, description: str) -> None:
+    """Write a new owner-only file without replacing a pre-existing path."""
+    try:
+        with path.open("x", encoding="utf-8") as file_handle:
+            file_handle.write(contents)
+    except FileExistsError as exc:
+        raise RuntimeError(f"refusing to overwrite existing {description}: {path}") from exc
+    except OSError as exc:
+        raise RuntimeError(f"failed to write {description} {path}: {exc}") from exc
+    try:
+        path.chmod(0o600)
+    except OSError as exc:
+        raise RuntimeError(
+            f"failed to restrict {description} permissions for {path}: {exc}"
+        ) from exc
+
+
 def generate_sequencer_keypair() -> tuple[str, str]:
     """
     Generate a sequencer keypair (private key, X-only public key).
@@ -87,6 +119,7 @@ class AlpenClientFactory(flexitest.Factory):
         da_rate_wei_per_byte: int = 0,
         base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR,
         prover: ProverBackend = NATIVE_BACKEND,
+        eest_fixture_mode: bool = False,
         **kwargs,
     ) -> AlpenClientService:
         """
@@ -111,6 +144,28 @@ class AlpenClientFactory(flexitest.Factory):
         p2p_port = self.next_port()
         authrpc_port = self.next_port()
         logfile = datadir / "service.log"
+
+        if not isinstance(eest_fixture_mode, bool):
+            raise TypeError(
+                "eest_fixture_mode must be a boolean, "
+                f"got {type(eest_fixture_mode).__name__}"
+            )
+
+        engine_jwt_secret_path: Path | None = None
+        engine_endpoint_path: Path | None = None
+        if eest_fixture_mode:
+            engine_jwt_secret_path = _required_eest_engine_file("EEST_ENGINE_JWT_SECRET_FILE")
+            engine_endpoint_path = _required_eest_engine_file("EEST_ENGINE_ENDPOINT_FILE")
+            _write_new_private_file(
+                engine_jwt_secret_path,
+                f"{secrets.token_hex(32)}\n",
+                "EEST Engine JWT secret",
+            )
+            _write_new_private_file(
+                engine_endpoint_path,
+                f"http://127.0.0.1:{authrpc_port}\n",
+                "EEST Engine endpoint",
+            )
 
         # Generate P2P secret key if not provided
         if p2p_secret_key is None:
@@ -195,6 +250,10 @@ class AlpenClientFactory(flexitest.Factory):
             "--p2p-secret-key", str(p2p_secret_key_file),
             "-vvvv",
         ]
+        if eest_fixture_mode:
+            if engine_jwt_secret_path is None:
+                raise RuntimeError("EEST fixture mode did not create an Engine JWT secret path")
+            cmd.extend(["--authrpc.jwtsecret", str(engine_jwt_secret_path), "--eest-fixture-mode"])
         # fmt: on
 
         # Discovery mode configuration:
@@ -224,6 +283,12 @@ class AlpenClientFactory(flexitest.Factory):
             "mode": "sequencer",
             "enode": None,  # Will be populated after start
         }
+        if eest_fixture_mode:
+            if engine_jwt_secret_path is None or engine_endpoint_path is None:
+                raise RuntimeError("EEST fixture mode did not initialize Engine metadata paths")
+            props["engine_endpoint"] = f"http://127.0.0.1:{authrpc_port}"
+            props["engine_jwt_secret_path"] = str(engine_jwt_secret_path)
+            props["engine_endpoint_path"] = str(engine_endpoint_path)
 
         # Set environment variable for sequencer private key
         env = os.environ.copy()

@@ -290,13 +290,15 @@ def main(argv: list[str]) -> int:
     global_envs: dict[str, flexitest.EnvConfig] = {
         # Alpen-client (EE) environments
         "alpen_ee": AlpenClientEnv(),
-        # EEST needs the externally observable OL/EE path, not a
-        # test-only client surface.
+        # EEST requires the Alpen execution client, but must isolate every
+        # fixture by Engine forkchoice without EE services consuming reorged
+        # canonical-head notifications.
         "alpen_eest": EeOLEnv(
             fullnode_count=0,
             pre_generate_blocks=110,
             batch_sealing_block_count=5,
             base_fee_floor=0,
+            eest_fixture_mode=True,
         ),
         "alpen_ee_discovery": AlpenClientEnv(enable_discovery=True, pure_discovery=True),
         "alpen_ee_multi": AlpenClientEnv(fullnode_count=3, forward_tx=False),

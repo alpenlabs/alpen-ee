@@ -7,7 +7,7 @@ import contextlib
 import logging
 import subprocess
 import time
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from common.config.constants import (
     DEFAULT_BLOCK_WAIT_SLACK_SECONDS,
@@ -39,6 +39,9 @@ class AlpenClientProps(TypedDict):
     datadir: str
     mode: str  # "sequencer" or "fullnode"
     enode: str | None
+    engine_endpoint: NotRequired[str]
+    engine_jwt_secret_path: NotRequired[str]
+    engine_endpoint_path: NotRequired[str]
 
 
 class AlpenClientService(RpcService):
