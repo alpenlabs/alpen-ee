@@ -47,6 +47,7 @@ class AlpenClientEnvParams:
     da_rate_wei_per_byte: int = 0
     forward_tx: bool = True
     base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR
+    eest_fixture_mode: bool = False
 
 
 class AlpenClientEnv(flexitest.EnvConfig):
@@ -79,6 +80,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
         da_rate_wei_per_byte: int = 0,
         forward_tx: bool = True,
         base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR,
+        eest_fixture_mode: bool = False,
     ):
         self.env_params = AlpenClientEnvParams(
             fullnode_count=fullnode_count,
@@ -92,6 +94,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
             da_rate_wei_per_byte=da_rate_wei_per_byte,
             forward_tx=forward_tx,
             base_fee_floor=base_fee_floor,
+            eest_fixture_mode=eest_fixture_mode,
         )
         if pure_discovery and not enable_discovery:
             raise ValueError("pure_discovery requires enable_discovery=True")
@@ -99,6 +102,11 @@ class AlpenClientEnv(flexitest.EnvConfig):
             raise ValueError("mesh_bootnodes requires enable_discovery=True")
         if len(da_magic_bytes) != 4:
             raise ValueError(f"da_magic_bytes must be exactly 4 bytes, got {len(da_magic_bytes)}")
+        if not isinstance(eest_fixture_mode, bool):
+            raise TypeError(
+                "eest_fixture_mode must be a boolean, "
+                f"got {type(eest_fixture_mode).__name__}"
+            )
 
     def init(self, ectx: flexitest.EnvContext) -> flexitest.LiveEnv:
         services = self.get_services(ectx, self.env_params)
@@ -177,6 +185,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
             prover=envparams.prover,
             da_rate_wei_per_byte=envparams.da_rate_wei_per_byte,
             base_fee_floor=envparams.base_fee_floor,
+            eest_fixture_mode=envparams.eest_fixture_mode,
         )
         sequencer.wait_for_ready(timeout=60)
         seq_enode = sequencer.get_enode()
