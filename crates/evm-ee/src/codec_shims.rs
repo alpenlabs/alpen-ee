@@ -8,7 +8,8 @@
 
 use std::collections::BTreeMap;
 
-use reth_trie::HashedPostState;
+use alloy_consensus::constants::EMPTY_ROOT_HASH;
+use reth_trie::{HashedPostState, TrieAccount};
 use revm_primitives::{B256, HashMap as RevmHashMap};
 use rsp_mpt::EthereumState;
 use strata_codec::{Codec, CodecError, Varint};
@@ -134,10 +135,37 @@ pub(crate) fn decode_ethereum_state(
         storage_tries.insert(address_hash, storage_trie);
     }
 
-    Ok(EthereumState {
+    let state = EthereumState {
         state_trie,
         storage_tries,
-    })
+    };
+    validate_storage_tries(&state)?;
+
+    Ok(state)
+}
+
+/// Checks each storage trie against the storage root its account commits to.
+///
+/// The state root commits to the account leaves, and each leaf commits to a
+/// storage root -- but nothing ties the storage tries carried alongside to
+/// those roots. Without this check a prover could hand the guest a storage
+/// trie holding values the account never had, and `SLOAD` would read them.
+fn validate_storage_tries(state: &EthereumState) -> Result<(), CodecError> {
+    for (hashed_address, storage_trie) in state.storage_tries.iter() {
+        let account = state
+            .state_trie
+            .get_rlp::<TrieAccount>(hashed_address.as_slice())
+            .map_err(|_| CodecError::MalformedField("account not resolvable in state trie"))?;
+
+        // An account absent from the state trie has no storage, so the only
+        // trie it can carry is an empty one.
+        let expected_root = account.map_or(EMPTY_ROOT_HASH, |account| account.storage_root);
+        if expected_root != storage_trie.hash() {
+            return Err(CodecError::MalformedField("storage root mismatch"));
+        }
+    }
+
+    Ok(())
 }
 
 /// Encodes HashedPostState deterministically (sorts HashMap entries).

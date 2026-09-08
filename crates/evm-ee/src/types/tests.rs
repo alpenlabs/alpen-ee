@@ -490,3 +490,49 @@ fn test_partial_state_decode_seals_headers_with_computed_hashes() {
 
     assert_block_hashes_match_headers(&decoded, &headers);
 }
+
+#[test]
+fn test_partial_state_codec_roundtrip_with_storage() {
+    let slot = (U256::from(3u64), U256::from(42u64));
+    let partial_state = EvmPartialState::new(
+        single_account_state(Address::ZERO, Some(slot)),
+        BTreeMap::new(),
+        vec![],
+    );
+
+    let encoded = encode_to_vec(&partial_state).expect("encode failed");
+    let decoded: EvmPartialState = decode_buf_exact(&encoded).expect("decode failed");
+
+    assert_eq!(
+        decoded.ethereum_state().state_root(),
+        partial_state.ethereum_state().state_root()
+    );
+}
+
+/// The state root commits to each account's storage root, but nothing ties the
+/// storage tries carried alongside to those roots. A trie holding values the
+/// account never had must be rejected, or `SLOAD` would read them.
+#[test]
+fn test_partial_state_decode_rejects_mismatched_storage_root() {
+    let address = Address::ZERO;
+    let hashed_address = keccak256(address);
+
+    let mut donor = single_account_state(address, Some((U256::from(3u64), U256::from(42u64))));
+    let mut tampered = single_account_state(address, None);
+
+    // Same account, but now carrying a storage trie its leaf never committed to.
+    let forged_trie = donor
+        .storage_tries
+        .remove(&hashed_address)
+        .expect("donor state must hold a storage trie");
+    tampered.storage_tries.insert(hashed_address, forged_trie);
+
+    let partial_state = EvmPartialState::new(tampered, BTreeMap::new(), vec![]);
+    let encoded = encode_to_vec(&partial_state).expect("encode failed");
+
+    let result = decode_buf_exact::<EvmPartialState>(&encoded);
+    assert!(
+        result.is_err(),
+        "a storage trie that does not match the account's storage root must be rejected"
+    );
+}
