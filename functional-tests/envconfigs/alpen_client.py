@@ -8,6 +8,7 @@ from typing import cast
 
 import flexitest
 
+from common.alpen_params import DEFAULT_BASE_FEE_FLOOR
 from common.config import EeDaConfig, ServiceType
 from common.prover_backend import NATIVE_BACKEND, ProverBackend
 from common.services.bitcoin import BitcoinService
@@ -45,6 +46,7 @@ class AlpenClientEnvParams:
     prover: ProverBackend = NATIVE_BACKEND
     da_rate_wei_per_byte: int = 0
     forward_tx: bool = True
+    base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR
 
 
 class AlpenClientEnv(flexitest.EnvConfig):
@@ -76,6 +78,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
         beneficiary_address: str | None = None,
         da_rate_wei_per_byte: int = 0,
         forward_tx: bool = True,
+        base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR,
     ):
         self.env_params = AlpenClientEnvParams(
             fullnode_count=fullnode_count,
@@ -88,6 +91,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
             beneficiary_address=beneficiary_address,
             da_rate_wei_per_byte=da_rate_wei_per_byte,
             forward_tx=forward_tx,
+            base_fee_floor=base_fee_floor,
         )
         if pure_discovery and not enable_discovery:
             raise ValueError("pure_discovery requires enable_discovery=True")
@@ -172,6 +176,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
             beneficiary_address=envparams.beneficiary_address,
             prover=envparams.prover,
             da_rate_wei_per_byte=envparams.da_rate_wei_per_byte,
+            base_fee_floor=envparams.base_fee_floor,
         )
         sequencer.wait_for_ready(timeout=60)
         seq_enode = sequencer.get_enode()
@@ -200,6 +205,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
                 sequencer_http=seq_http_url if envparams.forward_tx else None,
                 ol_endpoint=ol_endpoint,
                 ee_params_path=ee_params_path,
+                base_fee_floor=envparams.base_fee_floor,
             )
             fullnode.wait_for_ready(timeout=60)
             fullnodes.append(fullnode)

@@ -54,7 +54,7 @@ use crate::{
 const MIN_TX_GAS_LIMIT: u64 = 21_000;
 
 /// A custom payload service builder that supports the custom engine types
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct AlpenPayloadBuilderBuilder {
     /// Live DA rate (wei per byte), shared with the payload builder.
@@ -65,6 +65,17 @@ pub struct AlpenPayloadBuilderBuilder {
     /// once and freezes that value into the block, so a single relaxed load/store on
     /// an [`AtomicU64`] is all the synchronization the hand-off needs.
     pub live_da_rate: Arc<AtomicU64>,
+    /// Minimum EIP-1559 base fee from the chain params artifact.
+    pub base_fee_floor: u64,
+}
+
+impl Default for AlpenPayloadBuilderBuilder {
+    fn default() -> Self {
+        Self {
+            live_da_rate: Arc::new(AtomicU64::new(0)),
+            base_fee_floor: alpen_ee_params::DEFAULT_BASE_FEE_FLOOR,
+        }
+    }
 }
 
 impl<Node, Pool> PayloadBuilderBuilder<Node, Pool, AlpenEvmConfig> for AlpenPayloadBuilderBuilder
@@ -98,6 +109,7 @@ where
             evm_config,
             EthereumBuilderConfig::new().with_gas_limit(gas_limit),
             self.live_da_rate,
+            self.base_fee_floor,
         ))
     }
 }
@@ -117,6 +129,8 @@ pub struct AlpenPayloadBuilder<Pool, Client> {
     builder_config: EthereumBuilderConfig,
     /// Live DA rate (wei per byte) sampled and frozen per block.
     live_da_rate: Arc<AtomicU64>,
+    /// Minimum EIP-1559 base fee from the chain params artifact.
+    base_fee_floor: u64,
 }
 
 impl<Pool, Client> AlpenPayloadBuilder<Pool, Client> {
@@ -127,6 +141,7 @@ impl<Pool, Client> AlpenPayloadBuilder<Pool, Client> {
         evm_config: AlpenEvmConfig,
         builder_config: EthereumBuilderConfig,
         live_da_rate: Arc<AtomicU64>,
+        base_fee_floor: u64,
     ) -> Self {
         Self {
             client,
@@ -134,6 +149,7 @@ impl<Pool, Client> AlpenPayloadBuilder<Pool, Client> {
             evm_config,
             builder_config,
             live_da_rate,
+            base_fee_floor,
         }
     }
 }
@@ -156,6 +172,7 @@ where
         try_build_payload(
             self.evm_config.clone(),
             self.live_da_rate.clone(),
+            self.base_fee_floor,
             self.client.clone(),
             self.pool.clone(),
             self.builder_config.clone(),
@@ -172,6 +189,7 @@ where
         try_build_payload(
             self.evm_config.clone(),
             self.live_da_rate.clone(),
+            self.base_fee_floor,
             self.client.clone(),
             self.pool.clone(),
             self.builder_config.clone(),
@@ -199,6 +217,7 @@ type BestTransactionsIter<Pool> = Box<
 fn try_build_payload<Pool, Client, F>(
     evm_config: AlpenEvmConfig,
     live_da_rate: Arc<AtomicU64>,
+    base_fee_floor: u64,
     client: Client,
     _pool: Pool,
     builder_config: EthereumBuilderConfig,
@@ -260,11 +279,9 @@ where
         withdrawals: Some(attributes.withdrawals().clone()),
     };
 
-    // Build the next block's EVM env and apply the base-fee floor. `next_evm_env`
-    // computes the pure EIP-1559 base fee; clamp it to `max(BASE_FEE_FLOOR, .)`. The sealed
-    // header takes its base fee from this env, so flooring here keeps the header and the
-    // executed base fee consistent, and matches the host consensus + guest, which recompute
-    // the same floored value from the parent. This inlines `builder_for_next_block_with_version`
+    // Build the next block's EVM env and apply the configured base-fee floor. `next_evm_env`
+    // computes the pure EIP-1559 base fee; the sealed header takes its floored value from this
+    // env. This inlines `builder_for_next_block_with_version`
     // so the floor can be inserted between `next_evm_env` and block-builder construction,
     // keeping the floor logic in the builder rather than inside `AlpenEvmConfig`.
     //
@@ -274,7 +291,7 @@ where
     let mut evm_env = versioned_config
         .next_evm_env(&parent_header, &next_block_attrs)
         .map_err(PayloadBuilderError::other)?;
-    evm_env.block_env.basefee = apply_base_fee_floor(evm_env.block_env.basefee);
+    evm_env.block_env.basefee = apply_base_fee_floor(evm_env.block_env.basefee, base_fee_floor);
 
     let evm = evm_config.evm_with_env(&mut db, evm_env);
     let block_ctx = evm_config.context_for_next_block_with_version(

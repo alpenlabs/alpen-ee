@@ -89,6 +89,8 @@ pub struct AlpenEthereumNode {
     /// charge. Only the sequencer's build path reads it; full nodes recover the
     /// per-block rate from each block's `extra_data`.
     live_da_rate: Arc<AtomicU64>,
+    /// Minimum EIP-1559 base fee from the chain params artifact.
+    base_fee_floor: u64,
 }
 
 impl AlpenEthereumNode {
@@ -97,12 +99,14 @@ impl AlpenEthereumNode {
         evm_spec: EvmSpec,
         mode: AlpenNodeMode,
         live_da_rate: Arc<AtomicU64>,
+        base_fee_floor: u64,
     ) -> Self {
         Self {
             evm_factory,
             evm_spec,
             mode,
             live_da_rate,
+            base_fee_floor,
         }
     }
 }
@@ -151,10 +155,14 @@ where
             .payload(BasicPayloadServiceBuilder::new(
                 AlpenPayloadBuilderBuilder {
                     live_da_rate: self.live_da_rate.clone(),
+                    base_fee_floor: self.base_fee_floor,
                 },
             ))
             .network(EthereumNetworkBuilder::default())
-            .consensus(AlpenConsensusBuilder::new(self.evm_spec.clone()))
+            .consensus(AlpenConsensusBuilder::new(
+                self.evm_spec.clone(),
+                self.base_fee_floor,
+            ))
     }
 
     fn add_ons(&self) -> Self::AddOns {

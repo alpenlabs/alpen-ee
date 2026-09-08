@@ -26,6 +26,9 @@ CHAIN_SPEC_FILES = {
     "testnet3": _CHAINSPEC_DIR / "testnet3-chain.json",
 }
 
+DEFAULT_BASE_FEE_FLOOR = 1_000_000_000
+EEST_BASE_FEE_FLOOR = 0
+
 
 def compose_alpen_params(
     datadir: Path,
@@ -35,6 +38,7 @@ def compose_alpen_params(
     max_withdrawal_amount: int | None = 1_000_000_000,
     max_withdrawal_descriptor_len: int = 81,
     da_magic_bytes: str = "ALPN",
+    base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR,
 ) -> Path:
     """Writes ``alpen-params.json`` into ``datadir`` and returns its path.
 
@@ -45,9 +49,16 @@ def compose_alpen_params(
             cap. The old CLI sentinel ``0`` is rejected: ``BridgeParams``
             requires a set cap to be a positive multiple of the denomination,
             so ``0`` would fail node startup far from the mistake.
+        base_fee_floor: minimum EIP-1559 base fee in wei. Production tests
+            retain the 1 gwei floor; EEST sets this to zero to exercise the
+            standard Ethereum recurrence.
     """
     if max_withdrawal_amount == 0:
         raise ValueError("max_withdrawal_amount=0 is not a valid cap; pass None to disable it")
+    if isinstance(base_fee_floor, bool) or not isinstance(base_fee_floor, int):
+        raise TypeError("base_fee_floor must be an integer")
+    if not 0 <= base_fee_floor <= 2**64 - 1:
+        raise ValueError("base_fee_floor must be between 0 and 2**64 - 1")
 
     ee_params = json.loads(Path(ee_params_path).read_text())
     evm_spec = json.loads(CHAIN_SPEC_FILES[chain].read_text())
@@ -62,6 +73,7 @@ def compose_alpen_params(
         "blob_spec": {"magic_bytes": da_magic_bytes},
         "spec_schedule": {"v0": 0},
         "evm_spec": evm_spec,
+        "base_fee_floor": base_fee_floor,
     }
 
     out_path = Path(datadir) / "alpen-params.json"
