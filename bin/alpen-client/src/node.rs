@@ -60,6 +60,10 @@ pub(crate) async fn launch(
     builder: WithLaunchContext<NodeBuilder<reth_db::DatabaseEnv, ChainSpec>>,
     ext: AdditionalConfig,
 ) -> eyre::Result<()> {
+    if ext.eest_fixture_mode {
+        return crate::eest::run(builder, ext.alpen_params).await;
+    }
+
     let alpen_config = ext.alpen_config.clone();
     let params = ext.alpen_params.clone();
 

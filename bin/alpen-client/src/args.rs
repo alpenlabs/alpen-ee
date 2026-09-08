@@ -51,6 +51,17 @@ pub(crate) struct AdditionalConfig {
         value_parser = alpen_config_value_parser,
     )]
     pub alpen_config: Arc<AlpenClientConfig>,
+
+    /// Launch only the execution client required by the EEST fixture driver.
+    ///
+    /// This is intentionally a CLI switch rather than a persisted node
+    /// configuration value. It must never change the behavior of a deployed
+    /// sequencer: it starts the Alpen EVM, payload builder, consensus, and
+    /// authenticated Engine API, but deliberately omits OL, DA, batch, chunk,
+    /// gossip, and proving services so an EEST case can safely reorg to its
+    /// fixture baseline.
+    #[arg(long, hide = true)]
+    pub eest_fixture_mode: bool,
 }
 
 /// Logging and telemetry args.
@@ -194,6 +205,13 @@ mod tests {
 
         assert_eq!(config.alpen_params.genesis_block_info().blocknum(), 0);
         assert!(matches!(config.alpen_config.mode, NodeMode::FullNode(_)));
+    }
+
+    #[test]
+    fn parses_the_test_only_eest_fixture_switch() {
+        let config = parse_additional_config(&["--eest-fixture-mode"]);
+
+        assert!(config.eest_fixture_mode);
     }
 
     /// Catches arg id / flag collisions between the flattened Alpen arg

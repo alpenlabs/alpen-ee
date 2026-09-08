@@ -32,6 +32,7 @@ static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::ne
 
 mod args;
 mod config;
+mod eest;
 mod full_node;
 mod gossip;
 mod node;
