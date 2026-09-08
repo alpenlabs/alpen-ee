@@ -164,7 +164,14 @@ impl<'a> DatabaseRef for WitnessDB<'a> {
     }
 
     fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
-        // Look up block hash by number - return a copy (B256 is Copy)
-        Ok(self.block_hashes.get(&number).copied().unwrap_or_default())
+        // Fail rather than defaulting to zero. The EVM only asks for numbers
+        // it is prepared to use (revm returns zero for out-of-range ones
+        // without consulting the database), so a missing entry means the
+        // witness is incomplete -- and defaulting would let whoever built it
+        // choose zero over the real hash by leaving the header out.
+        self.block_hashes
+            .get(&number)
+            .copied()
+            .ok_or(ProviderError::HeaderNotFound(number.into()))
     }
 }
