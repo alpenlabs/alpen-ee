@@ -10,7 +10,7 @@ from pathlib import Path
 
 import flexitest
 
-from common.alpen_params import compose_alpen_params
+from common.alpen_params import DEFAULT_BASE_FEE_FLOOR, compose_alpen_params
 from common.config import (
     AlpenAdminRpcConfig,
     AlpenClientConfig,
@@ -86,6 +86,7 @@ class AlpenClientFactory(flexitest.Factory):
         max_withdrawal_amount: int | None = 1_000_000_000,
         beneficiary_address: str | None = None,
         da_rate_wei_per_byte: int = 0,
+        base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR,
         prover: ProverBackend = NATIVE_BACKEND,
         **kwargs,
     ) -> AlpenClientService:
@@ -138,6 +139,7 @@ class AlpenClientFactory(flexitest.Factory):
             bridge_denomination=bridge_denomination,
             max_withdrawal_amount=max_withdrawal_amount,
             da_magic_bytes=da_config.magic_bytes.decode("ascii"),
+            base_fee_floor=base_fee_floor,
         )
 
         ol_config = (
@@ -272,6 +274,7 @@ class AlpenClientFactory(flexitest.Factory):
         ol_endpoint: str | None = None,
         bridge_denomination: int = 100_000_000,
         max_withdrawal_amount: int | None = 1_000_000_000,
+        base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR,
         **kwargs,
     ) -> AlpenClientService:
         """
@@ -328,6 +331,7 @@ class AlpenClientFactory(flexitest.Factory):
             chain=custom_chain,
             bridge_denomination=bridge_denomination,
             max_withdrawal_amount=max_withdrawal_amount,
+            base_fee_floor=base_fee_floor,
         )
 
         alpen_config = AlpenClientConfig(
