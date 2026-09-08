@@ -2,10 +2,14 @@
 
 use std::{collections::BTreeMap, fs::read_to_string, path::PathBuf};
 
-use alloy_consensus::{Header, Sealable};
+use alloy_consensus::{Header, Sealable, constants::EMPTY_ROOT_HASH};
+use alloy_rpc_types_debug::ExecutionWitness;
+use reth_primitives_traits::Account;
+use reth_trie::{HashedPostState, HashedStorage};
 use revm::{DatabaseRef, state::Bytecode};
-use revm_primitives::alloy_primitives::{Address, B256, Bloom, Bytes, U256};
+use revm_primitives::alloy_primitives::{Address, B256, Bloom, Bytes, U256, keccak256};
 use rsp_client_executor::io::EthClientExecutorInput;
+use rsp_mpt::EthereumState;
 use serde::Deserialize;
 use strata_codec::{decode_buf_exact, encode_to_vec};
 use strata_ee_acct_types::ExecHeader;
@@ -400,4 +404,89 @@ fn test_evm_write_batch_codec_roundtrip() {
 
     let reencoded = encode_to_vec(&decoded).expect("re-encode failed");
     assert_eq!(reencoded, encoded);
+}
+
+/// Builds a state holding a single account, optionally with one storage slot
+/// set. The account's storage root always matches the storage trie, so this is
+/// a well-formed witness.
+fn single_account_state(address: Address, slot: Option<(U256, U256)>) -> EthereumState {
+    // An empty trie: the null node's RLP hashes to the empty root.
+    let witness = ExecutionWitness {
+        state: vec![Bytes::from_static(&[0x80])],
+        ..Default::default()
+    };
+    let mut state = EthereumState::from_execution_witness(&witness, EMPTY_ROOT_HASH);
+
+    let hashed_address = keccak256(address);
+    let mut post_state = HashedPostState::default();
+    post_state.accounts.insert(
+        hashed_address,
+        Some(Account {
+            nonce: 1,
+            balance: U256::from(1u64),
+            bytecode_hash: None,
+        }),
+    );
+
+    if let Some((key, value)) = slot {
+        let mut storage = HashedStorage::new(false);
+        storage
+            .storage
+            .insert(keccak256(key.to_be_bytes::<32>()), value);
+        post_state.storages.insert(hashed_address, storage);
+    }
+
+    state.update(&post_state);
+    state
+}
+
+/// A witness may only serve code under the hash of that code. Taking the map
+/// key from the encoding would let a prover run any code it likes for a
+/// deployed contract, since the state trie commits to the code hash and never
+/// to the code behind it.
+#[test]
+fn test_partial_state_decode_keys_bytecode_by_its_own_hash() {
+    let honest_code = Bytes::from_static(&[0x00]);
+    let substituted_code = Bytes::from_static(&[0x60, 0x01, 0x00]);
+    let honest_hash = keccak256(&honest_code);
+
+    // A witness claiming the substituted code is what `honest_hash` commits to.
+    let partial_state = EvmPartialState::new(
+        single_account_state(Address::ZERO, None),
+        BTreeMap::from([(honest_hash, Bytecode::new_raw(substituted_code.clone()))]),
+        vec![],
+    );
+
+    let encoded = encode_to_vec(&partial_state).expect("encode failed");
+    let decoded: EvmPartialState = decode_buf_exact(&encoded).expect("decode failed");
+
+    assert!(
+        decoded.bytecodes().get(&honest_hash).is_none(),
+        "substituted code must not be reachable under the code hash it claimed"
+    );
+    assert_eq!(
+        decoded
+            .bytecodes()
+            .get(&keccak256(&substituted_code))
+            .map(|bytecode| bytecode.original_bytes()),
+        Some(substituted_code),
+        "code must be keyed by its own hash"
+    );
+}
+
+/// `BLOCKHASH` returns these hashes, so they are computed from the headers
+/// rather than carried alongside them.
+#[test]
+fn test_partial_state_decode_seals_headers_with_computed_hashes() {
+    let headers = create_test_ancestor_headers();
+    let partial_state = EvmPartialState::new(
+        single_account_state(Address::ZERO, None),
+        BTreeMap::new(),
+        headers.clone(),
+    );
+
+    let encoded = encode_to_vec(&partial_state).expect("encode failed");
+    let decoded: EvmPartialState = decode_buf_exact(&encoded).expect("decode failed");
+
+    assert_block_hashes_match_headers(&decoded, &headers);
 }
