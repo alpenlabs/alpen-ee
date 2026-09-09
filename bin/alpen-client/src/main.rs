@@ -65,6 +65,14 @@ fn main() {
     command
         .engine
         .always_process_payload_attributes_on_canonical_head = true;
+    // EEST restores the fixture baseline by sending an Engine forkchoice
+    // update to a canonical ancestor. Vanilla Reth deliberately treats that
+    // as a no-op, as permitted by the Engine API specification. The isolated
+    // fixture process has no OL/DA/proving consumers and therefore may safely
+    // enable Reth's explicit canonical-unwind mode. Keep this strictly tied
+    // to the hidden fixture switch: allowing a production sequencer to rewind
+    // its canonical execution head would be unsafe.
+    command.engine.allow_unwind_canonical_header = command.ext.eest_fixture_mode;
 
     if let Err(err) = run(command, node::launch) {
         eprintln!("Error: {err:?}");
