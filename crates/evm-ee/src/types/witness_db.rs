@@ -134,12 +134,17 @@ impl<'a> DatabaseRef for WitnessDB<'a> {
             }
         };
 
-        // Get the storage trie for this account
+        // Fail rather than panic. A missing trie says the witness is
+        // incomplete, which is a fact about the input, not a bug here.
         let storage_trie = self
             .ethereum_state
             .storage_tries
             .get(hashed_address.as_slice())
-            .expect("A storage trie must be provided for each account");
+            .ok_or_else(|| {
+                ProviderError::TrieWitnessError(format!(
+                    "missing storage trie for account {address}"
+                ))
+            })?;
 
         // Check if storage key hash is cached, otherwise compute and cache it
         let hashed_index = {

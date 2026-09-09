@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, fs::read_to_string, path::PathBuf};
 use alloy_consensus::{Header, Sealable, constants::EMPTY_ROOT_HASH};
 use alloy_rpc_types_debug::ExecutionWitness;
 use reth_primitives_traits::Account;
-use reth_trie::{HashedPostState, HashedStorage};
+use reth_trie::{HashedPostState, HashedStorage, TrieAccount};
 use revm::{DatabaseRef, state::Bytecode};
 use revm_primitives::alloy_primitives::{Address, B256, Bloom, Bytes, U256, keccak256};
 use rsp_client_executor::io::EthClientExecutorInput;
@@ -14,7 +14,7 @@ use serde::Deserialize;
 use strata_codec::{decode_buf_exact, encode_to_vec};
 use strata_ee_acct_types::ExecHeader;
 
-use super::{EvmBlock, EvmBlockBody, EvmHeader, EvmPartialState};
+use super::{EvmBlock, EvmBlockBody, EvmHeader, EvmPartialState, EvmWriteBatch};
 
 #[derive(Deserialize)]
 struct TestData {
@@ -534,5 +534,85 @@ fn test_partial_state_decode_rejects_mismatched_storage_root() {
     assert!(
         result.is_err(),
         "a storage trie that does not match the account's storage root must be rejected"
+    );
+}
+
+/// Reads the storage root an account's leaf commits to.
+fn account_storage_root(state: &EthereumState, hashed_address: B256) -> B256 {
+    state
+        .state_trie
+        .get_rlp::<TrieAccount>(hashed_address.as_slice())
+        .expect("account must be resolvable")
+        .expect("account must be present in the state trie")
+        .storage_root
+}
+
+/// Builds a write batch that only bumps an account's balance. Nothing here
+/// reads or writes storage, which is what makes the wipe below silent.
+fn balance_only_write_batch(hashed_address: B256, balance: u64) -> EvmWriteBatch {
+    let mut post_state = HashedPostState::default();
+    post_state.accounts.insert(
+        hashed_address,
+        Some(Account {
+            nonce: 1,
+            balance: U256::from(balance),
+            bytecode_hash: None,
+        }),
+    );
+
+    EvmWriteBatch::new(post_state)
+}
+
+/// A witness that omits an account's storage trie must not be allowed to
+/// rewrite that account. `EthereumState::update` derives the new storage root
+/// from the tries it holds, so merging without one would swap the account's
+/// storage for an empty trie and erase every slot.
+#[test]
+fn test_merge_write_batch_rejects_missing_storage_trie() {
+    let address = Address::ZERO;
+    let hashed_address = keccak256(address);
+
+    let mut state = single_account_state(address, Some((U256::from(3u64), U256::from(42u64))));
+    assert_ne!(
+        account_storage_root(&state, hashed_address),
+        EMPTY_ROOT_HASH
+    );
+
+    // Drop the trie the account's leaf commits to, keeping the leaf itself.
+    state
+        .storage_tries
+        .remove(&hashed_address)
+        .expect("state must hold a storage trie");
+
+    let mut partial_state = EvmPartialState::new(state, BTreeMap::new(), vec![]);
+    let write_batch = balance_only_write_batch(hashed_address, 2);
+
+    assert!(
+        partial_state.merge_write_batch(&write_batch).is_err(),
+        "rewriting an account without its storage trie must be rejected"
+    );
+}
+
+/// The guard only rejects witnesses that cannot preserve storage. With the
+/// trie present the same balance change goes through and the storage root
+/// survives it.
+#[test]
+fn test_merge_write_batch_preserves_untouched_storage() {
+    let address = Address::ZERO;
+    let hashed_address = keccak256(address);
+
+    let state = single_account_state(address, Some((U256::from(3u64), U256::from(42u64))));
+    let storage_root = account_storage_root(&state, hashed_address);
+
+    let mut partial_state = EvmPartialState::new(state, BTreeMap::new(), vec![]);
+    let write_batch = balance_only_write_batch(hashed_address, 2);
+
+    partial_state
+        .merge_write_batch(&write_batch)
+        .expect("merging a complete witness must succeed");
+
+    assert_eq!(
+        account_storage_root(partial_state.ethereum_state(), hashed_address),
+        storage_root
     );
 }

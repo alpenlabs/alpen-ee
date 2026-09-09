@@ -225,10 +225,7 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
         state: &mut Self::PartialState,
         wb: &Self::WriteBatch,
     ) -> EnvResult<()> {
-        // Merge the HashedPostState into the EthereumState
-        state.merge_write_batch(wb);
-
-        Ok(())
+        state.merge_write_batch(wb)
     }
 
     fn update_partial_state_after_block(

@@ -2,15 +2,16 @@
 
 use std::collections::BTreeMap;
 
-use alloy_consensus::{BlockHeader, Header, Sealable, Sealed};
+use alloy_consensus::{BlockHeader, Header, Sealable, Sealed, constants::EMPTY_ROOT_HASH};
 use alloy_rpc_types_debug::ExecutionWitness;
 use itertools::Itertools;
+use reth_trie::{HashedPostState, TrieAccount};
 use revm::state::Bytecode;
 use revm_primitives::{B256, Bytes, keccak256, map::HashMap};
 use rsp_mpt::EthereumState;
 use strata_acct_types::Hash;
 use strata_codec::{Codec, CodecError};
-use strata_ee_acct_types::{EnvResult, ExecPartialState};
+use strata_ee_acct_types::{EnvError, EnvResult, ExecPartialState};
 
 use crate::{
     codec_shims::{
@@ -175,9 +176,61 @@ impl EvmPartialState {
     /// Merges a write batch into this state by applying the hashed post state changes.
     ///
     /// This updates the internal EthereumState with the changes from the write batch.
-    pub fn merge_write_batch(&mut self, wb: &EvmWriteBatch) {
-        self.ethereum_state.update(wb.hashed_post_state());
+    /// It fails when the witness is missing a storage trie the merge would need.
+    pub fn merge_write_batch(&mut self, wb: &EvmWriteBatch) -> EnvResult<()> {
+        let post_state = wb.hashed_post_state();
+        require_storage_tries_for_writes(&self.ethereum_state, post_state)?;
+        self.ethereum_state.update(post_state);
+        Ok(())
     }
+}
+
+/// Requires a storage trie for every account the batch rewrites whose leaf
+/// commits to non-empty storage.
+///
+/// [`EthereumState::update`] recomputes a written account's storage root from
+/// the tries carried alongside the state trie, falling back to an empty trie
+/// when the account has none. A witness that leaves a trie out would therefore
+/// erase that account's storage instead of preserving it, and the account
+/// needs no storage access for that to happen: a plain balance change is
+/// enough. Refuse the merge instead of building a state the witness never
+/// justified.
+///
+/// Storage the block wipes is exempt, since a wipe clears the trie anyway.
+fn require_storage_tries_for_writes(
+    state: &EthereumState,
+    post_state: &HashedPostState,
+) -> EnvResult<()> {
+    for (hashed_address, account) in post_state.accounts.iter() {
+        // Deleting an account takes its storage with it.
+        if account.is_none() {
+            continue;
+        }
+
+        if state.storage_tries.contains_key(hashed_address) {
+            continue;
+        }
+
+        if post_state
+            .storages
+            .get(hashed_address)
+            .is_some_and(|storage| storage.wiped)
+        {
+            continue;
+        }
+
+        let storage_root = state
+            .state_trie
+            .get_rlp::<TrieAccount>(hashed_address.as_slice())
+            .map_err(|_| EnvError::InsufficientPartialState)?
+            .map_or(EMPTY_ROOT_HASH, |account| account.storage_root);
+
+        if storage_root != EMPTY_ROOT_HASH {
+            return Err(EnvError::InsufficientPartialState);
+        }
+    }
+
+    Ok(())
 }
 
 impl ExecPartialState for EvmPartialState {
