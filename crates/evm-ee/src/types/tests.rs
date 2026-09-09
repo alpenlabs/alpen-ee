@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, fs::read_to_string, path::PathBuf};
 use alloy_consensus::{Header, Sealable, constants::EMPTY_ROOT_HASH};
 use alloy_rpc_types_debug::ExecutionWitness;
 use reth_primitives_traits::Account;
-use reth_trie::{HashedPostState, HashedStorage};
+use reth_trie::{HashedPostState, HashedStorage, TrieAccount};
 use revm::{DatabaseRef, state::Bytecode};
 use revm_primitives::alloy_primitives::{Address, B256, Bloom, Bytes, U256, keccak256};
 use rsp_client_executor::io::EthClientExecutorInput;
@@ -14,7 +14,7 @@ use serde::Deserialize;
 use strata_codec::{decode_buf_exact, encode_to_vec};
 use strata_ee_acct_types::ExecHeader;
 
-use super::{EvmBlock, EvmBlockBody, EvmHeader, EvmPartialState};
+use super::{EvmBlock, EvmBlockBody, EvmHeader, EvmPartialState, EvmWriteBatch};
 
 #[derive(Deserialize)]
 struct TestData {
@@ -536,5 +536,85 @@ fn test_partial_state_decode_rejects_mismatched_storage_root() {
     assert!(
         result.is_err(),
         "a storage trie that does not match the account's storage root must be rejected"
+    );
+}
+
+/// Reads the storage root an account's leaf commits to.
+fn account_storage_root(state: &EthereumState, hashed_address: B256) -> B256 {
+    state
+        .state_trie
+        .get_rlp::<TrieAccount>(hashed_address.as_slice())
+        .expect("account must be resolvable")
+        .expect("account must be present in the state trie")
+        .storage_root
+}
+
+/// Builds a write batch that only bumps an account's balance. Nothing here
+/// reads or writes storage, so the account's storage must come through the
+/// merge unchanged.
+fn balance_only_write_batch(hashed_address: B256, balance: u64) -> EvmWriteBatch {
+    let mut post_state = HashedPostState::default();
+    post_state.accounts.insert(
+        hashed_address,
+        Some(Account {
+            nonce: 1,
+            balance: U256::from(balance),
+            bytecode_hash: None,
+        }),
+    );
+
+    EvmWriteBatch::new(post_state)
+}
+
+/// A canonical execution witness omits the storage trie of an account whose
+/// storage the block never touched. Merging a balance-only write for such an
+/// account must keep the storage the account's leaf commits to.
+///
+/// This pins a guarantee that lives in `rsp-mpt`: `EthereumState::update`
+/// rebuilds a missing storage trie from the account leaf's own storage root
+/// instead of starting from an empty one. An earlier `rsp` revision used an
+/// empty trie here, which silently erased the account's storage. If a future
+/// bump regresses that, this test fails instead of the erasure reaching a proof.
+#[test]
+fn test_merge_write_batch_preserves_storage_of_omitted_trie() {
+    let address = Address::ZERO;
+    let hashed_address = keccak256(address);
+
+    let mut state = single_account_state(address, Some((U256::from(3u64), U256::from(42u64))));
+    let storage_root = account_storage_root(&state, hashed_address);
+    assert_ne!(storage_root, EMPTY_ROOT_HASH);
+
+    // Storage untouched by the block, so the witness carries no trie for it.
+    state
+        .storage_tries
+        .remove(&hashed_address)
+        .expect("state must hold a storage trie");
+
+    let mut partial_state = EvmPartialState::new(state, BTreeMap::new(), vec![]);
+    partial_state.merge_write_batch(&balance_only_write_batch(hashed_address, 2));
+
+    assert_eq!(
+        account_storage_root(partial_state.ethereum_state(), hashed_address),
+        storage_root,
+        "a balance-only write must not disturb storage the witness omitted"
+    );
+}
+
+/// The same balance change with the storage trie present must also leave the
+/// storage root untouched.
+#[test]
+fn test_merge_write_batch_preserves_untouched_storage() {
+    let address = Address::ZERO;
+    let hashed_address = keccak256(address);
+
+    let state = single_account_state(address, Some((U256::from(3u64), U256::from(42u64))));
+    let storage_root = account_storage_root(&state, hashed_address);
+
+    let mut partial_state = EvmPartialState::new(state, BTreeMap::new(), vec![]);
+    partial_state.merge_write_batch(&balance_only_write_batch(hashed_address, 2));
+
+    assert_eq!(
+        account_storage_root(partial_state.ethereum_state(), hashed_address),
+        storage_root
     );
 }

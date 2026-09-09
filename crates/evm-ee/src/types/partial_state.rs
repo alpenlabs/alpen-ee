@@ -175,6 +175,11 @@ impl EvmPartialState {
     /// Merges a write batch into this state by applying the hashed post state changes.
     ///
     /// This updates the internal EthereumState with the changes from the write batch.
+    ///
+    /// A witness may legitimately omit the storage trie of an account whose storage the
+    /// block never touched. [`EthereumState::update`] rebuilds that account's storage root
+    /// from the root its own leaf commits to, so the omitted storage is preserved rather
+    /// than erased.
     pub fn merge_write_batch(&mut self, wb: &EvmWriteBatch) {
         self.ethereum_state.update(wb.hashed_post_state());
     }
