@@ -39,15 +39,11 @@ members = [
   "provers/sp1",
 
   # binaries listed separately
-  "bin/alpen-cli",
   "bin/alpen-client",
   "bin/prover-perf",
 ]
 
-default-members = [
-  "bin/alpen-client",
-  # "bin/alpen-cli",
-]
+default-members = ["bin/alpen-client"]
 
 [workspace.lints]
 rust.missing_debug_implementations = "warn"

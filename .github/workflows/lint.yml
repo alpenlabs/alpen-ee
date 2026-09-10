@@ -70,7 +70,6 @@ jobs:
       matrix:
         crate:
           # - alpen-client # unsupported due to `rkyv` dependency
-          # - alpen-cli # unsupported due to `secp256k1` FFI dependency
           - strata-ee-acct-types
           - strata-ee-chain-types
           - strata-simple-ee
