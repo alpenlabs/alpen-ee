@@ -648,7 +648,7 @@ Summary (the document is authoritative):
   transactions, and any sequencer RPC method reachable from outside the operator.
 - Sequencer-signed gossip is trusted for ordering and liveness only; full nodes re-execute
   every block, so a signed block that fails execution has to be rejected.
-- Fund safety and proof soundness override the above. Any path that mints native token without
+- Fund safety and proof soundness override the above. Any path that mints native coin without
   an OL deposit, credits a deposit twice or drops one, emits a withdrawal intent without an
   equal burn, or lets the proof runtime accept an invalid transition is critical regardless of
   input source.

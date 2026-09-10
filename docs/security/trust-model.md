@@ -52,10 +52,10 @@ The sequencer is a single known party, and its public key is in every full node'
 
 Keeping funds safe is the most important security requirement. The trust chain:
 
-1. The EE trusts its paired OL client.
-2. The OL client trusts the ZK proof produced by the OL sequencer, which guarantees the OL
+1. An EE Client trusts its paired OL client.
+2. An OL client trusts the SNARK proof produced by the OL sequencer, which guarantees the OL
    STF ran honestly.
-3. The OL does not trust the EE's word. The EE submits state updates together with a ZK
+3. The EE submits state updates together with a  SNARK
    (account) proof, and the OL accepts an update only if the proof verifies. Withdrawal
    outputs therefore reach the OL only as part of a proven update.
 4. The OL STF maintains the balance invariants of the EE's account at the OL level: the
@@ -69,16 +69,16 @@ prove something false, and the OL will accept it.
 
 What the EE is responsible for, and what stays in scope, is applying that accounting
 faithfully inside the EVM. These are the invariants this repository upholds; a violation is a
-security finding whichever boundary the triggering input crossed (rule 6):
+security finding whichever boundary the triggering input crossed:
 
 1. **Deposits are credited to the right recipient, for the right amount, exactly once, and
    in order.** Minting happens in block assembly (`alpen-ee/block-assembly`). The chunk and
    account proof runtimes enforce the ordering by matching each chunk's `subject_deposits`
    against the pending inputs (`ee-chunk-runtime`, `ee-acct-runtime`).
-2. **A withdrawal burns native token and creates a bridge-out intent of equal amount.** An
+2. **A withdrawal burns native coin and creates a bridge-out intent of equal amount.** An
    intent must never exist without its burn. Enforced by the bridge-out precompile and the
    log extraction that collects intents (`reth/evm`).
-3. **The native token supply inside the EE never diverges from what the OL has credited
+3. **The native coin supply inside the EE never diverges from what the OL has credited
    minus what the EE has emitted as withdrawals.** Any EE-side path that mints without a
    matching OL deposit, credits a deposit twice, drops a deposit, or emits a withdrawal
    intent without burning the same amount violates this.
@@ -91,7 +91,7 @@ security finding whichever boundary the triggering input crossed (rule 6):
 
 | Level | Meaning | Consequence for review |
 |-------|---------|------------------------|
-| Trusted | Controlled by the node operator, or by the same entity that runs this node. If it is compromised, the node is compromised. | Malformed or inconsistent data from it points to a bug on one side of the interface, usually protocol drift or a version mismatch. Panics and missing validation on this data are worth reporting as bugs, but they are not security findings unless they can affect funds or soundness (rule 6). |
+| Trusted | Controlled by the node operator, or by the same entity that runs this node. If it is compromised, the node is compromised. | Malformed or inconsistent data from it points to a bug on one side of the interface, usually protocol drift or a version mismatch. Panics and missing validation on this data are worth reporting as bugs, but they are not security findings unless they can affect funds or soundness. |
 | Authenticated | A known counterparty whose messages are cryptographically bound to an identity we already trust for a specific role. | The authentication check itself is in scope. Once a message is authenticated, its payload is trusted only for the role that party holds (see row notes) and everything else still has to be validated. |
 | Untrusted | Anyone on the internet, or anyone who can get data onto Bitcoin. | The node has to validate everything. Panics, unbounded allocation, hangs, and incorrect acceptance on this data are in scope. |
 
@@ -154,7 +154,7 @@ still apply on top.
 2. Data from a Trusted source cannot produce a security finding on its own. Panics,
    `unwrap()`s, missing bounds checks, or inconsistent handling of data from a Trusted row
    usually indicate protocol drift between components. They are bugs worth reporting as
-   bugs, and a security review may leave them out entirely, unless rule 6 applies.
+   bugs, and a security review may leave them out entirely, unless rule 6 (fund safety) applies.
 3. Secrets are always in scope, wherever they sit. Logging, echoing over RPC, or persisting a
    private key, RPC token, or bitcoind password in plaintext where it did not previously exist
    is reportable even if every party involved is Trusted.
@@ -180,7 +180,7 @@ unless the higher impact can be concretely demonstrated.
 
 | Pattern | Default impact |
 |---------|----------------|
-| Native token minted without a matching OL deposit, or a deposit credited twice or dropped | Severe |
+| Native coin minted without a matching OL deposit, or a deposit credited twice or dropped | Severe |
 | Bridge-out intent without an equal burn, or a burn without its intent | Severe |
 | Proof runtime or DA witness verification accepts an invalid state transition, invalid DA payload, or forged proof | Severe |
 | A signed block that fails re-execution becomes canonical on full nodes | Severe |
