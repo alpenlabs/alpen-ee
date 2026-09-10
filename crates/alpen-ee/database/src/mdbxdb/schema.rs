@@ -4,11 +4,11 @@
 //! big-endian keys so MDBX's lexicographic cursor order matches numeric order
 //! (relied on by `first`/`last`/range queries).
 
-use alpen_db_store_mdbx::{
+use alpen_ee_common::AccessedStateRecord;
+use alpen_store_mdbx::{
     define_table, define_table_be_key, define_table_borsh, impl_be_key_codec, impl_borsh_key_codec,
     impl_cbor_value_codec, impl_raw_key_codec, tables, CodecError, KeyCodec, Schema, TableSpec,
 };
-use alpen_ee_common::AccessedStateRecord;
 use strata_acct_types::Hash;
 use strata_db_types::{
     chunked_envelope::ChunkedEnvelopeEntry,
@@ -185,7 +185,7 @@ impl_be_key_codec!(L1ChunkedEnvelopeSchema, u64);
 impl_cbor_value_codec!(L1ChunkedEnvelopeSchema, ChunkedEnvelopeEntry);
 
 /// The full set of tables backing the EE node database, for
-/// [`MdbxEnv::open`](alpen_db_store_mdbx::MdbxEnv::open).
+/// [`MdbxEnv::open`](alpen_store_mdbx::MdbxEnv::open).
 pub(crate) fn node_tables() -> Vec<TableSpec> {
     tables![
         OLBlockAtEpochSchema,

@@ -1,13 +1,11 @@
 //! MDBX table definitions for the reth state-diff / DA-context store.
 //!
 //! Keys are `B256`/`u64` in big-endian form. Values go through the table's
-//! [`ValueCodec`](alpen_db_store_mdbx::ValueCodec), so callers store and read
+//! [`ValueCodec`](alpen_store_mdbx::ValueCodec), so callers store and read
 //! domain types and never touch the encoding.
 
-use alpen_db_store_mdbx::{
-    define_table_bincode_be_key, define_table_raw_be_key, tables, TableSpec,
-};
 use alpen_reth_statediff::BlockStateChanges;
+use alpen_store_mdbx::{define_table_bincode_be_key, define_table_raw_be_key, tables, TableSpec};
 use revm_primitives::alloy_primitives::B256;
 
 define_table_bincode_be_key! {
