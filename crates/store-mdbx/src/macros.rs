@@ -9,7 +9,6 @@
 ///
 /// Codecs are attached separately (see the `impl_*_codec` macros), or use a
 /// bundling macro such as [`define_table_borsh!`](crate::define_table_borsh).
-/// Append `, dup_sort` to open the table with MDBX `DUP_SORT`.
 #[macro_export]
 macro_rules! define_table {
     ($(#[$docs:meta])* ($name:ident) $key:ty => $value:ty) => {
@@ -19,18 +18,6 @@ macro_rules! define_table {
 
         impl $crate::Schema for $name {
             const NAME: &'static str = ::core::stringify!($name);
-            type Key = $key;
-            type Value = $value;
-        }
-    };
-    ($(#[$docs:meta])* ($name:ident, dup_sort) $key:ty => $value:ty) => {
-        $(#[$docs])*
-        #[derive(Clone, Copy, Debug, Default)]
-        pub(crate) struct $name;
-
-        impl $crate::Schema for $name {
-            const NAME: &'static str = ::core::stringify!($name);
-            const DUP_SORT: bool = true;
             type Key = $key;
             type Value = $value;
         }
