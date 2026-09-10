@@ -11,7 +11,7 @@ name = "alpen"
 path = "src/main.rs"
 
 [dependencies]
-alpen-db-store-mdbx.workspace = true
+alpen-store-mdbx.workspace = true
 alpen-reth-primitives.workspace = true
 strata-asm-proto-bridge-txs.workspace = true
 strata-bridge-params.workspace = true

@@ -24,7 +24,6 @@ members = [
   "crates/evm-ee",
   "crates/proof-impl/alpen-chunk",
   "crates/proof-impl/alpen-acct",
-  "crates/db/store-mdbx",
   "crates/reth/chainspec",
   "crates/reth/db",
   "crates/reth/evm",
@@ -36,6 +35,7 @@ members = [
   "crates/reth/witness",
   "crates/rpc/open-rpc-spec",
   "crates/simple-ee",
+  "crates/store-mdbx",
   "provers/sp1",
 
   # binaries listed separately
@@ -67,7 +67,6 @@ rustdoc.all = "warn"
 
 [workspace.dependencies]
 alpen-chainspec = { path = "crates/reth/chainspec" }
-alpen-db-store-mdbx = { path = "crates/db/store-mdbx" }
 alpen-ee-block-assembly = { path = "crates/alpen-ee/block-assembly" }
 alpen-ee-common = { path = "crates/alpen-ee/common" }
 alpen-ee-da-provider = { path = "crates/alpen-ee/da/provider" }
@@ -91,6 +90,7 @@ alpen-reth-primitives = { path = "crates/reth/primitives" }
 alpen-reth-rpc = { path = "crates/reth/rpc" }
 alpen-reth-statediff = { path = "crates/reth/statediff", default-features = false }
 alpen-reth-witness = { path = "crates/reth/witness" }
+alpen-store-mdbx = { path = "crates/store-mdbx" }
 strata-ee-acct-runtime = { path = "crates/ee-acct-runtime" }
 strata-ee-acct-types = { path = "crates/ee-acct-types" }
 strata-ee-chain-types = { path = "crates/ee-chain-types" }

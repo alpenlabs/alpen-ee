@@ -8,7 +8,7 @@ use std::{
 };
 
 use aes_gcm_siv::{aead::AeadMutInPlace, Aes256GcmSiv, KeyInit, Nonce, Tag};
-use alpen_db_store_mdbx::{define_table_borsh, tables, DbError, MdbxConfig, MdbxEnv};
+use alpen_store_mdbx::{define_table_borsh, tables, DbError, MdbxConfig, MdbxEnv};
 use bdk_wallet::{
     bitcoin::{constants::ChainHash, Network},
     keys::{DescriptorPublicKey, DescriptorSecretKey},

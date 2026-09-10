@@ -9,8 +9,8 @@
 
 use std::{path::Path, sync::Arc};
 
-use alpen_db_store_mdbx::{MdbxConfig, MdbxEnv};
 use alpen_ee_common::{BatchId, ProofId};
+use alpen_store_mdbx::{MdbxConfig, MdbxEnv};
 use strata_db_types::{errors::DbError, prover_task::ProverTaskDatabase, DbResult};
 use strata_paas::TaskRecordData;
 use zkaleido::ProofReceiptWithMetadata;

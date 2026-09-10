@@ -23,7 +23,7 @@
 //!
 //! ```
 //! mod schema {
-//!     use alpen_db_store_mdbx::{define_table_be_key, define_table_borsh};
+//!     use alpen_store_mdbx::{define_table_be_key, define_table_borsh};
 //!
 //!     define_table_borsh! {
 //!         /// Maps a block id to its record.

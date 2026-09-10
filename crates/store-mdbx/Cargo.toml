@@ -1,5 +1,5 @@
 [package]
-name = "alpen-db-store-mdbx"
+name = "alpen-store-mdbx"
 version = "0.1.0"
 edition = "2021"
 

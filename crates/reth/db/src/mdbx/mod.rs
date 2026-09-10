@@ -1,6 +1,6 @@
 //! MDBX-backed state-diff / DA-context store.
 //!
-//! Backed by a single [`alpen_db_store_mdbx::MdbxEnv`].
+//! Backed by a single [`alpen_store_mdbx::MdbxEnv`].
 
 mod db;
 mod schema;

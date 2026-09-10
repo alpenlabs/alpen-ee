@@ -13,8 +13,8 @@ use std::{
     sync::Arc,
 };
 
-use alpen_db_store_mdbx::{MdbxConfig, MdbxEnv};
 use alpen_reth_db::mdbx::{witness_tables, EeDaContextDbMdbx, WitnessDbMdbx};
+use alpen_store_mdbx::{MdbxConfig, MdbxEnv};
 use eyre::{eyre, Result};
 /// Re-export the async ops proxies so callers do not need `strata-storage`.
 pub use strata_db_types::chunked_envelope::L1ChunkedEnvelopeDatabaseProxy as ChunkedEnvelopeOps;

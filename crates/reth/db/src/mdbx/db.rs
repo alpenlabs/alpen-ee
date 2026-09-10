@@ -1,7 +1,7 @@
 use std::{path::Path, sync::Arc};
 
-use alpen_db_store_mdbx::{DbError as MdbxError, MdbxConfig, MdbxEnv};
 use alpen_reth_statediff::BlockStateChanges;
+use alpen_store_mdbx::{DbError as MdbxError, MdbxConfig, MdbxEnv};
 use revm_primitives::alloy_primitives::B256;
 use tracing::warn;
 

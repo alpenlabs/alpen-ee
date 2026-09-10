@@ -996,8 +996,8 @@ version = "0.3.0-alpha.1"
 dependencies = [
  "aes-gcm-siv",
  "alloy",
- "alpen-db-store-mdbx",
  "alpen-reth-primitives",
+ "alpen-store-mdbx",
  "argh",
  "argon2",
  "async-trait",
@@ -1119,19 +1119,6 @@ dependencies = [
  "zkaleido-native-adapter",
  "zkaleido-sp1-groth16-verifier",
  "zkaleido-sp1-host",
-]
-
-[[package]]
-name = "alpen-db-store-mdbx"
-version = "0.1.0"
-dependencies = [
- "bincode",
- "borsh",
- "ciborium",
- "signet-libmdbx",
- "strata-codec",
- "tempfile",
- "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1265,10 +1252,10 @@ dependencies = [
 name = "alpen-ee-database"
 version = "0.3.0-alpha.1"
 dependencies = [
- "alpen-db-store-mdbx",
  "alpen-ee-common",
  "alpen-ee-params",
  "alpen-reth-db",
+ "alpen-store-mdbx",
  "async-trait",
  "bincode",
  "bitcoin",
@@ -1458,8 +1445,8 @@ dependencies = [
 name = "alpen-reth-db"
 version = "0.3.0-alpha.1"
 dependencies = [
- "alpen-db-store-mdbx",
  "alpen-reth-statediff",
+ "alpen-store-mdbx",
  "bincode",
  "revm-primitives",
  "strata-db-types",
@@ -1659,6 +1646,19 @@ dependencies = [
  "strata-evm-ee",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "alpen-store-mdbx"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "borsh",
+ "ciborium",
+ "signet-libmdbx",
+ "strata-codec",
+ "tempfile",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
