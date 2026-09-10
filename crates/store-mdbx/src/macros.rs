@@ -105,6 +105,40 @@ macro_rules! impl_raw_value_codec {
     };
 }
 
+/// [`ValueCodec`](crate::ValueCodec) for `()`, encoding to no bytes at all —
+/// for a presence set, where membership is the whole datum and the key carries
+/// it.
+///
+/// Decoding refuses a non-empty value rather than ignoring it: such a row was
+/// written by something that did not agree the table is presence-only, and
+/// silently dropping its payload would hide that.
+#[macro_export]
+macro_rules! impl_unit_value_codec {
+    ($schema:ty) => {
+        impl $crate::ValueCodec<$schema> for () {
+            fn encode_value(
+                &self,
+            ) -> ::core::result::Result<::std::vec::Vec<u8>, $crate::CodecError> {
+                ::core::result::Result::Ok(::std::vec::Vec::new())
+            }
+
+            fn decode_value(
+                bytes: &[u8],
+                _ctx: &$crate::UpgradeCtx<'_>,
+            ) -> ::core::result::Result<Self, $crate::CodecError> {
+                if bytes.is_empty() {
+                    ::core::result::Result::Ok(())
+                } else {
+                    ::core::result::Result::Err($crate::CodecError::decode(
+                        <$schema as $crate::Schema>::NAME,
+                        ::std::format!("presence marker carries {} bytes", bytes.len()),
+                    ))
+                }
+            }
+        }
+    };
+}
+
 /// bincode [`ValueCodec`](crate::ValueCodec), using bincode's default
 /// configuration, for `serde`-serializable values that are not borsh.
 #[macro_export]
@@ -236,17 +270,6 @@ macro_rules! define_table_bincode_be_key {
         $crate::define_table!($(#[$docs])* ($name) $key => $value);
         $crate::impl_be_key_codec!($name, $key);
         $crate::impl_bincode_value_codec!($name, $value);
-    };
-}
-
-/// Defines a table with a big-endian key and a raw `Vec<u8>` value stored
-/// verbatim — for opaque encoded blobs served directly (e.g. bincode payloads).
-#[macro_export]
-macro_rules! define_table_raw_be_key {
-    ($(#[$docs:meta])* ($name:ident) $key:ty => Vec<u8>) => {
-        $crate::define_table!($(#[$docs])* ($name) $key => ::std::vec::Vec<u8>);
-        $crate::impl_be_key_codec!($name, $key);
-        $crate::impl_raw_value_codec!($name);
     };
 }
 

@@ -6,8 +6,8 @@
 
 use alpen_reth_statediff::BlockStateChanges;
 use alpen_store_mdbx::{
-    define_table_bincode_be_key, define_table_raw_be_key, define_table_versioned_be_key, tables,
-    TableSpec,
+    define_table, define_table_bincode_be_key, define_table_versioned_be_key, impl_be_key_codec,
+    impl_unit_value_codec, tables, TableSpec,
 };
 use revm_primitives::alloy_primitives::B256;
 
@@ -26,10 +26,15 @@ define_table_bincode_be_key! {
     (BlockHashByNumber) u64 => B256
 }
 
-define_table_raw_be_key! {
-    /// Set of contract code hashes already published to DA (presence-only).
-    (PublishedCodeHashSchema) B256 => Vec<u8>
+define_table! {
+    /// Set of contract code hashes already published to DA.
+    ///
+    /// Membership is the whole record, so the value is `()` and occupies no
+    /// bytes: the key says everything the table has to say.
+    (PublishedCodeHashSchema) B256 => ()
 }
+impl_be_key_codec!(PublishedCodeHashSchema, B256);
+impl_unit_value_codec!(PublishedCodeHashSchema);
 
 /// The full set of tables backing the state-diff / DA-context store.
 pub fn witness_tables() -> Vec<TableSpec> {
