@@ -324,7 +324,9 @@ mod tests {
     use tempfile::tempdir;
 
     use crate::{
-        define_table_be_key, define_table_borsh, tables, DbError, DbResult, MdbxConfig, MdbxEnv,
+        define_table, define_table_be_key, define_table_borsh, impl_be_key_codec,
+        impl_raw_value_codec, impl_unit_value_codec, tables, CodecError, DbError, DbResult,
+        MdbxConfig, MdbxEnv, Schema,
     };
 
     define_table_be_key! {
@@ -337,10 +339,33 @@ mod tests {
         (Blobs) [u8; 32] => u64
     }
 
+    define_table! {
+        /// A presence set: membership is the whole record.
+        (Marks) u64 => ()
+    }
+    impl_be_key_codec!(Marks, u64);
+    impl_unit_value_codec!(Marks);
+
+    /// A raw view of the `Marks` sub-database, for inspecting the bytes a presence
+    /// marker actually occupies and for planting a value it should refuse.
+    struct MarksRaw;
+
+    impl Schema for MarksRaw {
+        const NAME: &'static str = "Marks";
+        type Key = u64;
+        type Value = Vec<u8>;
+    }
+    impl_be_key_codec!(MarksRaw, u64);
+    impl_raw_value_codec!(MarksRaw);
+
     fn open() -> (tempfile::TempDir, MdbxEnv) {
         let dir = tempdir().unwrap();
-        let env =
-            MdbxEnv::open(dir.path(), &MdbxConfig::small(), &tables![Numbers, Blobs]).unwrap();
+        let env = MdbxEnv::open(
+            dir.path(),
+            &MdbxConfig::small(),
+            &tables![Numbers, Blobs, Marks],
+        )
+        .unwrap();
         (dir, env)
     }
 
@@ -453,6 +478,32 @@ mod tests {
         assert_eq!(
             env.view(|r| r.get::<Numbers>(&11)).unwrap(),
             Some(vec![1, 1])
+        );
+    }
+
+    #[test]
+    fn a_presence_marker_stores_the_key_and_no_value_bytes() {
+        let (_dir, env) = open();
+        env.update(|w| w.put::<Marks>(&7, &())).unwrap();
+
+        assert_eq!(env.view(|r| r.get::<Marks>(&7)).unwrap(), Some(()));
+        assert_eq!(env.view(|r| r.get::<Marks>(&8)).unwrap(), None);
+        assert_eq!(
+            env.view(|r| r.get::<MarksRaw>(&7)).unwrap(),
+            Some(Vec::new()),
+            "membership must cost no value bytes"
+        );
+    }
+
+    #[test]
+    fn a_presence_marker_refuses_a_value_it_did_not_write() {
+        let (_dir, env) = open();
+        env.update(|w| w.put::<MarksRaw>(&7, &vec![1])).unwrap();
+
+        let err = env.view(|r| r.get::<Marks>(&7)).unwrap_err();
+        assert!(
+            matches!(err, DbError::Codec(CodecError::Decode { .. })),
+            "expected a decode refusal, got {err:?}"
         );
     }
 }

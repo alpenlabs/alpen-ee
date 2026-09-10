@@ -21,7 +21,7 @@
 use alpen_ee_common::AccessedStateRecord;
 use alpen_store_mdbx::{
     define_table, define_table_be_key, define_table_borsh, define_table_versioned,
-    define_table_versioned_be_key, impl_be_key_codec, impl_cbor_value_codec, impl_raw_key_codec,
+    define_table_versioned_be_key, impl_be_key_codec, impl_raw_key_codec, impl_unit_value_codec,
     impl_versioned_value_codec, tables, CodecError, KeyCodec, Schema, TableSpec,
 };
 use strata_acct_types::Hash;
@@ -215,12 +215,12 @@ define_table! {
     /// Presence marker: this replacement chain may still need fee bumping.
     ///
     /// The replacement pass scans this set instead of the whole node table,
-    /// whose records are kept forever for crash-recovery point lookups. The
-    /// value is empty, so there is nothing to version.
+    /// whose records are kept forever for crash-recovery point lookups.
+    /// Membership is the whole record, so the value occupies no bytes.
     (L1BroadcastActiveTxNodeSchema) TxNodeId => ()
 }
 impl_node_id_key_codec!(L1BroadcastActiveTxNodeSchema);
-impl_cbor_value_codec!(L1BroadcastActiveTxNodeSchema, ());
+impl_unit_value_codec!(L1BroadcastActiveTxNodeSchema);
 
 define_table! {
     /// Chunked-envelope entry by sequential index.
