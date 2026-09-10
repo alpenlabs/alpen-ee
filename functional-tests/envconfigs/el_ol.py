@@ -46,6 +46,7 @@ class EeOLEnv(flexitest.EnvConfig):
         prover: ProverBackend = NATIVE_BACKEND,
         chunk_sealing_block_count: int | None = None,
         base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR,
+        genesis_base_fee_per_gas: int | None = None,
         eest_fixture_mode: bool = False,
     ):
         epoch_seal_config = (
@@ -64,6 +65,7 @@ class EeOLEnv(flexitest.EnvConfig):
             chunk_sealing_block_count=chunk_sealing_block_count,
             epoch_tracking_mode=epoch_tracking_mode,
             base_fee_floor=base_fee_floor,
+            genesis_base_fee_per_gas=genesis_base_fee_per_gas,
             eest_fixture_mode=eest_fixture_mode,
         )
         self.strata_config = StrataEnvConfig(

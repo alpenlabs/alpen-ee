@@ -53,6 +53,16 @@ use crate::{
 /// DA-inflated signed `gas_limit`; the precise per-tx fit is checked post-execution.
 const MIN_TX_GAS_LIMIT: u64 = 21_000;
 
+/// Fee inputs sampled by a payload build.
+///
+/// The DA rate is shared with the sequencer because it changes between payloads;
+/// the base-fee floor is fixed by the chain parameters.
+#[derive(Debug, Clone)]
+struct PayloadFeeConfig {
+    live_da_rate: Arc<AtomicU64>,
+    base_fee_floor: u64,
+}
+
 /// A custom payload service builder that supports the custom engine types
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -127,10 +137,8 @@ pub struct AlpenPayloadBuilder<Pool, Client> {
     evm_config: AlpenEvmConfig,
     /// Payload builder configuration.
     builder_config: EthereumBuilderConfig,
-    /// Live DA rate (wei per byte) sampled and frozen per block.
-    live_da_rate: Arc<AtomicU64>,
-    /// Minimum EIP-1559 base fee from the chain params artifact.
-    base_fee_floor: u64,
+    /// Fee inputs used when building payloads.
+    fee_config: PayloadFeeConfig,
 }
 
 impl<Pool, Client> AlpenPayloadBuilder<Pool, Client> {
@@ -148,8 +156,10 @@ impl<Pool, Client> AlpenPayloadBuilder<Pool, Client> {
             pool,
             evm_config,
             builder_config,
-            live_da_rate,
-            base_fee_floor,
+            fee_config: PayloadFeeConfig {
+                live_da_rate,
+                base_fee_floor,
+            },
         }
     }
 }
@@ -171,8 +181,7 @@ where
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
         try_build_payload(
             self.evm_config.clone(),
-            self.live_da_rate.clone(),
-            self.base_fee_floor,
+            &self.fee_config,
             self.client.clone(),
             self.pool.clone(),
             self.builder_config.clone(),
@@ -188,8 +197,7 @@ where
         let args = BuildArguments::new(Default::default(), config, Default::default(), None);
         try_build_payload(
             self.evm_config.clone(),
-            self.live_da_rate.clone(),
-            self.base_fee_floor,
+            &self.fee_config,
             self.client.clone(),
             self.pool.clone(),
             self.builder_config.clone(),
@@ -216,8 +224,7 @@ type BestTransactionsIter<Pool> = Box<
 #[inline]
 fn try_build_payload<Pool, Client, F>(
     evm_config: AlpenEvmConfig,
-    live_da_rate: Arc<AtomicU64>,
-    base_fee_floor: u64,
+    fee_config: &PayloadFeeConfig,
     client: Client,
     _pool: Pool,
     builder_config: EthereumBuilderConfig,
@@ -239,7 +246,7 @@ where
     // NOTE: `live_da_rate` currently mirrors the sequencer's Bitcoin publication fee rate
     // (`btcio::writer::fees::resolve_fee_rate`, gossiped from the OL). It should later be
     // decoupled from the publication rate and smoothed/cached for the fee model.
-    let da_rate = live_da_rate.load(Ordering::Relaxed);
+    let da_rate = fee_config.live_da_rate.load(Ordering::Relaxed);
 
     let BuildArguments {
         mut cached_reads,
@@ -291,7 +298,8 @@ where
     let mut evm_env = versioned_config
         .next_evm_env(&parent_header, &next_block_attrs)
         .map_err(PayloadBuilderError::other)?;
-    evm_env.block_env.basefee = apply_base_fee_floor(evm_env.block_env.basefee, base_fee_floor);
+    evm_env.block_env.basefee =
+        apply_base_fee_floor(evm_env.block_env.basefee, fee_config.base_fee_floor);
 
     let evm = evm_config.evm_with_env(&mut db, evm_env);
     let block_ctx = evm_config.context_for_next_block_with_version(

@@ -28,6 +28,7 @@ CHAIN_SPEC_FILES = {
 
 DEFAULT_BASE_FEE_FLOOR = 1_000_000_000
 EEST_BASE_FEE_FLOOR = 0
+EEST_GENESIS_BASE_FEE_PER_GAS = 7
 
 
 def compose_alpen_params(
@@ -39,6 +40,7 @@ def compose_alpen_params(
     max_withdrawal_descriptor_len: int = 81,
     da_magic_bytes: str = "ALPN",
     base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR,
+    genesis_base_fee_per_gas: int | None = None,
 ) -> Path:
     """Writes ``alpen-params.json`` into ``datadir`` and returns its path.
 
@@ -52,6 +54,9 @@ def compose_alpen_params(
         base_fee_floor: minimum EIP-1559 base fee in wei. Production tests
             retain the 1 gwei floor; EEST sets this to zero to exercise the
             standard Ethereum recurrence.
+        genesis_base_fee_per_gas: optional EIP-1559 base fee in the genesis
+            header. EEST sets this to its canonical 7 wei baseline; other
+            environments retain their selected chain spec's genesis value.
     """
     if max_withdrawal_amount == 0:
         raise ValueError("max_withdrawal_amount=0 is not a valid cap; pass None to disable it")
@@ -59,9 +64,18 @@ def compose_alpen_params(
         raise TypeError("base_fee_floor must be an integer")
     if not 0 <= base_fee_floor <= 2**64 - 1:
         raise ValueError("base_fee_floor must be between 0 and 2**64 - 1")
+    if genesis_base_fee_per_gas is not None:
+        if isinstance(genesis_base_fee_per_gas, bool) or not isinstance(
+            genesis_base_fee_per_gas, int
+        ):
+            raise TypeError("genesis_base_fee_per_gas must be an integer or None")
+        if not 0 <= genesis_base_fee_per_gas <= 2**64 - 1:
+            raise ValueError("genesis_base_fee_per_gas must be between 0 and 2**64 - 1")
 
     ee_params = json.loads(Path(ee_params_path).read_text())
     evm_spec = json.loads(CHAIN_SPEC_FILES[chain].read_text())
+    if genesis_base_fee_per_gas is not None:
+        evm_spec["baseFeePerGas"] = hex(genesis_base_fee_per_gas)
 
     params = {
         "strata_exec_account_id": ee_params["account_id"],
