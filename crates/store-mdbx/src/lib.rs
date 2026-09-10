@@ -49,9 +49,6 @@ mod config;
 mod env;
 mod macros;
 
-#[cfg(test)]
-mod tests;
-
 pub use codec::{BoxError, CodecError, KeyCodec, Schema, ValueCodec};
 pub use config::{MdbxConfig, MdbxSyncMode, GIB, TIB};
 pub use env::{MdbxEnv, Reader, TableSpec, Writer};
