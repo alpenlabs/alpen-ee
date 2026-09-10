@@ -135,7 +135,7 @@ impl<S: StateDiffProvider + 'static> EeDaContext for EeDaContextDbMdbx<S> {
         self.env
             .update(|w| {
                 for hash in code_hashes {
-                    w.put::<PublishedCodeHashSchema>(hash, &Vec::new())?;
+                    w.put::<PublishedCodeHashSchema>(hash, &())?;
                 }
                 Ok(())
             })
