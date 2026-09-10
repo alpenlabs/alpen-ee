@@ -650,8 +650,8 @@ Summary (the document is authoritative):
   every block, so a signed block that fails execution has to be rejected.
 - Fund safety and proof soundness override the above. Any path that mints native coin without
   an OL deposit, credits a deposit twice or drops one, emits a withdrawal intent without an
-  equal burn, or lets the proof runtime accept an invalid transition is critical regardless of
-  input source.
+  equal burn, or lets the proof runtime accept an invalid transition has Severe impact regardless
+  of input source, and is Critical when an ordinary user or an L1 payload can trigger it.
 - Secrets (private keys, RPC tokens, bitcoind credentials) are in scope everywhere.
 - Do not re-report items listed under "Known accepted risks" in the trust model.
 
