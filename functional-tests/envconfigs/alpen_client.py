@@ -47,6 +47,7 @@ class AlpenClientEnvParams:
     da_rate_wei_per_byte: int = 0
     forward_tx: bool = True
     base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR
+    genesis_base_fee_per_gas: int | None = None
     eest_fixture_mode: bool = False
 
 
@@ -80,6 +81,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
         da_rate_wei_per_byte: int = 0,
         forward_tx: bool = True,
         base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR,
+        genesis_base_fee_per_gas: int | None = None,
         eest_fixture_mode: bool = False,
     ):
         self.env_params = AlpenClientEnvParams(
@@ -94,6 +96,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
             da_rate_wei_per_byte=da_rate_wei_per_byte,
             forward_tx=forward_tx,
             base_fee_floor=base_fee_floor,
+            genesis_base_fee_per_gas=genesis_base_fee_per_gas,
             eest_fixture_mode=eest_fixture_mode,
         )
         if pure_discovery and not enable_discovery:
@@ -185,6 +188,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
             prover=envparams.prover,
             da_rate_wei_per_byte=envparams.da_rate_wei_per_byte,
             base_fee_floor=envparams.base_fee_floor,
+            genesis_base_fee_per_gas=envparams.genesis_base_fee_per_gas,
             eest_fixture_mode=envparams.eest_fixture_mode,
         )
         sequencer.wait_for_ready(timeout=60)
@@ -215,6 +219,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
                 ol_endpoint=ol_endpoint,
                 ee_params_path=ee_params_path,
                 base_fee_floor=envparams.base_fee_floor,
+                genesis_base_fee_per_gas=envparams.genesis_base_fee_per_gas,
             )
             fullnode.wait_for_ready(timeout=60)
             fullnodes.append(fullnode)

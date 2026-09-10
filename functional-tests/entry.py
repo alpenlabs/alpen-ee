@@ -298,6 +298,7 @@ def main(argv: list[str]) -> int:
             pre_generate_blocks=110,
             batch_sealing_block_count=5,
             base_fee_floor=0,
+            genesis_base_fee_per_gas=7,
             eest_fixture_mode=True,
         ),
         "alpen_ee_discovery": AlpenClientEnv(enable_discovery=True, pure_discovery=True),
