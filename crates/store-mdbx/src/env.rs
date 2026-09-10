@@ -32,17 +32,12 @@ use crate::{
 pub struct TableSpec {
     /// The sub-database name (matches [`Schema::NAME`]).
     pub name: &'static str,
-    /// Whether the table is opened with MDBX `DUP_SORT`.
-    pub dup_sort: bool,
 }
 
 impl TableSpec {
     /// Builds a [`TableSpec`] from a [`Schema`] type.
     pub fn of<S: Schema>() -> Self {
-        Self {
-            name: S::NAME,
-            dup_sort: S::DUP_SORT,
-        }
+        Self { name: S::NAME }
     }
 }
 
@@ -87,11 +82,7 @@ impl MdbxEnv {
 
         let txn = env.begin_rw_unsync()?;
         for table in tables {
-            let mut flags = DatabaseFlags::CREATE;
-            if table.dup_sort {
-                flags |= DatabaseFlags::DUP_SORT;
-            }
-            txn.create_db(Some(table.name), flags)?;
+            txn.create_db(Some(table.name), DatabaseFlags::CREATE)?;
         }
         txn.commit()?;
 
