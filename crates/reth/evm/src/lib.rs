@@ -8,7 +8,7 @@ mod utils;
 
 pub use utils::{
     accumulate_logs_bloom, address_to_subject, extract_withdrawal_intents, subject_to_address,
-    subject_to_address_unchecked, WithdrawalIntentExtractionError,
+    subject_to_address_unchecked, WithdrawalIntentExtractionError, WEI_PER_SAT,
 };
 
 pub mod apis;

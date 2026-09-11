@@ -13,6 +13,7 @@ import flexitest
 from common.alpen_params import compose_alpen_params
 from common.config import (
     AlpenClientConfig,
+    AlpenDaFeeRateConfig,
     AlpenFullNodeConfig,
     AlpenL1FeePolicyConfig,
     AlpenOlConfig,
@@ -163,6 +164,10 @@ class AlpenClientFactory(flexitest.Factory):
             chunk_sealing_block_count=chunk_sealing_block_count,
             prover=prover_config,
             l1_fee_policy=AlpenL1FeePolicyConfig(fee_policy="fixed", fixed_fee_rate=1.0),
+            da_fee_rate=AlpenDaFeeRateConfig(
+                policy="fixed",
+                fixed_rate_wei_per_byte=da_rate_wei_per_byte,
+            ),
         )
 
         alpen_config = AlpenClientConfig(
@@ -226,8 +231,6 @@ class AlpenClientFactory(flexitest.Factory):
         # Set environment variable for sequencer private key
         env = os.environ.copy()
         env["SEQUENCER_PRIVATE_KEY"] = sequencer_privkey
-        # DA fee rate (wei per byte). 0 keeps the in-EVM DA fee charge dormant.
-        env["ALPEN_DA_RATE_WEI_PER_BYTE"] = str(da_rate_wei_per_byte)
         if ol_submit_token:
             env["STRATA_SUBMIT_RPC_TOKEN"] = ol_submit_token
 
