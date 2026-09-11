@@ -8,8 +8,9 @@
 //! module.
 
 use std::{
+    net::{IpAddr, Ipv4Addr},
     num::{NonZeroU64, NonZeroUsize},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use alloy_primitives::{address, Address};
@@ -30,6 +31,9 @@ const DEFAULT_DB_RETRY_COUNT: u16 = 5;
 const DEFAULT_BLOCKTIME_MS: NonZeroU64 = NonZeroU64::new(5_000).expect("5000 is always NonZero");
 const DEFAULT_BATCH_EVENT_CHANNEL_CAPACITY: NonZeroUsize =
     NonZeroUsize::new(64).expect("64 is always NonZero");
+const DEFAULT_ADMIN_RPC_HOST: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
+// Resolved under the node datadir when `admin_rpc.jwtsecret` is unset.
+const DEFAULT_ADMIN_JWT_SECRET_PATH: &str = "admin-jwt.hex";
 
 fn default_health_check_host() -> String {
     DEFAULT_HEALTH_CHECK_HOST.to_owned()
@@ -61,6 +65,10 @@ fn default_batch_sealing_block_count() -> u64 {
 
 fn default_batch_event_channel_capacity() -> NonZeroUsize {
     DEFAULT_BATCH_EVENT_CHANNEL_CAPACITY
+}
+
+fn default_admin_rpc_host() -> IpAddr {
+    DEFAULT_ADMIN_RPC_HOST
 }
 
 /// Deserializes a [`Buf32`] from hex, with or without an `0x` prefix.
@@ -156,6 +164,8 @@ struct AlpenClientConfigFile {
     mode: NodeModeTag,
 
     ol: OlConfig,
+    #[serde(default)]
+    admin_rpc: Option<AdminRpcConfig>,
     full_node: Option<FullNodeConfig>,
     #[serde(default)]
     sequencer: Option<SequencerConfig>,
@@ -194,6 +204,38 @@ pub(crate) enum OlSource {
     },
 }
 
+/// `[admin_rpc]` — the JWT-authenticated admin RPC server.
+///
+/// The admin RPC serves the `alpenadmin` namespace on its own port, separate
+/// from reth's RPC. It runs only when this table is present; a full node and a
+/// sequencer both may enable it. `host` defaults to loopback, and `jwtsecret`
+/// defaults to `admin-jwt.hex` under the node datadir, resolved at startup
+/// where the datadir is known rather than here.
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct AdminRpcConfig {
+    /// Port the admin RPC server binds. Present iff the admin RPC is enabled,
+    /// since the whole table is optional.
+    pub(crate) port: u16,
+    /// Host interface the admin RPC server binds.
+    #[serde(default = "default_admin_rpc_host")]
+    pub(crate) host: IpAddr,
+    /// Path to the admin RPC JWT secret hex file. A new secret is generated
+    /// and persisted when the file does not exist. Defaults to
+    /// [`DEFAULT_ADMIN_JWT_SECRET_PATH`] under the node datadir; resolve it
+    /// with [`AdminRpcConfig::jwtsecret_path`].
+    pub(crate) jwtsecret: Option<PathBuf>,
+}
+
+impl AdminRpcConfig {
+    /// Resolves the JWT secret file path: the configured `jwtsecret`, or
+    /// [`DEFAULT_ADMIN_JWT_SECRET_PATH`] under `datadir` when unset.
+    pub(crate) fn jwtsecret_path(&self, datadir: &Path) -> PathBuf {
+        self.jwtsecret
+            .clone()
+            .unwrap_or_else(|| datadir.join(DEFAULT_ADMIN_JWT_SECRET_PATH))
+    }
+}
+
 /// The resolved runtime representation the rest of the binary uses (params
 /// comes from the separate `--alpen-params` flag). Plain struct, no Serde
 /// derive: [`AlpenClientConfigFile`] is the only type that round-trips
@@ -204,6 +246,7 @@ pub(crate) struct AlpenClientConfig {
     pub(crate) health_check_port: u16,
     pub(crate) db_retry_count: u16,
     pub(crate) ol: OlConfig,
+    pub(crate) admin_rpc: Option<AdminRpcConfig>,
     pub(crate) mode: NodeMode,
 }
 
@@ -443,6 +486,7 @@ impl TryFrom<AlpenClientConfigFile> for AlpenClientConfig {
             health_check_port: raw.health_check_port,
             db_retry_count: raw.db_retry_count,
             ol: raw.ol,
+            admin_rpc: raw.admin_rpc,
             mode,
         })
     }
@@ -536,6 +580,51 @@ mod tests {
         };
         assert!(fc.sequencer_http_url.is_none());
         assert!(matches!(config.ol.source, OlSource::Rpc { .. }));
+    }
+
+    /// The admin RPC stays disabled unless `[admin_rpc]` is present, binds
+    /// loopback by default, and takes an explicit host and secret path when
+    /// given.
+    #[test]
+    fn admin_rpc_config_optional_with_defaults() {
+        let config = AlpenClientConfig::from_toml_str(FULL_NODE_TOML).unwrap();
+        assert!(config.admin_rpc.is_none());
+
+        let toml = r#"
+            mode = "full_node"
+            [ol]
+            source = "dummy"
+            [admin_rpc]
+            port = 8552
+            [full_node]
+            sequencer_pubkey = "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f"
+        "#;
+        let admin = AlpenClientConfig::from_toml_str(toml)
+            .unwrap()
+            .admin_rpc
+            .expect("admin_rpc present");
+        assert_eq!(admin.port, 8552);
+        assert!(admin.host.is_loopback());
+        assert!(admin.jwtsecret.is_none());
+
+        let toml = r#"
+            mode = "full_node"
+            [ol]
+            source = "dummy"
+            [admin_rpc]
+            port = 8552
+            host = "0.0.0.0"
+            jwtsecret = "/tmp/admin-jwt.hex"
+            [full_node]
+            sequencer_pubkey = "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f"
+        "#;
+        let admin = AlpenClientConfig::from_toml_str(toml)
+            .unwrap()
+            .admin_rpc
+            .expect("admin_rpc present");
+        assert_eq!(admin.port, 8552);
+        assert!(!admin.host.is_loopback());
+        assert_eq!(admin.jwtsecret, Some(PathBuf::from("/tmp/admin-jwt.hex")));
     }
 
     #[test]
