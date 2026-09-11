@@ -43,41 +43,8 @@
           ];
         };
         rust-toolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
-        alpen-cli-toml = builtins.fromTOML (builtins.readFile ./bin/alpen-cli/Cargo.toml);
       in
-      rec {
-        packages = {
-          default = packages.alpen-cli;
-
-          alpen-cli = pkgs.rustPlatform.buildRustPackage {
-            pname = alpen-cli-toml.package.name;
-            version = alpen-cli-toml.package.version;
-            src = ./.;
-            cargoLock = {
-              lockFile = ./Cargo.lock;
-              allowBuiltinFetchGit = true;
-            };
-            buildType = "release";
-            doCheck = false;
-            cargoBuildFlags = [
-              "--package"
-              "alpen-cli"
-              "--bin"
-              "alpen"
-            ];
-            nativeBuildInputs = with pkgs; [
-              pkg-config
-              rust-toolchain
-            ];
-            buildInputs = with pkgs; [
-              openssl
-            ];
-            meta = {
-              mainProgram = "alpen";
-            };
-          };
-        };
-
+      {
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
             bashInteractive
