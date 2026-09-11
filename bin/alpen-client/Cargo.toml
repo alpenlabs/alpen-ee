@@ -52,7 +52,6 @@ sequencer = [
   "dep:bitcoind-async-client",
   "dep:k256",
   "dep:reth-payload-builder",
-  "dep:reth-primitives-traits",
   "dep:strata-btcio",
   "dep:strata-codec",
   "dep:strata-db-types",
@@ -158,8 +157,8 @@ reth-network.workspace = true
 reth-network-api.workspace = true
 reth-node-builder.workspace = true
 reth-payload-builder = { workspace = true, optional = true }
-reth-primitives.workspace = true
-reth-primitives-traits = { workspace = true, optional = true }
+reth-ethereum-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-provider.workspace = true
 reth-tasks.workspace = true
 serde.workspace = true

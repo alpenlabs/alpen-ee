@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 
 use revm::precompile::{
-    utilities::right_pad, Precompile, PrecompileError, PrecompileId, PrecompileOutput,
-    PrecompileResult,
+    eth_precompile_fn, utilities::right_pad, EthPrecompileOutput, EthPrecompileResult, Precompile,
+    PrecompileHalt, PrecompileId,
 };
 use revm_primitives::Bytes;
 use strata_crypto::schnorr::verify_schnorr_sig;
@@ -16,8 +16,11 @@ const SCHNORR_VERIFY_GAS: u64 = 3_000;
 pub(crate) const SCHNORR_SIGNATURE_VALIDATION: Precompile = Precompile::new(
     PrecompileId::Custom(Cow::Borrowed(SCHNORR_PRECOMPILE_PRECOMPILE_ID)),
     SCHNORR_PRECOMPILE_ADDRESS,
-    verify_schnorr_precompile,
+    verify_schnorr_precompile_fn,
 );
+
+// Adapts the gas-limit-only precompile to revm's reservoir-aware `PrecompileFn` signature.
+eth_precompile_fn!(verify_schnorr_precompile_fn, verify_schnorr_precompile);
 
 /// Internal representation of parsed Schnorr input bytes.
 struct SchnorrInput {
@@ -39,9 +42,9 @@ fn parse_schnorr_input(input: &[u8]) -> SchnorrInput {
     }
 }
 
-fn verify_schnorr_precompile(input: &[u8], gas_limit: u64) -> PrecompileResult {
+fn verify_schnorr_precompile(input: &[u8], gas_limit: u64) -> EthPrecompileResult {
     if SCHNORR_VERIFY_GAS > gas_limit {
-        return Err(PrecompileError::OutOfGas);
+        return Err(PrecompileHalt::OutOfGas);
     }
 
     let schnorr_input = parse_schnorr_input(input);
@@ -53,7 +56,10 @@ fn verify_schnorr_precompile(input: &[u8], gas_limit: u64) -> PrecompileResult {
     );
     let verification_byte = Bytes::from([result as u8]);
 
-    Ok(PrecompileOutput::new(SCHNORR_VERIFY_GAS, verification_byte))
+    Ok(EthPrecompileOutput::new(
+        SCHNORR_VERIFY_GAS,
+        verification_byte,
+    ))
 }
 
 #[cfg(test)]
@@ -146,6 +152,6 @@ mod tests {
 
         let error = verify_schnorr_precompile(&input, SCHNORR_VERIFY_GAS - 1).unwrap_err();
 
-        assert_eq!(error, PrecompileError::OutOfGas);
+        assert_eq!(error, PrecompileHalt::OutOfGas);
     }
 }

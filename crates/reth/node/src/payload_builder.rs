@@ -8,6 +8,7 @@ use std::{
 };
 
 use alloy_consensus::{Header, Transaction};
+use alloy_eips::eip4895::Withdrawals;
 use alpen_reth_evm::{
     base_fee::apply_base_fee_floor,
     constants::BRIDGEOUT_PRECOMPILE_ADDRESS,
@@ -19,16 +20,16 @@ use reth_basic_payload_builder::*;
 use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{BlockExecutionError, BlockValidationError};
 use reth_ethereum_payload_builder::EthereumBuilderConfig;
-use reth_ethereum_primitives::TransactionSigned;
+use reth_ethereum_primitives::{EthPrimitives, Receipt, TransactionSigned};
 use reth_evm::{
     block::CommitChanges,
     execute::{BlockBuilder, BlockBuilderOutcome},
     Evm, NextBlockEnvAttributes,
 };
-use reth_node_api::{ConfigureEvm, FullNodeTypes, NodeTypes, PayloadBuilderAttributes};
+use reth_node_api::{ConfigureEvm, FullNodeTypes, NodeTypes};
 use reth_node_builder::{components::PayloadBuilderBuilder, BuilderContext, PayloadBuilderConfig};
 use reth_payload_builder::{BlobSidecars, EthBuiltPayload, PayloadBuilderError};
-use reth_primitives::{EthPrimitives, InvalidTransactionError, Receipt};
+use reth_primitives_traits::transaction::error::InvalidTransactionError;
 use reth_provider::{HeaderProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{
@@ -43,7 +44,7 @@ use crate::{
     block_witness::build_block_witness_from_executed_state,
     engine::AlpenEngineTypes,
     evm_config::AlpenEvmConfig,
-    payload::{AlpenBuiltPayload, AlpenPayloadBuilderAttributes},
+    payload::{AlpenBuiltPayload, AlpenPayloadAttributes},
 };
 
 /// Intrinsic gas floor of the cheapest possible transaction (a plain value transfer).
@@ -146,7 +147,7 @@ where
         + Clone,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
 {
-    type Attributes = AlpenPayloadBuilderAttributes;
+    type Attributes = AlpenPayloadAttributes;
     type BuiltPayload = AlpenBuiltPayload;
 
     fn try_build(
@@ -168,7 +169,14 @@ where
         &self,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
-        let args = BuildArguments::new(Default::default(), config, Default::default(), None);
+        let args = BuildArguments::new(
+            Default::default(),
+            None,
+            None,
+            config,
+            Default::default(),
+            None,
+        );
         try_build_payload(
             self.evm_config.clone(),
             self.live_da_rate.clone(),
@@ -202,7 +210,7 @@ fn try_build_payload<Pool, Client, F>(
     client: Client,
     _pool: Pool,
     builder_config: EthereumBuilderConfig,
-    args: BuildArguments<AlpenPayloadBuilderAttributes, AlpenBuiltPayload>,
+    args: BuildArguments<AlpenPayloadAttributes, AlpenBuiltPayload>,
     best_txs: F,
 ) -> Result<BuildOutcome<AlpenBuiltPayload>, PayloadBuilderError>
 where
@@ -227,13 +235,19 @@ where
         config,
         cancel,
         best_payload,
+        ..
     } = args;
     let PayloadConfig {
         parent_header,
         attributes,
+        payload_id,
     } = config;
 
-    let spec_version = attributes.spec_version();
+    // Refuse a spec version this binary has no variant for: it was resolved by newer code,
+    // and failing beats building under rules older than the ones asked for.
+    let spec_version = attributes
+        .alpen_spec_version()
+        .map_err(PayloadBuilderError::other)?;
     let attributes = attributes.inner;
 
     // Pin the per-block DA rate as the config's pending rate (the in-EVM charge reads it via
@@ -252,12 +266,18 @@ where
         .build();
 
     let next_block_attrs = NextBlockEnvAttributes {
-        timestamp: attributes.timestamp(),
-        suggested_fee_recipient: attributes.suggested_fee_recipient(),
-        prev_randao: attributes.prev_randao(),
+        timestamp: attributes.timestamp,
+        suggested_fee_recipient: attributes.suggested_fee_recipient,
+        prev_randao: attributes.prev_randao,
         gas_limit: builder_config.gas_limit(parent_header.gas_limit),
-        parent_beacon_block_root: attributes.parent_beacon_block_root(),
-        withdrawals: Some(attributes.withdrawals().clone()),
+        parent_beacon_block_root: attributes.parent_beacon_block_root,
+        withdrawals: Some(Withdrawals::new(
+            attributes.withdrawals.clone().unwrap_or_default(),
+        )),
+        // The version-aware assembler overwrites `extra_data` per block, so this value never
+        // reaches a built header.
+        extra_data: builder_config.extra_data.clone(),
+        slot_number: attributes.slot_number,
     };
 
     // Build the next block's EVM env and apply the base-fee floor. `next_evm_env`
@@ -294,7 +314,7 @@ where
     // the block builds under, not the node's boot chain spec.
     let chain_spec = versioned_config.chain_spec().clone();
 
-    debug!(target: "payload_builder", id=%attributes.id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
+    debug!(target: "payload_builder", id=%payload_id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
     let mut cumulative_gas_used = 0;
     let block_gas_limit: u64 = builder.evm_mut().block().gas_limit;
 
@@ -352,7 +372,7 @@ where
             trace!(target: "payload_builder", gas_limit = pool_tx.gas_limit(), remaining_gas, "rejecting oversized transaction: speculative execution budget exhausted");
             best_txs.mark_invalid(
                 &pool_tx,
-                InvalidPoolTransactionError::ExceedsGasLimit(pool_tx.gas_limit(), block_gas_limit),
+                &InvalidPoolTransactionError::ExceedsGasLimit(pool_tx.gas_limit(), block_gas_limit),
             );
             continue;
         }
@@ -387,22 +407,23 @@ where
         let does_not_fit = Cell::new(false);
         let rejected_gas = Cell::new(0u64);
         let exec_outcome = builder.execute_transaction_with_commit_condition(tx.clone(), |res| {
+            let gas_used = res.result.result.tx_gas_used();
             // (a) Fit on actual executed gas, not the DA-inflated signed limit.
-            if cumulative_gas_used + res.gas_used() > block_gas_limit {
+            if cumulative_gas_used + gas_used > block_gas_limit {
                 does_not_fit.set(true);
-                rejected_gas.set(res.gas_used());
+                rejected_gas.set(gas_used);
                 return CommitChanges::No;
             }
             // (b) DA coverage: skip under-covered txs the protocol would subsidize.
             if da_rate != 0 && da_report.load(Ordering::Relaxed) == DA_COVERAGE_CAPPED {
-                rejected_gas.set(res.gas_used());
+                rejected_gas.set(gas_used);
                 return CommitChanges::No;
             }
             CommitChanges::Yes
         });
 
         let gas_used = match exec_outcome {
-            Ok(Some(gas_used)) => gas_used,
+            Ok(Some(gas_output)) => gas_output.tx_gas_used(),
             Ok(None) => {
                 // Executed but not committed — it either didn't fit on actual gas or its DA
                 // fee was under-covered. Either way it did full EVM work without paying, so
@@ -414,14 +435,14 @@ where
                     trace!(target: "payload_builder", ?tx, "skipping transaction that exceeds remaining block gas");
                     best_txs.mark_invalid(
                         &pool_tx,
-                        InvalidPoolTransactionError::ExceedsGasLimit(
+                        &InvalidPoolTransactionError::ExceedsGasLimit(
                             pool_tx.gas_limit(),
                             block_gas_limit,
                         ),
                     );
                 } else {
                     trace!(target: "payload_builder", ?tx, "skipping DA-undercovered transaction");
-                    best_txs.mark_invalid(&pool_tx, InvalidPoolTransactionError::Underpriced);
+                    best_txs.mark_invalid(&pool_tx, &InvalidPoolTransactionError::Underpriced);
                 }
                 continue;
             }
@@ -437,7 +458,7 @@ where
                     trace!(target: "payload_builder", %error, ?tx, "skipping invalid transaction and its descendants");
                     best_txs.mark_invalid(
                         &pool_tx,
-                        InvalidPoolTransactionError::Consensus(
+                        &InvalidPoolTransactionError::Consensus(
                             InvalidTransactionError::TxTypeNotSupported,
                         ),
                     );
@@ -471,7 +492,7 @@ where
         execution_result,
         block,
         ..
-    } = builder.finish(&state_provider)?;
+    } = builder.finish(&state_provider, None)?;
 
     // Inline depth-0 proof-witness capture. The block was just executed into
     // `db`; reuse that post-execution state (no re-execution) to read the
@@ -499,9 +520,9 @@ where
         .then_some(execution_result.requests);
 
     let sealed_block = Arc::new(block.sealed_block().clone());
-    debug!(target: "payload_builder", id=%attributes.id, sealed_block_header = ?sealed_block.sealed_header(), "sealed built block");
+    debug!(target: "payload_builder", id=%payload_id, sealed_block_header = ?sealed_block.sealed_header(), "sealed built block");
 
-    let eth_payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees, requests)
+    let eth_payload = EthBuiltPayload::new(sealed_block, total_fees, requests, None)
         // Blob transactions are not supported in the Alpen environment.
         // Using empty blob sidecars to maintain compatibility with the Engine API.
         .with_sidecars(BlobSidecars::Empty);
@@ -523,7 +544,7 @@ where
     if bridgeout_log_count > 0 || !withdrawal_intents.is_empty() {
         info!(
             target: "payload_builder",
-            id = %attributes.id,
+            id = %payload_id,
             tx_count = txns.len(),
             receipt_count = receipts.len(),
             bridgeout_log_count,
@@ -532,8 +553,9 @@ where
         );
     }
 
-    let strata_payload =
-        AlpenBuiltPayload::new(eth_payload, withdrawal_intents).with_block_witness(block_witness);
+    let strata_payload = AlpenBuiltPayload::new(eth_payload, withdrawal_intents)
+        .with_payload_id(payload_id)
+        .with_block_witness(block_witness);
 
     Ok(BuildOutcome::Better {
         payload: strata_payload,

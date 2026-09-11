@@ -24,10 +24,10 @@ use alpen_reth_node::{AlpenEngineTypes, AlpenGossipEvent};
 use eyre::Context;
 use jsonrpsee::server::ServerHandle;
 use reth_chainspec::ChainSpec;
+use reth_ethereum_primitives::EthPrimitives;
 use reth_node_builder::{
     ConsensusEngineHandle, NodeBuilder, NodeTypes, NodeTypesWithDB, WithLaunchContext,
 };
-use reth_primitives::EthPrimitives;
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
     CanonStateSubscriptions,
@@ -54,7 +54,7 @@ use crate::{
 };
 
 pub(crate) async fn launch(
-    builder: WithLaunchContext<NodeBuilder<Arc<reth_db::DatabaseEnv>, ChainSpec>>,
+    builder: WithLaunchContext<NodeBuilder<reth_db::DatabaseEnv, ChainSpec>>,
     ext: AdditionalConfig,
 ) -> eyre::Result<()> {
     let alpen_config = ext.alpen_config.clone();
@@ -135,7 +135,7 @@ impl NodeBootstrap {
 }
 
 async fn bootstrap_node(
-    builder: &WithLaunchContext<NodeBuilder<Arc<reth_db::DatabaseEnv>, ChainSpec>>,
+    builder: &WithLaunchContext<NodeBuilder<reth_db::DatabaseEnv, ChainSpec>>,
     alpen_config: &AlpenClientConfig,
     params: &Arc<AlpenParams>,
 ) -> eyre::Result<NodeBootstrap> {
@@ -258,11 +258,11 @@ where
             gossip_config,
         );
 
-        self.task_executor.spawn_critical(
+        self.task_executor.spawn_critical_task(
             "engine_control",
             engine_control_task.instrument(info_span!("engine_control", component = "alpen")),
         );
-        self.task_executor.spawn_critical(
+        self.task_executor.spawn_critical_task(
             "gossip_task",
             gossip_task.instrument(info_span!("gossip_task", component = "alpen")),
         );

@@ -18,7 +18,7 @@ use alloy_consensus::Header;
 use alloy_primitives::{keccak256, Bytes, B256};
 use reth_provider::{BytecodeReader, HeaderProvider, StateProofProvider};
 use reth_revm::{db::State, witness::ExecutionWitnessRecord, Database};
-use reth_trie::TrieInput;
+use reth_trie::{ExecutionWitnessMode, TrieInput};
 use revm_primitives::KECCAK_EMPTY;
 use serde::{Deserialize, Serialize};
 
@@ -90,7 +90,7 @@ where
 {
     // Access set read straight out of the post-execution state — no re-run.
     let mut record = ExecutionWitnessRecord::default();
-    record.record_executed_state(executed_state);
+    record.record_executed_state(executed_state, ExecutionWitnessMode::Legacy);
     let ExecutionWitnessRecord {
         hashed_state,
         codes,
@@ -100,7 +100,11 @@ where
 
     // Trie nodes covering the block's touched paths (against the parent state).
     let witness_state = state_provider
-        .witness(TrieInput::default(), hashed_state)?
+        .witness(
+            TrieInput::default(),
+            hashed_state,
+            ExecutionWitnessMode::Legacy,
+        )?
         .into_iter()
         .map(|node| node.to_vec())
         .collect();
@@ -290,6 +294,7 @@ mod tests {
 
     fn account_info_with_code_hash(code_hash: B256) -> AccountInfo {
         AccountInfo {
+            account_id: None,
             balance: U256::ZERO,
             nonce: 1,
             code_hash,
@@ -330,6 +335,7 @@ mod tests {
 
         let mut state = State::builder().with_database(EmptyDB::default()).build();
         let info = AccountInfo {
+            account_id: None,
             balance: U256::ZERO,
             nonce: 1,
             code_hash,
@@ -356,6 +362,7 @@ mod tests {
     fn skips_accounts_without_code() {
         let mut state = State::builder().with_database(EmptyDB::default()).build();
         let info = AccountInfo {
+            account_id: None,
             balance: U256::from(5u64),
             nonce: 0,
             ..Default::default()
@@ -383,6 +390,7 @@ mod tests {
 
         let mut state = State::builder().with_database(EmptyDB::default()).build();
         let info = AccountInfo {
+            account_id: None,
             balance: U256::ZERO,
             nonce: 1,
             code_hash,
@@ -394,7 +402,7 @@ mod tests {
         );
 
         let mut record = ExecutionWitnessRecord::default();
-        record.record_executed_state(&state);
+        record.record_executed_state(&state, ExecutionWitnessMode::Legacy);
         assert!(
             !record.codes.iter().any(|code| keccak256(code) == code_hash),
             "raw reth record should reproduce the missing-code condition"
@@ -416,6 +424,7 @@ mod tests {
         let code = Bytecode::new_raw(raw);
         let mut state = State::builder().with_database(EmptyDB::default()).build();
         let info = AccountInfo {
+            account_id: None,
             balance: U256::ZERO,
             nonce: 1,
             code_hash: B256::repeat_byte(0x11),
@@ -444,6 +453,7 @@ mod tests {
 
         let mut state = State::builder().with_database(EmptyDB::default()).build();
         let info = AccountInfo {
+            account_id: None,
             balance: U256::ZERO,
             nonce: 1,
             code_hash,
@@ -506,6 +516,7 @@ mod tests {
         // Post-block the account carries the new designator (attached-code sweep
         // captures it); the transition records the code change old -> new.
         let info = AccountInfo {
+            account_id: None,
             balance: U256::ZERO,
             nonce: 2,
             code_hash: new_code_hash,

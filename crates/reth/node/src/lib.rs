@@ -23,6 +23,5 @@ pub use gossip::{
 pub use node::{AlpenEthereumNode, AlpenNodeMode};
 pub use payload::{
     AlpenBuiltPayload, AlpenExecutionPayloadEnvelopeV2, AlpenExecutionPayloadEnvelopeV4,
-    AlpenPayloadAttributes, AlpenPayloadBuilderAttributes, ExecutionPayloadEnvelopeV2,
-    ExecutionPayloadFieldV2,
+    AlpenPayloadAttributes, ExecutionPayloadEnvelopeV2, ExecutionPayloadFieldV2,
 };

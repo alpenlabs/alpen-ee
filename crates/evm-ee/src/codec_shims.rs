@@ -205,7 +205,7 @@ pub(crate) fn encode_hashed_post_state(
 pub(crate) fn decode_hashed_post_state(
     dec: &mut impl strata_codec::Decoder,
 ) -> Result<HashedPostState, CodecError> {
-    use reth_primitives::Account;
+    use reth_primitives_traits::Account;
     use reth_trie::HashedStorage;
     use revm_primitives::U256;
 

@@ -29,6 +29,7 @@
 use std::{convert::Infallible, io};
 
 use alloy_eips::Decodable2718;
+use alloy_primitives::Bytes;
 use alloy_rpc_types::engine::payload::ExecutionData;
 use alpen_ee_params::{
     header_spec_version, peek_spec_version, AlpenSpecId, EvmSpec, HeaderExtra, HeaderExtraError,
@@ -40,16 +41,15 @@ use alpen_reth_evm::{
     },
     evm::AlpenEvmFactory,
 };
+use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
-    block::{BlockExecutorFactory, BlockExecutorFor},
+    block::{BlockExecutorFactory, StateDB},
     execute::{BlockAssembler, BlockAssemblerInput, BlockExecutionError},
-    ConfigureEngineEvm, ConfigureEvm, Database, EvmEnvFor, EvmFactory, ExecutableTxIterator,
+    ConfigureEngineEvm, ConfigureEvm, EvmEnvFor, EvmFactory, ExecutableTxIterator,
     NextBlockEnvAttributes,
 };
-use reth_primitives::{
-    transaction::SignedTransaction, EthPrimitives, Header, Recovered, SealedBlock, SealedHeader,
-};
-use revm::{database::State, Inspector};
+use reth_primitives_traits::{Header, Recovered, SealedBlock, SealedHeader, SignedTransaction};
+use revm::Inspector;
 use revm_primitives::U256;
 
 /// The per-version inner EVM config the table is made of: the DA-rate-aware
@@ -204,6 +204,9 @@ impl BlockExecutorFactory for AlpenBlockExecutorFactory {
     type ExecutionCtx<'a> = AlpenBlockExecutionCtx<'a>;
     type Transaction = <VersionedExecutorFactory as BlockExecutorFactory>::Transaction;
     type Receipt = <VersionedExecutorFactory as BlockExecutorFactory>::Receipt;
+    type TxExecutionResult = <VersionedExecutorFactory as BlockExecutorFactory>::TxExecutionResult;
+    type Executor<'a, DB: StateDB, I: Inspector<<Self::EvmFactory as EvmFactory>::Context<DB>>> =
+        <VersionedExecutorFactory as BlockExecutorFactory>::Executor<'a, DB, I>;
 
     fn evm_factory(&self) -> &Self::EvmFactory {
         // Every version shares the node's EVM factory; any entry serves.
@@ -215,12 +218,12 @@ impl BlockExecutorFactory for AlpenBlockExecutorFactory {
 
     fn create_executor<'a, DB, I>(
         &'a self,
-        evm: <Self::EvmFactory as EvmFactory>::Evm<&'a mut State<DB>, I>,
+        evm: <Self::EvmFactory as EvmFactory>::Evm<DB, I>,
         ctx: Self::ExecutionCtx<'a>,
-    ) -> impl BlockExecutorFor<'a, Self, DB, I>
+    ) -> Self::Executor<'a, DB, I>
     where
-        DB: Database + 'a,
-        I: Inspector<<Self::EvmFactory as EvmFactory>::Context<&'a mut State<DB>>> + 'a,
+        DB: StateDB,
+        I: Inspector<<Self::EvmFactory as EvmFactory>::Context<DB>>,
     {
         version_indexed(&self.inners, ctx.spec_version).create_executor(evm, ctx.inner)
     }
@@ -310,7 +313,7 @@ impl ConfigureEvm for AlpenEvmConfig {
 
     fn context_for_block<'a>(
         &self,
-        block: &'a SealedBlock<reth_primitives::Block>,
+        block: &'a SealedBlock<reth_ethereum_primitives::Block>,
     ) -> Result<AlpenBlockExecutionCtx<'a>, Self::Error> {
         let spec_version = header_spec_version(block.header())?;
         let config = self.config_for(spec_version);
@@ -363,17 +366,14 @@ impl ConfigureEngineEvm<ExecutionData> for AlpenEvmConfig {
     ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
         // Version-invariant, mirroring the inner config's implementation:
         // decoding and signer recovery predate any fork the table can vary.
-        Ok(payload
-            .payload
-            .transactions()
-            .clone()
-            .into_iter()
-            .map(|tx| {
-                let tx = reth_primitives::TransactionSigned::decode_2718_exact(tx.as_ref())
-                    .map_err(io::Error::other)?;
-                let signer = tx.try_recover().map_err(io::Error::other)?;
-                Ok::<_, io::Error>(Recovered::new_unchecked(tx, signer))
-            }))
+        let txs = payload.payload.transactions().clone();
+        let convert = |tx: Bytes| {
+            let tx = reth_ethereum_primitives::TransactionSigned::decode_2718_exact(tx.as_ref())
+                .map_err(io::Error::other)?;
+            let signer = tx.try_recover().map_err(io::Error::other)?;
+            Ok::<_, io::Error>(Recovered::new_unchecked(tx, signer))
+        };
+        Ok((txs, convert))
     }
 }
 
@@ -396,7 +396,7 @@ mod tests {
         execute::{BlockAssembler, BlockAssemblerInput, BlockBuilder},
         ConfigureEvm, EvmEnv, NextBlockEnvAttributes,
     };
-    use reth_primitives::{Header, SealedHeader};
+    use reth_primitives_traits::{Header, SealedHeader};
     use reth_revm::database::StateProviderDatabase;
     use reth_storage_api::noop::NoopProvider;
     use revm::{database::State, primitives::hardfork::SpecId};
@@ -536,6 +536,8 @@ mod tests {
                 gas_limit: 30_000_000,
                 parent_beacon_block_root: None,
                 withdrawals: Some(Default::default()),
+                extra_data: Default::default(),
+                slot_number: None,
             };
             let evm_env = infallible(
                 config
@@ -548,7 +550,9 @@ mod tests {
             builder
                 .apply_pre_execution_changes()
                 .expect("empty pre-execution succeeds");
-            let outcome = builder.finish(&provider).expect("empty block assembles");
+            let outcome = builder
+                .finish(&provider, None)
+                .expect("empty block assembles");
 
             assert_eq!(
                 outcome.block.header().extra_data,
@@ -577,6 +581,9 @@ mod tests {
                         parent_beacon_block_root: None,
                         ommers: &[],
                         withdrawals: None,
+                        extra_data: Default::default(),
+                        tx_count_hint: None,
+                        slot_number: None,
                     },
                     U256::from(DA_RATE),
                 ),

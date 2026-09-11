@@ -4,9 +4,9 @@ use alloy_rpc_types::BlockNumHash;
 use alpen_reth_db::StateDiffStore;
 use alpen_reth_statediff::BlockStateChanges;
 use futures_util::TryStreamExt;
+use reth_ethereum_primitives::EthPrimitives;
 use reth_exex::{ExExContext, ExExEvent};
 use reth_node_api::{FullNodeComponents, NodeTypes};
-use reth_primitives::EthPrimitives;
 use reth_provider::{BlockReaderIdExt, Chain};
 use tracing::{debug, error};
 

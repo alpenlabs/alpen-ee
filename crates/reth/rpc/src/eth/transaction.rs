@@ -2,6 +2,8 @@
 
 use std::time::Duration;
 
+use alloy_consensus::transaction::Recovered;
+use alloy_eips::eip2718::WithEncoded;
 use alloy_primitives::{Bytes, B256};
 use reth_rpc_eth_api::{
     helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction},
@@ -9,7 +11,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_transaction_pool::{
-    AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
+    AddedTransactionOutcome, PoolPooledTx, PoolTransaction, TransactionOrigin, TransactionPool,
 };
 
 use crate::{AlpenEthApi, SequencerClient, StrataNodeCore};
@@ -27,8 +29,8 @@ where
         self.inner.eth_api.send_raw_transaction_sync_timeout()
     }
 
-    /// Decodes and recovers the transaction, forwards it to the sequencer when
-    /// a forwarding target is configured, and submits it to the pool.
+    /// Forwards the transaction to the sequencer when a forwarding target is
+    /// configured, and submits it to the pool.
     ///
     /// Returns the hash of the transaction. That hash means the local pool
     /// accepted it, not that the sequencer will include it. The two steps can
@@ -36,8 +38,12 @@ where
     /// unreachable sequencer still returns a hash. A pool rejection returns an
     /// error even though the sequencer already has the transaction and may
     /// well include it.
-    async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
-        let recovered = recover_raw_transaction(&tx)?;
+    async fn send_transaction(
+        &self,
+        origin: TransactionOrigin,
+        tx: WithEncoded<Recovered<PoolPooledTx<Self::Pool>>>,
+    ) -> Result<B256, Self::Error> {
+        let (tx, recovered) = tx.split();
         let pool_transaction = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
 
         // Forward before validating anything past the signature. The sequencer runs its own
@@ -50,14 +56,21 @@ where
                     tracing::debug!(target: "rpc::eth", %err, hash=% *pool_transaction.hash(), "failed to forward raw transaction");
                 });
         }
-        // submit the transaction to the pool with a `Local` origin
         let AddedTransactionOutcome { hash, .. } = self
             .pool()
-            .add_transaction(TransactionOrigin::Local, pool_transaction)
+            .add_transaction(origin, pool_transaction)
             .await
             .map_err(Self::Error::from_eth_err)?;
 
         Ok(hash)
+    }
+
+    /// Decodes and recovers the transaction and submits it with a
+    /// [`TransactionOrigin::Local`] origin via [`Self::send_transaction`].
+    async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
+        let recovered = recover_raw_transaction::<PoolPooledTx<Self::Pool>>(&tx)?;
+        self.send_transaction(TransactionOrigin::Local, WithEncoded::new(tx, recovered))
+            .await
     }
 }
 

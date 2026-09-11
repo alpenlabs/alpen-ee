@@ -41,14 +41,14 @@ mod sequencer;
 mod service_executor;
 mod services;
 
-use std::{env, process, sync::Arc};
+use std::{env, process};
 
 use alpen_chainspec::AlpenChainSpecParser;
 use alpen_ee_params::AlpenSpecId;
 use clap::Parser;
 use reth_chainspec::ChainSpec;
 use reth_cli_commands::{launcher::FnLauncher, node::NodeCommand};
-use reth_cli_runner::{tokio_runtime, CliRunner};
+use reth_cli_runner::CliRunner;
 use reth_cli_util::sigsegv_handler;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use strata_logging::{init_logging_from_config, LoggingInitConfigRef};
@@ -99,7 +99,7 @@ fn run<L>(
 ) -> eyre::Result<()>
 where
     L: std::ops::AsyncFnOnce(
-        WithLaunchContext<NodeBuilder<Arc<reth_db::DatabaseEnv>, ChainSpec>>,
+        WithLaunchContext<NodeBuilder<reth_db::DatabaseEnv, ChainSpec>>,
         AdditionalConfig,
     ) -> eyre::Result<()>,
 {
@@ -127,13 +127,14 @@ where
         }
     }
 
-    // Build the tokio runtime ourselves so logging init can run inside its
-    // context, then hand it to CliRunner. The OTLP tracing exporter requires
-    // an active tokio handle when it is built.
-    let rt = tokio_runtime()?;
+    // Build the runner (and its tokio runtime) first so logging init can run
+    // inside the runtime's context. The OTLP tracing exporter requires an
+    // active tokio handle when it is built.
+    let runner = CliRunner::try_default_runtime()?;
 
     {
-        let _g = rt.handle().enter();
+        let runtime = runner.runtime();
+        let _g = runtime.handle().enter();
 
         let mut extra_filter_directives =
             vec!["sp1_core_executor=warn", "jsonrpsee_server::server=warn"];
@@ -152,8 +153,6 @@ where
             extra_filter_directives: &extra_filter_directives,
         });
     }
-
-    let runner = CliRunner::from_runtime(rt);
 
     info!(target: "alpen-client", component = "alpen", "logging initialized");
 

@@ -1,9 +1,9 @@
 use alpen_ee_params::EvmSpec;
 use alpen_reth_evm::evm::AlpenEvmFactory;
 use reth_chainspec::ChainSpec;
+use reth_ethereum_primitives::EthPrimitives;
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{components::ExecutorBuilder, BuilderContext};
-use reth_primitives::EthPrimitives;
 
 use crate::evm_config::AlpenEvmConfig;
 

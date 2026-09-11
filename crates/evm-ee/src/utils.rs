@@ -5,9 +5,9 @@
 
 use alloy_consensus::Block as AlloyBlock;
 use alpen_reth_evm::subject_to_address;
+use reth_ethereum_primitives::{Receipt as EthereumReceipt, TransactionSigned};
 use reth_evm::execute::BlockExecutionOutput;
-use reth_primitives::{Receipt as EthereumReceipt, RecoveredBlock, TransactionSigned};
-use reth_primitives_traits::Block;
+use reth_primitives_traits::{Block, RecoveredBlock};
 use reth_trie::{HashedPostState, KeccakKeyHasher};
 use strata_ee_acct_types::{EnvError, EnvResult, ExecPayload};
 use strata_ee_chain_types::ExecInputs;
@@ -118,7 +118,7 @@ pub(crate) fn validate_deposits_against_block(
 mod tests {
     use alloy_consensus::{BlockBody, Header};
     use alloy_eips::eip4895::Withdrawal;
-    use reth_primitives::RecoveredBlock;
+    use reth_primitives_traits::RecoveredBlock;
     use revm_primitives::Address;
     use strata_acct_types::{BitcoinAmount, SubjectId};
     use strata_ee_chain_types::{ExecInputs, SubjectDepositData};

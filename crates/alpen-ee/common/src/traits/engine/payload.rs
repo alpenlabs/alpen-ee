@@ -96,6 +96,7 @@ impl TryFrom<AlpenBuiltPayload> for SerializablePayload {
     type Error = AlpenEnginePayloadError;
 
     fn try_from(value: AlpenBuiltPayload) -> Result<Self, Self::Error> {
+        let payload_id = value.payload_id();
         let (eth_built_payload, withdrawal_intents) = value.into_parts();
 
         if !matches!(eth_built_payload.sidecars(), BlobSidecars::Empty) {
@@ -110,7 +111,7 @@ impl TryFrom<AlpenBuiltPayload> for SerializablePayload {
         let block_rlp = alloy_rlp::encode(sealed_block.clone_block());
 
         Ok(SerializablePayload {
-            payload_id: eth_built_payload.id(),
+            payload_id,
             block_rlp,
             block_hash,
             fees: eth_built_payload.fees(),
@@ -138,12 +139,11 @@ impl TryFrom<SerializablePayload> for AlpenBuiltPayload {
         let sealed_block: SealedBlock<<EthPrimitives as NodePrimitives>::Block> =
             block.seal_unchecked(block_hash);
 
-        let eth_built_payload =
-            EthBuiltPayload::new(payload_id, sealed_block.into(), fees, requests);
+        let eth_built_payload = EthBuiltPayload::new(sealed_block.into(), fees, requests, None);
 
-        Ok(AlpenBuiltPayload::new(
-            eth_built_payload,
-            withdrawal_intents,
-        ))
+        Ok(
+            AlpenBuiltPayload::new(eth_built_payload, withdrawal_intents)
+                .with_payload_id(payload_id),
+        )
     }
 }

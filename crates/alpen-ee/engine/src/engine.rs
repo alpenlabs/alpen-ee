@@ -2,9 +2,7 @@ use alloy_rpc_types_engine::ForkchoiceState;
 use alpen_ee_common::{ExecutionEngine, ExecutionEngineError};
 use alpen_reth_node::{AlpenBuiltPayload, AlpenEngineTypes};
 use async_trait::async_trait;
-use reth_node_builder::{
-    BuiltPayload, ConsensusEngineHandle, EngineApiMessageVersion, PayloadTypes,
-};
+use reth_node_builder::{BuiltPayload, ConsensusEngineHandle, PayloadTypes};
 use strata_common::retry::{
     policies::ExponentialBackoff, retry_with_backoff_async, DEFAULT_ENGINE_CALL_MAX_RETRIES,
 };
@@ -58,7 +56,7 @@ impl ExecutionEngine for AlpenRethExecEngine {
             || async {
                 debug!(?state, "Sending fork choice state to beacon");
                 self.beacon_engine_handle
-                    .fork_choice_updated(state, None, EngineApiMessageVersion::V4)
+                    .fork_choice_updated(state, None)
                     .await
                     .map(|_| ())
                     .map_err(|e| ExecutionEngineError::fork_choice_update(e.to_string()))

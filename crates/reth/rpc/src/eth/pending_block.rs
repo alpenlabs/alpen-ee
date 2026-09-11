@@ -19,7 +19,7 @@ impl<N, Rpc> LoadPendingBlock for AlpenEthApi<N, Rpc>
 where
     N: RpcNodeCore,
     EthApiError: FromEvmError<N::Evm>,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError>,
 {
     #[inline]
     fn pending_block(&self) -> &Mutex<Option<PendingBlock<N::Primitives>>> {

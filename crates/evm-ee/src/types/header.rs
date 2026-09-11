@@ -2,7 +2,7 @@
 
 use alloy_consensus::{BlockBody, Header, proofs::calculate_transaction_root};
 use alpen_ee_da_types::EvmHeaderSummary;
-use reth_primitives::TransactionSigned;
+use reth_ethereum_primitives::TransactionSigned;
 use revm_primitives::alloy_primitives::{Address, B64, B256, Bloom, Bytes, U256};
 use strata_codec::{Codec, CodecError, encode_to_vec};
 use strata_ee_acct_types::ExecHeader;
@@ -107,6 +107,9 @@ impl EvmHeaderIntrinsics {
             excess_blob_gas: self.excess_blob_gas,
             parent_beacon_block_root: self.parent_beacon_block_root,
             requests_hash: self.has_requests_hash.then_some(B256::ZERO),
+            // Amsterdam (EIP-7928 / EIP-7843) fields; Alpen does not enable Amsterdam.
+            block_access_list_hash: None,
+            slot_number: None,
         }
     }
 

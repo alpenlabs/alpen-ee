@@ -12,12 +12,10 @@ use alpen_ee_common::{
     PayloadBuildAttributes, PayloadBuilderEngine,
 };
 use alpen_ee_engine::AlpenRethExecEngine;
-use alpen_reth_node::{
-    AlpenBuiltPayload, AlpenEngineTypes, AlpenPayloadAttributes, AlpenPayloadBuilderAttributes,
-};
+use alpen_reth_node::{AlpenBuiltPayload, AlpenEngineTypes, AlpenPayloadAttributes};
 use eyre::{eyre, Context};
-use reth_node_builder::{ConsensusEngineHandle, PayloadBuilderAttributes, PayloadKind};
-use reth_payload_builder::{PayloadBuilderError, PayloadBuilderHandle};
+use reth_node_builder::{ConsensusEngineHandle, PayloadKind};
+use reth_payload_builder::{BuildNewPayload, PayloadBuilderError, PayloadBuilderHandle};
 use strata_acct_types::Hash;
 use tokio::time::sleep;
 use tracing::{debug, info, info_span, warn, Instrument};
@@ -136,12 +134,10 @@ impl AlpenRethPayloadEngine {
                 prev_randao: B256::ZERO,
                 suggested_fee_recipient: self.beneficiary_address,
                 withdrawals: Some(withdrawals),
+                slot_number: None,
             },
             build_attrs.spec_version(),
         );
-
-        let payload_builder_attrs =
-            AlpenPayloadBuilderAttributes::try_new(parent, payload_attrs, 0)?;
 
         let build_started = Instant::now();
         debug!("requesting payload builder job");
@@ -149,7 +145,12 @@ impl AlpenRethPayloadEngine {
         let mut payload = loop {
             let payload_id = match self
                 .payload_builder_handle
-                .send_new_payload(payload_builder_attrs.clone())
+                .send_new_payload(BuildNewPayload {
+                    attributes: payload_attrs.clone(),
+                    parent_hash: parent,
+                    cache: None,
+                    trie_handle: None,
+                })
                 .await
             {
                 Ok(Ok(payload_id)) => {

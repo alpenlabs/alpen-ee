@@ -1,19 +1,20 @@
-use alloy_eips::{eip4895::Withdrawals, eip7685::Requests};
+use alloy_eips::eip7685::Requests;
 use alloy_rpc_types::{
     engine::{
         ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5,
-        ExecutionPayloadV1, ExecutionPayloadV2, PayloadAttributes as EthPayloadAttributes,
-        PayloadId,
+        ExecutionPayloadEnvelopeV6, ExecutionPayloadV1, ExecutionPayloadV2,
+        PayloadAttributes as EthPayloadAttributes, PayloadId,
     },
     Withdrawal,
 };
 use alpen_ee_params::{AlpenSpecId, HeaderExtraError};
 use alpen_reth_primitives::WithdrawalIntent;
 use reth_ethereum_engine_primitives::BuiltPayloadConversionError;
-use reth_node_api::{BuiltPayload, PayloadAttributes, PayloadBuilderAttributes};
-use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
-use reth_primitives::{EthPrimitives, SealedBlock};
-use revm_primitives::alloy_primitives::{Address, B256, U256};
+use reth_ethereum_primitives::{Block, EthPrimitives};
+use reth_node_api::{BuiltPayload, PayloadAttributes};
+use reth_payload_builder::EthBuiltPayload;
+use reth_primitives_traits::SealedBlock;
+use revm_primitives::alloy_primitives::{B256, U256};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -25,8 +26,9 @@ pub struct AlpenPayloadAttributes {
     /// Version resolution happens at the Alpen layer; this wire type only
     /// carries the choice (the enum's serde form is a variant name, wrong
     /// for engine-API JSON). Typed — and an unknown discriminant refused —
-    /// when the builder attributes are created. Defaults to 0 (the genesis
-    /// version) for attribute sources that predate versioning.
+    /// when the payload is validated or built (see
+    /// [`Self::alpen_spec_version`]). Defaults to 0 (the genesis version)
+    /// for attribute sources that predate versioning.
     #[serde(default)]
     pub spec_version: u16,
 }
@@ -43,9 +45,24 @@ impl AlpenPayloadAttributes {
             spec_version: u16::from(spec_version),
         }
     }
+
+    /// Returns the typed Alpen spec version governing the block.
+    ///
+    /// Errs when the attributes name a spec version this binary has no
+    /// variant for: they were resolved by newer code, and failing beats
+    /// building under rules older than the ones asked for.
+    pub fn alpen_spec_version(&self) -> Result<AlpenSpecId, HeaderExtraError> {
+        AlpenSpecId::try_from(self.spec_version).map_err(HeaderExtraError::UnknownVersion)
+    }
 }
 
 impl PayloadAttributes for AlpenPayloadAttributes {
+    /// Derived from the wrapped Ethereum attributes only; the spec version
+    /// does not contribute to the id.
+    fn payload_id(&self, parent_hash: &B256) -> PayloadId {
+        self.inner.payload_id(parent_hash)
+    }
+
     fn timestamp(&self) -> u64 {
         self.inner.timestamp()
     }
@@ -57,69 +74,9 @@ impl PayloadAttributes for AlpenPayloadAttributes {
     fn parent_beacon_block_root(&self) -> Option<B256> {
         self.inner.parent_beacon_block_root()
     }
-}
 
-/// New type around the payload builder attributes type
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AlpenPayloadBuilderAttributes {
-    pub(crate) inner: EthPayloadBuilderAttributes,
-    /// The typed form of [`AlpenPayloadAttributes::spec_version`].
-    pub(crate) spec_version: AlpenSpecId,
-}
-
-impl AlpenPayloadBuilderAttributes {
-    /// Returns the Alpen spec version governing the block.
-    pub fn spec_version(&self) -> AlpenSpecId {
-        self.spec_version
-    }
-}
-
-impl PayloadBuilderAttributes for AlpenPayloadBuilderAttributes {
-    type RpcPayloadAttributes = AlpenPayloadAttributes;
-    type Error = HeaderExtraError;
-
-    /// Errs when the attributes name a spec version this binary has no
-    /// variant for: they were resolved by newer code, and failing beats
-    /// building under rules older than the ones asked for.
-    fn try_new(
-        parent: B256,
-        attributes: AlpenPayloadAttributes,
-        _version: u8,
-    ) -> Result<Self, Self::Error> {
-        let spec_version = AlpenSpecId::try_from(attributes.spec_version)
-            .map_err(HeaderExtraError::UnknownVersion)?;
-        Ok(Self {
-            inner: EthPayloadBuilderAttributes::new(parent, attributes.inner),
-            spec_version,
-        })
-    }
-
-    fn payload_id(&self) -> PayloadId {
-        self.inner.id
-    }
-
-    fn parent(&self) -> B256 {
-        self.inner.parent
-    }
-
-    fn timestamp(&self) -> u64 {
-        self.inner.timestamp
-    }
-
-    fn parent_beacon_block_root(&self) -> Option<B256> {
-        self.inner.parent_beacon_block_root
-    }
-
-    fn suggested_fee_recipient(&self) -> Address {
-        self.inner.suggested_fee_recipient
-    }
-
-    fn prev_randao(&self) -> B256 {
-        self.inner.prev_randao
-    }
-
-    fn withdrawals(&self) -> &Withdrawals {
-        &self.inner.withdrawals
+    fn slot_number(&self) -> Option<u64> {
+        self.inner.slot_number()
     }
 }
 
@@ -127,6 +84,9 @@ impl PayloadBuilderAttributes for AlpenPayloadBuilderAttributes {
 pub struct AlpenBuiltPayload {
     /// Payload to build ethereum block.
     pub(crate) inner: EthBuiltPayload,
+    /// Identifier of the payload job that built this payload, kept for
+    /// persistence alongside the [`EthBuiltPayload`] (which carries no id).
+    pub(crate) payload_id: PayloadId,
     // additional fields for strata
     /// Requested withdrawals
     pub(crate) withdrawal_intents: Vec<WithdrawalIntent>,
@@ -141,9 +101,21 @@ impl AlpenBuiltPayload {
     pub fn new(inner: EthBuiltPayload, withdrawal_intents: Vec<WithdrawalIntent>) -> Self {
         Self {
             inner,
+            payload_id: PayloadId::default(),
             withdrawal_intents,
             block_witness: None,
         }
+    }
+
+    /// Attaches the identifier of the payload job that built this payload.
+    pub fn with_payload_id(mut self, payload_id: PayloadId) -> Self {
+        self.payload_id = payload_id;
+        self
+    }
+
+    /// Returns the identifier of the payload job that built this payload.
+    pub fn payload_id(&self) -> PayloadId {
+        self.payload_id
     }
 
     /// Attaches the encoded per-block proof witness captured during build.
@@ -169,7 +141,7 @@ impl AlpenBuiltPayload {
 impl BuiltPayload for AlpenBuiltPayload {
     type Primitives = EthPrimitives;
 
-    fn block(&self) -> &SealedBlock {
+    fn block(&self) -> &SealedBlock<Block> {
         self.inner.block()
     }
 
@@ -307,5 +279,13 @@ impl TryFrom<AlpenBuiltPayload> for ExecutionPayloadEnvelopeV5 {
 
     fn try_from(value: AlpenBuiltPayload) -> Result<Self, Self::Error> {
         value.inner.try_into_v5()
+    }
+}
+
+impl TryFrom<AlpenBuiltPayload> for ExecutionPayloadEnvelopeV6 {
+    type Error = BuiltPayloadConversionError;
+
+    fn try_from(value: AlpenBuiltPayload) -> Result<Self, Self::Error> {
+        value.inner.try_into_v6()
     }
 }

@@ -28,13 +28,13 @@ use alloy_primitives::B256;
 use alpen_ee_common::{AccessedAccount, AccessedStateRecord, AccessedStateStore};
 use alpen_reth_witness::CacheDBProvider;
 use futures_util::TryStreamExt;
+use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm::{
     execute::{BasicBlockExecutor, Executor},
     ConfigureEvm,
 };
 use reth_exex::{ExExContext, ExExEvent};
 use reth_node_api::{FullNodeComponents, NodeTypes};
-use reth_primitives::{Block, EthPrimitives};
 use reth_primitives_traits::Block as _;
 use reth_provider::{BlockReader, Chain, StateProviderFactory};
 use reth_revm::{db::CacheDB, state::Bytecode};

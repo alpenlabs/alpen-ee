@@ -32,8 +32,7 @@ struct WitnessData {
 
 fn load_witness() -> EthClientExecutorInput {
     // Canonical Reth-shaped witness fixture lives under
-    // crates/test-utils/data/evm_ee/, alongside the legacy
-    // witness_{N}.json files used by the EVM-EE STF tests.
+    // crates/test-utils/data/evm_ee/ (shared with the EVM-EE STF tests).
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../crates/test-utils/data/evm_ee/witness_params.json");
     let json = fs::read_to_string(path).expect("read witness JSON");
