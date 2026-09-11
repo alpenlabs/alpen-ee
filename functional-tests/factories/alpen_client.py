@@ -10,7 +10,12 @@ from pathlib import Path
 
 import flexitest
 
-from common.alpen_params import DEFAULT_BASE_FEE_FLOOR, EEST_CHAIN, compose_alpen_params
+from common.alpen_params import (
+    DEFAULT_BASE_FEE_FLOOR,
+    EEST_BLOCK_GAS_LIMIT,
+    EEST_CHAIN,
+    compose_alpen_params,
+)
 from common.config import (
     AlpenClientConfig,
     AlpenFullNodeConfig,
@@ -259,6 +264,7 @@ class AlpenClientFactory(flexitest.Factory):
             if engine_jwt_secret_path is None:
                 raise RuntimeError("EEST fixture mode did not create an Engine JWT secret path")
             cmd.extend(["--authrpc.jwtsecret", str(engine_jwt_secret_path), "--eest-fixture-mode"])
+            cmd.extend(["--builder.gaslimit", str(EEST_BLOCK_GAS_LIMIT)])
         # fmt: on
 
         # Discovery mode configuration:

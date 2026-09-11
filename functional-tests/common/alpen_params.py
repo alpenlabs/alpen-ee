@@ -29,6 +29,9 @@ CHAIN_SPEC_FILES = {
 
 DEFAULT_BASE_FEE_FLOOR = 1_000_000_000
 EEST_CHAIN = "eest"
+# Match execution-specs' EnvironmentDefaults.gas_limit. This affects only
+# the isolated conformance chain, not the production network's gas policy.
+EEST_BLOCK_GAS_LIMIT = 120_000_000
 EEST_BASE_FEE_FLOOR = 0
 EEST_GENESIS_BASE_FEE_PER_GAS = 7
 
