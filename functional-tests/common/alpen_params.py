@@ -24,9 +24,11 @@ CHAIN_SPEC_FILES = {
     "devnet": _CHAINSPEC_DIR / "devnet-chain.json",
     "testnet": _CHAINSPEC_DIR / "testnet-chain.json",
     "testnet3": _CHAINSPEC_DIR / "testnet3-chain.json",
+    "eest": _CHAINSPEC_DIR / "alpen-eest-chain.json",
 }
 
 DEFAULT_BASE_FEE_FLOOR = 1_000_000_000
+EEST_CHAIN = "eest"
 EEST_BASE_FEE_FLOOR = 0
 EEST_GENESIS_BASE_FEE_PER_GAS = 7
 
