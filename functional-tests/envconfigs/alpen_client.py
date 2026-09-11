@@ -200,6 +200,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
                 sequencer_http=seq_http_url if envparams.forward_tx else None,
                 ol_endpoint=ol_endpoint,
                 ee_params_path=ee_params_path,
+                spec_schedule=envparams.prover.genesis_spec_schedule,
             )
             fullnode.wait_for_ready(timeout=60)
             fullnodes.append(fullnode)

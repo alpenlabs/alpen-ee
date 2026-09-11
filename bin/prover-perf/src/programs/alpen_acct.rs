@@ -60,7 +60,7 @@ pub(crate) fn gen_perf_report(host: &impl ZkVmHost) -> (String, ExecutionSummary
 
 #[cfg(test)]
 mod tests {
-    use alpen_ee_params::AlpenParams;
+    use alpen_ee_params::{AlpenParams, AlpenSpecId};
     use strata_predicate::PredicateKey;
 
     use super::*;
@@ -74,7 +74,11 @@ mod tests {
         // the cycle count there reflects an honest verify. Not exercised
         // since this benchmark runs zero chunks, so the default (empty EVM
         // genesis) params are fine here.
-        let program = EeAcctProgram::new(PredicateKey::always_accept(), AlpenParams::default());
+        let program = EeAcctProgram::new(
+            PredicateKey::always_accept(),
+            AlpenParams::default(),
+            AlpenSpecId::V1,
+        );
         let result = program.execute(&input).expect("native execution");
         assert_eq!(
             result.cur_state().inner_state(),

@@ -9,6 +9,20 @@ backend is picked once, from ``EE_PROVER_BACKEND``, matching whatever
 - ``sp1``: the real guest pair from ``provers/sp1``. Needs a release build --
   SP1 proving is unusably slow in debug.
 
+A backend is resolved for a set of spec versions, and owns the whole mapping
+from version to program. Tests that never cross a VK rotation take the
+default single-``v1`` set: v1 is what the current source builds, and v0 is
+only the program already deployed on live networks. A rotation test takes
+``ROTATION_SPEC_VERSIONS`` instead, which starts the chain back on v0 so the
+rotation has somewhere to rotate from. Which program a version maps to is the
+backend's business, not the test's, so the spec schedule the chain launches
+on, the predicate OL registers at genesis, and the predicate a rotation
+targets always agree with the programs actually configured.
+
+Both backends serve either set. sp1 gets its v1 pair from the build and its
+v0 pair from ``functional-tests/testdata``, since a build only ever produces
+the version current source names.
+
 The sp1 artifact paths are fixed by where ``provers/sp1/build.rs`` and
 ``scripts/gen_sp1_guest_params.py`` write them, so they are derived here
 rather than passed in.
@@ -20,31 +34,89 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
-from common.config import AlpenProverConfig
-from common.config.params import GenesisAccountData
+from common.config import AlpenProverConfig, AlpenProverProgram
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Where provers/sp1/build.rs puts the guest ELFs and the acct predicate.
+# Where provers/sp1/build.rs puts the guest ELFs and the acct predicate. This
+# is the build of the *current* workspace source, which is the v1 program:
+# both guests bake in `AlpenSpecId::V1`.
 _GENERATED_DIR = _REPO_ROOT / "provers" / "sp1" / "generated"
 CHUNK_ELF = _GENERATED_DIR / "guest-alpen-chunk.elf"
 ACCT_ELF = _GENERATED_DIR / "guest-alpen-acct.elf"
 ACCT_PREDICATE = _GENERATED_DIR / "alpen-acct.predicate"
+
+# The v0 pair, committed rather than built. A build only ever produces one
+# version -- the guests bake in the version they prove under, and current
+# source names v1 -- so the older pair has to come from the tree. See that
+# directory's README for how it was produced.
+_V0_TESTDATA_DIR = _REPO_ROOT / "functional-tests" / "testdata" / "sp1" / "v0"
+V0_CHUNK_ELF = _V0_TESTDATA_DIR / "guest-alpen-chunk.elf"
+V0_ACCT_ELF = _V0_TESTDATA_DIR / "guest-alpen-acct.elf"
+V0_ACCT_PREDICATE = _V0_TESTDATA_DIR / "alpen-acct.predicate"
 
 # Where scripts/gen_sp1_guest_params.py puts the params the guests bake in.
 GUEST_PARAMS_DIR = _REPO_ROOT / "target" / "sp1-guest-params"
 EE_PARAMS = GUEST_PARAMS_DIR / "ee-params.json"
 ALPEN_PARAMS = GUEST_PARAMS_DIR / "alpen-params.json"
 
+#: Every spec version this binary knows, oldest first.
+SPEC_VERSIONS = ("v0", "v1")
+
+#: The spec versions a test that never crosses a rotation needs a program
+#: for. A fresh chain launches on the version the current source builds, so
+#: v0 -- the program already deployed on live networks -- only shows up where
+#: a test rotates away from it.
+DEFAULT_SPEC_VERSIONS = ("v1",)
+
+#: The spec versions a VK-rotation test needs resident at once: the genesis
+#: program, plus the successor the rotation activates. Such a test launches
+#: the chain a version back, on v0, so that v1 is still ahead of it.
+ROTATION_SPEC_VERSIONS = ("v0", "v1")
+
 # The native provers sign proofs with these Schnorr keys instead of doing real
-# ZK proving -- see `EeAcctProgram::test_signing_key` /
-# `EeChunkProgram::test_signing_key` in crates/proof-impl/alpen-{acct,chunk}.
-# Signing with a different key still produces a validly-signed proof, but OL
-# checks it against the genesis predicate and rejects it, so the two have to be
-# chosen together: that is why `NativeBackend` owns both halves. These are not
-# secrets (unlike SEQUENCER_PRIVATE_KEY), just a fixed publicly-known value.
+# ZK proving. Signing with a different key still produces a validly-signed
+# proof, but OL checks it against the registered predicate and rejects it, so
+# a version's key and the predicate registered for it have to be chosen
+# together: that is why `NativeBackend` owns both halves. These are not
+# secrets (unlike SEQUENCER_PRIVATE_KEY), just fixed publicly-known values.
+#
+# v1 runs `EeAcctProgram::test_signing_key` / `EeChunkProgram::test_signing_key`
+# from crates/proof-impl/alpen-{acct,chunk}. It has to: the dummy OL client
+# reports `EeAcctProgram::test_predicate_key()` as the expected update_vk, and
+# the sequencer refuses to start unless a resident program matches it. So the
+# default program is the one an env with no real OL already expects. v0's key
+# is just a second deterministic value -- nothing in the crates points at it,
+# and native proving never verifies anything, so it only has to agree with the
+# predicate registered for v0.
+#
+# One chunk key serves both versions: a program's chunk key only has to agree
+# with its own acct key, not with any other program's.
 NATIVE_CHUNK_SIGNING_KEY_HEX = "03" * 32
-NATIVE_ACCT_SIGNING_KEY_HEX = "02" * 32
+NATIVE_V0_ACCT_SIGNING_KEY_HEX = "04" * 32
+NATIVE_V1_ACCT_SIGNING_KEY_HEX = "02" * 32
+
+# The `Bip340Schnorr` predicate each acct key above is bound to. Pinned rather
+# than derived: deriving one here would need a BIP340 implementation in the
+# harness, and the point of a fixture is that it doesn't move.
+NATIVE_V0_ACCT_PREDICATE = (
+    "Bip340Schnorr:462779ad4aad39514614751a71085f2f10e1c7a593e4e030efb5b8721ce55b0b"
+)
+NATIVE_V1_ACCT_PREDICATE = (
+    "Bip340Schnorr:4d4b6cd1361032ca9bd2aeb9d900aa4d45d9ead80ac9423374c451a7254d0766"
+)
+
+#: Signing-key pair the native backend runs for each spec version.
+_NATIVE_SIGNING_KEYS: dict[str, tuple[str, str]] = {
+    "v0": (NATIVE_CHUNK_SIGNING_KEY_HEX, NATIVE_V0_ACCT_SIGNING_KEY_HEX),
+    "v1": (NATIVE_CHUNK_SIGNING_KEY_HEX, NATIVE_V1_ACCT_SIGNING_KEY_HEX),
+}
+
+#: Predicate each native program's proofs are signed under.
+_NATIVE_PREDICATES: dict[str, str] = {
+    "v0": NATIVE_V0_ACCT_PREDICATE,
+    "v1": NATIVE_V1_ACCT_PREDICATE,
+}
 
 
 class ProverBackend(ABC):
@@ -52,9 +124,14 @@ class ProverBackend(ABC):
 
     backend: ClassVar[str]
 
+    spec_versions: tuple[str, ...]
+    """Spec versions this backend has a resident program for. The first is the
+    genesis version; a rotation targets the one after it."""
+
     genesis_predicate: str
     """Predicate OL genesis registers for the EE account. Has to match what
-    this backend's acct proofs are actually signed or proved with."""
+    this backend's ``spec_versions[0]`` program's proofs are actually signed
+    or proved with."""
 
     ee_params_path: Path | None
     """ee-params.json the node must reuse rather than generate, for backends
@@ -63,7 +140,51 @@ class ProverBackend(ABC):
     @abstractmethod
     def prover_config(self, datadir: Path) -> AlpenProverConfig:
         """Builds the ``[sequencer.prover]`` table, writing any files it needs
-        into ``datadir``."""
+        into ``datadir``, with one
+        ``[sequencer.prover.programs.<spec_version>]`` entry per
+        [`spec_versions`]."""
+
+    @property
+    @abstractmethod
+    def rotation_target_predicate(self) -> str:
+        """Predicate of the successor version's program -- what an admin
+        `PredicateUpdate` must rotate to for proving to survive the boundary.
+
+        Only meaningful when the backend was resolved for more than one spec
+        version.
+        """
+
+    @property
+    def genesis_spec_schedule(self) -> dict[str, int]:
+        """``spec_schedule`` the chain's params must carry.
+
+        Every version up to and including the genesis version activates at
+        coordinate 0; whatever a rotation is still expected to activate stays
+        unscheduled. So the chain launches on ``spec_versions[0]``, and the
+        batches it stamps name a version this backend has a program for.
+        """
+        genesis_version = self.spec_versions[0]
+        launched = SPEC_VERSIONS[: SPEC_VERSIONS.index(genesis_version) + 1]
+        return {spec_version: 0 for spec_version in launched}
+
+    @property
+    def proof_wait_scale(self) -> int:
+        """Multiplier for waits that block on a proof being produced.
+
+        Native signing returns almost immediately, so a wait sized for it is
+        a wait sized for no proving at all. Real proving costs seconds per
+        chunk and longer for the account proof a rotation settles behind, so
+        anything waiting on that has to stretch with the backend instead of
+        being pinned to one backend's timings.
+        """
+        return 1
+
+    def _require_rotation_versions(self) -> None:
+        if len(self.spec_versions) < 2:
+            raise ValueError(
+                f"{type(self).__name__} was resolved for {self.spec_versions}, so it has no "
+                "rotation target; resolve it with ROTATION_SPEC_VERSIONS instead"
+            )
 
 
 @dataclass(frozen=True)
@@ -71,37 +192,81 @@ class NativeBackend(ProverBackend):
     """The zkaleido NativeHost: signs proofs rather than proving them."""
 
     backend: ClassVar[str] = "native"
-    genesis_predicate: str = GenesisAccountData().predicate
+    spec_versions: tuple[str, ...] = DEFAULT_SPEC_VERSIONS
     ee_params_path: None = None
 
     def prover_config(self, datadir: Path) -> AlpenProverConfig:
-        chunk_key_path = datadir / "native-chunk-signing-key.hex"
-        acct_key_path = datadir / "native-acct-signing-key.hex"
-        chunk_key_path.write_text(NATIVE_CHUNK_SIGNING_KEY_HEX)
-        acct_key_path.write_text(NATIVE_ACCT_SIGNING_KEY_HEX)
-        return AlpenProverConfig(
-            backend=self.backend,
-            chunk_signing_key_path=str(chunk_key_path),
-            acct_signing_key_path=str(acct_key_path),
-        )
+        entries = {}
+        for spec_version in self.spec_versions:
+            chunk_hex, acct_hex = _NATIVE_SIGNING_KEYS[spec_version]
+            chunk_key_path = datadir / f"native-chunk-signing-key-{spec_version}.hex"
+            acct_key_path = datadir / f"native-acct-signing-key-{spec_version}.hex"
+            chunk_key_path.write_text(chunk_hex)
+            acct_key_path.write_text(acct_hex)
+            entries[spec_version] = AlpenProverProgram(
+                chunk_path=str(chunk_key_path),
+                acct_path=str(acct_key_path),
+            )
+        return AlpenProverConfig(backend=self.backend, programs=entries)
+
+    @property
+    def genesis_predicate(self) -> str:
+        return _NATIVE_PREDICATES[self.spec_versions[0]]
+
+    @property
+    def rotation_target_predicate(self) -> str:
+        self._require_rotation_versions()
+        return _NATIVE_PREDICATES[self.spec_versions[1]]
 
 
 @dataclass(frozen=True)
 class Sp1Backend(ProverBackend):
-    """The real compiled guest pair from ``provers/sp1``."""
+    """The real compiled guest pairs.
+
+    The pair built from current source is the v1 program -- that is the version
+    its guests bake in. The v0 pair is committed test data, built from the same
+    source with that constant set a version back. Holding both is what a
+    rotation under sp1 needs, and it is the production shape: an
+    already-deployed binary at genesis handing off to a new one.
+    """
 
     backend: ClassVar[str] = "sp1"
-    genesis_predicate: str
+    spec_versions: tuple[str, ...]
     ee_params_path: Path
-    chunk_elf: Path
-    acct_elf: Path
+    programs: dict[str, tuple[Path, Path]]
+    """Spec version -> its (chunk ELF, acct ELF) pair."""
+    predicates: dict[str, str]
+    """Spec version -> the predicate that pair's acct guest proves under."""
 
     def prover_config(self, datadir: Path) -> AlpenProverConfig:
         return AlpenProverConfig(
             backend=self.backend,
-            chunk_elf_path=str(self.chunk_elf),
-            acct_elf_path=str(self.acct_elf),
+            programs={
+                spec_version: AlpenProverProgram(
+                    chunk_path=str(chunk_elf),
+                    acct_path=str(acct_elf),
+                )
+                for spec_version, (chunk_elf, acct_elf) in self.programs.items()
+            },
         )
+
+    @property
+    def proof_wait_scale(self) -> int:
+        # Measured: the slowest phase of the rotation test, settling a
+        # predicate change behind an account proof, takes about 150s against
+        # a native budget of 120s. The rest land in well under a minute. Four
+        # leaves room for the prover network queueing without letting a test
+        # that is genuinely stuck run for a quarter of an hour first.
+        return 4
+
+    @property
+    def genesis_predicate(self) -> str:
+        return self.predicates[self.spec_versions[0]]
+
+    @property
+    def rotation_target_predicate(self) -> str:
+        self._require_rotation_versions()
+        return self.predicates[self.spec_versions[1]]
 
 
 #: Shared default for the many call sites that never override the backend.
@@ -110,6 +275,11 @@ NATIVE_BACKEND = NativeBackend()
 
 def _require_built(path: Path) -> Path:
     if not path.exists():
+        if _V0_TESTDATA_DIR in path.parents:
+            raise RuntimeError(
+                f"{path} is missing -- it is committed test data, so a checkout should "
+                "always have it (see that directory's README)"
+            )
         raise RuntimeError(
             f"{path} is missing -- EE_PROVER_BACKEND=sp1 requires run_tests.sh to have built "
             "the SP1 guest pair first (see its build_sp1_guests)"
@@ -117,16 +287,50 @@ def _require_built(path: Path) -> Path:
     return path
 
 
-def resolve_prover_backend() -> ProverBackend:
-    """Resolves the prover backend from ``EE_PROVER_BACKEND`` (default: native)."""
+#: Where each spec version's (chunk ELF, acct ELF, acct predicate) comes from.
+#: v1 is built by ``run_tests.sh``; v0 is committed test data.
+_SP1_ARTIFACTS: dict[str, tuple[Path, Path, Path]] = {
+    "v0": (V0_CHUNK_ELF, V0_ACCT_ELF, V0_ACCT_PREDICATE),
+    "v1": (CHUNK_ELF, ACCT_ELF, ACCT_PREDICATE),
+}
+
+
+def _sp1_backend(spec_versions: tuple[str, ...]) -> Sp1Backend:
+    """Builds the sp1 backend for `spec_versions`."""
+    unknown = [v for v in spec_versions if v not in _SP1_ARTIFACTS]
+    if unknown:
+        raise ValueError(
+            f"the sp1 backend has no program for {unknown}: known versions are "
+            f"{tuple(_SP1_ARTIFACTS)}"
+        )
+
+    programs: dict[str, tuple[Path, Path]] = {}
+    predicates: dict[str, str] = {}
+    for spec_version in spec_versions:
+        chunk_elf, acct_elf, predicate_path = _SP1_ARTIFACTS[spec_version]
+        programs[spec_version] = (_require_built(chunk_elf), _require_built(acct_elf))
+        predicates[spec_version] = _require_built(predicate_path).read_text().strip()
+
+    return Sp1Backend(
+        spec_versions=spec_versions,
+        ee_params_path=_require_built(EE_PARAMS),
+        programs=programs,
+        predicates=predicates,
+    )
+
+
+def resolve_prover_backend(
+    spec_versions: tuple[str, ...] = DEFAULT_SPEC_VERSIONS,
+) -> ProverBackend:
+    """Resolves the prover backend from ``EE_PROVER_BACKEND`` (default: native).
+
+    Args:
+        spec_versions: which spec versions need a resident program. Pass
+            `ROTATION_SPEC_VERSIONS` for a test that crosses a VK rotation.
+    """
     backend = os.environ.get("EE_PROVER_BACKEND", "native")
     if backend == "native":
-        return NATIVE_BACKEND
+        return NativeBackend(spec_versions=spec_versions)
     if backend == "sp1":
-        return Sp1Backend(
-            genesis_predicate=_require_built(ACCT_PREDICATE).read_text().strip(),
-            ee_params_path=_require_built(EE_PARAMS),
-            chunk_elf=_require_built(CHUNK_ELF),
-            acct_elf=_require_built(ACCT_ELF),
-        )
+        return _sp1_backend(spec_versions)
     raise ValueError(f"Unknown EE_PROVER_BACKEND: {backend!r} (expected: native|sp1)")
