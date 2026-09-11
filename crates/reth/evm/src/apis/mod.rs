@@ -7,7 +7,7 @@ use reth_evm::{eth::EthEvmContext, precompiles::PrecompilesMap, Database, Evm, E
 use revm::{
     context::{
         result::{EVMError, HaltReason, ResultAndState},
-        BlockEnv, Evm as RevmEvm, FrameStack, TxEnv,
+        BlockEnv, CfgEnv, Evm as RevmEvm, FrameStack, TxEnv,
     },
     handler::{
         evm::{ContextDbError, FrameInitResult},
@@ -153,6 +153,10 @@ where
 
     fn block(&self) -> &BlockEnv {
         &self.block
+    }
+
+    fn cfg_env(&self) -> &CfgEnv<Self::Spec> {
+        &self.cfg
     }
 
     fn chain_id(&self) -> u64 {

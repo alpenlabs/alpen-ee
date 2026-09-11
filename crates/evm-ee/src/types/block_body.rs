@@ -1,7 +1,7 @@
 //! EVM block body implementation.
 
 use alloy_consensus::BlockBody;
-use reth_primitives::TransactionSigned;
+use reth_ethereum_primitives::TransactionSigned;
 use strata_codec::{Codec, CodecError};
 use strata_ee_acct_types::ExecBlockBody;
 

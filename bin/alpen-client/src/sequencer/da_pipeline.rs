@@ -64,7 +64,7 @@ pub(crate) async fn start<P>(
     inputs: DaPipelineInputs<'_, P>,
 ) -> eyre::Result<DaPipeline>
 where
-    P: HeaderProvider<Header = reth_primitives::Header> + Send + Sync + 'static,
+    P: HeaderProvider<Header = reth_primitives_traits::Header> + Send + Sync + 'static,
 {
     let DaPipelineInputs {
         bitcoind,
@@ -169,7 +169,7 @@ where
     )?);
 
     // Spawn btcio tasks.
-    task_executor.spawn_critical(
+    task_executor.spawn_critical_task(
         "chunked_envelope_watcher",
         envelope_watcher_task
             .instrument(info_span!("chunked_envelope_watcher", component = "alpen")),

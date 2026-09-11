@@ -27,7 +27,7 @@ impl<P> RethHeaderSummaryProvider<P> {
 
 impl<P> HeaderSummaryProvider for RethHeaderSummaryProvider<P>
 where
-    P: reth_provider::HeaderProvider<Header = reth_primitives::Header> + Send + Sync,
+    P: reth_provider::HeaderProvider<Header = reth_primitives_traits::Header> + Send + Sync,
 {
     fn header_summary(&self, block_num: u64) -> eyre::Result<EvmHeaderSummary> {
         let header = self
@@ -42,7 +42,7 @@ where
 ///
 /// Split out from the trait impl so the reth → DA mapping can be unit-tested
 /// without constructing a full [`reth_provider::HeaderProvider`].
-fn summarize_header(header: &reth_primitives::Header) -> eyre::Result<EvmHeaderSummary> {
+fn summarize_header(header: &reth_primitives_traits::Header) -> eyre::Result<EvmHeaderSummary> {
     Ok(EvmHeaderSummary {
         block_num: header.number,
         timestamp: header.timestamp,
@@ -60,7 +60,7 @@ fn summarize_header(header: &reth_primitives::Header) -> eyre::Result<EvmHeaderS
 
 #[cfg(test)]
 mod tests {
-    use reth_primitives::Header;
+    use reth_primitives_traits::Header;
 
     use super::*;
 

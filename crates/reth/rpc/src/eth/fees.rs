@@ -120,7 +120,7 @@ where
         let res = self
             .transact_call_at(request, at, EvmOverrides::new(state_override, None))
             .await?;
-        let gas_used = res.result.gas_used();
+        let gas_used = res.result.tx_gas_used();
         let diff_size = calc_diff_size(&res.state);
 
         // Read the DA rate and base fee from the header of the block the transaction is

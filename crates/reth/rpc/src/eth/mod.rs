@@ -25,8 +25,8 @@ use reth_provider::{BlockReader, ChainSpecProvider, ProviderHeader};
 use reth_rpc::{eth::core::EthApiInner, RpcTypes};
 use reth_rpc_eth_api::{
     helpers::{
-        pending_block::BuildPendingEnv, EthApiSpec, EthFees, EthState, LoadFee, LoadPendingBlock,
-        LoadState, SpawnBlocking, Trace,
+        pending_block::BuildPendingEnv, EthApiSpec, EthFees, EthState, GetBlockAccessList, LoadFee,
+        LoadPendingBlock, LoadState, SpawnBlocking, Trace,
     },
     EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcConverter, RpcNodeCore,
     RpcNodeCoreExt,
@@ -36,8 +36,9 @@ use reth_rpc_eth_types::{
 };
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
-    TaskSpawner,
+    Runtime,
 };
+use tokio::sync::Semaphore;
 
 use crate::SequencerClient;
 
@@ -91,14 +92,14 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> AlpenEthApi<N, Rpc> {
 impl<N, Rpc> EthApiTypes for AlpenEthApi<N, Rpc>
 where
     N: RpcNodeCore,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError>,
 {
     type Error = EthApiError;
     type NetworkTypes = Rpc::Network;
     type RpcConvert = Rpc;
 
-    fn tx_resp_builder(&self) -> &Self::RpcConvert {
-        self.inner.eth_api.tx_resp_builder()
+    fn converter(&self) -> &Self::RpcConvert {
+        self.inner.eth_api.converter()
     }
 }
 
@@ -148,7 +149,7 @@ where
 impl<N, Rpc> EthApiSpec for AlpenEthApi<N, Rpc>
 where
     N: RpcNodeCore,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError>,
 {
     #[inline]
     fn starting_block(&self) -> U256 {
@@ -159,10 +160,10 @@ where
 impl<N, Rpc> SpawnBlocking for AlpenEthApi<N, Rpc>
 where
     N: RpcNodeCore,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError>,
 {
     #[inline]
-    fn io_task_spawner(&self) -> impl TaskSpawner {
+    fn io_task_spawner(&self) -> &Runtime {
         self.inner.eth_api.task_spawner()
     }
 
@@ -174,6 +175,11 @@ where
     #[inline]
     fn tracing_task_guard(&self) -> &BlockingTaskGuard {
         self.inner.eth_api.blocking_task_guard()
+    }
+
+    #[inline]
+    fn blocking_io_task_guard(&self) -> &Arc<Semaphore> {
+        self.inner.eth_api.blocking_io_request_semaphore()
     }
 }
 
@@ -205,7 +211,7 @@ where
 impl<N, Rpc> EthState for AlpenEthApi<N, Rpc>
 where
     N: RpcNodeCore,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError>,
     Self: LoadPendingBlock,
 {
     #[inline]
@@ -226,7 +232,15 @@ impl<N, Rpc> Trace for AlpenEthApi<N, Rpc>
 where
     N: RpcNodeCore,
     EthApiError: FromEvmError<N::Evm>,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError, Evm = N::Evm>,
+{
+}
+
+impl<N, Rpc> GetBlockAccessList for AlpenEthApi<N, Rpc>
+where
+    N: RpcNodeCore,
+    EthApiError: FromEvmError<N::Evm>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError, Evm = N::Evm>,
 {
 }
 

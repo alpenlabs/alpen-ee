@@ -2,9 +2,9 @@ use std::{default::Default, time::SystemTime};
 
 use alloy_eips::merge::EPOCH_SLOTS;
 use reth_chainspec::{ChainSpec, EthChainSpec};
-use reth_node_api::{FullNodeTypes, NodeTypes};
+use reth_ethereum_primitives::EthPrimitives;
+use reth_node_api::{ConfigureEvm, FullNodeTypes, NodeTypes};
 use reth_node_builder::{components::PoolBuilder, BuilderContext};
-use reth_primitives::EthPrimitives;
 use reth_provider::CanonStateSubscriptions;
 use reth_transaction_pool::{
     blobstore::{DiskFileBlobStore, DiskFileBlobStoreConfig},
@@ -23,14 +23,19 @@ use tracing::{debug, info};
 pub struct AlpenEthereumPoolBuilder {
     // TODO(STR-3681): add options for txpool args
 }
-impl<Types, Node> PoolBuilder<Node> for AlpenEthereumPoolBuilder
+impl<Types, Node, Evm> PoolBuilder<Node, Evm> for AlpenEthereumPoolBuilder
 where
     Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
+    Evm: ConfigureEvm<Primitives = EthPrimitives> + Clone + 'static,
 {
-    type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore>;
+    type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore, Evm>;
 
-    async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
+    async fn build_pool(
+        self,
+        ctx: &BuilderContext<Node>,
+        evm_config: Evm,
+    ) -> eyre::Result<Self::Pool> {
         let data_dir = ctx.config().datadir();
         let pool_config = ctx.pool_config();
 
@@ -62,14 +67,14 @@ where
         // sequencer's own pool then refuses. Aligning the pool needs a custom
         // TransactionValidator with the same 4x cap (and a bounded-work admission policy,
         // since a relaxed pool holds and gossips costlier-to-validate txs).
-        let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
-            .no_eip4844()
-            .with_head_timestamp(ctx.head().timestamp)
-            .kzg_settings(ctx.kzg_settings()?)
-            .with_local_transactions_config(pool_config.local_transactions_config.clone())
-            .set_tx_fee_cap(ctx.config().rpc.rpc_tx_fee_cap)
-            .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
-            .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
+        let validator =
+            TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone(), evm_config)
+                .no_eip4844()
+                .kzg_settings(ctx.kzg_settings()?)
+                .with_local_transactions_config(pool_config.local_transactions_config.clone())
+                .set_tx_fee_cap(ctx.config().rpc.rpc_tx_fee_cap)
+                .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
+                .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
 
         let transaction_pool =
             reth_transaction_pool::Pool::eth_pool(validator, blob_store, pool_config);
@@ -109,7 +114,7 @@ where
             }
 
             // spawn the maintenance task
-            ctx.task_executor().spawn_critical(
+            ctx.task_executor().spawn_critical_task(
                 "txpool maintenance task",
                 maintain::maintain_transaction_pool_future(
                     client,

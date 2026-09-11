@@ -1,6 +1,6 @@
 use std::future::Future;
 
-use reth_tasks::{shutdown::Shutdown, TaskExecutor};
+use reth_tasks::{shutdown::GracefulShutdown, TaskExecutor};
 use strata_service::{AsyncExecutor, AsyncGuard};
 use tracing::{info_span, Instrument};
 
@@ -25,8 +25,11 @@ impl AsyncExecutor for ServiceExecutor {
         F: Future<Output = anyhow::Result<()>> + Send + 'static,
     {
         let span = info_span!("alpen_service", component = "alpen");
+        // The worker owns its shutdown: it observes the signal through the guard and runs its
+        // own shutdown hooks, and the runtime's graceful shutdown waits for it to finish
+        // (bounded by the runner's timeout).
         self.inner
-            .spawn_critical_with_shutdown_signal(name, |shutdown| {
+            .spawn_critical_with_graceful_shutdown_signal(name, |shutdown| {
                 async move {
                     worker(ServiceShutdownGuard(shutdown))
                         .await
@@ -37,10 +40,10 @@ impl AsyncExecutor for ServiceExecutor {
     }
 }
 
-pub(crate) struct ServiceShutdownGuard(Shutdown);
+pub(crate) struct ServiceShutdownGuard(GracefulShutdown);
 
 impl AsyncGuard for ServiceShutdownGuard {
     fn wait_for_shutdown(&self) -> impl Future<Output = ()> {
-        self.0.clone()
+        self.0.clone().ignore_guard()
     }
 }

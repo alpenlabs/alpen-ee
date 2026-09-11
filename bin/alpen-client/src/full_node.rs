@@ -28,7 +28,7 @@ use crate::{
 };
 
 pub(crate) async fn run(
-    builder: WithLaunchContext<NodeBuilder<Arc<reth_db::DatabaseEnv>, ChainSpec>>,
+    builder: WithLaunchContext<NodeBuilder<reth_db::DatabaseEnv, ChainSpec>>,
     common: NodeBootstrap,
     config: &FullNodeConfig,
 ) -> eyre::Result<()> {

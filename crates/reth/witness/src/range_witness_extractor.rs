@@ -19,7 +19,7 @@ use alloy_primitives::{
 };
 use alpen_ee_common::AccessedStateStore;
 use eyre::{eyre, Result};
-use reth_primitives::Block;
+use reth_ethereum_primitives::Block;
 use reth_provider::{BlockReader, StateProvider, StateProviderFactory};
 use reth_revm::state::Bytecode;
 use reth_trie::{HashedPostState, MultiProofTargets, TrieInput};

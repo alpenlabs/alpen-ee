@@ -1,10 +1,11 @@
 use alloy_rpc_types::engine::{
     payload::ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV3,
-    ExecutionPayloadEnvelopeV5, ExecutionPayloadV1,
+    ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6, ExecutionPayloadV1,
 };
 use alpen_ee_params::{AlpenSpecId, EvmSpec, HeaderExtraError};
 use reth_chainspec::ChainSpec;
 use reth_ethereum_payload_builder::EthereumExecutionPayloadValidator;
+use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_node_api::{
     payload::PayloadTypes, validate_execution_requests, validate_version_specific_fields,
     AddOnsContext, BuiltPayload, EngineApiMessageVersion, EngineApiValidator,
@@ -12,12 +13,12 @@ use reth_node_api::{
     PayloadOrAttributes, PayloadValidator,
 };
 use reth_node_builder::rpc::PayloadValidatorBuilder;
-use reth_primitives::{Block, EthPrimitives, NodePrimitives, RecoveredBlock, SealedBlock};
+use reth_primitives_traits::{NodePrimitives, SealedBlock};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     evm_config::{payload_spec_version, version_indexed, AlpenEvmConfig},
-    payload::{AlpenBuiltPayload, AlpenExecutionPayloadEnvelopeV4, AlpenPayloadBuilderAttributes},
+    payload::{AlpenBuiltPayload, AlpenExecutionPayloadEnvelopeV4},
     AlpenExecutionPayloadEnvelopeV2, AlpenPayloadAttributes,
 };
 
@@ -30,7 +31,6 @@ impl PayloadTypes for AlpenEngineTypes {
     type BuiltPayload = AlpenBuiltPayload;
     type ExecutionData = ExecutionData;
     type PayloadAttributes = AlpenPayloadAttributes;
-    type PayloadBuilderAttributes = AlpenPayloadBuilderAttributes;
 
     fn block_to_payload(
         block: SealedBlock<
@@ -49,6 +49,7 @@ impl EngineTypes for AlpenEngineTypes {
     type ExecutionPayloadEnvelopeV3 = ExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = AlpenExecutionPayloadEnvelopeV4;
     type ExecutionPayloadEnvelopeV5 = ExecutionPayloadEnvelopeV5;
+    type ExecutionPayloadEnvelopeV6 = ExecutionPayloadEnvelopeV6;
 }
 
 /// Strata engine validator, dispatching by the spec version each payload
@@ -86,23 +87,22 @@ impl AlpenEngineValidator {
     fn attributes_spec_version(
         attributes: &AlpenPayloadAttributes,
     ) -> Result<AlpenSpecId, HeaderExtraError> {
-        AlpenSpecId::try_from(attributes.spec_version).map_err(HeaderExtraError::UnknownVersion)
+        attributes.alpen_spec_version()
     }
 }
 
 impl PayloadValidator<AlpenEngineTypes> for AlpenEngineValidator {
     type Block = Block;
 
-    fn ensure_well_formed_payload(
+    fn convert_payload_to_block(
         &self,
         payload: ExecutionData,
-    ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
+    ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
         let spec_version = payload_spec_version(&payload).map_err(NewPayloadError::other)?;
         let inner = version_indexed(&self.inners, spec_version);
-        let sealed_block = inner.ensure_well_formed_payload(payload)?;
-        sealed_block
-            .try_recover()
-            .map_err(|e| NewPayloadError::Other(e.into()))
+        inner
+            .ensure_well_formed_payload(payload)
+            .map_err(Into::into)
     }
 }
 

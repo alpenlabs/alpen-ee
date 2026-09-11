@@ -52,7 +52,11 @@ pub(crate) async fn launch<P>(
     inputs: EeProverInputs<P>,
 ) -> eyre::Result<Arc<PaasBatchProver>>
 where
-    P: StateProviderFactory + BlockReader<Block = reth_primitives::Block> + Send + Sync + 'static,
+    P: StateProviderFactory
+        + BlockReader<Block = reth_ethereum_primitives::Block>
+        + Send
+        + Sync
+        + 'static,
 {
     let EeProverInputs {
         storage,

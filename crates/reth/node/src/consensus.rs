@@ -24,26 +24,23 @@ use alloy_consensus::BlockHeader as _;
 use alpen_ee_params::{header_spec_version, AlpenSpecId, EvmSpec, HeaderExtra, HeaderExtraError};
 use alpen_reth_evm::base_fee::expected_floored_base_fee;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
-use reth_consensus::{Consensus, FullConsensus, HeaderValidator};
+use reth_consensus::{Consensus, FullConsensus, HeaderValidator, ReceiptRootBloom};
 use reth_consensus_common::validation::{
     validate_against_parent_4844, validate_against_parent_gas_limit,
     validate_against_parent_hash_number, validate_against_parent_timestamp,
 };
 use reth_errors::ConsensusError;
-use reth_ethereum_primitives::BlockBody;
+use reth_ethereum_primitives::{Block, BlockBody, EthPrimitives, Receipt};
 use reth_evm::block::BlockExecutionResult;
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{components::ConsensusBuilder, BuilderContext};
 use reth_node_ethereum::consensus::EthBeaconConsensus;
-use reth_primitives::{
-    Block, EthPrimitives, Header, Receipt, RecoveredBlock, SealedBlock, SealedHeader,
-};
-use reth_primitives_traits::GotExpected;
+use reth_primitives_traits::{GotExpected, Header, RecoveredBlock, SealedBlock, SealedHeader};
 
 use crate::evm_config::version_indexed;
 
 fn consensus_error(err: HeaderExtraError) -> ConsensusError {
-    ConsensusError::Other(err.to_string())
+    ConsensusError::other(err)
 }
 
 /// Consensus rules of one spec version: standard Ethereum consensus, with the
@@ -121,13 +118,11 @@ impl HeaderValidator for FlooredConsensus {
 }
 
 impl Consensus<Block> for FlooredConsensus {
-    type Error = ConsensusError;
-
     fn validate_body_against_header(
         &self,
         body: &BlockBody,
         header: &SealedHeader,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), ConsensusError> {
         <EthBeaconConsensus<ChainSpec> as Consensus<Block>>::validate_body_against_header(
             &self.inner,
             body,
@@ -135,7 +130,10 @@ impl Consensus<Block> for FlooredConsensus {
         )
     }
 
-    fn validate_block_pre_execution(&self, block: &SealedBlock<Block>) -> Result<(), Self::Error> {
+    fn validate_block_pre_execution(
+        &self,
+        block: &SealedBlock<Block>,
+    ) -> Result<(), ConsensusError> {
         self.inner.validate_block_pre_execution(block)
     }
 }
@@ -145,11 +143,13 @@ impl FullConsensus<EthPrimitives> for FlooredConsensus {
         &self,
         block: &RecoveredBlock<Block>,
         result: &BlockExecutionResult<Receipt>,
+        receipt_root_bloom: Option<ReceiptRootBloom>,
     ) -> Result<(), ConsensusError> {
         <EthBeaconConsensus<ChainSpec> as FullConsensus<EthPrimitives>>::validate_block_post_execution(
             &self.inner,
             block,
             result,
+            receipt_root_bloom,
         )
     }
 }
@@ -210,7 +210,7 @@ impl HeaderValidator for AlpenConsensus {
         let version = header_spec_version(header.header()).map_err(consensus_error)?;
         let parent_version = header_spec_version(parent.header()).map_err(consensus_error)?;
         if version < parent_version {
-            return Err(ConsensusError::Other(format!(
+            return Err(ConsensusError::msg(format!(
                 "alpen spec version regressed from {parent_version:?} to {version:?}"
             )));
         }
@@ -219,18 +219,19 @@ impl HeaderValidator for AlpenConsensus {
 }
 
 impl Consensus<Block> for AlpenConsensus {
-    type Error = ConsensusError;
-
     fn validate_body_against_header(
         &self,
         body: &BlockBody,
         header: &SealedHeader,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), ConsensusError> {
         let inner = self.inner_for(header.header())?;
         Consensus::<Block>::validate_body_against_header(inner, body, header)
     }
 
-    fn validate_block_pre_execution(&self, block: &SealedBlock<Block>) -> Result<(), Self::Error> {
+    fn validate_block_pre_execution(
+        &self,
+        block: &SealedBlock<Block>,
+    ) -> Result<(), ConsensusError> {
         self.inner_for(block.header())?
             .validate_block_pre_execution(block)
     }
@@ -241,9 +242,15 @@ impl FullConsensus<EthPrimitives> for AlpenConsensus {
         &self,
         block: &RecoveredBlock<Block>,
         result: &BlockExecutionResult<Receipt>,
+        receipt_root_bloom: Option<ReceiptRootBloom>,
     ) -> Result<(), ConsensusError> {
         let inner = self.inner_for(block.header())?;
-        FullConsensus::<EthPrimitives>::validate_block_post_execution(inner, block, result)
+        FullConsensus::<EthPrimitives>::validate_block_post_execution(
+            inner,
+            block,
+            result,
+            receipt_root_bloom,
+        )
     }
 }
 
@@ -277,7 +284,7 @@ mod tests {
     use alpen_reth_evm::base_fee::BASE_FEE_FLOOR;
     use reth_consensus::HeaderValidator;
     use reth_errors::ConsensusError;
-    use reth_primitives::{Header, SealedHeader};
+    use reth_primitives_traits::{Header, SealedHeader};
 
     use super::AlpenConsensus;
 
@@ -308,7 +315,7 @@ mod tests {
             .validate_header_against_parent(&child, &parent)
             .expect_err("regressing from v1 to v0 is structurally invalid");
         assert!(
-            matches!(&err, ConsensusError::Other(msg) if msg.contains("regressed")),
+            matches!(&err, ConsensusError::Other(msg) if msg.to_string().contains("regressed")),
             "{err:?}"
         );
     }
@@ -322,7 +329,7 @@ mod tests {
             .validate_header(&header)
             .expect_err("v7 is past this binary's versions");
         assert!(
-            matches!(&err, ConsensusError::Other(msg) if msg.contains("no spec version")),
+            matches!(&err, ConsensusError::Other(msg) if msg.to_string().contains("no spec version")),
             "{err:?}"
         );
     }
@@ -340,7 +347,7 @@ mod tests {
             .validate_header(&header)
             .expect_err("trailing bytes violate v1's layout");
         assert!(
-            matches!(&err, ConsensusError::Other(msg) if msg.contains("layout")),
+            matches!(&err, ConsensusError::Other(msg) if msg.to_string().contains("layout")),
             "{err:?}"
         );
     }
@@ -378,9 +385,10 @@ mod tests {
                 ..Default::default()
             });
 
-            assert_eq!(
-                consensus.validate_header_against_parent(&child, &parent),
-                Ok(()),
+            assert!(
+                consensus
+                    .validate_header_against_parent(&child, &parent)
+                    .is_ok(),
                 "{version:?}"
             );
         }
@@ -393,7 +401,7 @@ mod tests {
         let consensus = test_consensus();
         let genesis = sealed_header(0, Bytes::from_static(b"SC"));
 
-        assert_eq!(consensus.validate_header(&genesis), Ok(()));
+        assert!(consensus.validate_header(&genesis).is_ok());
     }
 
     /// An existing chain must be able to cross into the stamped format: a
@@ -411,7 +419,7 @@ mod tests {
         });
 
         // legacy tip validates on its own
-        assert_eq!(consensus.validate_header(&legacy_parent), Ok(()));
+        assert!(consensus.validate_header(&legacy_parent).is_ok());
 
         // legacy -> legacy
         let legacy_child = SealedHeader::seal_slow(Header {
@@ -422,11 +430,10 @@ mod tests {
             extra_data: Default::default(),
             ..Default::default()
         });
-        assert_eq!(consensus.validate_header(&legacy_child), Ok(()));
-        assert_eq!(
-            consensus.validate_header_against_parent(&legacy_child, &legacy_parent),
-            Ok(())
-        );
+        assert!(consensus.validate_header(&legacy_child).is_ok());
+        assert!(consensus
+            .validate_header_against_parent(&legacy_child, &legacy_parent)
+            .is_ok());
 
         // legacy -> first stamped child (the activation boundary)
         for version in [AlpenSpecId::V0, AlpenSpecId::V1] {
@@ -438,14 +445,14 @@ mod tests {
                 extra_data: HeaderExtra::new(version, 0).encode().into(),
                 ..Default::default()
             });
-            assert_eq!(
-                consensus.validate_header(&stamped_child),
-                Ok(()),
+            assert!(
+                consensus.validate_header(&stamped_child).is_ok(),
                 "{version:?}"
             );
-            assert_eq!(
-                consensus.validate_header_against_parent(&stamped_child, &legacy_parent),
-                Ok(()),
+            assert!(
+                consensus
+                    .validate_header_against_parent(&stamped_child, &legacy_parent)
+                    .is_ok(),
                 "{version:?}"
             );
         }

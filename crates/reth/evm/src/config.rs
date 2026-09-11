@@ -43,29 +43,26 @@ use std::sync::Arc;
 
 use alloy_consensus::{
     proofs::{self, calculate_receipt_root},
-    Block, BlockBody, BlockHeader, Header, TxReceipt, EMPTY_OMMER_ROOT_HASH,
+    Block, BlockBody, BlockHeader, Header, Transaction as _, TransactionEnvelope, TxReceipt,
+    EMPTY_OMMER_ROOT_HASH,
 };
-use alloy_eips::{eip7840::BlobParams, merge::BEACON_NONCE, Encodable2718};
+use alloy_eips::{eip4895::Withdrawals, eip7840::BlobParams, merge::BEACON_NONCE, Encodable2718};
 use alloy_rpc_types_engine::ExecutionData;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     block::{
-        BlockExecutionResult, BlockExecutor, BlockExecutorFactory, BlockExecutorFor, ExecutableTx,
-        OnStateHook,
+        BlockExecutionResult, BlockExecutor, BlockExecutorFactory, ExecutableTx, GasOutput,
+        OnStateHook, StateDB,
     },
-    eth::EthBlockExecutionCtx,
+    eth::{EthBlockExecutionCtx, EthTxResult},
     execute::{BlockAssembler, BlockAssemblerInput, BlockExecutionError},
-    ConfigureEngineEvm, ConfigureEvm, Database, Evm, EvmEnvFor, EvmFactory, ExecutableTxIterator,
-    ExecutionCtxFor, NextBlockEnvAttributes,
+    ConfigureEngineEvm, ConfigureEvm, Evm, EvmEnvFor, EvmFactory, ExecutableTxIterator,
+    ExecutionCtxFor, NextBlockEnvAttributes, RecoveredTx,
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{logs_bloom, SealedBlock, SealedHeader, SignedTransaction};
-use revm::{
-    context::{result::ResultAndState, Block as _},
-    database::State,
-    Inspector,
-};
+use revm::{context::Block as _, Inspector};
 use revm_primitives::{Bytes, U256};
 
 use crate::{da_fee::da_rate_from_extra_data, evm::AlpenEvmFactory};
@@ -124,6 +121,9 @@ impl BlockExecutorFactory for AlpenBlockExecutorFactory {
     type ExecutionCtx<'a> = AlpenBlockExecutionCtx<'a>;
     type Transaction = <InnerBef as BlockExecutorFactory>::Transaction;
     type Receipt = <InnerBef as BlockExecutorFactory>::Receipt;
+    type TxExecutionResult = <InnerBef as BlockExecutorFactory>::TxExecutionResult;
+    type Executor<'a, DB: StateDB, I: Inspector<<Self::EvmFactory as EvmFactory>::Context<DB>>> =
+        AlpenBlockExecutor<<InnerBef as BlockExecutorFactory>::Executor<'a, DB, I>>;
 
     fn evm_factory(&self) -> &Self::EvmFactory {
         self.inner.evm_factory()
@@ -131,12 +131,12 @@ impl BlockExecutorFactory for AlpenBlockExecutorFactory {
 
     fn create_executor<'a, DB, I>(
         &'a self,
-        mut evm: <Self::EvmFactory as EvmFactory>::Evm<&'a mut State<DB>, I>,
+        mut evm: <Self::EvmFactory as EvmFactory>::Evm<DB, I>,
         ctx: Self::ExecutionCtx<'a>,
-    ) -> impl BlockExecutorFor<'a, Self, DB, I>
+    ) -> Self::Executor<'a, DB, I>
     where
-        DB: Database + 'a,
-        I: Inspector<<Self::EvmFactory as EvmFactory>::Context<&'a mut State<DB>>> + 'a,
+        DB: StateDB,
+        I: Inspector<<Self::EvmFactory as EvmFactory>::Context<DB>>,
     {
         // The one chokepoint: every block execution path reaches `create_executor`, so the
         // committed rate is applied here regardless of how the EVM was created.
@@ -173,13 +173,18 @@ pub struct AlpenBlockExecutor<E> {
     inner: E,
 }
 
-impl<E> BlockExecutor for AlpenBlockExecutor<E>
+impl<E, H, T> BlockExecutor for AlpenBlockExecutor<E>
 where
-    E: BlockExecutor<Transaction: SignedTransaction>,
+    E: BlockExecutor<Result = EthTxResult<H, T>>,
+    E::Transaction: SignedTransaction + TransactionEnvelope<TxType = T>,
+    E::Evm: Evm<HaltReason = H>,
+    H: Send + 'static,
+    T: Send + 'static,
 {
     type Transaction = E::Transaction;
     type Receipt = E::Receipt;
     type Evm = E::Evm;
+    type Result = E::Result;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         self.inner.apply_pre_execution_changes()
@@ -188,21 +193,26 @@ where
     fn execute_transaction_without_commit(
         &mut self,
         tx: impl ExecutableTx<Self>,
-    ) -> Result<ResultAndState<<Self::Evm as Evm>::HaltReason>, BlockExecutionError> {
+    ) -> Result<Self::Result, BlockExecutionError> {
         // Mirror `EthBlockExecutor` minus the `gas_limit <= available` check.
-        let hash = tx.tx().trie_hash();
-        self.inner
-            .evm_mut()
-            .transact(&tx)
-            .map_err(|err| BlockExecutionError::evm(err, hash))
+        let (tx_env, tx) = tx.into_parts();
+        let result = self.inner.evm_mut().transact(tx_env).map_err(|err| {
+            let hash = tx.tx().trie_hash();
+            BlockExecutionError::evm(err, hash)
+        })?;
+        Ok(EthTxResult {
+            result,
+            blob_gas_used: tx.tx().blob_gas_used().unwrap_or_default(),
+            tx_type: tx.tx().tx_type(),
+        })
     }
 
-    fn commit_transaction(
-        &mut self,
-        output: ResultAndState<<Self::Evm as Evm>::HaltReason>,
-        tx: impl ExecutableTx<Self>,
-    ) -> Result<u64, BlockExecutionError> {
-        self.inner.commit_transaction(output, tx)
+    fn commit_transaction(&mut self, output: Self::Result) -> GasOutput {
+        self.inner.commit_transaction(output)
+    }
+
+    fn receipts(&self) -> &[Self::Receipt] {
+        self.inner.receipts()
     }
 
     fn finish(
@@ -267,7 +277,7 @@ impl BlockAssembler<AlpenBlockExecutorFactory> for AlpenBlockAssembler {
 
         let withdrawals = chain_spec
             .is_shanghai_active_at_timestamp(timestamp)
-            .then(|| ctx.withdrawals.map(|w| w.into_owned()).unwrap_or_default());
+            .then(|| Withdrawals::new(ctx.withdrawals.map(|w| w.into_owned()).unwrap_or_default()));
 
         let withdrawals_root = withdrawals
             .as_deref()
@@ -310,11 +320,13 @@ impl BlockAssembler<AlpenBlockExecutorFactory> for AlpenBlockAssembler {
             gas_limit: evm_env.block_env.gas_limit(),
             difficulty: evm_env.block_env.difficulty(),
             gas_used: output.gas_used,
-            extra_data: self.inner.extra_data.clone(),
+            extra_data: ctx.extra_data,
             parent_beacon_block_root: ctx.parent_beacon_block_root,
             blob_gas_used: block_blob_gas_used,
             excess_blob_gas,
             requests_hash,
+            block_access_list_hash: None,
+            slot_number: None,
         };
 
         Ok(Block {
@@ -356,17 +368,6 @@ impl AlpenEvmConfig {
             inner,
             pending_da_rate: U256::ZERO,
         }
-    }
-
-    /// Sets the `extra_data` stamped into blocks assembled by this config.
-    ///
-    /// Unused by the Alpen payload builder: the version-aware assembler
-    /// (`alpen-reth-node`'s `AlpenBlockAssembler`) stamps `extra_data` per block instead,
-    /// deriving both the spec version and the DA rate from the execution context that ran
-    /// the block. Setting a static value here would be overwritten by that stamp.
-    pub fn with_extra_data(mut self, extra_data: Bytes) -> Self {
-        self.block_assembler.inner.extra_data = extra_data;
-        self
     }
 
     /// Sets the DA rate (wei per byte) applied when building the next block.

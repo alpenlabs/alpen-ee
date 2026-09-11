@@ -15,7 +15,7 @@ mod schnorr;
     missing_debug_implementations,
     reason = "Precompiles struct contains static precompiles that don't need debug implementation"
 )]
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct AlpenEvmPrecompiles {
     pub inner: EthPrecompiles,
 }

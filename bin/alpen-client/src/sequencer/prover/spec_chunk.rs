@@ -15,7 +15,7 @@ use alpen_ee_common::{
 use alpen_ee_database::EeNodeStorage;
 use alpen_reth_node::BlockWitnessRecord;
 use async_trait::async_trait;
-use reth_primitives::Block;
+use reth_ethereum_primitives::Block;
 use reth_primitives_traits::Block as _;
 use strata_acct_types::Hash;
 use strata_codec::encode_to_vec;

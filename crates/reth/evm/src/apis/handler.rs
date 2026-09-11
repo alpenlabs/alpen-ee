@@ -6,7 +6,8 @@ use std::sync::{
 
 use revm::{
     context::{
-        result::{EVMError, ExecutionResult, HaltReason, InvalidTransaction},
+        journaled_state::account::JournaledAccountTr,
+        result::{EVMError, ExecutionResult, HaltReason, InvalidTransaction, ResultGas},
         Block, ContextTr, JournalTr, Transaction,
     },
     handler::{
@@ -93,7 +94,9 @@ where
         let effective_gas_price = tx.effective_gas_price(basefee);
 
         let gas = exec_result.gas();
-        let gas_used = (gas.spent() - gas.refunded() as u64) as u128;
+        // Reservoir gas (EIP-8037) is unused and reimbursed to the caller, so it is excluded
+        // from the gas the beneficiary is paid for, as in revm's mainnet handler.
+        let gas_used = gas.used().saturating_sub(gas.reservoir()) as u128;
 
         // Credit all gas fees to the beneficiary (base fee + priority fee). Multiply in
         // U256: both operands are u128, so `effective_gas_price * gas_used` can exceed
@@ -117,6 +120,7 @@ where
         &mut self,
         evm: &mut Self::Evm,
         result: FrameResult,
+        result_gas: ResultGas,
     ) -> Result<ExecutionResult<Self::HaltReason>, Self::Error> {
         if self.da_rate != U256::ZERO {
             let context = evm.ctx();
@@ -129,9 +133,12 @@ where
             if effective_gas_price != 0 {
                 let gas = result.gas();
                 // Value of the gas budget the caller authorized but did not consume — it
-                // was just refunded to the caller, so a DA fee bounded by it is always
-                // covered and never over-charges what the signature authorized.
-                let remaining_gas = (gas.remaining() as u128) + (gas.refunded() as u128);
+                // was just refunded to the caller (`reimburse_caller`: remaining + reservoir
+                // + refunded), so a DA fee bounded by it is always covered and never
+                // over-charges what the signature authorized.
+                let remaining_gas = (gas.remaining() as u128)
+                    + (gas.reservoir() as u128)
+                    + (gas.refunded() as u128);
                 let remaining_value = U256::from(remaining_gas) * U256::from(effective_gas_price);
                 let diff_size = calc_diff_size(context.evm_state());
                 let uncapped_da_fee = self.da_rate.saturating_mul(U256::from(diff_size));
@@ -166,7 +173,7 @@ where
         }
 
         MainnetHandler::<EVM, Self::Error, <EVM as EvmTr>::Frame>::default()
-            .execution_result(evm, result)
+            .execution_result(evm, result, result_gas)
     }
 
     fn validate_env(&self, evm: &mut Self::Evm) -> Result<(), Self::Error> {

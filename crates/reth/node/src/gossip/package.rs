@@ -10,7 +10,7 @@ use alloy_primitives::{
 };
 use alloy_rlp::{Decodable, Encodable};
 use eyre::{ensure, eyre, Result};
-use reth_primitives::Header;
+use reth_primitives_traits::Header;
 use strata_primitives::{
     buf::Buf64,
     crypto::{sign_schnorr_sig, verify_schnorr_sig},

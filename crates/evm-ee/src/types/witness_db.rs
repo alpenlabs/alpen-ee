@@ -101,6 +101,7 @@ impl<'a> DatabaseRef for WitnessDB<'a> {
             balance: account_in_trie.balance,
             nonce: account_in_trie.nonce,
             code_hash: account_in_trie.code_hash,
+            account_id: None,
             code: None,
         });
 

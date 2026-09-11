@@ -210,7 +210,7 @@ async fn init_boot_state(
 /// the engine-control task starts from — so both must happen before the reth
 /// node is built.
 pub(crate) async fn run(
-    builder: WithLaunchContext<NodeBuilder<Arc<reth_db::DatabaseEnv>, ChainSpec>>,
+    builder: WithLaunchContext<NodeBuilder<reth_db::DatabaseEnv, ChainSpec>>,
     common: NodeBootstrap,
     mode: &SequencerMode,
     privkey: Buf32,
@@ -401,8 +401,8 @@ async fn start_services<N>(
 where
     N: NodeTypesWithDB + ProviderNodeTypes,
     BlockchainProvider<N>: StateProviderFactory
-        + BlockReader<Block = reth_primitives::Block>
-        + HeaderProvider<Header = reth_primitives::Header>
+        + BlockReader<Block = reth_ethereum_primitives::Block>
+        + HeaderProvider<Header = reth_primitives_traits::Header>
         + Clone
         + Send
         + Sync
@@ -569,7 +569,7 @@ where
         status_watcher,
     );
 
-    task_executor.spawn_critical(
+    task_executor.spawn_critical_task(
         "ol_chain_tracker",
         ol_chain_tracker_task.instrument(info_span!("ol_chain_tracker", component = "alpen")),
     );
@@ -579,7 +579,7 @@ where
     // payload is returned, so the block builder runs no separate
     // witness step. The chunk prover's `ChunkSpec::fetch_input`
     // assembles a chunk proof input from those per-block records.
-    task_executor.spawn_critical(
+    task_executor.spawn_critical_task(
         "block_assembly",
         block_builder_task(
             block_builder_config,
@@ -618,15 +618,15 @@ where
     .await
     .map_err(|e| eyre::eyre!("failed to launch chunk builder service: {e}"))?;
 
-    task_executor.spawn_critical(
+    task_executor.spawn_critical_task(
         "ee_batch_builder",
         batch_builder_task.instrument(info_span!("ee_batch_builder", component = "alpen")),
     );
-    task_executor.spawn_critical(
+    task_executor.spawn_critical_task(
         "ee_batch_lifecycle",
         batch_lifecycle_task.instrument(info_span!("ee_batch_lifecycle", component = "alpen")),
     );
-    task_executor.spawn_critical(
+    task_executor.spawn_critical_task(
         "ee_update_submitter",
         update_submitter_task.instrument(info_span!("ee_update_submitter", component = "alpen")),
     );

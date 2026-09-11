@@ -9,13 +9,12 @@ use alloy_consensus::Block as AlloyBlock;
 use alpen_reth_evm::{config::AlpenEvmConfig, evm::AlpenEvmFactory, extract_withdrawal_intents};
 use reth_chainspec::ChainSpec;
 use reth_consensus_common::validation::validate_body_against_header;
+use reth_ethereum_primitives::{EthPrimitives, Receipt as EthereumReceipt, TransactionSigned};
 use reth_evm::{
     ConfigureEvm,
     execute::{BasicBlockExecutor, BlockExecutionOutput, Executor},
 };
-use reth_primitives::{
-    EthPrimitives, Receipt as EthereumReceipt, RecoveredBlock, TransactionSigned,
-};
+use reth_primitives_traits::RecoveredBlock;
 use revm::database::WrapDatabaseRef;
 use rsp_client_executor::BlockValidator;
 use strata_acct_types::{BRIDGE_GATEWAY_ACCT_ID, BitcoinAmount, MsgPayload};

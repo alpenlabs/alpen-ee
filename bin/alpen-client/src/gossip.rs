@@ -7,7 +7,7 @@ use alpen_reth_node::{
     AlpenGossipCommand, AlpenGossipEvent, AlpenGossipMessage, AlpenGossipPackage,
 };
 use reth_network_api::PeerId;
-use reth_primitives::Header;
+use reth_primitives_traits::Header;
 use reth_provider::CanonStateNotification;
 use strata_acct_types::Hash;
 use strata_primitives::buf::Buf32;

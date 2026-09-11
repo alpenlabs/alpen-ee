@@ -2,8 +2,8 @@
 
 use alloy_consensus::{TxReceipt, proofs::calculate_receipt_root};
 use alpen_reth_evm::accumulate_logs_bloom;
+use reth_ethereum_primitives::Receipt as EthereumReceipt;
 use reth_evm::execute::BlockExecutionOutput;
-use reth_primitives::Receipt as EthereumReceipt;
 use revm_primitives::alloy_primitives::{B256, Bloom};
 
 use crate::types::EvmHeaderIntrinsics;

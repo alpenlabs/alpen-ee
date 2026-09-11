@@ -4,6 +4,7 @@ use alpen_ee_params::EvmSpec;
 use alpen_reth_evm::evm::AlpenEvmFactory;
 use alpen_reth_rpc::{eth::AlpenEthApiBuilder, SequencerClient};
 use reth_chainspec::ChainSpec;
+use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes};
 use reth_node_api::{FullNodeComponents, NodeAddOns};
 use reth_node_builder::{
@@ -17,7 +18,6 @@ use reth_node_builder::{
     Node, NodeAdapter, NodeComponentsBuilder,
 };
 use reth_node_ethereum::node::EthereumNetworkBuilder;
-use reth_primitives::EthPrimitives;
 use reth_provider::EthStorage;
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use revm::context::TxEnv;
@@ -196,6 +196,7 @@ impl AlpenRethAddOnsBuilder {
                 AlpenEngineValidatorBuilder::default(),
                 BasicEngineApiBuilder::default(),
                 BasicEngineValidatorBuilder::default(),
+                Default::default(),
                 Default::default(),
             ),
         }
