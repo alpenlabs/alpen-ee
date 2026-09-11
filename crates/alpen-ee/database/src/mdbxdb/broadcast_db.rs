@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use alpen_db_store_mdbx::{DbError as MdbxError, MdbxEnv, Writer};
+use alpen_store_mdbx::{DbError as MdbxError, MdbxEnv, Writer};
 use strata_db_types::{
     common::L1TxId,
     errors::DbError,
@@ -454,7 +454,7 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
     };
 
-    use alpen_db_store_mdbx::MdbxConfig;
+    use alpen_store_mdbx::MdbxConfig;
     use strata_db_tests::l1_broadcast_db_tests;
 
     use super::*;

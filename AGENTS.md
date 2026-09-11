@@ -221,7 +221,7 @@ Bitcoin primitive types, header verification, and related helpers are provided t
 |-------|-------------|
 | `storage` | Storage managers and interfaces |
 | `storage-common` | Shared storage abstractions |
-| `db/store-mdbx` | MDBX storage implementation |
+| `store-mdbx` | MDBX storage implementation |
 | `db/types` | Database type definitions |
 | `state` | Chain and client state management |
 

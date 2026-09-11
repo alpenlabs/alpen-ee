@@ -11,7 +11,7 @@ workspace = true
 test-utils = []
 
 [dependencies]
-alpen-db-store-mdbx.workspace = true
+alpen-store-mdbx.workspace = true
 alpen-ee-common.workspace = true
 alpen-ee-params.workspace = true
 alpen-reth-db.workspace = true
