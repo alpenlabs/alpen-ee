@@ -43,6 +43,7 @@ class EeOLEnv(flexitest.EnvConfig):
         epoch_tracking_mode: str = "confirmed",
         batch_sealing_block_count: int = 10,
         prover: ProverBackend = NATIVE_BACKEND,
+        chunk_sealing_block_count: int | None = None,
     ):
         epoch_seal_config = (
             EpochSealingConfig.new_fixed_slot(seal_epoch_slots)
@@ -57,6 +58,7 @@ class EeOLEnv(flexitest.EnvConfig):
             mesh_bootnodes=mesh_bootnodes,
             batch_sealing_block_count=batch_sealing_block_count,
             prover=prover,
+            chunk_sealing_block_count=chunk_sealing_block_count,
             epoch_tracking_mode=epoch_tracking_mode,
         )
         self.strata_config = StrataEnvConfig(

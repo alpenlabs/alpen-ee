@@ -79,6 +79,7 @@ class AlpenClientFactory(flexitest.Factory):
         ol_submit_endpoint: str | None = None,
         ol_submit_token: str | None = None,
         batch_sealing_block_count: int = 100,
+        chunk_sealing_block_count: int | None = None,
         epoch_tracking_mode: str = "confirmed",
         bridge_denomination: int = 100_000_000,
         max_withdrawal_amount: int | None = 1_000_000_000,
@@ -159,6 +160,7 @@ class AlpenClientFactory(flexitest.Factory):
             beneficiary_address=beneficiary_address,
             blocktime_ms=DEFAULT_EE_BLOCK_TIME_MS,
             batch_sealing_block_count=batch_sealing_block_count,
+            chunk_sealing_block_count=chunk_sealing_block_count,
             prover=prover_config,
             l1_fee_policy=AlpenL1FeePolicyConfig(fee_policy="fixed", fixed_fee_rate=1.0),
         )
