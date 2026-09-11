@@ -134,12 +134,17 @@ impl<'a> DatabaseRef for WitnessDB<'a> {
             }
         };
 
-        // Get the storage trie for this account
+        // Fail rather than panic. A missing trie says the witness is
+        // incomplete, which is a fact about the input, not a bug here.
         let storage_trie = self
             .ethereum_state
             .storage_tries
             .get(hashed_address.as_slice())
-            .expect("A storage trie must be provided for each account");
+            .ok_or_else(|| {
+                ProviderError::TrieWitnessError(format!(
+                    "missing storage trie for account {address}"
+                ))
+            })?;
 
         // Check if storage key hash is cached, otherwise compute and cache it
         let hashed_index = {
@@ -164,7 +169,14 @@ impl<'a> DatabaseRef for WitnessDB<'a> {
     }
 
     fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
-        // Look up block hash by number - return a copy (B256 is Copy)
-        Ok(self.block_hashes.get(&number).copied().unwrap_or_default())
+        // Fail rather than defaulting to zero. The EVM only asks for numbers
+        // it is prepared to use (revm returns zero for out-of-range ones
+        // without consulting the database), so a missing entry means the
+        // witness is incomplete -- and defaulting would let whoever built it
+        // choose zero over the real hash by leaving the header out.
+        self.block_hashes
+            .get(&number)
+            .copied()
+            .ok_or(ProviderError::HeaderNotFound(number.into()))
     }
 }

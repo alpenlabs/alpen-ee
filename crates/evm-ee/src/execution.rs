@@ -28,7 +28,7 @@ use strata_msg_fmt::{Msg as MsgTrait, OwnedMsg};
 use strata_ol_msg_types::{DEFAULT_OPERATOR_FEE, WITHDRAWAL_MSG_TYPE_ID, WithdrawalMsgData};
 
 use crate::{
-    types::{EvmBlock, EvmBlockOutput, EvmPartialState, EvmWriteBatch},
+    types::{EvmBlock, EvmBlockOutput, EvmHeaderIntrinsics, EvmPartialState, EvmWriteBatch},
     utils::{build_and_recover_block, compute_hashed_post_state, validate_deposits_against_block},
 };
 
@@ -71,6 +71,37 @@ fn convert_withdrawal_intents_to_messages(
         let message = OutputMessage::new(BRIDGE_GATEWAY_ACCT_ID, payload);
         outputs.add_message(message);
     }
+}
+
+/// Checks that the witness's `BLOCKHASH` ancestors belong to the chain the
+/// block being executed builds on.
+///
+/// [`EvmPartialState`] checks that its ancestors are contiguous and link to
+/// each other, but that only makes the set self-consistent: a fabricated chain
+/// satisfies it just as well as the real one. Pinning the newest ancestor to
+/// this block's parent hash anchors the whole set, because the linkage check
+/// carries the binding down the rest of it.
+fn validate_ancestors_against_block(
+    pre_state: &EvmPartialState,
+    header_intrinsics: &EvmHeaderIntrinsics,
+) -> EnvResult<()> {
+    let parent_number = header_intrinsics
+        .number()
+        .checked_sub(1)
+        .ok_or(EnvError::InvalidBlock)?;
+
+    // The witness always carries the parent, since a block's ancestor range
+    // ends there even when it never uses `BLOCKHASH`.
+    let parent_hash = pre_state
+        .block_hashes()
+        .get(&parent_number)
+        .ok_or(EnvError::InvalidBlock)?;
+
+    if *parent_hash != header_intrinsics.parent_hash() {
+        return Err(EnvError::InvalidBlock);
+    }
+
+    Ok(())
 }
 
 impl EvmExecutionEnvironment {
@@ -134,6 +165,9 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
         // The full block header is checked separately by `verify_outputs_against_header`.
         self.validate_execution_inputs(&block, inputs)?;
 
+        // Step 2b: Anchor the `BLOCKHASH` ancestors to this block.
+        validate_ancestors_against_block(pre_state, exec_payload.header_intrinsics())?;
+
         // Step 3: Execute the block.
         let execution_output = self.execute_recovered_block(&block, pre_state)?;
 
@@ -191,10 +225,7 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
         state: &mut Self::PartialState,
         wb: &Self::WriteBatch,
     ) -> EnvResult<()> {
-        // Merge the HashedPostState into the EthereumState
-        state.merge_write_batch(wb);
-
-        Ok(())
+        state.merge_write_batch(wb)
     }
 
     fn update_partial_state_after_block(
@@ -211,7 +242,7 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
 mod tests {
     use std::{collections::BTreeMap, fs, path::PathBuf};
 
-    use alloy_consensus::Sealable;
+    use alloy_consensus::{Header, Sealable};
     use reth_primitives_traits::Block as RethBlockTrait;
     use revm::{DatabaseRef, state::Bytecode};
     use revm_primitives::{B256, alloy_primitives::Bloom};
@@ -302,12 +333,13 @@ mod tests {
             test_data.witness.ancestor_headers,
         );
 
-        assert_eq!(
+        // The block has not been executed yet, so its hash is not in the
+        // witness. Looking it up fails rather than defaulting to zero.
+        assert!(
             state
                 .create_witness_db()
                 .block_hash_ref(header.number)
-                .expect("block hash lookup must succeed"),
-            B256::ZERO
+                .is_err()
         );
 
         env.update_partial_state_after_block(&mut state, &evm_header)
@@ -319,6 +351,63 @@ mod tests {
                 .block_hash_ref(header.number)
                 .expect("block hash lookup must succeed"),
             header.seal_slow().hash()
+        );
+    }
+
+    /// A fabricated ancestor chain is internally consistent, so the linkage
+    /// check alone accepts it. It must still be rejected, because these hashes
+    /// are what `BLOCKHASH` returns.
+    #[test]
+    fn execute_block_body_rejects_ancestors_from_another_chain() {
+        #[derive(Deserialize, Debug)]
+        struct TestData {
+            witness: EthClientExecutorInput,
+        }
+
+        let test_data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("test-utils/data/evm_ee/witness_params.json");
+
+        let json_content = fs::read_to_string(&test_data_path)
+            .expect("Failed to read witness_params.json from test-utils/data/evm_ee");
+
+        let test_data: TestData =
+            serde_json::from_str(&json_content).expect("Failed to parse test data");
+
+        let chain_spec: Arc<ChainSpec> = Arc::new((&test_data.witness.genesis).try_into().unwrap());
+        let env = EvmExecutionEnvironment::new(chain_spec, AlpenEvmFactory::default());
+
+        // Same block numbers, different content, relinked so the chain still
+        // hangs together on its own terms.
+        let mut fabricated: Vec<Header> = Vec::new();
+        for (idx, ancestor) in test_data.witness.ancestor_headers.iter().enumerate() {
+            let mut header = ancestor.clone();
+            header.timestamp += 1;
+            if idx > 0 {
+                header.parent_hash = fabricated[idx - 1].clone().seal_slow().hash();
+            }
+            fabricated.push(header);
+        }
+
+        let pre_state = EvmPartialState::new(
+            test_data.witness.parent_state,
+            rehashed_fixture_bytecodes(test_data.witness.bytecodes),
+            fabricated,
+        );
+
+        let evm_header = EvmHeader::new(test_data.witness.current_block.header().clone());
+        let evm_body =
+            EvmBlockBody::from_alloy_body(test_data.witness.current_block.body().clone());
+        let block = EvmBlock::new(evm_header, evm_body);
+
+        let intrinsics = block.get_header().get_intrinsics();
+        let exec_payload = ExecPayload::new(&intrinsics, block.get_body());
+
+        let result = env.execute_block_body(&pre_state, &exec_payload, &ExecInputs::new_empty());
+        assert!(
+            result.is_err(),
+            "ancestors that do not link to the executed block must be rejected"
         );
     }
 
