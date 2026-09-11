@@ -10,7 +10,7 @@ from pathlib import Path
 
 import flexitest
 
-from common.alpen_params import DEFAULT_BASE_FEE_FLOOR, compose_alpen_params
+from common.alpen_params import DEFAULT_BASE_FEE_FLOOR, EEST_CHAIN, compose_alpen_params
 from common.config import (
     AlpenClientConfig,
     AlpenFullNodeConfig,
@@ -189,7 +189,10 @@ class AlpenClientFactory(flexitest.Factory):
         alpen_params_path = compose_alpen_params(
             datadir,
             ee_params_path,
-            chain=custom_chain,
+            # The isolated EEST engine must expose the canonical EIP-4788 and
+            # EIP-2935 system contracts. Keep that test-only allocation out of
+            # every regular functional-test chain specification.
+            chain=EEST_CHAIN if eest_fixture_mode else custom_chain,
             bridge_denomination=bridge_denomination,
             max_withdrawal_amount=max_withdrawal_amount,
             da_magic_bytes=da_config.magic_bytes.decode("ascii"),
