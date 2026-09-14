@@ -29,7 +29,8 @@ pub(crate) async fn run(
         AlpenNodeMode::sequencer(),
         Arc::new(AtomicU64::new(0)),
         params.base_fee_floor(),
-    );
+    )
+    .with_eest_fixture_mode();
 
     let handle = builder
         .node(node)

@@ -59,6 +59,9 @@ pub struct AlpenEngineValidator {
     /// Payload validator of each known [`AlpenSpecId`], indexed by
     /// discriminant.
     inners: Vec<EthereumExecutionPayloadValidator<ChainSpec>>,
+    /// Whether payloads carry canonical Ethereum `extra_data` instead of an
+    /// Alpen version stamp.
+    eest_fixture_mode: bool,
 }
 
 impl AlpenEngineValidator {
@@ -72,6 +75,24 @@ impl AlpenEngineValidator {
                 .cloned()
                 .map(EthereumExecutionPayloadValidator::new)
                 .collect(),
+            eest_fixture_mode: false,
+        }
+    }
+
+    /// Uses V0 for canonical EEST payloads while preserving their headers.
+    pub fn with_eest_fixture_mode(mut self) -> Self {
+        self.eest_fixture_mode = true;
+        self
+    }
+
+    fn payload_spec_version(
+        &self,
+        payload: &ExecutionData,
+    ) -> Result<AlpenSpecId, HeaderExtraError> {
+        if self.eest_fixture_mode {
+            Ok(AlpenSpecId::V0)
+        } else {
+            payload_spec_version(payload)
         }
     }
 
@@ -97,7 +118,9 @@ impl PayloadValidator<AlpenEngineTypes> for AlpenEngineValidator {
         &self,
         payload: ExecutionData,
     ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
-        let spec_version = payload_spec_version(&payload).map_err(NewPayloadError::other)?;
+        let spec_version = self
+            .payload_spec_version(&payload)
+            .map_err(NewPayloadError::other)?;
         let inner = version_indexed(&self.inners, spec_version);
         let sealed_block = inner.ensure_well_formed_payload(payload)?;
         sealed_block
@@ -118,7 +141,7 @@ impl EngineApiValidator<AlpenEngineTypes> for AlpenEngineValidator {
             .transpose()?;
 
         let spec_version = match &payload_or_attrs {
-            PayloadOrAttributes::ExecutionPayload(payload) => payload_spec_version(payload),
+            PayloadOrAttributes::ExecutionPayload(payload) => self.payload_spec_version(payload),
             PayloadOrAttributes::PayloadAttributes(attributes) => {
                 Self::attributes_spec_version(attributes)
             }
@@ -176,6 +199,12 @@ where
     type Validator = AlpenEngineValidator;
 
     async fn build(self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
-        Ok(AlpenEngineValidator::new(ctx.node.evm_config().evm_spec()))
+        let evm_config = ctx.node.evm_config();
+        let validator = AlpenEngineValidator::new(evm_config.evm_spec());
+        Ok(if evm_config.is_eest_fixture_mode() {
+            validator.with_eest_fixture_mode()
+        } else {
+            validator
+        })
     }
 }

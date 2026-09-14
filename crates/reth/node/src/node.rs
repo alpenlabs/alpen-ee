@@ -91,6 +91,8 @@ pub struct AlpenEthereumNode {
     live_da_rate: Arc<AtomicU64>,
     /// Minimum EIP-1559 base fee from the chain params artifact.
     base_fee_floor: u64,
+    /// Whether this is the isolated canonical EEST fixture process.
+    eest_fixture_mode: bool,
 }
 
 impl AlpenEthereumNode {
@@ -107,7 +109,17 @@ impl AlpenEthereumNode {
             mode,
             live_da_rate,
             base_fee_floor,
+            eest_fixture_mode: false,
         }
+    }
+
+    /// Configures this node as the isolated canonical EEST fixture process.
+    ///
+    /// The mode retains standard Ethereum `extra_data` in imported fixtures
+    /// and must never be enabled by production startup paths.
+    pub fn with_eest_fixture_mode(mut self) -> Self {
+        self.eest_fixture_mode = true;
+        self
     }
 }
 
@@ -145,13 +157,23 @@ where
     >;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
+        let executor = AlpenExecutorBuilder::new(self.evm_factory.clone(), self.evm_spec.clone());
+        let consensus = AlpenConsensusBuilder::new(self.evm_spec.clone(), self.base_fee_floor);
+        let executor = if self.eest_fixture_mode {
+            executor.with_eest_fixture_mode()
+        } else {
+            executor
+        };
+        let consensus = if self.eest_fixture_mode {
+            consensus.with_eest_fixture_mode()
+        } else {
+            consensus
+        };
+
         ComponentsBuilder::default()
             .node_types::<N>()
             .pool(AlpenEthereumPoolBuilder::default())
-            .executor(AlpenExecutorBuilder::new(
-                self.evm_factory.clone(),
-                self.evm_spec.clone(),
-            ))
+            .executor(executor)
             .payload(BasicPayloadServiceBuilder::new(
                 AlpenPayloadBuilderBuilder {
                     live_da_rate: self.live_da_rate.clone(),
@@ -159,10 +181,7 @@ where
                 },
             ))
             .network(EthereumNetworkBuilder::default())
-            .consensus(AlpenConsensusBuilder::new(
-                self.evm_spec.clone(),
-                self.base_fee_floor,
-            ))
+            .consensus(consensus)
     }
 
     fn add_ons(&self) -> Self::AddOns {

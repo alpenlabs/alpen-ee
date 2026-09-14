@@ -73,6 +73,13 @@ pub struct AlpenEvmConfig {
     configs: Vec<VersionedEvmConfig>,
     executor_factory: AlpenBlockExecutorFactory,
     assembler: AlpenBlockAssembler,
+    /// Whether incoming headers use standard Ethereum `extra_data` semantics.
+    ///
+    /// This is enabled only by the isolated EEST fixture process. Production
+    /// nodes resolve the Alpen spec version and DA rate from the versioned
+    /// header stamp; canonical Ethereum fixtures must instead preserve their
+    /// `extra_data` byte-for-byte because it is part of the block hash.
+    eest_fixture_mode: bool,
 }
 
 impl AlpenEvmConfig {
@@ -84,7 +91,7 @@ impl AlpenEvmConfig {
             .map(|spec| DaEvmConfig::new(spec.clone(), evm_factory.clone()))
             .collect();
 
-        Self::from_configs(evm_spec.clone(), configs)
+        Self::from_configs(evm_spec.clone(), configs, false)
     }
 
     /// Rebuilds the outer table's dispatchers over `configs`.
@@ -92,7 +99,11 @@ impl AlpenEvmConfig {
     /// The executor factory and assembler hold clones of the inner configs'
     /// own, so they must be re-derived whenever an inner config changes (see
     /// [`Self::with_pending_da_rate`]).
-    fn from_configs(evm_spec: EvmSpec, configs: Vec<VersionedEvmConfig>) -> Self {
+    fn from_configs(
+        evm_spec: EvmSpec,
+        configs: Vec<VersionedEvmConfig>,
+        eest_fixture_mode: bool,
+    ) -> Self {
         let executor_factory = AlpenBlockExecutorFactory {
             inners: configs
                 .iter()
@@ -111,12 +122,29 @@ impl AlpenEvmConfig {
             configs,
             executor_factory,
             assembler,
+            eest_fixture_mode,
         }
     }
 
     /// Returns the embedded EVM chain spec the table was derived from.
     pub fn evm_spec(&self) -> &EvmSpec {
         &self.evm_spec
+    }
+
+    /// Uses standard Ethereum header semantics for canonical EEST fixtures.
+    ///
+    /// In this mode arbitrary valid Ethereum `extra_data` is not interpreted
+    /// as an Alpen version stamp. Every fixture executes under V0 and an
+    /// undecodable DA-rate body contributes a zero DA charge. The hidden
+    /// `--eest-fixture-mode` launch path is the only caller.
+    pub fn with_eest_fixture_mode(mut self) -> Self {
+        self.eest_fixture_mode = true;
+        self
+    }
+
+    /// Returns whether this config is serving the isolated EEST fixture node.
+    pub(crate) fn is_eest_fixture_mode(&self) -> bool {
+        self.eest_fixture_mode
     }
 
     /// Sets the DA rate (wei per byte) applied when building the next block,
@@ -131,7 +159,7 @@ impl AlpenEvmConfig {
             .into_iter()
             .map(|config| config.with_pending_da_rate(da_rate))
             .collect();
-        Self::from_configs(self.evm_spec, configs)
+        Self::from_configs(self.evm_spec, configs, self.eest_fixture_mode)
     }
 
     /// Returns the inner EVM config governing `spec_version`.
@@ -147,7 +175,29 @@ impl AlpenEvmConfig {
         &self,
         header: &Header,
     ) -> Result<&VersionedEvmConfig, HeaderExtraError> {
-        Ok(self.config_for(header_spec_version(header)?))
+        Ok(self.config_for(self.spec_version_for_header(header)?))
+    }
+
+    /// Resolves the version governing a header under the active header mode.
+    fn spec_version_for_header(&self, header: &Header) -> Result<AlpenSpecId, HeaderExtraError> {
+        if self.eest_fixture_mode {
+            Ok(AlpenSpecId::V0)
+        } else {
+            header_spec_version(header)
+        }
+    }
+
+    /// Resolves the version governing an Engine payload under the active
+    /// header mode.
+    pub(crate) fn spec_version_for_payload(
+        &self,
+        payload: &ExecutionData,
+    ) -> Result<AlpenSpecId, HeaderExtraError> {
+        if self.eest_fixture_mode {
+            Ok(AlpenSpecId::V0)
+        } else {
+            payload_spec_version(payload)
+        }
     }
 
     /// Builds the execution context for the next block under an explicitly
@@ -312,7 +362,7 @@ impl ConfigureEvm for AlpenEvmConfig {
         &self,
         block: &'a SealedBlock<reth_primitives::Block>,
     ) -> Result<AlpenBlockExecutionCtx<'a>, Self::Error> {
-        let spec_version = header_spec_version(block.header())?;
+        let spec_version = self.spec_version_for_header(block.header())?;
         let config = self.config_for(spec_version);
         Ok(AlpenBlockExecutionCtx {
             inner: infallible(config.context_for_block(block)),
@@ -326,7 +376,7 @@ impl ConfigureEvm for AlpenEvmConfig {
         parent: &SealedHeader,
         attributes: Self::NextBlockEnvCtx,
     ) -> Result<AlpenBlockExecutionCtx<'_>, Self::Error> {
-        let spec_version = header_spec_version(parent.header())?;
+        let spec_version = self.spec_version_for_header(parent.header())?;
         let config = self.config_for(spec_version);
         Ok(AlpenBlockExecutionCtx {
             inner: infallible(config.context_for_next_block(parent, attributes)),
@@ -341,7 +391,7 @@ impl ConfigureEvm for AlpenEvmConfig {
 // payload's `extra_data`.
 impl ConfigureEngineEvm<ExecutionData> for AlpenEvmConfig {
     fn evm_env_for_payload(&self, payload: &ExecutionData) -> Result<EvmEnvFor<Self>, Self::Error> {
-        let config = self.config_for(payload_spec_version(payload)?);
+        let config = self.config_for(self.spec_version_for_payload(payload)?);
         Ok(infallible(config.evm_env_for_payload(payload)))
     }
 
@@ -349,7 +399,7 @@ impl ConfigureEngineEvm<ExecutionData> for AlpenEvmConfig {
         &self,
         payload: &'a ExecutionData,
     ) -> Result<AlpenBlockExecutionCtx<'a>, Self::Error> {
-        let spec_version = payload_spec_version(payload)?;
+        let spec_version = self.spec_version_for_payload(payload)?;
         let config = self.config_for(spec_version);
         Ok(AlpenBlockExecutionCtx {
             inner: infallible(config.context_for_payload(payload)),
@@ -486,6 +536,30 @@ mod tests {
             config.evm_env(&future),
             Err(HeaderExtraError::UnknownVersion(7))
         );
+    }
+
+    /// Canonical fixtures own the standard Ethereum `extra_data` field. The
+    /// isolated fixture mode must preserve those bytes and execute under V0
+    /// instead of trying to decode them as an Alpen stamp.
+    #[test]
+    fn eest_fixture_mode_accepts_standard_extra_data() {
+        let config = test_config().with_eest_fixture_mode();
+
+        for extra_data in [
+            Bytes::from_static(&[0x00]),
+            Bytes::from_static(b"ethereum-tests"),
+            Bytes::from(vec![0xFF; 32]),
+        ] {
+            let header = Header {
+                number: 1,
+                extra_data,
+                ..Default::default()
+            };
+            let env = config
+                .evm_env(&header)
+                .expect("standard fixture extra_data resolves through V0");
+            assert_eq!(env.cfg_env.spec, SpecId::PRAGUE);
+        }
     }
 
     /// The genesis header's operator-authored `extra_data` is never decoded;
