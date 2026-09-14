@@ -4,14 +4,15 @@
 //! backend (`sequencer.prover.backend`, native or sp1), builds every
 //! configured `[sequencer.prover.programs.<spec_version>]` entry into a
 //! launched [`ProverProgram`], keyed by that entry's spec version, and
-//! hard-fails unless the program matching the OL's expected `update_vk` is
-//! keyed under a version the chain has actually reached. Routing a given
-//! batch to the right resident program (by that batch's own governing spec
-//! version) is [`PaasBatchProver`]'s job, not this module's.
+//! hard-fails unless one of them derives the account predicate key the OL
+//! expects as its `update_vk`, warning when that match isn't the program
+//! governing current batches. Routing a given batch to the right resident
+//! program (by that batch's own governing spec version) is
+//! [`PaasBatchProver`]'s job, not this module's.
 
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc, time::Duration};
 
-use alpen_ee_common::{BatchStorage, ChunkStorage, ExecBlockStorage, SequencerOLClient};
+use alpen_ee_common::{BatchStorage, ChunkStorage, SequencerOLClient};
 use alpen_ee_params::{AlpenParams, AlpenSpecId};
 use eyre::Context;
 use k256::schnorr::SigningKey;
@@ -20,7 +21,7 @@ use strata_predicate::{PredicateKey, PredicateTypeId};
 use strata_primitives::buf::Buf32;
 use strata_proofimpl_alpen_acct::process_ee_acct_update;
 use strata_proofimpl_alpen_chunk::process_ee_chunk;
-use tracing::info;
+use tracing::{info, warn};
 #[cfg(feature = "sp1")]
 use zkaleido::ZkVmExecutor;
 use zkaleido_native_adapter::NativeHost;
@@ -57,10 +58,6 @@ pub(crate) struct EeProverStores {
     pub(crate) chunk_storage: Arc<dyn ChunkStorage>,
     pub(crate) batch_storage: Arc<dyn BatchStorage>,
     pub(crate) batch_proofs: Arc<EeBatchProofDbManager>,
-    /// Read once at startup to resolve which spec version the chain has
-    /// reached, so the live-`update_vk` check can be bound to it. Unlike the
-    /// others it is not handed on to [`PaasBatchProver`].
-    pub(crate) exec_blocks: Arc<dyn ExecBlockStorage>,
 }
 
 /// One resident candidate's built, not-yet-launched chunk + acct provers.
@@ -71,9 +68,8 @@ struct EeProvers {
 
 /// Picks a prover backend, builds every resident
 /// `[sequencer.prover.programs.<spec_version>]` entry into launched provers,
-/// and hard-fails unless the program whose derived account predicate key
-/// matches the OL's expected `update_vk` is keyed under a spec version the
-/// chain has reached.
+/// and hard-fails unless one of them derives the account predicate key the
+/// OL expects as its `update_vk`.
 pub(crate) async fn launch_validated_ee_batch_prover(
     ol_client: &(impl SequencerOLClient + Send + Sync),
     service_executor: &ServiceExecutor,
@@ -86,13 +82,13 @@ pub(crate) async fn launch_validated_ee_batch_prover(
         .get_latest_account_update_vk()
         .await
         .context("failed to fetch OL account update_vk for prover validation")?;
-    let reached_version = reached_spec_version(stores.exec_blocks.as_ref(), &params).await?;
+    let governing_version = governing_spec_version(stores.batch_storage.as_ref(), &params).await?;
     let provers = build_ee_provers(
         &builders,
         backend,
         params,
         &ol_account_update_vk,
-        reached_version,
+        governing_version,
     )
     .await?;
 
@@ -107,9 +103,9 @@ pub(crate) async fn launch_validated_ee_batch_prover(
 }
 
 /// Builds every configured program, keyed by the `AlpenSpecId` it is
-/// configured under, and hard-fails unless the program matching
-/// `ol_account_update_vk` is keyed under a version at or below
-/// `reached_version`.
+/// configured under, and hard-fails unless one of them matches
+/// `ol_account_update_vk`, warning when that match isn't the program keyed
+/// under `governing_version`.
 ///
 /// `backend` may carry several programs (see
 /// [`ProverProgramPaths`](crate::config::ProverProgramPaths)'s doc comment):
@@ -125,7 +121,7 @@ async fn build_ee_provers(
     backend: ProverBackendConfig,
     params: Arc<AlpenParams>,
     ol_account_update_vk: &PredicateKey,
-    reached_version: AlpenSpecId,
+    governing_version: AlpenSpecId,
 ) -> eyre::Result<BTreeMap<AlpenSpecId, EeProvers>> {
     let mut provers = BTreeMap::new();
     let mut matched_versions: Vec<AlpenSpecId> = Vec::new();
@@ -233,7 +229,7 @@ async fn build_ee_provers(
 
     validate_live_vk_match(
         &matched_versions,
-        reached_version,
+        governing_version,
         provers.len(),
         ol_account_update_vk,
     )?;
@@ -241,58 +237,55 @@ async fn build_ee_provers(
     Ok(provers)
 }
 
-/// Resolves the newest spec version the chain has actually reached: the one
-/// governing the block built after the finalized tip.
+/// Resolves the spec version governing the batches being proved right now:
+/// the one stamped on the most recently sealed batch, which is exactly what
+/// [`PaasBatchProver::program_for`] routes on.
 ///
-/// Finalized rather than head, because that is the tip OL has seen. The live
-/// `update_vk` only changes when the account update carrying a rotation is
-/// accepted on OL, which is the same event that finalizes the block that
-/// consumed it, so the finalized tip can never claim a version OL doesn't
-/// know about. A node with nothing finalized yet is at genesis, where the
-/// schedule names the version outright.
-async fn reached_spec_version(
-    exec_blocks: &dyn ExecBlockStorage,
+/// A node with no batch sealed yet is at genesis, where the schedule names
+/// the version outright.
+async fn governing_spec_version(
+    batch_storage: &dyn BatchStorage,
     params: &AlpenParams,
 ) -> eyre::Result<AlpenSpecId> {
-    let finalized = exec_blocks
-        .best_finalized_block()
+    let latest = batch_storage
+        .get_latest_batch()
         .await
-        .context("failed to read the finalized EE tip for prover validation")?;
+        .context("failed to read the latest batch for prover validation")?;
 
-    Ok(match finalized {
-        Some(record) => record.next_spec_version(),
+    Ok(match latest {
+        Some((batch, _status)) => batch.spec_version(),
         None => params.spec_schedule().active_at(0),
     })
 }
 
 /// Checks the resident programs against the OL's live `update_vk`.
 ///
-/// The program whose derived account predicate key equals the live
-/// `update_vk` is the one OL verifies against right now, so it has to be
-/// keyed under a version the chain has reached: a version still in the
-/// future hasn't activated, so its program's key cannot legitimately be the
-/// live one.
+/// Fatal only when *no* resident program derives the live key: that node can
+/// never produce an account proof OL accepts, whatever version it ends up
+/// proving.
 ///
-/// Accepting a match at *any* resident version — all this used to do — lets
-/// a config whose version keys are transposed start clean on the strength of
-/// the not-yet-active entry. Every batch then routes by its own stamp
-/// ([`PaasBatchProver::program_for`]) to a program whose proofs OL rejects.
-/// Proof failures are retried rather than fatal, so that stalls settlement
-/// indefinitely while the node still reports healthy — which is exactly what
-/// this check exists to catch.
+/// A match under a version other than `governing_version` only warns, and
+/// deliberately so. The two inputs are read at different freshness and move
+/// independently, so they disagree during any rotation, in both directions:
+///
+/// - `get_latest_account_update_vk` reads OL's `Latest` tag, so the live key flips as soon as the
+///   update carrying a rotation lands at the OL tip, while batches keep being sealed under the old
+///   version until the rotation-consuming block's batch is sealed.
+/// - The sequencer builds ahead of OL, so it can seal batches under the new version before the
+///   update that rotates OL's key has been accepted.
+///
+/// Failing startup on either window would wedge the node: nothing else runs,
+/// so the very state the check is waiting on can never advance, and the node
+/// restart-loops. A warning naming both versions is what this can soundly
+/// assert — it still surfaces transposed
+/// `[sequencer.prover.programs.<version>]` keys, which is the case worth
+/// catching, without being able to stall a healthy node.
 fn validate_live_vk_match(
     matched_versions: &[AlpenSpecId],
-    reached_version: AlpenSpecId,
+    governing_version: AlpenSpecId,
     program_count: usize,
     ol_account_update_vk: &PredicateKey,
 ) -> eyre::Result<()> {
-    if matched_versions
-        .iter()
-        .any(|version| *version <= reached_version)
-    {
-        return Ok(());
-    }
-
     if matched_versions.is_empty() {
         return Err(eyre::eyre!(
             "none of the {program_count} resident prover program(s) match \
@@ -300,17 +293,23 @@ fn validate_live_vk_match(
         ));
     }
 
-    let matched = matched_versions
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>()
-        .join(", ");
-    Err(eyre::eyre!(
-        "the only resident prover program(s) matching OL's expected account update_vk \
-         {ol_account_update_vk:?} are keyed under [{matched}], which the chain has not \
-         reached yet (it is at {reached_version}); check whether the \
-         [sequencer.prover.programs.<version>] keys are transposed"
-    ))
+    if !matched_versions.contains(&governing_version) {
+        let matched = matched_versions
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        warn!(
+            target: "alpen-client",
+            %governing_version,
+            matched_versions = %matched,
+            "the prover program matching OL's live account update_vk is not the one keyed \
+             under the version governing current batches; expected during a rotation, but \
+             check the [sequencer.prover.programs.<version>] keys are not transposed"
+        );
+    }
+
+    Ok(())
 }
 
 /// Reads a native-prover Schnorr signing key from a hex-encoded key file.
@@ -423,25 +422,18 @@ mod tests {
     }
 
     #[test]
-    fn live_vk_match_at_the_reached_version_is_accepted() {
+    fn live_vk_match_at_the_governing_version_is_accepted() {
         validate_live_vk_match(&[AlpenSpecId::V0], AlpenSpecId::V0, 2, &live_vk()).unwrap();
     }
 
     #[test]
-    fn live_vk_match_behind_the_reached_version_is_accepted() {
-        // The window between the block that consumed a rotation being
-        // finalized and OL's `update_vk` catching up: the chain is at v1
-        // while OL still verifies against the v0 program.
+    fn live_vk_match_off_the_governing_version_only_warns() {
+        // Both rotation windows land here, in either direction: OL's live key
+        // flips at its own tip while batches still seal under the old
+        // version, and the sequencer seals under the new version before the
+        // rotating update is accepted. Neither may fail startup.
+        validate_live_vk_match(&[AlpenSpecId::V1], AlpenSpecId::V0, 2, &live_vk()).unwrap();
         validate_live_vk_match(&[AlpenSpecId::V0], AlpenSpecId::V1, 2, &live_vk()).unwrap();
-    }
-
-    #[test]
-    fn live_vk_match_only_ahead_of_the_reached_version_is_rejected() {
-        // Transposed `[sequencer.prover.programs.<version>]` keys: the live
-        // key sits under v1 while the chain is still on v0.
-        let err = validate_live_vk_match(&[AlpenSpecId::V1], AlpenSpecId::V0, 2, &live_vk())
-            .expect_err("a match only at an unreached version must fail startup");
-        assert!(err.to_string().contains("has not reached yet"));
     }
 
     #[test]
