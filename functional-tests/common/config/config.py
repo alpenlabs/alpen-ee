@@ -183,6 +183,20 @@ class AlpenSequencerConfig:
 
 
 @dataclass
+class AlpenAdminRpcConfig:
+    """``[admin_rpc]`` table; present iff the JWT-authenticated admin RPC is
+    enabled.
+
+    Mirrors the Rust ``AdminRpcConfig``. ``jwtsecret`` is left unset so the
+    node generates and persists ``admin-jwt.hex`` under its datadir.
+    """
+
+    port: int
+    host: str = field(default="127.0.0.1")
+    jwtsecret: str | None = field(default=None)
+
+
+@dataclass
 class AlpenClientConfig:
     """Top-level ``--alpen-config`` TOML, mirroring the Rust
     ``AlpenClientConfigFile`` schema in ``bin/alpen-client/src/config.rs``.
@@ -190,6 +204,7 @@ class AlpenClientConfig:
 
     mode: str  # "full_node" | "sequencer"
     ol: AlpenOlConfig = field(default_factory=AlpenOlConfig)
+    admin_rpc: AlpenAdminRpcConfig | None = field(default=None)
     full_node: AlpenFullNodeConfig | None = field(default=None)
     sequencer: AlpenSequencerConfig | None = field(default=None)
     health_check_host: str = field(default="127.0.0.1")

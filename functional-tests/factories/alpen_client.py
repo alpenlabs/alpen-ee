@@ -12,6 +12,7 @@ import flexitest
 
 from common.alpen_params import compose_alpen_params
 from common.config import (
+    AlpenAdminRpcConfig,
     AlpenClientConfig,
     AlpenFullNodeConfig,
     AlpenL1FeePolicyConfig,
@@ -109,6 +110,7 @@ class AlpenClientFactory(flexitest.Factory):
         http_port = self.next_port()
         p2p_port = self.next_port()
         authrpc_port = self.next_port()
+        admin_rpc_port = self.next_port()
         logfile = datadir / "service.log"
 
         # Generate P2P secret key if not provided
@@ -169,6 +171,9 @@ class AlpenClientFactory(flexitest.Factory):
             mode="sequencer",
             ol=ol_config,
             sequencer=sequencer_config,
+            # JWT-authenticated admin RPC; the node generates the secret at
+            # <datadir>/admin-jwt.hex on first start.
+            admin_rpc=AlpenAdminRpcConfig(port=admin_rpc_port),
             health_check_host="127.0.0.1",
             health_check_port=0,
             l1_reorg_safe_depth=da_config.l1_reorg_safe_depth,
@@ -218,6 +223,8 @@ class AlpenClientFactory(flexitest.Factory):
             "http_port": http_port,
             "http_url": http_url,
             "p2p_port": p2p_port,
+            "admin_rpc_port": admin_rpc_port,
+            "admin_rpc_url": f"http://127.0.0.1:{admin_rpc_port}",
             "datadir": str(datadir),
             "mode": "sequencer",
             "enode": None,  # Will be populated after start
@@ -291,6 +298,7 @@ class AlpenClientFactory(flexitest.Factory):
         http_port = self.next_port()
         p2p_port = self.next_port()
         authrpc_port = self.next_port()
+        admin_rpc_port = self.next_port()
         logfile = datadir / "service.log"
 
         # Generate P2P secret key if not provided
@@ -329,6 +337,9 @@ class AlpenClientFactory(flexitest.Factory):
                 sequencer_pubkey=sequencer_pubkey,
                 sequencer_http_url=sequencer_http,
             ),
+            # JWT-authenticated admin RPC; the node generates the secret at
+            # <datadir>/admin-jwt.hex on first start.
+            admin_rpc=AlpenAdminRpcConfig(port=admin_rpc_port),
             health_check_host="127.0.0.1",
             health_check_port=0,
         )
@@ -384,6 +395,8 @@ class AlpenClientFactory(flexitest.Factory):
             "http_port": http_port,
             "http_url": http_url,
             "p2p_port": p2p_port,
+            "admin_rpc_port": admin_rpc_port,
+            "admin_rpc_url": f"http://127.0.0.1:{admin_rpc_port}",
             "datadir": str(datadir),
             "mode": "fullnode",
             "enode": None,

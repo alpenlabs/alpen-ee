@@ -3,10 +3,15 @@ Alpen-client service wrapper with P2P and Ethereum RPC capabilities.
 """
 
 import atexit
+import base64
 import contextlib
+import hashlib
+import hmac
+import json
 import logging
 import subprocess
 import time
+from pathlib import Path
 from typing import TypedDict
 
 from common.config.constants import (
@@ -30,12 +35,32 @@ def _register_kill(proc):
     atexit.register(kill)
 
 
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def build_admin_jwt(secret_hex: str, iat: int | None = None) -> str:
+    """Build an HS256 JWT with the ``iat`` claim reth-style JWT auth expects.
+
+    The validator accepts tokens whose ``iat`` is within +-60 seconds of the
+    server clock; pass an explicit ``iat`` to construct expired tokens.
+    """
+    header = _b64url(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
+    claims = _b64url(json.dumps({"iat": int(time.time()) if iat is None else iat}).encode())
+    signing_input = f"{header}.{claims}".encode("ascii")
+    secret = bytes.fromhex(secret_hex.removeprefix("0x").strip())
+    signature = _b64url(hmac.new(secret, signing_input, hashlib.sha256).digest())
+    return f"{header}.{claims}.{signature}"
+
+
 class AlpenClientProps(TypedDict):
     """Properties for alpen-client service."""
 
     http_port: int
     http_url: str
     p2p_port: int
+    admin_rpc_port: int
+    admin_rpc_url: str
     datadir: str
     mode: str  # "sequencer" or "fullnode"
     enode: str | None
@@ -121,6 +146,30 @@ class AlpenClientService(RpcService):
         """Get the raw L1 finalization status response of an EE block."""
         rpc = self.create_rpc()
         return rpc.alpen_getBlockStatus(block_hash)
+
+    def read_admin_jwt_secret(self) -> str:
+        """Read the hex JWT secret the node generated for the admin RPC."""
+        return (Path(self.props["datadir"]) / "admin-jwt.hex").read_text().strip()
+
+    def create_admin_rpc(self, jwt_token: str | None = None) -> JsonRpcClient:
+        """Create a client for the JWT-authenticated admin RPC endpoint.
+
+        A valid token is derived from the node's generated secret when none
+        is given.
+        """
+        if not self.check_status():
+            raise RuntimeError("Service is not running")
+
+        if jwt_token is None:
+            jwt_token = build_admin_jwt(self.read_admin_jwt_secret())
+        return JsonRpcClient(
+            self.props["admin_rpc_url"],
+            headers={"Authorization": f"Bearer {jwt_token}"},
+        )
+
+    def get_admin_status(self) -> dict:
+        """Get the raw node status response from the authenticated admin RPC."""
+        return self.create_admin_rpc().alpenadmin_getAdminStatus()
 
     def get_peers(self) -> list[dict]:
         """Get connected peers via admin_peers."""
