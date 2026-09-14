@@ -25,6 +25,7 @@ use crate::{
     da_fee::{
         calc_diff_size, DaStateAccess, DA_COVERAGE_CAPPED, DA_COVERAGE_OK, DA_COVERAGE_UNKNOWN,
     },
+    evm::BeneficiaryRewardPolicy,
 };
 
 #[expect(
@@ -39,16 +40,23 @@ pub struct AlpenRevmHandler<EVM> {
     /// under-covered transactions; re-execution ignores it. The cell is owned by the
     /// per-block EVM (`AlpenAlloyEvm`).
     da_report: Arc<AtomicU64>,
+    /// Determines whether the beneficiary receives Alpen or Ethereum gas rewards.
+    beneficiary_reward_policy: BeneficiaryRewardPolicy,
     pub _phantom: PhantomData<EVM>,
 }
 
 impl<EVM> AlpenRevmHandler<EVM> {
     /// Creates a handler that charges the DA fee at the given per-block rate and records
     /// per-transaction coverage into `da_report`.
-    pub fn new(da_rate: U256, da_report: Arc<AtomicU64>) -> Self {
+    pub fn new(
+        da_rate: U256,
+        da_report: Arc<AtomicU64>,
+        beneficiary_reward_policy: BeneficiaryRewardPolicy,
+    ) -> Self {
         Self {
             da_rate,
             da_report,
+            beneficiary_reward_policy,
             _phantom: PhantomData,
         }
     }
@@ -59,6 +67,7 @@ impl<EVM> Default for AlpenRevmHandler<EVM> {
         Self {
             da_rate: U256::ZERO,
             da_report: Arc::new(AtomicU64::new(DA_COVERAGE_UNKNOWN)),
+            beneficiary_reward_policy: BeneficiaryRewardPolicy::AllGasFees,
             _phantom: PhantomData,
         }
     }
@@ -85,6 +94,11 @@ where
         evm: &mut Self::Evm,
         exec_result: &mut FrameResult,
     ) -> Result<(), Self::Error> {
+        if self.beneficiary_reward_policy == BeneficiaryRewardPolicy::Ethereum {
+            return MainnetHandler::<EVM, Self::Error, <EVM as EvmTr>::Frame>::default()
+                .reward_beneficiary(evm, exec_result);
+        }
+
         let context = evm.ctx();
         let block = context.block();
         let tx = context.tx();

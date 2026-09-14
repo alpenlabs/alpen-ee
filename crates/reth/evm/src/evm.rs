@@ -35,8 +35,9 @@ const TX_GAS_LIMIT_BLOCK_MULTIPLE: u64 = 4;
 
 /// Custom EVM configuration.
 ///
-/// Carries only the bridge withdrawal policy used for precompile validation — it is a pure,
-/// shareable config object with no interior-mutable per-execution state.
+/// Carries the bridge withdrawal policy used for precompile validation and the beneficiary
+/// reward policy used by the execution handler. It is a pure, shareable config object with no
+/// interior-mutable per-execution state.
 ///
 /// Neither the per-block DA rate (an input) nor the per-transaction DA-coverage report (an
 /// output) is held here. reth's `EvmEnv` plumbing cannot thread a per-block value into
@@ -49,6 +50,16 @@ const TX_GAS_LIMIT_BLOCK_MULTIPLE: u64 = 4;
 #[derive(Debug, Clone)]
 pub struct AlpenEvmFactory {
     bridge_params: BridgeParams,
+    beneficiary_reward_policy: BeneficiaryRewardPolicy,
+}
+
+/// Determines which transaction fees are credited to the block beneficiary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BeneficiaryRewardPolicy {
+    /// Credits the base fee and priority fee to the beneficiary, as Alpen does.
+    AllGasFees,
+    /// Applies Ethereum's fork-aware reward rule, including EIP-1559 base-fee burning.
+    Ethereum,
 }
 
 // Manual instead of derived: `BridgeParams` has no `Default` (denomination
@@ -65,6 +76,7 @@ impl Default for AlpenEvmFactory {
                 81,
             )
             .expect("valid bridge params"),
+            beneficiary_reward_policy: BeneficiaryRewardPolicy::AllGasFees,
         }
     }
 }
@@ -82,6 +94,7 @@ impl AlpenEvmFactory {
                 DEFAULT_MAX_WITHDRAWAL_DESCRIPTOR_LEN,
             )
             .expect("withdrawal policy constructed from wei must be valid"),
+            beneficiary_reward_policy: BeneficiaryRewardPolicy::AllGasFees,
         }
     }
 
@@ -95,7 +108,19 @@ impl AlpenEvmFactory {
 
     /// Creates an [`AlpenEvmFactory`] from [`BridgeParams`].
     pub fn from_bridge_params(bp: &BridgeParams) -> Self {
-        Self { bridge_params: *bp }
+        Self {
+            bridge_params: *bp,
+            beneficiary_reward_policy: BeneficiaryRewardPolicy::AllGasFees,
+        }
+    }
+
+    /// Uses Ethereum's fork-aware beneficiary reward rule.
+    ///
+    /// This exists for canonical Ethereum conformance fixtures. Production
+    /// Alpen execution must retain [`BeneficiaryRewardPolicy::AllGasFees`].
+    pub fn with_ethereum_beneficiary_reward(mut self) -> Self {
+        self.beneficiary_reward_policy = BeneficiaryRewardPolicy::Ethereum;
+        self
     }
 }
 
@@ -152,7 +177,13 @@ impl EvmFactory for AlpenEvmFactory {
 
         // The DA rate is stamped per block by `AlpenEvmConfig`; a freshly built EVM starts
         // dormant (rate 0) until then. Each EVM owns its own DA-coverage report cell.
-        AlpenAlloyEvm::new(evm, false, U256::ZERO, new_da_report_cell())
+        AlpenAlloyEvm::new(
+            evm,
+            false,
+            U256::ZERO,
+            new_da_report_cell(),
+            self.beneficiary_reward_policy,
+        )
     }
 
     fn create_evm_with_inspector<DB: Database, I: Inspector<Self::Context<DB>, EthInterpreter>>(
@@ -168,6 +199,81 @@ impl EvmFactory for AlpenEvmFactory {
             true,
             U256::ZERO,
             new_da_report_cell(),
+            self.beneficiary_reward_policy,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use reth_evm::{EvmEnv, EvmFactory};
+    use revm::{
+        context::{BlockEnv, TxEnv},
+        database::{CacheDB, EmptyDB},
+        state::{AccountInfo, Bytecode},
+        ExecuteEvm,
+    };
+    use revm_primitives::{address, hardfork::SpecId, TxKind, B256, U256};
+
+    use super::AlpenEvmFactory;
+
+    const BASE_FEE: u64 = 7;
+    const GAS_USED: u64 = 21_000;
+
+    fn beneficiary_balance(factory: &AlpenEvmFactory, gas_price: u128) -> U256 {
+        let caller = address!("1000000000000000000000000000000000000000");
+        let beneficiary = address!("2000000000000000000000000000000000000000");
+        let recipient = address!("3000000000000000000000000000000000000000");
+        let mut database = CacheDB::<EmptyDB>::default();
+        database.insert_account_info(
+            caller,
+            AccountInfo::new(
+                U256::from(1_000_000_000_u64),
+                0,
+                B256::ZERO,
+                Bytecode::new(),
+            ),
+        );
+
+        let mut input: EvmEnv<SpecId, BlockEnv> = EvmEnv::default();
+        input.cfg_env.spec = SpecId::LONDON;
+        input.block_env.beneficiary = beneficiary;
+        input.block_env.basefee = BASE_FEE;
+        input.block_env.gas_limit = 30_000_000;
+
+        let mut evm = factory.create_evm(database, input);
+        let transaction = TxEnv::builder()
+            .caller(caller)
+            .kind(TxKind::Call(recipient))
+            .gas_limit(GAS_USED)
+            .gas_price(gas_price)
+            .build()
+            .expect("test transaction must be valid");
+        let result = evm
+            .transact(transaction)
+            .expect("plain value-less transfer must execute");
+
+        result
+            .state
+            .get(&beneficiary)
+            .map_or(U256::ZERO, |account| account.info.balance)
+    }
+
+    #[test]
+    fn production_rewards_base_fee_to_beneficiary() {
+        let balance = beneficiary_balance(&AlpenEvmFactory::default(), u128::from(BASE_FEE));
+
+        assert_eq!(balance, U256::from(BASE_FEE * GAS_USED));
+    }
+
+    #[test]
+    fn ethereum_reward_policy_only_rewards_priority_fee() {
+        let factory = AlpenEvmFactory::default().with_ethereum_beneficiary_reward();
+        let zero_tip_balance = beneficiary_balance(&factory, u128::from(BASE_FEE));
+        let gas_price_with_tip = u128::from(BASE_FEE + 4);
+        let tipped_balance = beneficiary_balance(&factory, gas_price_with_tip);
+
+        assert_eq!(zero_tip_balance, U256::ZERO);
+        assert_eq!(tipped_balance, U256::from(4 * GAS_USED));
     }
 }

@@ -20,6 +20,8 @@ use revm::{
 };
 use revm_primitives::{hardfork::SpecId, Address, Bytes, U256};
 
+use crate::evm::BeneficiaryRewardPolicy;
+
 mod exec;
 pub mod handler;
 pub mod validation;
@@ -42,6 +44,8 @@ pub struct AlpenAlloyEvm<DB: Database, I> {
     /// Per-transaction DA-coverage report cell, written by the handler after each charge and
     /// read by the sequencer's payload builder via [`Self::da_report_handle`].
     da_report: Arc<AtomicU64>,
+    /// Determines whether execution applies Alpen or Ethereum beneficiary rewards.
+    beneficiary_reward_policy: BeneficiaryRewardPolicy,
 }
 
 impl<DB: Database, I> AlpenAlloyEvm<DB, I> {
@@ -60,12 +64,14 @@ impl<DB: Database, I> AlpenAlloyEvm<DB, I> {
         inspect: bool,
         da_rate: U256,
         da_report: Arc<AtomicU64>,
+        beneficiary_reward_policy: BeneficiaryRewardPolicy,
     ) -> Self {
         Self {
             inner: evm,
             inspect,
             da_rate,
             da_report,
+            beneficiary_reward_policy,
         }
     }
 
@@ -95,6 +101,11 @@ impl<DB: Database, I> AlpenAlloyEvm<DB, I> {
     /// reads it, keeping it determinism-neutral.
     pub fn da_report_handle(&self) -> Arc<AtomicU64> {
         self.da_report.clone()
+    }
+
+    /// Returns the beneficiary reward policy configured for this EVM instance.
+    pub const fn beneficiary_reward_policy(&self) -> BeneficiaryRewardPolicy {
+        self.beneficiary_reward_policy
     }
 
     /// Consumes self and return the inner EVM instance.
