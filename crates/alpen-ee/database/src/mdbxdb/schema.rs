@@ -296,30 +296,6 @@ mod tests {
         };
     }
 
-    /// The declared chain must start at 1, ascend by one, and end at the version
-    /// this binary writes — a gap would leave stored bytes undecodable.
-    fn check_chain<S: VersionedTable>() {
-        let versions = S::VERSIONS;
-        let name = <S as Schema>::NAME;
-        assert_eq!(
-            versions.first(),
-            Some(&1),
-            "`{name}`: chain must start at 1"
-        );
-        for (position, version) in versions.iter().enumerate() {
-            assert_eq!(
-                *version,
-                position as u8 + 1,
-                "`{name}`: chain must ascend without gaps, got {versions:?}"
-            );
-        }
-        assert_eq!(
-            versions.last(),
-            Some(&S::CURRENT_VERSION),
-            "`{name}`: the last declared version must be the one written"
-        );
-    }
-
     /// A value written by a newer binary must be refused, not misread.
     fn check_refuses_newer<S: VersionedTable>() {
         let name = <S as Schema>::NAME;
@@ -343,11 +319,6 @@ mod tests {
             matches!(err, CodecError::MissingVersionTag { .. }),
             "`{name}`: expected a missing-tag error, got {err:?}"
         );
-    }
-
-    #[test]
-    fn every_table_declares_a_gapless_chain() {
-        for_each_versioned_table!(check_chain);
     }
 
     #[test]

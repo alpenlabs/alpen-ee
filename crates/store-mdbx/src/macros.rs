@@ -368,6 +368,25 @@ macro_rules! impl_versioned_value_codec {
             )+
         };
 
+        // The chain starts at 1 and ascends by one, so the set of decodable
+        // versions is exactly `1..=CURRENT_VERSION` and no table has to carry it
+        // separately. A gap would leave stored bytes with no decoder.
+        const _: () = {
+            let mut expected: u8 = 1;
+            $(
+                ::core::assert!(
+                    $tag == expected,
+                    ::core::concat!(
+                        "`",
+                        ::core::stringify!($schema),
+                        "`: version tags must start at 1 and ascend by one",
+                    ),
+                );
+                expected += 1;
+            )+
+            let _ = expected;
+        };
+
         // The table must store the chain's *current* version, never a past one.
         const _: fn($crate::impl_versioned_value_codec!(@last_ty $($ver),+))
             -> <$schema as $crate::Schema>::Value = |value| value;
@@ -378,7 +397,6 @@ macro_rules! impl_versioned_value_codec {
         impl $crate::VersionedTable for $schema {
             const CURRENT_VERSION: u8 =
                 $crate::impl_versioned_value_codec!(@last_tag $($tag),+);
-            const VERSIONS: &'static [u8] = &[$($tag),+];
 
             fn decode_tagged(
                 bytes: &[u8],
