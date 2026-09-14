@@ -117,10 +117,14 @@ impl AlpenEthereumNode {
     ///
     /// The mode retains standard Ethereum `extra_data` in imported fixtures
     /// and selects fork-aware canonical precompiles instead of Alpen's
-    /// production set. It must never be enabled by production startup paths.
+    /// production set, while applying Ethereum's beneficiary reward rule.
+    /// It must never be enabled by production startup paths.
     pub fn with_eest_fixture_mode(mut self) -> Self {
         self.eest_fixture_mode = true;
-        self.evm_factory = self.evm_factory.with_eest_fixture_precompiles();
+        self.evm_factory = self
+            .evm_factory
+            .with_eest_fixture_precompiles()
+            .with_ethereum_beneficiary_reward();
         self
     }
 }
@@ -189,7 +193,12 @@ where
     >;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
-        let executor = AlpenExecutorBuilder::new(self.evm_factory.clone(), self.evm_spec.clone());
+        let evm_factory = if self.eest_fixture_mode {
+            self.evm_factory.clone().with_ethereum_beneficiary_reward()
+        } else {
+            self.evm_factory.clone()
+        };
+        let executor = AlpenExecutorBuilder::new(evm_factory, self.evm_spec.clone());
         let consensus = AlpenConsensusBuilder::new(self.evm_spec.clone(), self.base_fee_floor);
         let executor = if self.eest_fixture_mode {
             executor.with_eest_fixture_mode()
