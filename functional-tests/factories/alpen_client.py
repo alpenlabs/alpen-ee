@@ -265,7 +265,12 @@ class AlpenClientFactory(flexitest.Factory):
         if eest_fixture_mode:
             if engine_jwt_secret_path is None:
                 raise RuntimeError("EEST fixture mode did not create an Engine JWT secret path")
-            cmd.extend(["--authrpc.jwtsecret", str(engine_jwt_secret_path), "--eest-fixture-mode"])
+            cmd.extend([
+                "--authrpc.jwtsecret",
+                str(engine_jwt_secret_path),
+                "--eest-fixture-mode",
+                "--eest-unwind-canonical-head",
+            ])
             cmd.extend([
                 "--builder.gaslimit", str(EEST_BLOCK_GAS_LIMIT),
                 "--txpool.max-tx-gas", str(EEST_BLOCK_GAS_LIMIT),
