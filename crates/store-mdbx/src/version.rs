@@ -244,11 +244,11 @@ pub trait LiftToCurrent<S: Schema>: Sized {
 /// current.
 pub trait VersionedTable: Schema {
     /// The tag this binary writes.
+    ///
+    /// The chain starts at 1 and ascends by one — the macro rejects anything
+    /// else at compile time — so this binary decodes exactly the versions
+    /// `1..=CURRENT_VERSION`.
     const CURRENT_VERSION: u8;
-
-    /// Every version this binary can decode, ascending, ending at
-    /// [`Self::CURRENT_VERSION`].
-    const VERSIONS: &'static [u8];
 
     /// Decodes tagged bytes, dispatching on the tag and folding up to current.
     fn decode_tagged(bytes: &[u8], ctx: &UpgradeCtx<'_>) -> Result<Self::Value, CodecError>;
@@ -385,8 +385,12 @@ pub mod fixtures {
     ) -> Result<Vec<S::Value>, FixtureError> {
         let table = <S as Schema>::NAME;
 
+        // The chain is `1..=CURRENT_VERSION` by construction, so coverage is a
+        // check against that range rather than against a declared list.
+        let versions = 1..=S::CURRENT_VERSION;
+
         for fixture in fixtures {
-            if !S::VERSIONS.contains(&fixture.version) {
+            if !versions.contains(&fixture.version) {
                 return Err(FixtureError::UnknownVersion {
                     table,
                     version: fixture.version,
@@ -394,12 +398,9 @@ pub mod fixtures {
             }
         }
 
-        for version in S::VERSIONS {
-            if !fixtures.iter().any(|f| f.version == *version) {
-                return Err(FixtureError::MissingVersion {
-                    table,
-                    version: *version,
-                });
+        for version in versions {
+            if !fixtures.iter().any(|f| f.version == version) {
+                return Err(FixtureError::MissingVersion { table, version });
             }
         }
 
@@ -970,7 +971,6 @@ mod tests {
     fn the_table_reports_its_version_chain() {
         assert_eq!(<Accounts as Schema>::NAME, "Accounts");
         assert_eq!(<Accounts as VersionedTable>::CURRENT_VERSION, 3);
-        assert_eq!(<Accounts as VersionedTable>::VERSIONS, &[1, 2, 3]);
     }
 
     #[test]
