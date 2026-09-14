@@ -163,6 +163,9 @@ pub struct AlpenConsensus {
     /// Consensus rules of each known [`AlpenSpecId`], indexed by
     /// discriminant.
     inners: Vec<FlooredConsensus>,
+    /// Whether headers are canonical Ethereum fixtures rather than
+    /// Alpen-stamped production blocks.
+    eest_fixture_mode: bool,
 }
 
 impl AlpenConsensus {
@@ -175,13 +178,25 @@ impl AlpenConsensus {
                 .cloned()
                 .map(|chain_spec| FlooredConsensus::new(chain_spec, base_fee_floor))
                 .collect(),
+            eest_fixture_mode: false,
         }
+    }
+
+    /// Uses standard Ethereum `extra_data` semantics for the isolated EEST
+    /// fixture process while retaining Alpen's EVM and consensus rules.
+    pub fn with_eest_fixture_mode(mut self) -> Self {
+        self.eest_fixture_mode = true;
+        self
     }
 
     /// Returns the consensus rules governing `header`, erring on a stamp
     /// that does not resolve to a version.
     fn inner_for(&self, header: &Header) -> Result<&FlooredConsensus, ConsensusError> {
-        let spec_version = header_spec_version(header).map_err(consensus_error)?;
+        let spec_version = if self.eest_fixture_mode {
+            AlpenSpecId::V0
+        } else {
+            header_spec_version(header).map_err(consensus_error)?
+        };
         Ok(version_indexed(&self.inners, spec_version))
     }
 }
@@ -192,7 +207,7 @@ impl HeaderValidator for AlpenConsensus {
         // the version prefix, so this parse is what rejects `extra_data`
         // that violates its version's layout. Genesis is exempt — its
         // `extra_data` is the operator-authored genesis document's.
-        let spec_version = if header.number == 0 {
+        let spec_version = if self.eest_fixture_mode || header.number == 0 {
             AlpenSpecId::V0
         } else {
             HeaderExtra::decode(&header.extra_data)
@@ -210,13 +225,18 @@ impl HeaderValidator for AlpenConsensus {
         // Upgrades only ever move forward: a chain whose version regresses
         // is structurally invalid regardless of what the inbox ordering
         // would derive.
-        let version = header_spec_version(header.header()).map_err(consensus_error)?;
-        let parent_version = header_spec_version(parent.header()).map_err(consensus_error)?;
-        if version < parent_version {
-            return Err(ConsensusError::msg(format!(
-                "alpen spec version regressed from {parent_version:?} to {version:?}"
-            )));
-        }
+        let version = if self.eest_fixture_mode {
+            AlpenSpecId::V0
+        } else {
+            let version = header_spec_version(header.header()).map_err(consensus_error)?;
+            let parent_version = header_spec_version(parent.header()).map_err(consensus_error)?;
+            if version < parent_version {
+                return Err(ConsensusError::msg(format!(
+                    "alpen spec version regressed from {parent_version:?} to {version:?}"
+                )));
+            }
+            version
+        };
         version_indexed(&self.inners, version).validate_header_against_parent(header, parent)
     }
 }
@@ -262,6 +282,7 @@ impl FullConsensus<EthPrimitives> for AlpenConsensus {
 pub struct AlpenConsensusBuilder {
     evm_spec: EvmSpec,
     base_fee_floor: u64,
+    eest_fixture_mode: bool,
 }
 
 impl AlpenConsensusBuilder {
@@ -269,7 +290,14 @@ impl AlpenConsensusBuilder {
         Self {
             evm_spec,
             base_fee_floor,
+            eest_fixture_mode: false,
         }
+    }
+
+    /// Configures consensus for canonical EEST fixture headers.
+    pub fn with_eest_fixture_mode(mut self) -> Self {
+        self.eest_fixture_mode = true;
+        self
     }
 }
 
@@ -280,10 +308,12 @@ where
     type Consensus = Arc<AlpenConsensus>;
 
     async fn build_consensus(self, _ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
-        Ok(Arc::new(AlpenConsensus::new(
-            &self.evm_spec,
-            self.base_fee_floor,
-        )))
+        let consensus = AlpenConsensus::new(&self.evm_spec, self.base_fee_floor);
+        Ok(Arc::new(if self.eest_fixture_mode {
+            consensus.with_eest_fixture_mode()
+        } else {
+            consensus
+        }))
     }
 }
 
@@ -385,6 +415,16 @@ mod tests {
             matches!(&err, ConsensusError::Other(msg) if msg.to_string().contains("layout")),
             "{err:?}"
         );
+    }
+
+    /// The canonical fixture process keeps the standard Ethereum header
+    /// field opaque while production consensus remains strict above.
+    #[test]
+    fn eest_fixture_mode_accepts_standard_extra_data() {
+        let consensus = test_consensus().with_eest_fixture_mode();
+        let header = sealed_header(1, Bytes::from_static(&[0x00]));
+
+        assert_eq!(consensus.validate_header(&header), Ok(()));
     }
 
     /// The fee model's base-fee floor survives per-version dispatch: a child
