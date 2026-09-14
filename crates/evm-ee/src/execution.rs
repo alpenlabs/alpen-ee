@@ -250,7 +250,7 @@ mod tests {
     use revm_primitives::{B256, alloy_primitives::Bloom};
     use rsp_client_executor::io::EthClientExecutorInput;
     use serde::Deserialize;
-    use strata_ee_acct_types::{ExecBlock, ExecHeader};
+    use strata_ee_acct_types::{ExecBlock, ExecHeader, ExecPartialState};
     use strata_msg_fmt::{Msg, MsgRef};
     use strata_ol_bridge_types::OperatorSelection;
     use strata_ol_msg_types::OLMessageExt;
@@ -439,7 +439,7 @@ mod tests {
         let env = EvmExecutionEnvironment::new(chain_spec, AlpenEvmFactory::default());
 
         // Use the pre-state directly from witness data (it already has all the proofs!)
-        let pre_state = EvmPartialState::new(
+        let mut pre_state = EvmPartialState::new(
             test_data.witness.parent_state,
             rehashed_fixture_bytecodes(test_data.witness.bytecodes),
             test_data.witness.ancestor_headers,
@@ -472,15 +472,25 @@ mod tests {
             result.err()
         );
 
-        if let Ok(output) = result {
-            // Test that verification works against the original witness header
-            // This validates our computed outputs match the expected results from the witness data
-            let verify_result = env.verify_outputs_against_header(block.get_header(), &output);
-            assert!(
-                verify_result.is_ok(),
-                "Verification should succeed: our computed state_root should match witness header"
-            );
-        }
+        let output = result.expect("block execution should succeed");
+
+        // Check the execution-derived header commitments. This covers the receipts
+        // root, logs bloom and gas figures, but not the state root, which this
+        // method does not look at.
+        env.verify_outputs_against_header(block.get_header(), &output)
+            .expect("execution-derived commitments should match the witness header");
+
+        // The state root only exists once the writes are merged, so check it here.
+        env.merge_write_into_state(&mut pre_state, output.write_batch())
+            .expect("merging the write batch should succeed");
+        assert_eq!(
+            pre_state
+                .compute_state_root()
+                .expect("state root should be computable")
+                .as_ref(),
+            header.state_root.as_slice(),
+            "merged state root should match the witness header"
+        );
     }
 
     #[test]
