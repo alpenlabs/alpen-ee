@@ -31,7 +31,8 @@ where
         self.inner.ctx.set_tx(tx);
         let da_rate = self.da_rate;
         let da_report = self.da_report.clone();
-        AlpenRevmHandler::new(da_rate, da_report).run(self)
+        let beneficiary_reward_policy = self.beneficiary_reward_policy;
+        AlpenRevmHandler::new(da_rate, da_report, beneficiary_reward_policy).run(self)
     }
 
     fn finalize(&mut self) -> Self::State {
@@ -41,7 +42,8 @@ where
     fn replay(&mut self) -> Result<ResultAndState, Self::Error> {
         let da_rate = self.da_rate;
         let da_report = self.da_report.clone();
-        AlpenRevmHandler::new(da_rate, da_report)
+        let beneficiary_reward_policy = self.beneficiary_reward_policy;
+        AlpenRevmHandler::new(da_rate, da_report, beneficiary_reward_policy)
             .run(self)
             .map(|result| {
                 let state = self.finalize();
@@ -74,7 +76,8 @@ where
         self.inner.ctx.set_tx(tx);
         let da_rate = self.da_rate;
         let da_report = self.da_report.clone();
-        AlpenRevmHandler::new(da_rate, da_report).inspect_run(self)
+        let beneficiary_reward_policy = self.beneficiary_reward_policy;
+        AlpenRevmHandler::new(da_rate, da_report, beneficiary_reward_policy).inspect_run(self)
     }
 }
 
