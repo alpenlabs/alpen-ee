@@ -32,6 +32,12 @@ EEST_CHAIN = "eest"
 # Match execution-specs' EnvironmentDefaults.gas_limit. This affects only
 # the isolated conformance chain, not the production network's gas policy.
 EEST_BLOCK_GAS_LIMIT = 120_000_000
+# Keep the EEST-only transaction admission ceiling bounded while admitting the
+# largest reviewed Prague vector (1,231,210 encoded bytes).
+EEST_MAX_TX_INPUT_BYTES = 2 * 1024 * 1024
+# The canonical 120M gas envelope can exceed Reth's default 1 ETH RPC fee cap
+# even when the vector is valid. Zero disables that policy cap only in EEST.
+EEST_RPC_TX_FEE_CAP = 0
 EEST_BASE_FEE_FLOOR = 0
 EEST_GENESIS_BASE_FEE_PER_GAS = 7
 
