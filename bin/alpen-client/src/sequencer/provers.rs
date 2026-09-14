@@ -16,7 +16,7 @@
 
 use std::sync::Arc;
 
-use alpen_ee_common::{BatchStorage, ChunkStorage, SequencerOLClient};
+use alpen_ee_common::{BatchStorage, ChunkStorage, ExecBlockStorage, SequencerOLClient};
 use alpen_ee_database::{EeNodeStorage, SequencerDatabases};
 use alpen_ee_params::{AlpenParams, AlpenSpecId};
 use alpen_reth_witness::RangeWitnessExtractor;
@@ -73,6 +73,7 @@ where
     let batch_proofs = Arc::new(EeBatchProofDbManager::new(prover_db));
     let batch_storage_dyn: Arc<dyn BatchStorage> = storage.clone();
     let chunk_storage_dyn: Arc<dyn ChunkStorage> = storage.clone();
+    let exec_blocks_dyn: Arc<dyn ExecBlockStorage> = storage.clone();
 
     // TODO(STR-4157): the account prover still assembles its batch-range
     // witness via `RangeWitnessExtractor`, which builds a deep range
@@ -154,6 +155,7 @@ where
             chunk_storage: chunk_storage_dyn,
             batch_storage: batch_storage_dyn,
             batch_proofs,
+            exec_blocks: exec_blocks_dyn,
         },
         backend,
         params,
