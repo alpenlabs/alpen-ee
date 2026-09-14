@@ -10,12 +10,19 @@ from common.alpen_params import (
     EEST_BLOCK_GAS_LIMIT,
     EEST_CHAIN,
     EEST_GENESIS_BASE_FEE_PER_GAS,
+    EEST_MAX_TX_INPUT_BYTES,
+    EEST_RPC_TX_FEE_CAP,
     compose_alpen_params,
 )
 
 
 class AlpenParamsTests(unittest.TestCase):
     """Verify functional-test parameter composition."""
+
+    def test_eest_transaction_admission_limits_cover_reviewed_vectors(self) -> None:
+        self.assertEqual(EEST_BLOCK_GAS_LIMIT, 120_000_000)
+        self.assertGreaterEqual(EEST_MAX_TX_INPUT_BYTES, 1_231_210)
+        self.assertEqual(EEST_RPC_TX_FEE_CAP, 0)
 
     def test_eest_fee_configuration_changes_only_the_generated_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
