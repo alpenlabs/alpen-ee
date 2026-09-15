@@ -180,5 +180,39 @@ pub fn validate_tx_env<CTX: ContextTr, Error>(
         return Err(InvalidTransaction::CreateInitCodeSizeLimit);
     }
 
+    // EIP-2681: incrementing a transaction nonce at the maximum value would overflow.
+    if tx.nonce() == u64::MAX {
+        return Err(InvalidTransaction::NonceOverflowInTransaction);
+    }
+
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use revm::{
+        context::{result::InvalidTransaction, Context},
+        MainContext,
+    };
+    use revm_primitives::hardfork::SpecId;
+
+    use super::validate_tx_env;
+
+    #[test]
+    fn rejects_transaction_with_maximum_nonce() {
+        let mut context = Context::mainnet().modify_tx_chained(|tx| tx.nonce = u64::MAX);
+
+        let result = validate_tx_env::<_, InvalidTransaction>(&mut context, SpecId::PRAGUE);
+
+        assert_eq!(result, Err(InvalidTransaction::NonceOverflowInTransaction));
+    }
+
+    #[test]
+    fn accepts_transaction_below_maximum_nonce() {
+        let mut context = Context::mainnet().modify_tx_chained(|tx| tx.nonce = u64::MAX - 1);
+
+        let result = validate_tx_env::<_, InvalidTransaction>(&mut context, SpecId::PRAGUE);
+
+        assert_eq!(result, Ok(()));
+    }
 }
