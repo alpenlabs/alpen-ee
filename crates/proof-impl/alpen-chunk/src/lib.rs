@@ -20,15 +20,20 @@ pub use program::{EeChunkProgram, EeChunkProofInput};
 /// params using the EVM execution environment, and commits the resulting
 /// [`strata_ee_chain_types::ChunkTransition`] as SSZ public output.
 ///
-/// `params` is a trusted, out-of-band argument, not zkVM input: genesis and
-/// bridge params are consensus-critical, so they're bound into this guest's
-/// verifying key rather than trusted as prover-supplied private input. See
-/// `provers/sp1/guest-alpen-chunk/src/main.rs` for the guest-side
-/// construction path.
-pub fn process_ee_chunk(zkvm: &impl ZkVmEnvSerde, params: &AlpenParams) {
-    // TODO(STR-4002): pin to v0 until per-chunk version resolution is
-    // threaded through the proof guests.
-    let chain_spec: Arc<ChainSpec> = params.evm_spec().chain_spec(AlpenSpecId::V0).clone();
+/// `params` and `spec_version` are trusted, out-of-band arguments, not zkVM
+/// input: genesis and bridge params are consensus-critical, and a
+/// host-supplied spec version would let a prover pick which rules its chunk
+/// is checked under -- claiming an older version for a newer chunk to dodge
+/// a hardfork's rules. Both are bound into this guest's verifying key
+/// instead, so the predicate rotation that activates a version is also what
+/// authorizes proving under it. See `provers/sp1/guest-alpen-chunk/src/main.rs`
+/// for the guest-side construction path.
+///
+/// One version per chunk is well-defined because a rotation-consuming block
+/// always ends its group -- see `sealing_policy::rotation_policy` -- so no
+/// chunk straddles an activation boundary.
+pub fn process_ee_chunk(zkvm: &impl ZkVmEnvSerde, params: &AlpenParams, spec_version: AlpenSpecId) {
+    let chain_spec: Arc<ChainSpec> = params.evm_spec().chain_spec(spec_version).clone();
     let evm_factory = AlpenEvmFactory::from_bridge_params(params.bridge_params());
     let ee = EvmExecutionEnvironment::new(chain_spec, evm_factory);
 

@@ -1,5 +1,5 @@
 use alpen_ee_common::{ExecBlockPayload, ExecBlockRecord};
-use alpen_ee_params::{AlpenParams, AlpenSpecId};
+use alpen_ee_params::AlpenParams;
 use strata_acct_types::Hash;
 use strata_ee_acct_types::EeAccountState;
 use strata_ee_chain_types::{ExecBlockCommitment, ExecBlockPackage, ExecInputs, ExecOutputs};
@@ -46,7 +46,10 @@ pub fn build_genesis_exec_block(
     let genesis_parent_blockhash = Buf32([0; 32]); // 0x0
     let genesis_next_inbox_msg_idx = 0;
     let genesis_next_deposit_idx = 0;
-    let genesis_next_spec_version = AlpenSpecId::V0;
+    // The version the first non-genesis block builds under. A chain that
+    // launches on a newer version schedules it at coordinate 0, so it starts
+    // there rather than replaying the upgrades that predate its launch.
+    let genesis_next_spec_version = params.spec_schedule().active_at(0);
     let genesis_messages = vec![];
 
     let block = ExecBlockRecord::new(

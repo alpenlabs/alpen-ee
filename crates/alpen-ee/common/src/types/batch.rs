@@ -1,5 +1,6 @@
 use std::{fmt, iter};
 
+use alpen_ee_params::AlpenSpecId;
 use bitcoin::{Txid, Wtxid};
 use strata_acct_types::Hash;
 use strata_codec::Codec;
@@ -174,6 +175,12 @@ pub struct Batch {
     last_blocknum: u64,
     /// Rest of the blocks in this batch, cached here for easier processing.
     inner_blocks: Vec<Hash>,
+    /// The `AlpenSpecId` governing every block in this batch. A batch never
+    /// straddles a VK rotation (the sequencer force-seals immediately after
+    /// any rotation-consuming block), so this is a single, well-defined
+    /// value per batch — the version whichever local prover program proves
+    /// this batch's update under must have been built for.
+    spec_version: AlpenSpecId,
 }
 
 impl Batch {
@@ -184,6 +191,7 @@ impl Batch {
         last_block: Hash,
         last_blocknum: u64,
         inner_blocks: Vec<Hash>,
+        spec_version: AlpenSpecId,
     ) -> Result<Self, &'static str> {
         if idx == 0 {
             return Err("non-genesis batch cannot have idx == 0");
@@ -203,6 +211,7 @@ impl Batch {
             last_block,
             last_blocknum,
             inner_blocks,
+            spec_version,
         })
     }
 
@@ -225,6 +234,7 @@ impl Batch {
             last_block: genesis_hash,
             last_blocknum: genesis_blocknum,
             inner_blocks: Vec::new(),
+            spec_version: AlpenSpecId::V0,
         })
     }
 
@@ -267,6 +277,11 @@ impl Batch {
 
     pub fn last_blocknumhash(&self) -> BlockNumHash {
         BlockNumHash::new(self.last_block(), self.last_blocknum())
+    }
+
+    /// The `AlpenSpecId` governing every block in this batch.
+    pub fn spec_version(&self) -> AlpenSpecId {
+        self.spec_version
     }
 
     /// Get the inner blocks (blocks between prev_block and last_block, exclusive of last_block).
