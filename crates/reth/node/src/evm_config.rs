@@ -137,9 +137,17 @@ impl AlpenEvmConfig {
     /// as an Alpen version stamp. Every fixture executes under V0 and an
     /// undecodable DA-rate body contributes a zero DA charge. The hidden
     /// `--eest-fixture-mode` launch path is the only caller.
-    pub fn with_eest_fixture_mode(mut self) -> Self {
-        self.eest_fixture_mode = true;
-        self
+    pub fn with_eest_fixture_mode(self) -> Self {
+        let configs = self
+            .configs
+            .into_iter()
+            .map(|config| {
+                config
+                    .with_ethereum_block_gas_limit()
+                    .with_prague_system_contract_code_validation()
+            })
+            .collect();
+        Self::from_configs(self.evm_spec, configs, true)
     }
 
     /// Returns whether this config is serving the isolated EEST fixture node.
@@ -559,6 +567,29 @@ mod tests {
                 .evm_env(&header)
                 .expect("standard fixture extra_data resolves through V0");
             assert_eq!(env.cfg_env.spec, SpecId::PRAGUE);
+        }
+    }
+
+    #[test]
+    fn eest_fixture_mode_enables_canonical_validation_rules() {
+        let production = test_config();
+        for version in [AlpenSpecId::V0, AlpenSpecId::V1] {
+            assert!(!production
+                .config_for(version)
+                .enforces_ethereum_block_gas_limit());
+            assert!(!production
+                .config_for(version)
+                .validates_prague_system_contract_code());
+        }
+
+        let fixture = production.with_eest_fixture_mode();
+        for version in [AlpenSpecId::V0, AlpenSpecId::V1] {
+            assert!(fixture
+                .config_for(version)
+                .enforces_ethereum_block_gas_limit());
+            assert!(fixture
+                .config_for(version)
+                .validates_prague_system_contract_code());
         }
     }
 

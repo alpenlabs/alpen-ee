@@ -45,14 +45,18 @@ use alloy_consensus::{
     proofs::{self, calculate_receipt_root},
     Block, BlockBody, BlockHeader, Header, TxReceipt, EMPTY_OMMER_ROOT_HASH,
 };
-use alloy_eips::{eip7840::BlobParams, merge::BEACON_NONCE, Encodable2718};
+use alloy_eips::{
+    eip7002::WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS,
+    eip7251::CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS, eip7840::BlobParams, merge::BEACON_NONCE,
+    Encodable2718,
+};
 use alloy_rpc_types_engine::ExecutionData;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     block::{
-        BlockExecutionResult, BlockExecutor, BlockExecutorFactory, BlockExecutorFor, ExecutableTx,
-        OnStateHook,
+        BlockExecutionResult, BlockExecutor, BlockExecutorFactory, BlockExecutorFor,
+        BlockValidationError, ExecutableTx, OnStateHook,
     },
     eth::EthBlockExecutionCtx,
     execute::{BlockAssembler, BlockAssemblerInput, BlockExecutionError},
@@ -117,6 +121,8 @@ impl AlpenBlockExecutionCtx<'_> {
 #[derive(Debug, Clone)]
 pub struct AlpenBlockExecutorFactory {
     inner: InnerBef,
+    enforce_ethereum_block_gas_limit: bool,
+    validate_prague_system_contract_code: bool,
 }
 
 impl BlockExecutorFactory for AlpenBlockExecutorFactory {
@@ -141,8 +147,15 @@ impl BlockExecutorFactory for AlpenBlockExecutorFactory {
         // The one chokepoint: every block execution path reaches `create_executor`, so the
         // committed rate is applied here regardless of how the EVM was created.
         evm.set_da_rate(ctx.da_rate);
+        let validate_prague_system_contract_code = self.validate_prague_system_contract_code
+            && self
+                .inner
+                .spec()
+                .is_prague_active_at_timestamp(evm.block().timestamp().saturating_to());
         AlpenBlockExecutor {
             inner: self.inner.create_executor(evm, ctx.inner),
+            enforce_ethereum_block_gas_limit: self.enforce_ethereum_block_gas_limit,
+            validate_prague_system_contract_code,
         }
     }
 }
@@ -171,17 +184,31 @@ impl BlockExecutorFactory for AlpenBlockExecutorFactory {
 )]
 pub struct AlpenBlockExecutor<E> {
     inner: E,
+    enforce_ethereum_block_gas_limit: bool,
+    validate_prague_system_contract_code: bool,
 }
 
 impl<E> BlockExecutor for AlpenBlockExecutor<E>
 where
     E: BlockExecutor<Transaction: SignedTransaction>,
+    <E::Evm as Evm>::DB: Database,
 {
     type Transaction = E::Transaction;
     type Receipt = E::Receipt;
     type Evm = E::Evm;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
+        if self.validate_prague_system_contract_code {
+            ensure_system_contract_code(
+                self.inner.evm_mut().db_mut(),
+                WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS,
+            )?;
+            ensure_system_contract_code(
+                self.inner.evm_mut().db_mut(),
+                CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS,
+            )?;
+        }
+
         self.inner.apply_pre_execution_changes()
     }
 
@@ -189,6 +216,10 @@ where
         &mut self,
         tx: impl ExecutableTx<Self>,
     ) -> Result<ResultAndState<<Self::Evm as Evm>::HaltReason>, BlockExecutionError> {
+        if self.enforce_ethereum_block_gas_limit {
+            return self.inner.execute_transaction_without_commit(tx);
+        }
+
         // Mirror `EthBlockExecutor` minus the `gas_limit <= available` check.
         let hash = tx.tx().trie_hash();
         self.inner
@@ -222,6 +253,25 @@ where
     fn evm(&self) -> &Self::Evm {
         self.inner.evm()
     }
+}
+
+fn ensure_system_contract_code<DB>(
+    db: &mut DB,
+    address: revm_primitives::Address,
+) -> Result<(), BlockExecutionError>
+where
+    DB: Database,
+{
+    let account = db.basic(address).map_err(BlockExecutionError::other)?;
+    let has_code =
+        account.is_some_and(|info| !info.code_hash.is_zero() && !info.is_empty_code_hash());
+    if !has_code {
+        return Err(
+            BlockValidationError::msg(format!("system contract {address} has no code")).into(),
+        );
+    }
+
+    Ok(())
 }
 
 /// Block assembler mirroring reth's `EthBlockAssembler`.
@@ -349,6 +399,8 @@ impl AlpenEvmConfig {
         Self {
             executor_factory: AlpenBlockExecutorFactory {
                 inner: inner.executor_factory.clone(),
+                enforce_ethereum_block_gas_limit: false,
+                validate_prague_system_contract_code: false,
             },
             block_assembler: AlpenBlockAssembler {
                 inner: inner.block_assembler.clone(),
@@ -373,6 +425,37 @@ impl AlpenEvmConfig {
     pub const fn with_pending_da_rate(mut self, da_rate: U256) -> Self {
         self.pending_da_rate = da_rate;
         self
+    }
+
+    /// Restores Ethereum's per-transaction block-gas availability check.
+    ///
+    /// Alpen production deliberately interprets the signed transaction gas
+    /// limit as a DA-inflated authorization envelope. Canonical Ethereum
+    /// fixtures require Ethereum's original block-gas rule instead, so the
+    /// isolated EEST mode enables this on every versioned config.
+    pub const fn with_ethereum_block_gas_limit(mut self) -> Self {
+        self.executor_factory.enforce_ethereum_block_gas_limit = true;
+        self
+    }
+
+    /// Returns whether the executor enforces Ethereum's block-gas rule.
+    pub const fn enforces_ethereum_block_gas_limit(&self) -> bool {
+        self.executor_factory.enforce_ethereum_block_gas_limit
+    }
+
+    /// Validates that Prague's mandatory request contracts contain code.
+    ///
+    /// This is isolated to canonical EEST fixtures. Alpen mainnet launched
+    /// without these contracts, so enabling the validation in production is
+    /// an STF decision rather than a safe node-only change.
+    pub const fn with_prague_system_contract_code_validation(mut self) -> Self {
+        self.executor_factory.validate_prague_system_contract_code = true;
+        self
+    }
+
+    /// Returns whether Prague request-contract code is validated.
+    pub const fn validates_prague_system_contract_code(&self) -> bool {
+        self.executor_factory.validate_prague_system_contract_code
     }
 
     /// Returns the chain specification.
@@ -455,5 +538,48 @@ impl ConfigureEngineEvm<ExecutionData> for AlpenEvmConfig {
         payload: &ExecutionData,
     ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
         self.inner.tx_iterator_for_payload(payload)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use revm::{
+        database::{CacheDB, EmptyDB},
+        state::{AccountInfo, Bytecode},
+    };
+    use revm_primitives::{address, Bytes, U256};
+
+    use super::ensure_system_contract_code;
+
+    const SYSTEM_CONTRACT: revm_primitives::Address =
+        address!("0000000000000000000000000000000000007002");
+
+    #[test]
+    fn system_contract_validation_rejects_missing_or_empty_code() {
+        let mut database = CacheDB::<EmptyDB>::default();
+        let missing_error = ensure_system_contract_code(&mut database, SYSTEM_CONTRACT)
+            .expect_err("a missing system contract must be rejected");
+        assert!(missing_error
+            .to_string()
+            .contains("system contract 0x0000000000000000000000000000000000007002 has no code"));
+
+        database.insert_account_info(SYSTEM_CONTRACT, AccountInfo::default());
+        let empty_error = ensure_system_contract_code(&mut database, SYSTEM_CONTRACT)
+            .expect_err("an account with empty code must be rejected");
+        assert!(empty_error.to_string().contains("has no code"));
+    }
+
+    #[test]
+    fn system_contract_validation_accepts_non_empty_code() {
+        let mut database = CacheDB::<EmptyDB>::default();
+        let code = Bytecode::new_raw(Bytes::from_static(&[0x00]));
+        let code_hash = code.hash_slow();
+        database.insert_account_info(
+            SYSTEM_CONTRACT,
+            AccountInfo::new(U256::ZERO, 0, code_hash, code),
+        );
+
+        ensure_system_contract_code(&mut database, SYSTEM_CONTRACT)
+            .expect("non-empty system-contract code must be accepted");
     }
 }
