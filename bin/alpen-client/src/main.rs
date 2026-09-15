@@ -5,7 +5,7 @@
 //! The global allocator is jemalloc (via the `jemalloc` feature, on by
 //! default), the same choice reth's own binary makes. This is not a
 //! micro-optimization: the node runs a tokio worker pool alongside a large
-//! blocking pool that drives sled, block re-execution in the accessed-state
+//! blocking pool that drives MDBX, block re-execution in the accessed-state
 //! exex, and trie multiproof construction for chunk witnesses. Those are
 //! short-lived multi-megabyte allocations spread over many threads, which is
 //! precisely the pattern glibc's malloc handles worst — it spins up an arena
