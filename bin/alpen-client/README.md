@@ -772,10 +772,12 @@ blocktime_ms = 5000
 [sequencer.prover]
 backend = "sp1"
 
-# One entry per resident spec version, keyed by that version; at least one is
-# required. Each batch's proof request is routed to whichever entry matches
-# that batch's own governing version.
-[sequencer.prover.programs.v0]
+# One entry per resident spec version, keyed by the version that program was
+# built for; at least one is required. Each batch's proof request is routed to
+# whichever entry matches that batch's own governing version, so the chain
+# stalls if no entry covers the version it is on. The guests built from this
+# tree are v1.
+[sequencer.prover.programs.v1]
 chunk_path = "/app/elfs/sp1/guest-alpen-chunk.elf"
 acct_path = "/app/elfs/sp1/guest-alpen-acct.elf"
 
