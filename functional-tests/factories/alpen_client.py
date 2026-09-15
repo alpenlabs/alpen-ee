@@ -158,8 +158,7 @@ class AlpenClientFactory(flexitest.Factory):
 
         if not isinstance(eest_fixture_mode, bool):
             raise TypeError(
-                "eest_fixture_mode must be a boolean, "
-                f"got {type(eest_fixture_mode).__name__}"
+                f"eest_fixture_mode must be a boolean, got {type(eest_fixture_mode).__name__}"
             )
 
         engine_jwt_secret_path: Path | None = None
