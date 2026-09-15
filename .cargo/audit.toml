@@ -1,36 +1,24 @@
 [advisories]
 ignore = [
+  # RUSTSEC-2026-0285 (rustls 0.23.43)
+  # Fixed in 0.23.45, published 2026-09-14. Nothing in the graph blocks it: the
+  # 14-day min-publish-age cooldown in .cargo/config.toml is the only reason the
+  # resolver will not pick it up. Remove this entry after 2026-09-28 and run
+  # `cargo update -p rustls`.
+  "RUSTSEC-2026-0285",
+
   # RUSTSEC-2025-0055 (tracing-subscriber 0.2.25)
-  # Pulled in via ark-relations.
-  # Upgrade blocked until upstream bumps tracing-subscriber >= 0.3.20.
+  # Reached through ark-relations 0.5.1. ark-relations 0.6.0 drops the old
+  # tracing-subscriber, but getting there means moving the whole arkworks chain:
+  #   ark-relations 0.5 <- ark-r1cs-std 0.5 <- ark-bn254 0.5 <- revm-precompile 34
+  #   <- revm 38, which is the version reth v2.2.0 pins.
+  # Revisit when the reth tag moves far enough to carry revm-precompile 35+.
   # Low risk: affects ANSI escape sequences in logs only.
   "RUSTSEC-2025-0055",
 
-  # The rustls-webpki, aws-lc-sys and hickory-proto entries below are blocked on
-  # the reth v1.9.1 pin in the root Cargo.toml. reth-mdbx-sys declares
-  # `cc = "=1.2.15"` as an exact pin. Newer rustls needs newer aws-lc-rs, which
-  # needs a newer cc than that pin allows, so cargo cannot resolve any of the
-  # rustls upgrades. Revisit when the reth tag moves; most should clear then.
-  # Tracked in STR-4308.
-
-  # rustls-webpki, patched in 0.103.10 / 0.103.12 / 0.103.13.
-  # Two carriers, both unfixable here:
-  #   0.103.4  via rustls 0.23 -> reqwest 0.12, blocked by the cc pin above.
-  #   0.101.7  via rustls 0.21 -> bitreq -> bitcoind-async-client, which has to
-  #            move off rustls 0.21 upstream before this can clear.
-  "RUSTSEC-2026-0049", # CRL distribution point matching logic
-  "RUSTSEC-2026-0098", # name constraints wrongly accepted for URI names
-  "RUSTSEC-2026-0099", # name constraints accepted for wildcard certs
-  "RUSTSEC-2026-0104", # reachable panic parsing CRLs
-
-  # aws-lc-sys 0.30.0 (patched in 0.38.0 / 0.39.0), pinned by aws-lc-rs ^0.30.0.
-  # Reached through the AWS SDK under sp1-sdk.
-  "RUSTSEC-2026-0045", # timing side channel in AES-CCM tag verification
-  "RUSTSEC-2026-0046", # PKCS7_verify chain validation bypass
-  "RUSTSEC-2026-0047", # PKCS7_verify signature validation bypass
-  "RUSTSEC-2026-0048", # CRL distribution point scope check
-
-  # hickory-proto 0.25.2, pinned by hickory-resolver ^0.25 (reth-dns-discovery).
+  # hickory-proto 0.25.2, pinned by `hickory-resolver = "0.25.0"` in reth v2.2.0
+  # (reth-dns-discovery). There is no 0.25.x backport, so both need the reth tag
+  # to move to a release that takes hickory 0.26.
   "RUSTSEC-2026-0118", # NSEC3 unbounded loop; no patched release yet
   "RUSTSEC-2026-0119", # O(n^2) name compression; patched in 0.26.1
 ]
