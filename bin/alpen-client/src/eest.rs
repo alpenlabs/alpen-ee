@@ -19,7 +19,7 @@ use tracing::info;
 /// Launch the minimal Alpen execution node that EEST controls through Engine
 /// API calls.
 pub(crate) async fn run(
-    builder: WithLaunchContext<NodeBuilder<Arc<reth_db::DatabaseEnv>, ChainSpec>>,
+    builder: WithLaunchContext<NodeBuilder<reth_db::DatabaseEnv, ChainSpec>>,
     params: Arc<AlpenParams>,
 ) -> eyre::Result<()> {
     let evm_factory = AlpenEvmFactory::from_bridge_params(params.bridge_params());
