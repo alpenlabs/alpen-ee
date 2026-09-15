@@ -225,55 +225,55 @@ revm-primitives = { version = "23.0.0", features = [
 ], default-features = false }
 
 # reth itself:
-reth-basic-payload-builder = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-chainspec = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-cli = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-cli-commands = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-cli-runner = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-cli-util = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-consensus = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926", default-features = false }
-reth-consensus-common = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-db = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-engine-local = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-engine-primitives = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-errors = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-eth-wire = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-ethereum-engine-primitives = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-ethereum-forks = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-ethereum-payload-builder = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-ethereum-primitives = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-evm = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-evm-ethereum = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-execution-types = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-exex = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-ipc = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-network = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-network-api = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-network-p2p = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-node-api = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-node-builder = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-node-core = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-node-ethereum = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-payload-builder = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-payload-validator = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
+reth-basic-payload-builder = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-chainspec = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-cli = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-cli-commands = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-cli-runner = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-cli-util = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-consensus = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0", default-features = false }
+reth-consensus-common = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-db = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-engine-local = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-engine-primitives = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-errors = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-eth-wire = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-ethereum-engine-primitives = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-ethereum-forks = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-ethereum-payload-builder = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-ethereum-primitives = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-evm = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-evm-ethereum = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-execution-types = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-exex = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-ipc = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-network = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-network-api = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-network-p2p = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-node-api = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-node-builder = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-node-core = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-payload-builder = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-payload-validator = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
 reth-primitives-traits = { version = "0.3.2", default-features = false }
-reth-provider = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-revm = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-rpc = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-rpc-api = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-rpc-convert = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-rpc-eth-api = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-rpc-eth-types = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926", default-features = false }
-reth-rpc-layer = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-rpc-server-types = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-storage-api = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926", default-features = false }
-reth-tasks = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-transaction-pool = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-trie = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926", features = [
+reth-provider = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-revm = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-rpc = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-rpc-api = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-rpc-convert = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-rpc-eth-api = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-rpc-eth-types = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0", default-features = false }
+reth-rpc-layer = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-rpc-server-types = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-storage-api = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0", default-features = false }
+reth-tasks = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-transaction-pool = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-trie = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0", features = [
   "serde",
 ] }
-reth-trie-common = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926", default-features = false }
-reth-trie-db = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
+reth-trie-common = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0", default-features = false }
+reth-trie-db = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
 
 rsp-client-executor = { git = "https://github.com/succinctlabs/rsp", tag = "reth-2.2.0-sp1-6.5.0-patch.1" }
 rsp-mpt = { git = "https://github.com/succinctlabs/rsp", tag = "reth-2.2.0-sp1-6.5.0-patch.1" }
@@ -398,28 +398,3 @@ inherits = "release"
 lto = "off"
 opt-level = 0
 strip = true
-
-# Keep RSP's transitive Reth dependencies on the same source as Alpen Reth. The fork fixes
-# signer-recovery failures being surfaced as Engine API internal errors (reth issue #27241).
-[patch."https://github.com/paradigmxyz/reth"]
-reth-chainspec = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-consensus = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-consensus-common = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-db-models = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-errors = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-ethereum-consensus = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-ethereum-forks = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-ethereum-primitives = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-evm = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-evm-ethereum = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-execution-errors = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-execution-types = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-network-peers = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-prune-types = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-stages-types = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-static-file-types = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-storage-api = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-storage-errors = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-trie = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-trie-common = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }
-reth-trie-sparse = { git = "https://github.com/voidash/reth", rev = "6290d467831789aab1b8faa7232b867ce2e65926" }

@@ -424,7 +424,8 @@ mod tests {
         let consensus = test_consensus().with_eest_fixture_mode();
         let header = sealed_header(1, Bytes::from_static(&[0x00]));
 
-        assert_eq!(consensus.validate_header(&header), Ok(()));
+        let result = consensus.validate_header(&header);
+        assert!(result.is_ok(), "{result:?}");
     }
 
     /// The fee model's base-fee floor survives per-version dispatch: a child
@@ -479,10 +480,8 @@ mod tests {
             ..Default::default()
         });
 
-        assert_eq!(
-            consensus.validate_header_against_parent(&child, &parent),
-            Ok(())
-        );
+        let result = consensus.validate_header_against_parent(&child, &parent);
+        assert!(result.is_ok(), "{result:?}");
     }
 
     /// The genesis header's operator-authored `extra_data` is never parsed;
