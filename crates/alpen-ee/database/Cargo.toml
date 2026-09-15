@@ -7,6 +7,9 @@ version = "0.3.0-alpha.1"
 workspace = true
 
 [features]
+# Exposes the operator-console core (table registry, row reflection, class
+# model) consumed by the `alpen-ee dbconsole` command.
+console = []
 # Exposes helpers for constructing EE stores in downstream tests.
 test-utils = []
 

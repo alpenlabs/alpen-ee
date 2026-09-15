@@ -1,0 +1,26 @@
+[package]
+edition = "2021"
+name = "alpen-ee"
+version = "0.3.0-alpha.1"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "alpen-ee"
+path = "src/main.rs"
+
+[dependencies]
+alpen-ee-database = { workspace = true, features = ["console"] }
+
+clap = { workspace = true, features = [
+  "derive",
+  "std",
+  "help",
+  "usage",
+  "error-context",
+  "suggestions",
+  "color",
+] }
+eyre.workspace = true
+rhai.workspace = true
