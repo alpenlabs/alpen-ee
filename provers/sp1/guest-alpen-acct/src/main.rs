@@ -1,7 +1,7 @@
 #![no_main]
 zkaleido_sp1_guest_env::entrypoint!(main);
 
-use alpen_ee_params::AlpenParams;
+use alpen_ee_params::{AlpenParams, AlpenSpecId};
 use strata_predicate::{PredicateKey, PredicateTypeId};
 use strata_proofimpl_alpen_acct::process_ee_acct_update;
 use zkaleido_sp1_guest_env::Sp1ZkVmEnv;
@@ -11,11 +11,17 @@ use zkaleido_sp1_guest_env::Sp1ZkVmEnv;
 /// zkVM input — see `strata_proofimpl_alpen_acct::process_ee_acct_update` for
 /// why.
 mod predicates {
-    include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../generated/predicates.rs"));
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../generated/predicates.rs"
+    ));
 }
 
 mod alpen_params {
-    include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../generated/alpen_params.rs"));
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../generated/alpen_params.rs"
+    ));
 }
 
 /// Constructs the chunk proof predicate key from the Groth16 predicate
@@ -29,12 +35,17 @@ fn chunk_predicate_key() -> PredicateKey {
 }
 
 fn embedded_alpen_params() -> AlpenParams {
-    serde_json::from_str(alpen_params::ALPEN_PARAMS_JSON)
-        .expect("embedded alpen params must parse")
+    serde_json::from_str(alpen_params::ALPEN_PARAMS_JSON).expect("embedded alpen params must parse")
 }
+
+/// The spec version this guest proves under. Hardcoded, not read from zkVM
+/// input: it is what binds the version into this program's verifying key, so
+/// a prover cannot pick which rules its update is checked under. One guest
+/// package per version.
+const SPEC_VERSION: AlpenSpecId = AlpenSpecId::V1;
 
 fn main() {
     let key = chunk_predicate_key();
     let params = embedded_alpen_params();
-    process_ee_acct_update(&Sp1ZkVmEnv, &params, &key)
+    process_ee_acct_update(&Sp1ZkVmEnv, &params, SPEC_VERSION, &key)
 }

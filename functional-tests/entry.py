@@ -273,8 +273,14 @@ def main(argv: list[str]) -> int:
         return 0
 
     # Create factories
+    #
+    # The AlpenClient pool is consumed cumulatively across the whole run, four
+    # ports per node (http, p2p, authrpc, admin_rpc) plus one more when discv5
+    # is on, so it has to cover every node every env builds. It stops below
+    # 30600: test_fullnode_sync and test_ee_predicate_fullnode_sync build their
+    # own factories over 30600-30800.
     factories: dict[ServiceType, flexitest.Factory] = {
-        ServiceType.AlpenClient: AlpenClientFactory(range(30303, 30503)),
+        ServiceType.AlpenClient: AlpenClientFactory(range(30303, 30600)),
         ServiceType.Bitcoin: BitcoinFactory(range(18443, 18543)),
         ServiceType.Strata: StrataFactory(range(19443, 19543)),
         ServiceType.StrataSigner: SignerFactory(range(19543, 19553)),
@@ -307,11 +313,6 @@ def main(argv: list[str]) -> int:
         ),
         # Environments containing both ee and ol
         "el_ol": EeOLEnv(pre_generate_blocks=110),
-        "el_ol_ee_predicate_transition": EeOLEnv(
-            pre_generate_blocks=110,
-            admin_confirmation_depth=2,
-            fund_test_cli_wallet=True,
-        ),
         # Same as `el_ol` but with a tighter OL block time so bridge tests can
         # drive a deposit -> bridgeout -> WF cycle within reasonable runtime.
         # 500ms was tried first but flagged as likely-flaky in #1699 review;

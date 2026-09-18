@@ -429,10 +429,6 @@ mod tests {
     fn evm_env_dispatches_by_header_stamp() {
         let config = test_config();
 
-        // V1 has no EVM delta defined yet, so both stamps currently resolve
-        // to the same rules; what this pins is that each stamp resolves
-        // independently through the per-version table rather than one
-        // erroring or silently falling back to the other's config.
         let v0_env = config
             .evm_env(&stamped_header(AlpenSpecId::V0))
             .expect("v0 stamp resolves");
@@ -441,7 +437,7 @@ mod tests {
         let v1_env = config
             .evm_env(&stamped_header(AlpenSpecId::V1))
             .expect("v1 stamp resolves");
-        assert_eq!(v1_env.cfg_env.spec, SpecId::PRAGUE);
+        assert_eq!(v1_env.cfg_env.spec, SpecId::OSAKA);
     }
 
     /// An unstamped header is the chain's pre-stamp state, so it resolves to

@@ -26,21 +26,27 @@ pub use program::{EeAcctProgram, EeAcctProofInput};
 /// private inputs (EE, update, and DA witness) from the zkVM, and commits
 /// the pre-encoded `UpdateProofPubParams` SSZ bytes as public output.
 ///
-/// `params` and `chunk_predicate_key` are trusted, out-of-band arguments,
-/// not zkVM input: genesis and bridge params are consensus-critical, and a
-/// host-supplied predicate key would let a malicious prover bypass chunk
-/// proof verification, so both are bound into this guest's verifying key
-/// rather than trusted as prover-supplied private input. See
-/// `provers/sp1/guest-alpen-acct/src/main.rs` for the guest-side
-/// construction path.
+/// `params`, `spec_version`, and `chunk_predicate_key` are trusted,
+/// out-of-band arguments, not zkVM input: genesis and bridge params are
+/// consensus-critical, a host-supplied predicate key would let a malicious
+/// prover bypass chunk proof verification, and a host-supplied spec version
+/// would let one pick which rules its update is checked under -- claiming an
+/// older version for a newer batch to dodge a hardfork's rules. All three are
+/// bound into this guest's verifying key instead, so the predicate rotation
+/// that activates a version is also what authorizes proving under it. See
+/// `provers/sp1/guest-alpen-acct/src/main.rs` for the guest-side construction
+/// path.
+///
+/// One version per batch is well-defined because a rotation-consuming block
+/// always ends its group -- see `sealing_policy::rotation_policy` -- so no
+/// batch straddles an activation boundary.
 pub fn process_ee_acct_update(
     zkvm: &impl ZkVmEnvSerde,
     params: &AlpenParams,
+    spec_version: AlpenSpecId,
     chunk_predicate_key: &PredicateKey,
 ) {
-    // TODO(STR-4002): pin to v0 until per-block version resolution is
-    // threaded through the proof guests.
-    let chain_spec: Arc<ChainSpec> = params.evm_spec().chain_spec(AlpenSpecId::V0).clone();
+    let chain_spec: Arc<ChainSpec> = params.evm_spec().chain_spec(spec_version).clone();
 
     let ee_buf = zkvm.read_buf();
     let ee_input: &ArchivedEePrivateInput =

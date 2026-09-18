@@ -1,4 +1,4 @@
-use alpen_ee_params::AlpenParams;
+use alpen_ee_params::{AlpenParams, AlpenSpecId};
 use k256::schnorr::SigningKey;
 use rkyv::rancor::Error as RkyvError;
 use ssz::Decode;
@@ -27,11 +27,15 @@ pub struct EeChunkProofInput {
 #[derive(Debug)]
 pub struct EeChunkProgram {
     params: AlpenParams,
+    spec_version: AlpenSpecId,
 }
 
 impl EeChunkProgram {
-    pub fn new(params: AlpenParams) -> Self {
-        Self { params }
+    pub fn new(params: AlpenParams, spec_version: AlpenSpecId) -> Self {
+        Self {
+            params,
+            spec_version,
+        }
     }
 }
 
@@ -77,8 +81,9 @@ impl EeChunkProgram {
     /// Native host that can be used for testing.
     pub fn native_host(&self) -> NativeHost {
         let params = self.params.clone();
+        let spec_version = self.spec_version;
         NativeHost::new(Self::test_signing_key(), move |zkvm| {
-            process_ee_chunk(zkvm, &params)
+            process_ee_chunk(zkvm, &params, spec_version)
         })
     }
 
@@ -154,6 +159,11 @@ mod tests {
         )
     }
 
+    /// The spec version the RSP witness fixture was produced under. Shared by
+    /// the execution that builds the expected outputs and by the program that
+    /// replays them, so the two cannot drift apart.
+    const FIXTURE_SPEC_VERSION: AlpenSpecId = AlpenSpecId::V0;
+
     #[test]
     fn test_native_chunk_execution() {
         let witness = load_witness();
@@ -193,10 +203,8 @@ mod tests {
 
         // Execute the block to get outputs, against the same params `params`
         // will hand to `process_ee_chunk` below.
-        // TODO(STR-4002): pin to v0 until per-chunk version resolution is
-        // threaded through the proof guests.
         let chain_spec: Arc<reth_chainspec::ChainSpec> =
-            params.evm_spec().chain_spec(AlpenSpecId::V0).clone();
+            params.evm_spec().chain_spec(FIXTURE_SPEC_VERSION).clone();
         let ee = EvmExecutionEnvironment::new(chain_spec, AlpenEvmFactory::default());
         let header_intrinsics = block.get_header().get_intrinsics();
         let exec_payload = ExecPayload::new(&header_intrinsics, block.get_body());
@@ -235,7 +243,7 @@ mod tests {
         let proof_input = EeChunkProofInput { private_input };
 
         // Run the full native execution pipeline.
-        let result = EeChunkProgram::new(params)
+        let result = EeChunkProgram::new(params, FIXTURE_SPEC_VERSION)
             .execute(&proof_input)
             .expect("native execution should succeed");
 

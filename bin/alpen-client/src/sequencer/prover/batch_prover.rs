@@ -9,12 +9,21 @@
 //! [`EeBatchProofDbManager`] first (proof present → `Ready`); on miss
 //! it maps `acct_handle.get_status(BatchTask)` to
 //! [`ProofGenerationStatus`].
+//!
+//! Both route through [`PaasBatchProver::program_for`] first: a batch never
+//! straddles a VK rotation (the sequencer force-seals right after any
+//! rotation-consuming block), so each batch has exactly one governing
+//! `AlpenSpecId`, stamped on it at seal time and read back here via
+//! `batch_storage` — that version picks which resident [`ProverProgram`]
+//! actually proves it.
 
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use alpen_ee_common::{
-    BatchId, BatchProver, ChunkStatus, ChunkStorage, Proof, ProofGenerationStatus, ProofId,
+    BatchId, BatchProver, BatchStorage, ChunkStatus, ChunkStorage, Proof, ProofGenerationStatus,
+    ProofId,
 };
+use alpen_ee_params::AlpenSpecId;
 use async_trait::async_trait;
 use strata_paas::{ProverError as PaasError, ProverHandle, TaskStatus};
 use tracing::{debug, info, warn};
@@ -23,33 +32,65 @@ use super::{
     spec_acct::AcctSpec, spec_chunk::ChunkSpec, BatchTask, ChunkTask, EeBatchProofDbManager,
 };
 
+/// One resident `--prover-program` candidate's launched chunk + acct prover
+/// handles. Named to mirror the config-side `ProverProgramPaths` it was
+/// resolved from.
+pub(crate) struct ProverProgram {
+    pub(crate) chunk_handle: ProverHandle<ChunkSpec>,
+    pub(crate) acct_handle: ProverHandle<AcctSpec>,
+}
+
 /// New-paas-backed [`BatchProver`].
+///
+/// Holds every resident [`ProverProgram`], keyed by the `AlpenSpecId` its
+/// candidate declared. See the module doc for how a batch's own version
+/// picks which one proves it.
 pub(crate) struct PaasBatchProver {
-    chunk_handle: ProverHandle<ChunkSpec>,
-    acct_handle: ProverHandle<AcctSpec>,
+    programs: BTreeMap<AlpenSpecId, ProverProgram>,
     chunk_storage: Arc<dyn ChunkStorage>,
+    batch_storage: Arc<dyn BatchStorage>,
     batch_proofs: Arc<EeBatchProofDbManager>,
 }
 
 impl PaasBatchProver {
     pub(crate) fn new(
-        chunk_handle: ProverHandle<ChunkSpec>,
-        acct_handle: ProverHandle<AcctSpec>,
+        programs: BTreeMap<AlpenSpecId, ProverProgram>,
         chunk_storage: Arc<dyn ChunkStorage>,
+        batch_storage: Arc<dyn BatchStorage>,
         batch_proofs: Arc<EeBatchProofDbManager>,
     ) -> Self {
         Self {
-            chunk_handle,
-            acct_handle,
+            programs,
             chunk_storage,
+            batch_storage,
             batch_proofs,
         }
+    }
+
+    /// Resolves which resident program proves `batch_id`, by the spec
+    /// version stamped on it at seal time.
+    async fn program_for(&self, batch_id: BatchId) -> eyre::Result<&ProverProgram> {
+        let (batch, _status) = self
+            .batch_storage
+            .get_batch_by_id(batch_id)
+            .await?
+            .ok_or_else(|| eyre::eyre!("no batch stored for {batch_id}"))?;
+        let spec_version = batch.spec_version();
+        self.programs.get(&spec_version).ok_or_else(|| {
+            eyre::eyre!(
+                "no resident prover program for spec version {spec_version} (batch {batch_id}); \
+                 resident versions: {:?}",
+                self.programs.keys().collect::<Vec<_>>()
+            )
+        })
     }
 }
 
 #[async_trait]
 impl BatchProver for PaasBatchProver {
     async fn request_proof_generation(&self, batch_id: BatchId) -> eyre::Result<()> {
+        let program = self.program_for(batch_id).await?;
+
         let chunks = self
             .chunk_storage
             .get_batch_chunks(batch_id)
@@ -64,7 +105,8 @@ impl BatchProver for PaasBatchProver {
 
         for chunk_id in chunks {
             let task = ChunkTask(chunk_id);
-            self.chunk_handle
+            program
+                .chunk_handle
                 .submit(task)
                 .await
                 .map_err(|e| eyre::eyre!("submit chunk task {chunk_id:?}: {e}"))?;
@@ -81,7 +123,8 @@ impl BatchProver for PaasBatchProver {
             }
         }
 
-        self.acct_handle
+        program
+            .acct_handle
             .submit(BatchTask(batch_id))
             .await
             .map_err(|e| eyre::eyre!("submit acct task {batch_id}: {e}"))?;
@@ -98,10 +141,12 @@ impl BatchProver for PaasBatchProver {
             });
         }
 
+        let program = self.program_for(batch_id).await?;
+
         // Else map paas's task lifecycle status. `TaskNotFound` ⇒ NotStarted
         // (we never submitted, or we're in a fresh process and haven't yet
         // recovered).
-        match self.acct_handle.get_status(&BatchTask(batch_id)) {
+        match program.acct_handle.get_status(&BatchTask(batch_id)) {
             Ok(TaskStatus::Completed) => {
                 // Completed but not in the proof DB? Hook hasn't fired yet
                 // or the DB lost its entry. Treat as Pending so the

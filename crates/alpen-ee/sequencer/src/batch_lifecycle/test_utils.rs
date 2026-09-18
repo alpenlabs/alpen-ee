@@ -4,6 +4,7 @@ use alpen_ee_common::{
     Batch, BatchId, BatchStatus, BatchStorage, InMemoryStorage, L1DaBlockInfo, L1DaBlockRef,
     ProofId,
 };
+use alpen_ee_params::AlpenSpecId;
 use bitcoin::{hashes::Hash as _, BlockHash, Txid, Wtxid};
 use strata_acct_types::Hash;
 use strata_btc_types::BlockHashExt;
@@ -30,6 +31,7 @@ pub(crate) fn make_batch(idx: u64, prev_n: u8, last_n: u8) -> Batch {
         test_hash(last_n),
         last_n as u64,
         vec![],
+        AlpenSpecId::V0,
     )
     .expect("valid batch")
 }

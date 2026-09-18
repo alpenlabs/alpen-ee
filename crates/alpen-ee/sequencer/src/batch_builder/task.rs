@@ -74,6 +74,7 @@ async fn get_block_range(
 async fn seal_batch<P: AccumulationPolicy>(
     state: &mut BatchBuilderState<P>,
     storage: &impl BatchStorage,
+    block_storage: &impl ExecBlockStorage,
 ) -> Result<Option<BatchId>> {
     // Read the accumulated blocks without releasing them. `save_next_batch`
     // below can fail, and this state is never persisted: the task only logs
@@ -89,6 +90,25 @@ async fn seal_batch<P: AccumulationPolicy>(
     };
 
     let prev_block = state.prev_batch_end();
+
+    // The version governing every block in this batch: whatever the block
+    // this batch starts after (its own `prev_block`) already settled on for
+    // the block built after it. Mirrors the same derivation
+    // `block_builder::build_next_block` uses for "version governing the
+    // next block" (its `last_local_block.next_spec_version()`) — a batch
+    // never straddles a rotation, so this single value governs every block
+    // in it.
+    let spec_version = block_storage
+        .get_exec_block(prev_block.hash())
+        .await?
+        .ok_or_else(|| {
+            eyre!(
+                "missing exec block record for batch start {}",
+                prev_block.hash()
+            )
+        })?
+        .next_spec_version();
+
     let batch_idx = state.next_batch_idx();
     let batch = Batch::new(
         batch_idx,
@@ -96,6 +116,7 @@ async fn seal_batch<P: AccumulationPolicy>(
         last_block.hash(),
         last_block.blocknum(),
         inner_blocks,
+        spec_version,
     )
     .map_err(|err| eyre!(err))?;
     let batch_id = batch.id();
@@ -104,6 +125,7 @@ async fn seal_batch<P: AccumulationPolicy>(
         batch_idx = batch.idx(),
         prev_block = %prev_block.hash(),
         last_block = %last_block.hash(),
+        %spec_version,
         "Sealing batch"
     );
 
@@ -136,7 +158,13 @@ where
         return Ok(());
     }
 
-    if let Some(batch_id) = seal_batch(state, ctx.batch_storage.as_ref()).await? {
+    if let Some(batch_id) = seal_batch(
+        state,
+        ctx.batch_storage.as_ref(),
+        ctx.block_storage.as_ref(),
+    )
+    .await?
+    {
         let _ = ctx.latest_batch_tx.send(batch_id);
         emit_event(&ctx.event_tx, BatchBuilderEvent::batch_sealed(batch_id)).await;
     }
@@ -323,7 +351,13 @@ where
                 .accumulator()
                 .would_exceed(&ctx.sealing_policy, &block_data)
         {
-            if let Some(batch_id) = seal_batch(state, ctx.batch_storage.as_ref()).await? {
+            if let Some(batch_id) = seal_batch(
+                state,
+                ctx.batch_storage.as_ref(),
+                ctx.block_storage.as_ref(),
+            )
+            .await?
+            {
                 // Notify watchers of new batch
                 let _ = ctx.latest_batch_tx.send(batch_id);
                 emit_event(&ctx.event_tx, BatchBuilderEvent::batch_sealed(batch_id)).await;
@@ -514,7 +548,12 @@ mod tests {
             .expect_save_next_batch()
             .returning(|_| Err(StorageError::Database("transient".to_string())));
 
-        let result = seal_batch(&mut state, &batch_storage).await;
+        let mut block_storage = MockExecBlockStorage::new();
+        block_storage
+            .expect_get_exec_block()
+            .returning(move |_| Ok(Some(exec_record(genesis, None))));
+
+        let result = seal_batch(&mut state, &batch_storage, &block_storage).await;
 
         assert!(result.is_err(), "a failed batch write must surface");
         assert_eq!(

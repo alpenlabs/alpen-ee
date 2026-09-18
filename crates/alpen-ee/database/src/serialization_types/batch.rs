@@ -3,6 +3,7 @@
 use alpen_ee_common::{
     Batch, BatchId, BatchStatus, Chunk, ChunkId, ChunkStatus, L1DaBlockInfo, L1DaBlockRef, ProofId,
 };
+use alpen_ee_params::AlpenSpecId;
 use bitcoin::{hashes::Hash as _, Txid, Wtxid};
 use borsh::{BorshDeserialize, BorshSerialize};
 use strata_acct_types::Hash;
@@ -57,6 +58,9 @@ pub(crate) struct DBBatch {
     last_block: [u8; 32],
     last_blocknum: u64,
     inner_blocks: Vec<[u8; 32]>,
+    /// `AlpenSpecId` discriminant, stored raw since `AlpenSpecId` doesn't
+    /// derive Borsh (de)serialization.
+    spec_version: u16,
 }
 
 impl From<Batch> for DBBatch {
@@ -67,6 +71,7 @@ impl From<Batch> for DBBatch {
             last_block: value.last_block().into(),
             last_blocknum: value.last_blocknum(),
             inner_blocks: value.inner_blocks().iter().map(|h| (*h).into()).collect(),
+            spec_version: value.spec_version().into(),
         }
     }
 }
@@ -84,12 +89,15 @@ impl TryFrom<DBBatch> for Batch {
         if value.idx == 0 {
             Batch::new_genesis_batch(Hash::from(value.last_block), value.last_blocknum)
         } else {
+            let spec_version = AlpenSpecId::try_from(value.spec_version)
+                .map_err(|_| "unknown AlpenSpecId discriminant in stored batch")?;
             Batch::new(
                 value.idx,
                 Hash::from(value.prev_block),
                 Hash::from(value.last_block),
                 value.last_blocknum,
                 inner_blocks,
+                spec_version,
             )
         }
     }
