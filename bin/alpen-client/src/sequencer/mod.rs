@@ -34,7 +34,6 @@ use alpen_ee_sequencer::{
     sealing_policy::{
         block_count_policy::{BlockCountDataProvider, BlockCountPolicy, FixedBlockCountSealing},
         gas_limit_policy::MaxGasSealing,
-        or_policy::OrSealing,
         rotation_policy::{RotationDataProvider, RotationPolicy, SealOnRotation},
     },
     BatchBuilderEvent, BatchBuilderState, BatchLifecycleState, BlockBuilderConfig,
@@ -605,10 +604,16 @@ where
     // u64::MAX effectively disables the gas policy while keeping a
     // single monomorphic code path (no dyn / enum branching).
     let chunk_gas_limit = sequencer_config.chunk_sealing_gas_limit.unwrap_or(u64::MAX);
-    let chunk_sealing_policy = OrSealing::new(
-        FixedBlockCountSealing::new(chunk_block_count),
-        MaxGasSealing::new(chunk_gas_limit),
-    );
+    let (chunk_sealing_policy, chunk_sealing_data_provider) = or_sealing![
+        (
+            FixedBlockCountSealing::new(chunk_block_count),
+            BlockCountDataProvider
+        ),
+        (
+            MaxGasSealing::new(chunk_gas_limit),
+            RethGasDataProvider::new(node_provider.clone())
+        ),
+    ];
 
     services::chunk_builder::start_chunk_builder_service(
         genesis_blocknumhash,
@@ -616,7 +621,7 @@ where
         storage.clone(),
         storage.clone(),
         chunk_sealing_policy,
-        RethGasDataProvider::new(node_provider.clone()),
+        Arc::new(chunk_sealing_data_provider),
         batch_event_rx,
         service_executor,
     )
