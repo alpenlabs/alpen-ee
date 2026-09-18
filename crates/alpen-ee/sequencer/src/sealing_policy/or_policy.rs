@@ -4,6 +4,10 @@
 //! and accumulated value are tuples of the inner types. Sealing combinators
 //! like [`OrSealing`] define how the two halves are checked.
 //! [`ComposedDataProvider`] fetches block data from both inner providers.
+//!
+//! The pair types nest, so any number of policies can be OR'd. [`crate::or_sealing!`] builds the
+//! nested sealing policy and data provider from a list of pairs, and [`crate::compose_policy!`]
+//! names the matching [`AccumulationPolicy`] type.
 
 use std::marker::PhantomData;
 
@@ -120,14 +124,59 @@ where
     }
 }
 
+/// Names the [`AccumulationPolicy`] that [`crate::or_sealing!`] builds for the same policies.
+///
+/// `compose_policy![A, B, C]` is `ComposedPolicy<A, ComposedPolicy<B, C>>`.
+#[macro_export]
+macro_rules! compose_policy {
+    ($policy:ty $(,)?) => { $policy };
+    ($policy:ty, $($rest:ty),+ $(,)?) => {
+        $crate::sealing_policy::or_policy::ComposedPolicy<
+            $policy,
+            $crate::compose_policy!($($rest),+),
+        >
+    };
+}
+
+/// Builds an OR-combined sealing policy and data provider from `(sealing, provider)` pairs.
+///
+/// Returns `(sealing, provider)` where the group seals when **any** listed sealing policy
+/// triggers. Pairs nest to the right, so the result implements
+/// [`SealingPolicy`] / [`BlockDataProvider`] for the [`crate::compose_policy!`] of the same
+/// policies in the same order.
+///
+/// ```ignore
+/// type Policy = compose_policy![BlockCountPolicy, GasLimitPolicy, RotationPolicy];
+/// let (sealing, provider) = or_sealing![
+///     (FixedBlockCountSealing::new(10), BlockCountDataProvider),
+///     (MaxGasSealing::new(gas_limit), gas_provider),
+///     (SealOnRotation, RotationDataProvider::new(storage)),
+/// ];
+/// let acc: Accumulator<Policy> = Accumulator::new();
+/// ```
+#[macro_export]
+macro_rules! or_sealing {
+    (($sealing:expr, $provider:expr) $(,)?) => { ($sealing, $provider) };
+    (($sealing:expr, $provider:expr), $($rest:tt)+) => {{
+        let (rest_sealing, rest_provider) = $crate::or_sealing!($($rest)+);
+        (
+            $crate::sealing_policy::or_policy::OrSealing::new($sealing, rest_sealing),
+            $crate::sealing_policy::or_policy::ComposedDataProvider::new($provider, rest_provider),
+        )
+    }};
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
         sealing_policy::{
-            block_count_policy::{BlockCountData, BlockCountPolicy, FixedBlockCountSealing},
+            block_count_policy::{
+                BlockCountData, BlockCountDataProvider, BlockCountPolicy, FixedBlockCountSealing,
+            },
             gas_limit_policy::{GasBlockData, GasLimitPolicy, MaxGasSealing},
             policy::Accumulator,
+            rotation_policy::{RotationData, RotationPolicy, SealOnRotation},
         },
         test_utils::*,
     };
@@ -218,5 +267,70 @@ mod tests {
         assert!(!acc.would_exceed(&sealing, &block_data(0)));
         assert_eq!(acc.value().0.count, 0);
         assert_eq!(acc.value().1.total_gas, 0);
+    }
+
+    /// Reports a fixed gas figure for every block.
+    struct FixedGasProvider(u64);
+
+    #[async_trait]
+    impl BlockDataProvider<GasLimitPolicy> for FixedGasProvider {
+        async fn get_block_data(&self, _hash: Hash) -> eyre::Result<Option<GasBlockData>> {
+            Ok(Some(GasBlockData { gas_used: self.0 }))
+        }
+    }
+
+    /// Reports every block as consuming a rotation.
+    struct AlwaysRotates;
+
+    #[async_trait]
+    impl BlockDataProvider<RotationPolicy> for AlwaysRotates {
+        async fn get_block_data(&self, _hash: Hash) -> eyre::Result<Option<RotationData>> {
+            Ok(Some(RotationData::new(true)))
+        }
+    }
+
+    type Triple = compose_policy![BlockCountPolicy, GasLimitPolicy, RotationPolicy];
+
+    fn triple_data(gas: u64, rotates: bool) -> <Triple as AccumulationPolicy>::BlockData {
+        (
+            BlockCountData,
+            (GasBlockData { gas_used: gas }, RotationData::new(rotates)),
+        )
+    }
+
+    #[tokio::test]
+    async fn test_or_sealing_three_policies() {
+        let (sealing, provider) = or_sealing![
+            (FixedBlockCountSealing::new(100), BlockCountDataProvider),
+            (MaxGasSealing::new(50), FixedGasProvider(7)),
+            (SealOnRotation, AlwaysRotates),
+        ];
+        let mut acc: Accumulator<Triple> = Accumulator::new();
+
+        // The middle policy (gas) seals: 40 accumulated + 20 incoming > 50.
+        acc.add_block(test_blocknumhash(1), &triple_data(40, false));
+        assert!(!acc.must_seal(&sealing));
+        assert!(!acc.would_exceed(&sealing, &triple_data(5, false)));
+        assert!(acc.would_exceed(&sealing, &triple_data(20, false)));
+
+        // The provider fetches all three halves, nested like the policy type; the rotation
+        // half it reports then forces a seal after the block.
+        let data = provider
+            .get_block_data(test_hash(1))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(data.1 .0.gas_used, 7);
+        acc.add_block(test_blocknumhash(2), &data);
+        assert!(acc.must_seal(&sealing));
+    }
+
+    #[test]
+    fn test_or_sealing_single_pair_is_identity() {
+        let (sealing, _provider) =
+            or_sealing![(FixedBlockCountSealing::new(1), BlockCountDataProvider)];
+        let mut acc: Accumulator<compose_policy![BlockCountPolicy]> = Accumulator::new();
+        acc.add_block(test_blocknumhash(1), &BlockCountData);
+        assert!(acc.would_exceed(&sealing, &BlockCountData));
     }
 }

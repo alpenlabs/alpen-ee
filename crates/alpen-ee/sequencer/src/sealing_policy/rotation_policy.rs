@@ -21,6 +21,13 @@ pub struct RotationData {
     consumes_rotation: bool,
 }
 
+impl RotationData {
+    /// Marks whether the block consumed a predicate rotation.
+    pub(crate) fn new(consumes_rotation: bool) -> Self {
+        Self { consumes_rotation }
+    }
+}
+
 /// Whether any block added to the group consumed a predicate rotation.
 ///
 /// Latches: nothing can un-require a seal once a rotation is in the group. A
@@ -81,9 +88,9 @@ impl<ES: ExecBlockStorage> BlockDataProvider<RotationPolicy> for RotationDataPro
             .await?
             .ok_or_else(|| eyre!("missing exec block: {hash}"))?;
 
-        Ok(Some(RotationData {
-            consumes_rotation: record.package().outputs().new_predicate().is_some(),
-        }))
+        Ok(Some(RotationData::new(
+            record.package().outputs().new_predicate().is_some(),
+        )))
     }
 }
 

@@ -16,7 +16,7 @@
 //! |--------|-------------|
 //! | [`block_count_policy`] | Block count reaches a threshold |
 //! | [`gas_limit_policy`] | Cumulative gas exceeds a limit |
-//! | [`or_policy`] | Either of two composed policies triggers |
+//! | [`or_policy`] | Any of the composed policies triggers (see [`crate::or_sealing!`]) |
 //! | [`rotation_policy`] | The group's last block consumed a predicate rotation |
 
 pub mod block_count_policy;
