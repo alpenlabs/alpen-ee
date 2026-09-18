@@ -73,8 +73,12 @@ use crate::{
     gossip::GossipConfig,
     node::{LaunchedNode, NodeBootstrap},
     ol::OLClientKind,
+    sequencer::sealing_policy::da_size::{DaBatchSizePolicy, DaSizeProvider, MaxDaSizeSealing},
     service_executor::ServiceExecutor,
 };
+
+// TODO: make this configurable
+const MAX_DA_SIZE_BYTES: u64 = 200 * 1024; // 200kb
 
 /// What the sequencer path needs from [`crate::node`]'s bootstrap that a
 /// full node has no use for: the MDBX handle its extra databases come from,
@@ -95,7 +99,7 @@ type BlockCountPolicy = ValueAccumulatorPolicy;
 
 /// Batch sealing pairs the configured block-count cadence with the protocol
 /// rule that a predicate rotation ends its batch.
-type BatchSealingPolicy = compose_policy![BlockCountPolicy, RotationPolicy];
+type BatchSealingPolicy = compose_policy![BlockCountPolicy, RotationPolicy, DaBatchSizePolicy];
 
 /// Startup state that only the EE sequencer needs: the OL chain tracker,
 /// exec chain, batch builder, and batch lifecycle states loaded from
@@ -501,6 +505,10 @@ where
             BlockCountDataProvider
         ),
         (SealOnRotation, RotationDataProvider::new(storage.clone())),
+        (
+            MaxDaSizeSealing::new(MAX_DA_SIZE_BYTES),
+            DaSizeProvider::new(sequencer_dbs.witness_db())
+        )
     ];
 
     // Per-block proof witnesses are captured inline during payload
