@@ -11,7 +11,7 @@ use tracing::{debug, error, warn};
 use super::{ctx::BatchBuilderCtx, events::BatchBuilderEvent, BatchBuilderState};
 use crate::{
     batch_builder::reorg::{check_and_handle_reorg, ReorgReport},
-    sealing_policy::{AccumulationPolicy, BlockDataProvider, SealingPolicy},
+    sealing_policy::{AccumulationPolicy, BlockDataProvider, SealReason, SealingPolicy},
 };
 
 /// Polling interval for checking pending block data availability.
@@ -75,6 +75,7 @@ async fn seal_batch<P: AccumulationPolicy>(
     state: &mut BatchBuilderState<P>,
     storage: &impl BatchStorage,
     block_storage: &impl ExecBlockStorage,
+    reason: SealReason,
 ) -> Result<Option<BatchId>> {
     // Read the accumulated blocks without releasing them. `save_next_batch`
     // below can fail, and this state is never persisted: the task only logs
@@ -126,6 +127,7 @@ async fn seal_batch<P: AccumulationPolicy>(
         prev_block = %prev_block.hash(),
         last_block = %last_block.hash(),
         %spec_version,
+        reason,
         "Sealing batch"
     );
 
@@ -154,14 +156,18 @@ where
     BS: BatchStorage,
     ES: ExecBlockStorage,
 {
-    if !state.accumulator().must_seal(&ctx.sealing_policy) {
+    let Some(reason) = state
+        .accumulator()
+        .must_seal_with_reason(&ctx.sealing_policy)
+    else {
         return Ok(());
-    }
+    };
 
     if let Some(batch_id) = seal_batch(
         state,
         ctx.batch_storage.as_ref(),
         ctx.block_storage.as_ref(),
+        reason,
     )
     .await?
     {
@@ -346,15 +352,19 @@ where
         // Check if adding this block would exceed threshold. The write happens
         // before the block leaves the queue, so a failed seal leaves it at the
         // front for the next poll to retry.
-        if !state.accumulator().is_empty()
-            && state
-                .accumulator()
-                .would_exceed(&ctx.sealing_policy, &block_data)
-        {
+        let exceeded = (!state.accumulator().is_empty())
+            .then(|| {
+                state
+                    .accumulator()
+                    .would_exceed_with_reason(&ctx.sealing_policy, &block_data)
+            })
+            .flatten();
+        if let Some(reason) = exceeded {
             if let Some(batch_id) = seal_batch(
                 state,
                 ctx.batch_storage.as_ref(),
                 ctx.block_storage.as_ref(),
+                reason,
             )
             .await?
             {
@@ -555,7 +565,7 @@ mod tests {
             .expect_get_exec_block()
             .returning(move |_| Ok(Some(exec_record(genesis, None))));
 
-        let result = seal_batch(&mut state, &batch_storage, &block_storage).await;
+        let result = seal_batch(&mut state, &batch_storage, &block_storage, "test").await;
 
         assert!(result.is_err(), "a failed batch write must surface");
         assert_eq!(

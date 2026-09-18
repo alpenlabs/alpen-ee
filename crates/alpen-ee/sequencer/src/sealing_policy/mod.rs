@@ -24,4 +24,4 @@ pub mod or_policy;
 mod policy;
 pub mod rotation_policy;
 
-pub use policy::{AccumulationPolicy, Accumulator, BlockDataProvider, SealingPolicy};
+pub use policy::{AccumulationPolicy, Accumulator, BlockDataProvider, SealReason, SealingPolicy};

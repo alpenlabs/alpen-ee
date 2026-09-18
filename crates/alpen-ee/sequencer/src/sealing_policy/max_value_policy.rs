@@ -5,7 +5,7 @@
 //! Which quantity is summed is decided by the [`super::BlockDataProvider`]
 //! paired with it, not by the policy type.
 
-use super::policy::{AccumulationPolicy, SealingPolicy};
+use super::policy::{AccumulationPolicy, SealReason, SealingPolicy};
 
 /// Accumulates a per-block `u64` into a running, saturating sum.
 #[derive(Debug, Clone, Copy)]
@@ -27,12 +27,23 @@ impl AccumulationPolicy for ValueAccumulatorPolicy {
 #[derive(Debug, Clone, Copy)]
 pub struct MaxValueSealing {
     max_limit: u64,
+    name: SealReason,
 }
 
 impl MaxValueSealing {
+    pub const DEFAULT_NAME: SealReason = "max_value";
+
     /// Creates a sealing policy that admits sums up to and including `max_limit`.
     pub fn new(max_limit: u64) -> Self {
-        Self { max_limit }
+        Self {
+            max_limit,
+            name: Self::DEFAULT_NAME,
+        }
+    }
+
+    /// Sets the reason reported when this policy seals, e.g. `"block_count"`.
+    pub fn named(self, name: SealReason) -> Self {
+        Self { name, ..self }
     }
 
     /// The largest sum a group may reach.
@@ -42,6 +53,10 @@ impl MaxValueSealing {
 }
 
 impl SealingPolicy<ValueAccumulatorPolicy> for MaxValueSealing {
+    fn name(&self) -> SealReason {
+        self.name
+    }
+
     fn would_exceed(&self, accumulated: &u64, new: &u64) -> bool {
         accumulated.saturating_add(*new) > self.max_limit
     }
@@ -141,5 +156,21 @@ mod tests {
     #[test]
     fn max_limit_getter() {
         assert_eq!(MaxValueSealing::new(100).max_limit(), 100);
+    }
+
+    #[test]
+    fn reports_its_name_as_the_seal_reason() {
+        let mut acc: Accumulator<ValueAccumulatorPolicy> = Accumulator::new();
+        acc.add_block(test_blocknumhash(1), &1);
+
+        let unnamed = MaxValueSealing::new(1);
+        assert_eq!(
+            acc.would_exceed_with_reason(&unnamed, &1),
+            Some(MaxValueSealing::DEFAULT_NAME)
+        );
+
+        let named = MaxValueSealing::new(1).named("gas");
+        assert_eq!(acc.would_exceed_with_reason(&named, &1), Some("gas"));
+        assert_eq!(acc.would_exceed_with_reason(&named, &0), None);
     }
 }

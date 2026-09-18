@@ -13,7 +13,7 @@ use async_trait::async_trait;
 use eyre::eyre;
 use strata_acct_types::Hash;
 
-use super::policy::{AccumulationPolicy, BlockDataProvider, SealingPolicy};
+use super::policy::{AccumulationPolicy, BlockDataProvider, SealReason, SealingPolicy};
 
 /// Whether a block consumes a predicate rotation.
 #[derive(Debug, Clone, Copy, Default)]
@@ -55,7 +55,16 @@ impl AccumulationPolicy for RotationPolicy {
 #[derive(Debug)]
 pub struct SealOnRotation;
 
+impl SealOnRotation {
+    /// The [`SealReason`] reported when a rotation closes the group.
+    pub const NAME: SealReason = "rotation";
+}
+
 impl SealingPolicy<RotationPolicy> for SealOnRotation {
+    fn name(&self) -> SealReason {
+        Self::NAME
+    }
+
     fn would_exceed(&self, _value: &RotationValue, _block_data: &RotationData) -> bool {
         // A rotation never seals the group *before* its own block: the block
         // belongs to the group it closes.
@@ -109,9 +118,17 @@ mod tests {
         acc.add_block(test_blocknumhash(1), &data(true));
 
         assert!(acc.must_seal(&SealOnRotation));
+        assert_eq!(
+            acc.must_seal_with_reason(&SealOnRotation),
+            Some(SealOnRotation::NAME)
+        );
         // The rotation block belongs to the group it closes, so it must never
         // seal ahead of itself.
         assert!(!acc.would_exceed(&SealOnRotation, &data(true)));
+        assert_eq!(
+            acc.would_exceed_with_reason(&SealOnRotation, &data(true)),
+            None
+        );
     }
 
     #[test]
@@ -137,5 +154,6 @@ mod tests {
     fn empty_accumulator_never_seals() {
         let acc: Accumulator<RotationPolicy> = Accumulator::new();
         assert!(!acc.must_seal(&SealOnRotation));
+        assert_eq!(acc.must_seal_with_reason(&SealOnRotation), None);
     }
 }

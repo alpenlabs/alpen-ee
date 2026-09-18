@@ -90,10 +90,8 @@ pub(crate) struct BootstrapResources {
     pub(crate) genesis_epoch: EpochCommitment,
 }
 
-// Alias [`ValueAccumulatorPolicy`] and [`MaxValueSealing`] for readability
+// Alias for readability
 type BlockCountPolicy = ValueAccumulatorPolicy;
-type FixedBlockCountSealing = MaxValueSealing;
-type MaxGasSealing = MaxValueSealing;
 
 /// Batch sealing pairs the configured block-count cadence with the protocol
 /// rule that a predicate rotation ends its batch.
@@ -499,7 +497,7 @@ where
     // batch builder.
     let (batch_sealing_policy, batch_sealing_data_provider) = or_sealing![
         (
-            FixedBlockCountSealing::new(sequencer_config.batch_sealing_block_count),
+            MaxValueSealing::new(sequencer_config.batch_sealing_block_count).named("block_count"),
             BlockCountDataProvider
         ),
         (SealOnRotation, RotationDataProvider::new(storage.clone())),
@@ -613,11 +611,11 @@ where
     let chunk_gas_limit = sequencer_config.chunk_sealing_gas_limit.unwrap_or(u64::MAX);
     let (chunk_sealing_policy, chunk_sealing_data_provider) = or_sealing![
         (
-            FixedBlockCountSealing::new(chunk_block_count),
+            MaxValueSealing::new(chunk_block_count).named("block_count"),
             BlockCountDataProvider
         ),
         (
-            MaxGasSealing::new(chunk_gas_limit),
+            MaxValueSealing::new(chunk_gas_limit).named("gas"),
             RethGasDataProvider::new(node_provider.clone())
         ),
     ];

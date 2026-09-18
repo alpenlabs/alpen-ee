@@ -14,7 +14,7 @@ use std::marker::PhantomData;
 use async_trait::async_trait;
 use strata_acct_types::Hash;
 
-use super::policy::{AccumulationPolicy, BlockDataProvider, SealingPolicy};
+use super::policy::{AccumulationPolicy, BlockDataProvider, SealReason, SealingPolicy};
 
 /// Composed batch policy that pairs two inner policies.
 ///
@@ -37,7 +37,8 @@ impl<A: AccumulationPolicy, B: AccumulationPolicy> AccumulationPolicy for Compos
 /// Seals a batch when **either** of two sealing policies triggers.
 ///
 /// Both `SA` and `SB` operate on their respective projected half of the
-/// composed accumulated value.
+/// composed accumulated value. The `*_with_reason` checks report the first
+/// half that triggers, so a nested chain names the leftmost sealing policy.
 #[derive(Debug)]
 pub struct OrSealing<A: AccumulationPolicy, B: AccumulationPolicy, SA, SB> {
     a: SA,
@@ -79,6 +80,25 @@ where
 
     fn must_seal(&self, value: &(A::AccumulatedValue, B::AccumulatedValue)) -> bool {
         self.a.must_seal(&value.0) || self.b.must_seal(&value.1)
+    }
+
+    fn would_exceed_with_reason(
+        &self,
+        value: &(A::AccumulatedValue, B::AccumulatedValue),
+        block_data: &(A::BlockData, B::BlockData),
+    ) -> Option<SealReason> {
+        self.a
+            .would_exceed_with_reason(&value.0, &block_data.0)
+            .or_else(|| self.b.would_exceed_with_reason(&value.1, &block_data.1))
+    }
+
+    fn must_seal_with_reason(
+        &self,
+        value: &(A::AccumulatedValue, B::AccumulatedValue),
+    ) -> Option<SealReason> {
+        self.a
+            .must_seal_with_reason(&value.0)
+            .or_else(|| self.b.must_seal_with_reason(&value.1))
     }
 }
 
@@ -300,8 +320,11 @@ mod tests {
     #[tokio::test]
     async fn test_or_sealing_three_policies() {
         let (sealing, provider) = or_sealing![
-            (FixedBlockCountSealing::new(100), BlockCountDataProvider),
-            (MaxGasSealing::new(50), FixedGasProvider(7)),
+            (
+                FixedBlockCountSealing::new(100).named("block_count"),
+                BlockCountDataProvider
+            ),
+            (MaxGasSealing::new(50).named("gas"), FixedGasProvider(7)),
             (SealOnRotation, AlwaysRotates),
         ];
         let mut acc: Accumulator<Triple> = Accumulator::new();
@@ -311,6 +334,10 @@ mod tests {
         assert!(!acc.must_seal(&sealing));
         assert!(!acc.would_exceed(&sealing, &triple_data(5, false)));
         assert!(acc.would_exceed(&sealing, &triple_data(20, false)));
+        assert_eq!(
+            acc.would_exceed_with_reason(&sealing, &triple_data(20, false)),
+            Some("gas")
+        );
 
         // The provider fetches all three halves, nested like the policy type; the rotation
         // half it reports then forces a seal after the block.
@@ -322,6 +349,38 @@ mod tests {
         assert_eq!(data.1 .0, 7);
         acc.add_block(test_blocknumhash(2), &data);
         assert!(acc.must_seal(&sealing));
+        assert_eq!(
+            acc.must_seal_with_reason(&sealing),
+            Some(SealOnRotation::NAME)
+        );
+    }
+
+    /// When both halves would seal, the reason names the leftmost one, matching
+    /// the order the policies were listed in.
+    #[test]
+    fn test_or_sealing_reason_prefers_leftmost() {
+        let sealing = OrSealing::new(
+            FixedBlockCountSealing::new(1).named("block_count"),
+            MaxGasSealing::new(10).named("gas"),
+        );
+        let mut acc: Accumulator<Combined> = Accumulator::new();
+        acc.add_block(test_blocknumhash(1), &block_data(10));
+
+        // count: 1 + 1 > 1, gas: 10 + 10 > 10 — both trigger
+        assert_eq!(
+            acc.would_exceed_with_reason(&sealing, &block_data(10)),
+            Some("block_count")
+        );
+        // Only gas triggers once count has room.
+        let sealing = OrSealing::new(
+            FixedBlockCountSealing::new(100).named("block_count"),
+            MaxGasSealing::new(10).named("gas"),
+        );
+        assert_eq!(
+            acc.would_exceed_with_reason(&sealing, &block_data(10)),
+            Some("gas")
+        );
+        assert_eq!(acc.would_exceed_with_reason(&sealing, &block_data(0)), None);
     }
 
     #[test]
