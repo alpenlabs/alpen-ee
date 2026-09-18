@@ -14,13 +14,12 @@
 //!
 //! | Module | Seals when… |
 //! |--------|-------------|
-//! | [`block_count_policy`] | Block count reaches a threshold |
-//! | [`gas_limit_policy`] | Cumulative gas exceeds a limit |
+//! | [`max_value_policy`] | A summed per-block value (block count, gas, …) would exceed a limit |
 //! | [`or_policy`] | Any of the composed policies triggers (see [`crate::or_sealing!`]) |
 //! | [`rotation_policy`] | The group's last block consumed a predicate rotation |
 
-pub mod block_count_policy;
-pub mod gas_limit_policy;
+pub mod block_count_data_provider;
+pub mod max_value_policy;
 pub mod or_policy;
 mod policy;
 pub mod rotation_policy;

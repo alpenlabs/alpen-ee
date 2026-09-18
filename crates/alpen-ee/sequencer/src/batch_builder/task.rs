@@ -423,8 +423,10 @@ mod tests {
     use crate::{
         batch_builder::BatchBuilderState,
         sealing_policy::{
-            block_count_policy::{
-                BlockCountData, BlockCountDataProvider, BlockCountPolicy, FixedBlockCountSealing,
+            block_count_data_provider::BlockCountDataProvider,
+            max_value_policy::{
+                MaxValueSealing as FixedBlockCountSealing,
+                ValueAccumulatorPolicy as BlockCountPolicy,
             },
             or_policy::{ComposedDataProvider, ComposedPolicy, OrSealing},
             rotation_policy::{RotationDataProvider, RotationPolicy, SealOnRotation},
@@ -540,8 +542,8 @@ mod tests {
 
         let mut state: BatchBuilderState<BlockCountPolicy> =
             BatchBuilderState::from_last_batch(0, genesis);
-        state.accumulator_mut().add_block(block1, &BlockCountData);
-        state.accumulator_mut().add_block(block2, &BlockCountData);
+        state.accumulator_mut().add_block(block1, &1);
+        state.accumulator_mut().add_block(block2, &1);
 
         let mut batch_storage = MockBatchStorage::new();
         batch_storage

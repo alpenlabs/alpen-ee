@@ -146,10 +146,10 @@ macro_rules! compose_policy {
 /// policies in the same order.
 ///
 /// ```ignore
-/// type Policy = compose_policy![BlockCountPolicy, GasLimitPolicy, RotationPolicy];
+/// type Policy = compose_policy![ValueAccumulatorPolicy, ValueAccumulatorPolicy, RotationPolicy];
 /// let (sealing, provider) = or_sealing![
-///     (FixedBlockCountSealing::new(10), BlockCountDataProvider),
-///     (MaxGasSealing::new(gas_limit), gas_provider),
+///     (MaxValueSealing::new(max_blocks), block_count_provider),
+///     (MaxValueSealing::new(gas_limit), gas_provider),
 ///     (SealOnRotation, RotationDataProvider::new(storage)),
 /// ];
 /// let acc: Accumulator<Policy> = Accumulator::new();
@@ -171,10 +171,12 @@ mod tests {
     use super::*;
     use crate::{
         sealing_policy::{
-            block_count_policy::{
-                BlockCountData, BlockCountDataProvider, BlockCountPolicy, FixedBlockCountSealing,
+            block_count_data_provider::BlockCountDataProvider,
+            max_value_policy::{
+                MaxValueSealing as FixedBlockCountSealing, MaxValueSealing as MaxGasSealing,
+                ValueAccumulatorPolicy as BlockCountPolicy,
+                ValueAccumulatorPolicy as GasLimitPolicy,
             },
-            gas_limit_policy::{GasBlockData, GasLimitPolicy, MaxGasSealing},
             policy::Accumulator,
             rotation_policy::{RotationData, RotationPolicy, SealOnRotation},
         },
@@ -183,8 +185,8 @@ mod tests {
 
     type Combined = ComposedPolicy<BlockCountPolicy, GasLimitPolicy>;
 
-    fn block_data(gas: u64) -> (BlockCountData, GasBlockData) {
-        (BlockCountData, GasBlockData { gas_used: gas })
+    fn block_data(gas: u64) -> (u64, u64) {
+        (1, gas)
     }
 
     #[test]
@@ -265,8 +267,8 @@ mod tests {
 
         // After drain, both counters are zero — neither policy seals
         assert!(!acc.would_exceed(&sealing, &block_data(0)));
-        assert_eq!(acc.value().0.count, 0);
-        assert_eq!(acc.value().1.total_gas, 0);
+        assert_eq!(acc.value().0, 0);
+        assert_eq!(acc.value().1, 0);
     }
 
     /// Reports a fixed gas figure for every block.
@@ -274,8 +276,8 @@ mod tests {
 
     #[async_trait]
     impl BlockDataProvider<GasLimitPolicy> for FixedGasProvider {
-        async fn get_block_data(&self, _hash: Hash) -> eyre::Result<Option<GasBlockData>> {
-            Ok(Some(GasBlockData { gas_used: self.0 }))
+        async fn get_block_data(&self, _hash: Hash) -> eyre::Result<Option<u64>> {
+            Ok(Some(self.0))
         }
     }
 
@@ -292,10 +294,7 @@ mod tests {
     type Triple = compose_policy![BlockCountPolicy, GasLimitPolicy, RotationPolicy];
 
     fn triple_data(gas: u64, rotates: bool) -> <Triple as AccumulationPolicy>::BlockData {
-        (
-            BlockCountData,
-            (GasBlockData { gas_used: gas }, RotationData::new(rotates)),
-        )
+        (1, (gas, RotationData::new(rotates)))
     }
 
     #[tokio::test]
@@ -320,7 +319,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(data.1 .0.gas_used, 7);
+        assert_eq!(data.1 .0, 7);
         acc.add_block(test_blocknumhash(2), &data);
         assert!(acc.must_seal(&sealing));
     }
@@ -330,7 +329,7 @@ mod tests {
         let (sealing, _provider) =
             or_sealing![(FixedBlockCountSealing::new(1), BlockCountDataProvider)];
         let mut acc: Accumulator<compose_policy![BlockCountPolicy]> = Accumulator::new();
-        acc.add_block(test_blocknumhash(1), &BlockCountData);
-        assert!(acc.would_exceed(&sealing, &BlockCountData));
+        acc.add_block(test_blocknumhash(1), &1);
+        assert!(acc.would_exceed(&sealing, &1));
     }
 }

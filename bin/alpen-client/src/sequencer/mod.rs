@@ -9,11 +9,11 @@
 //! builders.
 
 mod da_pipeline;
-mod gas_data_provider;
 mod header_summary;
 mod payload_builder;
 mod prover;
 mod provers;
+mod sealing_policy;
 mod services;
 
 use std::{
@@ -32,8 +32,8 @@ use alpen_ee_sequencer::{
     create_batch_lifecycle_task, create_update_submitter_task, init_batch_builder_state,
     init_lifecycle_state, init_ol_chain_tracker_state, or_sealing,
     sealing_policy::{
-        block_count_policy::{BlockCountDataProvider, BlockCountPolicy, FixedBlockCountSealing},
-        gas_limit_policy::MaxGasSealing,
+        block_count_data_provider::BlockCountDataProvider,
+        max_value_policy::{MaxValueSealing, ValueAccumulatorPolicy},
         rotation_policy::{RotationDataProvider, RotationPolicy, SealOnRotation},
     },
     BatchBuilderEvent, BatchBuilderState, BatchLifecycleState, BlockBuilderConfig,
@@ -65,7 +65,9 @@ use strata_primitives::buf::Buf32;
 use tokio::sync::{mpsc, watch};
 use tracing::{error, info, info_span, Instrument};
 
-use self::{gas_data_provider::RethGasDataProvider, payload_builder::AlpenRethPayloadEngine};
+use self::{
+    payload_builder::AlpenRethPayloadEngine, sealing_policy::gas_data_provider::RethGasDataProvider,
+};
 use crate::{
     config::SequencerMode,
     gossip::GossipConfig,
@@ -87,6 +89,11 @@ pub(crate) struct BootstrapResources {
     pub(crate) ol_client: Arc<OLClientKind>,
     pub(crate) genesis_epoch: EpochCommitment,
 }
+
+// Alias [`ValueAccumulatorPolicy`] and [`MaxValueSealing`] for readability
+type BlockCountPolicy = ValueAccumulatorPolicy;
+type FixedBlockCountSealing = MaxValueSealing;
+type MaxGasSealing = MaxValueSealing;
 
 /// Batch sealing pairs the configured block-count cadence with the protocol
 /// rule that a predicate rotation ends its batch.
