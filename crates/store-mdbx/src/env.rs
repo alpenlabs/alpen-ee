@@ -7,7 +7,7 @@
 //! central discipline: **one logical operation = one transaction opened and
 //! committed inside a single call, never held across an await or slow work.**
 
-use std::{fs, path::Path};
+use std::{borrow::Cow, fs, ops::ControlFlow, path::Path};
 
 use signet_libmdbx::{
     sys::PageSize,
@@ -15,8 +15,8 @@ use signet_libmdbx::{
         aliases::{RoTxUnsync, RwTxUnsync},
         PtrUnsync, SyncKind,
     },
-    DatabaseFlags, Environment, EnvironmentFlags, Geometry, Mode, SyncMode, TransactionKind,
-    TxUnsync, WriteFlags,
+    DatabaseFlags, Environment, EnvironmentFlags, Geometry, MdbxError, Mode, SyncMode,
+    TransactionKind, TxUnsync, WriteFlags,
 };
 
 use crate::{
@@ -87,6 +87,91 @@ impl MdbxEnv {
         }
         txn.commit()?;
 
+        Ok(Self { env })
+    }
+
+    /// Opens an existing MDBX environment at `path` in **read-only** mode.
+    ///
+    /// Unlike [`MdbxEnv::open`], this never takes a write transaction, so it
+    /// can attach alongside a live writer (e.g. a running sequencer) without
+    /// contending for the environment write-lock — the attach posture the
+    /// operator console uses against a running node. Tables are not created;
+    /// they must already exist, and [`MdbxEnv::update`] will fail on the
+    /// resulting read-only environment.
+    pub fn open_readonly(path: &Path, config: &MdbxConfig) -> DbResult<Self> {
+        if !path.exists() {
+            return Err(DbError::Env(format!(
+                "read-only open of missing env {}",
+                path.display()
+            )));
+        }
+
+        let mut builder = Environment::builder();
+        builder
+            .set_max_dbs(config.max_dbs)
+            .set_max_readers(config.max_readers)
+            // A read-only environment cannot resize the map, so geometry is left
+            // to whatever the writer established; only the reader-slot and
+            // sub-database limits matter here.
+            .set_flags(EnvironmentFlags {
+                mode: Mode::ReadOnly,
+                ..Default::default()
+            });
+
+        let env = builder.open(path).map_err(|e| match e {
+            // MDBX answers a reader with EAGAIN or BUSY while another process
+            // holds the environment exclusively, which for this store means a
+            // console attached with --allow-writes.
+            MdbxError::Busy | MdbxError::Other(11) => DbError::Env(format!(
+                "{} is held exclusively by another process (a console with --allow-writes?); \
+                 wait for it to exit",
+                path.display()
+            )),
+            other => other.into(),
+        })?;
+        Ok(Self { env })
+    }
+
+    /// Opens an existing environment read-write, **exclusively**.
+    ///
+    /// The exclusive flag is the liveness guard: MDBX refuses the open if any
+    /// other process has this environment open, so an attach can only succeed
+    /// once the node owning the store is down. That is a hard requirement
+    /// rather than a courtesy — a node keeps state in memory that the store
+    /// alone does not capture, so an outside writer racing a live node would
+    /// have its edits clobbered by the next flush, or be silently unobserved.
+    ///
+    /// Tables are not created: they must already exist, so this never writes to
+    /// a store it does not recognise.
+    pub fn open_readwrite_exclusive(path: &Path, config: &MdbxConfig) -> DbResult<Self> {
+        if !path.exists() {
+            return Err(DbError::Env(format!(
+                "read-write open of missing env {}",
+                path.display()
+            )));
+        }
+
+        let sync_mode = match config.sync_mode {
+            MdbxSyncMode::Durable => SyncMode::Durable,
+        };
+
+        let mut builder = Environment::builder();
+        builder
+            .set_max_dbs(config.max_dbs)
+            .set_max_readers(config.max_readers)
+            .set_flags(EnvironmentFlags {
+                exclusive: true,
+                mode: Mode::ReadWrite { sync_mode },
+                ..Default::default()
+            });
+
+        let env = builder.open(path).map_err(|e| {
+            DbError::Env(format!(
+                "exclusive read-write open of {} failed ({e}); \
+                 another process has this environment open",
+                path.display()
+            ))
+        })?;
         Ok(Self { env })
     }
 
@@ -161,6 +246,16 @@ where
     }
 }
 
+/// Reports whether `key` is present, without reading its value.
+fn contains_in<S: Schema, K>(txn: &TxUnsync<K>, key: &S::Key) -> DbResult<bool>
+where
+    K: TransactionKind + SyncKind<Access = PtrUnsync>,
+{
+    let db = txn.open_db(Some(S::NAME))?;
+    let key_bytes = key.encode_key()?;
+    Ok(txn.get::<()>(db.dbi(), &key_bytes)?.is_some())
+}
+
 fn first_in<S: Schema, K>(txn: &TxUnsync<K>) -> DbResult<Option<(S::Key, S::Value)>>
 where
     K: TransactionKind + SyncKind<Access = PtrUnsync>,
@@ -206,6 +301,75 @@ where
     Ok(())
 }
 
+/// The direction of a [`Reader::walk`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Direction {
+    /// Ascending key order.
+    Forward,
+    /// Descending key order.
+    Backward,
+}
+
+/// One raw entry as the cursor hands it over: key and value borrowed from the
+/// mapped file, or nothing once the walk runs out.
+type RawEntry<'a> = Option<(Cow<'a, [u8]>, Cow<'a, [u8]>)>;
+
+/// Walks a table's raw entries from `start` in `direction` until `f` breaks
+/// or the table runs out.
+///
+/// `start` is inclusive either way: forward begins at the first key at or
+/// after it, backward at the last key at or before it; `None` begins at the
+/// table's first or last entry. Entries are handed over as slices borrowed
+/// from the mapped file, so nothing is copied and a caller that wants only
+/// keys never touches a value.
+fn walk_in<S: Schema, K>(
+    txn: &TxUnsync<K>,
+    start: Option<&[u8]>,
+    direction: Direction,
+    mut f: impl FnMut(&[u8], &[u8]) -> DbResult<ControlFlow<()>>,
+) -> DbResult<()>
+where
+    K: TransactionKind + SyncKind<Access = PtrUnsync>,
+{
+    let db = txn.open_db(Some(S::NAME))?;
+    let mut cursor = txn.cursor(db)?;
+
+    let mut current: RawEntry<'_> = match (start, direction) {
+        (None, Direction::Forward) => cursor.first()?,
+        (None, Direction::Backward) => cursor.last()?,
+        (Some(key), Direction::Forward) => cursor.set_range(key)?,
+        (Some(key), Direction::Backward) => {
+            match cursor.set_range::<Cow<'_, [u8]>, Cow<'_, [u8]>>(key)? {
+                // Landed on `start` itself: it is included.
+                Some((found, value)) if found.as_ref() == key => Some((found, value)),
+                // Landed past it, or nothing at or past it: the last key before
+                // it is where a backward walk begins.
+                Some(_) => cursor.prev()?,
+                None => cursor.last()?,
+            }
+        }
+    };
+
+    while let Some((key, value)) = current {
+        if f(&key, &value)?.is_break() {
+            break;
+        }
+        current = match direction {
+            Direction::Forward => cursor.next()?,
+            Direction::Backward => cursor.prev()?,
+        };
+    }
+    Ok(())
+}
+
+fn count_in<S: Schema, K>(txn: &TxUnsync<K>) -> DbResult<usize>
+where
+    K: TransactionKind + SyncKind<Access = PtrUnsync>,
+{
+    let db = txn.open_db(Some(S::NAME))?;
+    Ok(txn.db_stat(&db)?.entries())
+}
+
 fn decode_entry<S: Schema>(
     (key_bytes, value_bytes): (Vec<u8>, Vec<u8>),
     ctx: &UpgradeCtx<'_>,
@@ -237,6 +401,11 @@ impl<'txn> Reader<'txn> {
         get_in::<S, _>(self.txn, key)
     }
 
+    /// Reports whether `key` is present, without decoding its value.
+    pub fn contains<S: Schema>(&self, key: &S::Key) -> DbResult<bool> {
+        contains_in::<S, _>(self.txn, key)
+    }
+
     /// Returns the first (lowest-key) entry in the table, if any.
     pub fn first<S: Schema>(&self) -> DbResult<Option<(S::Key, S::Value)>> {
         first_in::<S, _>(self.txn)
@@ -253,6 +422,27 @@ impl<'txn> Reader<'txn> {
         f: impl FnMut(S::Key, S::Value) -> DbResult<()>,
     ) -> DbResult<()> {
         for_each_in::<S, _>(self.txn, f)
+    }
+
+    /// Returns the number of entries in the table (O(1) via MDBX stat).
+    pub fn count<S: Schema>(&self) -> DbResult<usize> {
+        count_in::<S, _>(self.txn)
+    }
+
+    /// Walks the table's raw entries from `start` in `direction` until `f`
+    /// breaks or the table runs out; see [`Direction`].
+    ///
+    /// The typed [`Self::for_each`] decodes every entry. This hands over the
+    /// encoded key and value as borrowed slices instead, for a caller that
+    /// decides per entry what to decode, wants to stop early, or walks
+    /// backwards.
+    pub fn walk<S: Schema>(
+        &self,
+        start: Option<&[u8]>,
+        direction: Direction,
+        f: impl FnMut(&[u8], &[u8]) -> DbResult<ControlFlow<()>>,
+    ) -> DbResult<()> {
+        walk_in::<S, _>(self.txn, start, direction, f)
     }
 }
 
@@ -293,6 +483,21 @@ impl<'txn> Writer<'txn> {
         for_each_in::<S, _>(self.txn, f)
     }
 
+    /// Returns the number of entries in the table (O(1) via MDBX stat).
+    pub fn count<S: Schema>(&self) -> DbResult<usize> {
+        count_in::<S, _>(self.txn)
+    }
+
+    /// Walks the table's raw entries; see [`Reader::walk`].
+    pub fn walk<S: Schema>(
+        &self,
+        start: Option<&[u8]>,
+        direction: Direction,
+        f: impl FnMut(&[u8], &[u8]) -> DbResult<ControlFlow<()>>,
+    ) -> DbResult<()> {
+        walk_in::<S, _>(self.txn, start, direction, f)
+    }
+
     /// Inserts or overwrites the value for `key`, in the current format.
     pub fn put<S: Schema>(&self, key: &S::Key, value: &S::Value) -> DbResult<()> {
         let db = self.txn.open_db(Some(S::NAME))?;
@@ -321,12 +526,14 @@ impl<'txn> Writer<'txn> {
 /// Behavioural tests for the environment and its typed accessors.
 #[cfg(test)]
 mod tests {
+    use std::ops::ControlFlow;
+
     use tempfile::tempdir;
 
     use crate::{
         define_table, define_table_be_key, define_table_borsh, impl_be_key_codec,
         impl_raw_value_codec, impl_unit_value_codec, tables, CodecError, DbError, DbResult,
-        MdbxConfig, MdbxEnv, Schema,
+        Direction, MdbxConfig, MdbxEnv, Schema,
     };
 
     define_table_be_key! {
@@ -505,5 +712,188 @@ mod tests {
             matches!(err, DbError::Codec(CodecError::Decode { .. })),
             "expected a decode refusal, got {err:?}"
         );
+    }
+
+    // --- Exclusive read-write attach ------------------------------------------
+
+    /// The exclusive attach is the console's liveness guard, so it has to actually
+    /// refuse while another handle on the environment is alive.
+    #[test]
+    fn exclusive_readwrite_is_refused_while_the_env_is_open() {
+        let (dir, env) = open();
+        env.update(|w| w.put::<Numbers>(&1, &vec![7])).unwrap();
+
+        let err = MdbxEnv::open_readwrite_exclusive(dir.path(), &MdbxConfig::small())
+            .expect_err("exclusive open succeeded while the env was still open");
+        assert!(
+            err.to_string()
+                .contains("another process has this environment open"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// Once the owning handle is gone the attach succeeds and can both read what
+    /// the previous writer left and write on top of it.
+    #[test]
+    fn exclusive_readwrite_attaches_once_the_env_is_closed() {
+        let (dir, env) = open();
+        env.update(|w| w.put::<Numbers>(&1, &vec![7])).unwrap();
+        drop(env);
+
+        let attached = MdbxEnv::open_readwrite_exclusive(dir.path(), &MdbxConfig::small()).unwrap();
+        assert_eq!(
+            attached.view(|r| r.get::<Numbers>(&1)).unwrap(),
+            Some(vec![7])
+        );
+
+        attached.update(|w| w.delete::<Numbers>(&1)).unwrap();
+        assert_eq!(attached.view(|r| r.get::<Numbers>(&1)).unwrap(), None);
+    }
+
+    /// A store that does not exist is reported as such rather than being created,
+    /// so a typo in `--datadir` never silently makes an empty environment.
+    #[test]
+    fn exclusive_readwrite_refuses_a_missing_env() {
+        let dir = tempdir().unwrap();
+        let missing = dir.path().join("nope");
+        let err = MdbxEnv::open_readwrite_exclusive(&missing, &MdbxConfig::small())
+            .expect_err("opened a missing env");
+        assert!(err.to_string().contains("missing env"), "unexpected: {err}");
+    }
+
+    // --- Raw walks ------------------------------------------------------------
+
+    /// Seeds keys 1..=5 and returns the keys a walk visits, decoded from their
+    /// big-endian bytes, so ordering assertions read as numbers.
+    fn walked(
+        env: &MdbxEnv,
+        start: Option<u64>,
+        direction: Direction,
+        stop_after: usize,
+    ) -> Vec<u64> {
+        let start_bytes = start.map(u64::to_be_bytes);
+        let mut seen = Vec::new();
+        env.view(|r| {
+            r.walk::<Numbers>(
+                start_bytes.as_ref().map(|b| b.as_slice()),
+                direction,
+                |key, value| {
+                    seen.push(u64::from_be_bytes(key.try_into().unwrap()));
+                    // The value rides along as stored (borsh: a length prefix and
+                    // the one byte), for the caller to decode or ignore.
+                    assert_eq!(value.len(), 4 + 1);
+                    Ok(if seen.len() >= stop_after {
+                        ControlFlow::Break(())
+                    } else {
+                        ControlFlow::Continue(())
+                    })
+                },
+            )
+        })
+        .unwrap();
+        seen
+    }
+
+    fn seed_numbers(env: &MdbxEnv) {
+        env.update(|w| {
+            for n in [1u64, 2, 3, 4, 5] {
+                w.put::<Numbers>(&n, &vec![n as u8])?;
+            }
+            Ok::<_, DbError>(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn walk_covers_the_table_in_either_direction() {
+        let (_dir, env) = open();
+        seed_numbers(&env);
+        assert_eq!(
+            walked(&env, None, Direction::Forward, usize::MAX),
+            vec![1, 2, 3, 4, 5]
+        );
+        assert_eq!(
+            walked(&env, None, Direction::Backward, usize::MAX),
+            vec![5, 4, 3, 2, 1]
+        );
+    }
+
+    #[test]
+    fn walk_stops_when_the_visitor_breaks() {
+        let (_dir, env) = open();
+        seed_numbers(&env);
+        assert_eq!(walked(&env, None, Direction::Forward, 2), vec![1, 2]);
+        assert_eq!(walked(&env, None, Direction::Backward, 2), vec![5, 4]);
+    }
+
+    /// `start` is inclusive both ways, and a start between keys snaps to the
+    /// nearest key in the walk's direction.
+    #[test]
+    fn walk_starts_at_or_beside_the_given_key() {
+        let (_dir, env) = open();
+        env.update(|w| {
+            for n in [10u64, 20, 30] {
+                w.put::<Numbers>(&n, &vec![1])?;
+            }
+            Ok::<_, DbError>(())
+        })
+        .unwrap();
+
+        assert_eq!(
+            walked(&env, Some(20), Direction::Forward, usize::MAX),
+            vec![20, 30]
+        );
+        assert_eq!(
+            walked(&env, Some(21), Direction::Forward, usize::MAX),
+            vec![30]
+        );
+        assert_eq!(
+            walked(&env, Some(31), Direction::Forward, usize::MAX),
+            Vec::<u64>::new()
+        );
+
+        assert_eq!(
+            walked(&env, Some(20), Direction::Backward, usize::MAX),
+            vec![20, 10]
+        );
+        assert_eq!(
+            walked(&env, Some(19), Direction::Backward, usize::MAX),
+            vec![10]
+        );
+        assert_eq!(
+            walked(&env, Some(99), Direction::Backward, usize::MAX),
+            vec![30, 20, 10]
+        );
+        assert_eq!(
+            walked(&env, Some(5), Direction::Backward, usize::MAX),
+            Vec::<u64>::new()
+        );
+    }
+
+    #[test]
+    fn walk_of_an_empty_table_visits_nothing() {
+        let (_dir, env) = open();
+        assert_eq!(
+            walked(&env, None, Direction::Forward, usize::MAX),
+            Vec::<u64>::new()
+        );
+        assert_eq!(
+            walked(&env, Some(1), Direction::Backward, usize::MAX),
+            Vec::<u64>::new()
+        );
+    }
+
+    /// A reader that meets an exclusive holder is told so in words, not a code.
+    #[test]
+    fn readonly_open_names_an_exclusive_holder() {
+        let (dir, env) = open();
+        env.update(|w| w.put::<Numbers>(&1, &vec![7])).unwrap();
+        drop(env);
+
+        let holder = MdbxEnv::open_readwrite_exclusive(dir.path(), &MdbxConfig::small()).unwrap();
+        let err = MdbxEnv::open_readonly(dir.path(), &MdbxConfig::small())
+            .expect_err("read-only open succeeded beside an exclusive holder");
+        assert!(err.to_string().contains("held exclusively"), "{err}");
+        drop(holder);
     }
 }

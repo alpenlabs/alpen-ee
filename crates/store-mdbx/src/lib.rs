@@ -66,7 +66,7 @@ pub mod version;
 
 pub use codec::{BoxError, CodecError, KeyCodec, Schema, ValueCodec};
 pub use config::{MdbxConfig, MdbxSyncMode, GIB, TIB};
-pub use env::{MdbxEnv, Reader, TableSpec, Writer};
+pub use env::{Direction, MdbxEnv, Reader, TableSpec, Writer};
 pub use error::{DbError, DbResult};
 pub use version::{
     split_version_tag, unknown_version_error, LiftToCurrent, RawGet, SchemaVersion, UpConvert,
