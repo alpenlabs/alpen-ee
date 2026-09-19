@@ -13,12 +13,16 @@
 //! cache in place, the extractor no longer has to re-execute blocks.
 
 use borsh::{BorshDeserialize, BorshSerialize};
+use serde::{Deserialize, Serialize};
 
 /// Accessed-state captured during one block's execution.
 ///
 /// Bytecodes are stored separately by code hash in the bytecode tree —
 /// keep this record small; many chunks reference the same contracts.
-#[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
+///
+/// Serde is for reflection (the operator console), not storage; borsh is the
+/// codec.
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
 pub struct AccessedStateRecord {
     /// Accounts the block read (and the storage slots, if any).
     pub accounts: Vec<AccessedAccount>,
@@ -45,9 +49,10 @@ impl AccessedStateRecord {
 }
 
 /// One account the block read, with the set of storage slots accessed.
-#[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
 pub struct AccessedAccount {
     /// 20-byte account address (alloy `Address` bytes).
+    #[serde(with = "hex::serde")]
     pub address: [u8; 20],
     /// 32-byte storage slot keys (alloy `B256` bytes).
     pub storage_slots: Vec<[u8; 32]>,

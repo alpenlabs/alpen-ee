@@ -16,6 +16,9 @@ alpen-ee-params.workspace = true
 alpen-reth-db.workspace = true
 alpen-store-mdbx.workspace = true
 bitcoin.workspace = true
+hex.workspace = true
+serde.workspace = true
+serde_bytes.workspace = true
 strata-acct-types.workspace = true
 strata-db-macros.workspace = true
 strata-db-types = { workspace = true, features = ["proxies"] }
