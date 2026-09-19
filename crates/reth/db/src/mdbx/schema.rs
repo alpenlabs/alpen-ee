@@ -13,7 +13,7 @@ use revm_primitives::alloy_primitives::B256;
 
 define_table_versioned_be_key! {
     /// Block state-diff data.
-    (BlockStateChangesSchema) B256 => {
+    (pub BlockStateChangesSchema) B256 => {
         1 => BlockStateChanges as bincode,
     }
 }
@@ -23,7 +23,7 @@ define_table_bincode_be_key! {
     ///
     /// A bare identifier, and the canonical hash at a height changes on a
     /// reorg — nothing here to version.
-    (BlockHashByNumber) u64 => B256
+    (pub BlockHashByNumber) u64 => B256
 }
 
 define_table! {
@@ -31,7 +31,7 @@ define_table! {
     ///
     /// Membership is the whole record, so the value is `()` and occupies no
     /// bytes: the key says everything the table has to say.
-    (PublishedCodeHashSchema) B256 => ()
+    (pub PublishedCodeHashSchema) B256 => ()
 }
 impl_be_key_codec!(PublishedCodeHashSchema, B256);
 impl_unit_value_codec!(PublishedCodeHashSchema);
