@@ -6,4 +6,6 @@ mod db;
 mod schema;
 
 pub use db::{EeDaContextDbMdbx, WitnessDbMdbx};
-pub use schema::witness_tables;
+pub use schema::{
+    witness_tables, BlockHashByNumber, BlockStateChangesSchema, PublishedCodeHashSchema,
+};
