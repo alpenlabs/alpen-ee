@@ -1,7 +1,8 @@
 use borsh::{BorshDeserialize, BorshSerialize};
+use serde::{Deserialize, Serialize};
 use strata_identifiers::{Buf32, OLBlockId};
 
-#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq)]
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
 pub(crate) struct DBOLBlockId(Buf32);
 
 impl From<OLBlockId> for DBOLBlockId {

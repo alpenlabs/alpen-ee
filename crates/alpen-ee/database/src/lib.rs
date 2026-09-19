@@ -1,5 +1,9 @@
 //! Database implementation for Alpen execution environment.
 
+// Referenced only from `#[serde(with = "hex::serde")]` attributes, which the
+// unused-crate-dependencies lint cannot see.
+use hex as _;
+
 pub mod database;
 pub mod error;
 mod init;

@@ -1,4 +1,9 @@
 //! Database serialization types for Batch and Chunk storage.
+//!
+//! Every type here also derives serde, which the operator console reflects
+//! through; serde is not the storage codec, so the on-disk borsh encoding is
+//! untouched. Fixed 32-byte arrays are marked hex so they reflect as one
+//! string rather than a list of integers.
 
 use alpen_ee_common::{
     Batch, BatchId, BatchStatus, Chunk, ChunkId, ChunkStatus, L1DaBlockInfo, L1DaBlockRef, ProofId,
@@ -6,15 +11,20 @@ use alpen_ee_common::{
 use alpen_ee_params::AlpenSpecId;
 use bitcoin::{hashes::Hash as _, Txid, Wtxid};
 use borsh::{BorshDeserialize, BorshSerialize};
+use serde::{Deserialize, Serialize};
 use strata_acct_types::Hash;
 use strata_identifiers::{Buf32, L1BlockCommitment, WtxidsRoot};
+
+use super::hex_list;
 
 /// Database representation of a (Txid, Wtxid) pair.
 ///
 /// Uses named fields to avoid confusion between the two identically-typed 32-byte arrays.
-#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq)]
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
 pub(crate) struct DBTxidPair {
+    #[serde(with = "hex::serde")]
     txid: [u8; 32],
+    #[serde(with = "hex::serde")]
     wtxid: [u8; 32],
 }
 
@@ -29,9 +39,16 @@ impl DBTxidPair {
 }
 
 /// Database representation of a BatchId.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, BorshSerialize, BorshDeserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, BorshSerialize, BorshDeserialize, Serialize, Deserialize,
+)]
 pub(crate) struct DBBatchId {
+    // Hex rather than a 32-element byte list wherever this type is reflected
+    // (the console); serde is not this type's storage codec, so the on-disk
+    // borsh encoding is untouched.
+    #[serde(with = "hex::serde")]
     prev_block: [u8; 32],
+    #[serde(with = "hex::serde")]
     last_block: [u8; 32],
 }
 
@@ -51,12 +68,15 @@ impl From<DBBatchId> for BatchId {
 }
 
 /// Database representation of a Batch.
-#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq)]
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
 pub(crate) struct DBBatch {
     idx: u64,
+    #[serde(with = "hex::serde")]
     prev_block: [u8; 32],
+    #[serde(with = "hex::serde")]
     last_block: [u8; 32],
     last_blocknum: u64,
+    #[serde(with = "hex_list")]
     inner_blocks: Vec<[u8; 32]>,
     /// `AlpenSpecId` discriminant, stored raw since `AlpenSpecId` doesn't
     /// derive Borsh (de)serialization.
@@ -104,11 +124,12 @@ impl TryFrom<DBBatch> for Batch {
 }
 
 /// Database representation of L1DaBlockRef.
-#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq)]
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
 pub(crate) struct DBL1DaBlockRef {
     /// L1BlockCommitment serialized via its Borsh impl.
     block: L1BlockCommitment,
     /// Witness transaction Merkle root for the L1 block.
+    #[serde(with = "hex::serde")]
     wtxids_root: [u8; 32],
     /// This batch's DA txs in this L1 block as raw `(txid, wtxid)` pairs.
     txns: Vec<DBTxidPair>,
@@ -151,7 +172,7 @@ impl From<DBL1DaBlockRef> for L1DaBlockRef {
 }
 
 /// Database representation of BatchStatus.
-#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq)]
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
 pub(crate) enum DBBatchStatus {
     Genesis,
     Sealed,
@@ -166,6 +187,7 @@ pub(crate) enum DBBatchStatus {
     },
     ProofReady {
         da: Vec<DBL1DaBlockRef>,
+        #[serde(with = "hex::serde")]
         proof: [u8; 32],
     },
 }
@@ -211,7 +233,7 @@ impl From<DBBatchStatus> for BatchStatus {
 }
 
 /// Database representation of a Batch with its status, stored together.
-#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq)]
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
 pub(crate) struct DBBatchWithStatus {
     batch: DBBatch,
     status: DBBatchStatus,
@@ -233,9 +255,16 @@ impl DBBatchWithStatus {
 }
 
 /// Database representation of a ChunkId.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, BorshSerialize, BorshDeserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, BorshSerialize, BorshDeserialize, Serialize, Deserialize,
+)]
 pub(crate) struct DBChunkId {
+    // Hex rather than a 32-element byte list wherever this type is reflected
+    // (the console); serde is not this type's storage codec, so the on-disk
+    // borsh encoding is untouched.
+    #[serde(with = "hex::serde")]
     prev_block: [u8; 32],
+    #[serde(with = "hex::serde")]
     last_block: [u8; 32],
 }
 
@@ -255,13 +284,16 @@ impl From<DBChunkId> for ChunkId {
 }
 
 /// Database representation of a Chunk.
-#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq)]
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
 pub(crate) struct DBChunk {
     idx: u64,
+    #[serde(with = "hex::serde")]
     prev_block: [u8; 32],
+    #[serde(with = "hex::serde")]
     last_block: [u8; 32],
     last_blocknum: u64,
     batch_idx: u64,
+    #[serde(with = "hex_list")]
     inner_blocks: Vec<[u8; 32]>,
 }
 
@@ -293,11 +325,11 @@ impl From<DBChunk> for Chunk {
 }
 
 /// Database representation of ChunkStatus.
-#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq)]
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
 pub(crate) enum DBChunkStatus {
     ProvingNotStarted,
     ProofPending(String),
-    ProofReady([u8; 32]),
+    ProofReady(#[serde(with = "hex::serde")] [u8; 32]),
 }
 
 impl From<ChunkStatus> for DBChunkStatus {
@@ -321,7 +353,7 @@ impl From<DBChunkStatus> for ChunkStatus {
 }
 
 /// Database representation of a Chunk with its status, stored together.
-#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq)]
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
 pub(crate) struct DBChunkWithStatus {
     chunk: DBChunk,
     status: DBChunkStatus,
