@@ -422,7 +422,7 @@ mod tests {
     #[test]
     fn eest_fixture_mode_accepts_standard_extra_data() {
         let consensus = test_consensus().with_eest_fixture_mode();
-        let header = sealed_header(1, Bytes::from_static(&[0x00]));
+        let header = SealedHeader::seal_slow(valid_header(1, Bytes::from_static(&[0x00])));
 
         let result = consensus.validate_header(&header);
         assert!(result.is_ok(), "{result:?}");
