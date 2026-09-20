@@ -405,6 +405,12 @@ pub struct AlpenEvmConfig {
     /// [`context_for_next_block`](ConfigureEvm::context_for_next_block); re-execution paths
     /// derive the rate from the block's committed `extra_data` instead.
     pending_da_rate: U256,
+    /// Whether imported blocks and payloads carry Alpen's DA-rate commitment.
+    ///
+    /// Production headers do. Canonical Ethereum fixtures own `extra_data`
+    /// and must never be charged merely because their bytes happen to decode
+    /// as an Alpen header extension.
+    derive_da_rate_from_extra_data: bool,
 }
 
 impl AlpenEvmConfig {
@@ -422,6 +428,7 @@ impl AlpenEvmConfig {
             },
             inner,
             pending_da_rate: U256::ZERO,
+            derive_da_rate_from_extra_data: true,
         }
     }
 
@@ -429,6 +436,25 @@ impl AlpenEvmConfig {
     pub const fn with_pending_da_rate(mut self, da_rate: U256) -> Self {
         self.pending_da_rate = da_rate;
         self
+    }
+
+    /// Treats committed `extra_data` as standard Ethereum data rather than
+    /// an Alpen DA-rate commitment.
+    ///
+    /// This is used only by the isolated EEST fixture process. Build-time
+    /// rates remain controlled independently by [`Self::with_pending_da_rate`].
+    pub const fn with_standard_ethereum_extra_data(mut self) -> Self {
+        self.derive_da_rate_from_extra_data = false;
+        self
+    }
+
+    /// Resolves the DA rate committed by an imported header or payload.
+    fn committed_da_rate(&self, extra_data: &Bytes) -> U256 {
+        if self.derive_da_rate_from_extra_data {
+            da_rate_of(extra_data)
+        } else {
+            U256::ZERO
+        }
     }
 
     /// Restores Ethereum's per-transaction block-gas availability check.
@@ -506,7 +532,7 @@ impl ConfigureEvm for AlpenEvmConfig {
     ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
         Ok(AlpenBlockExecutionCtx {
             inner: self.inner.context_for_block(block)?,
-            da_rate: da_rate_of(&block.header().extra_data),
+            da_rate: self.committed_da_rate(&block.header().extra_data),
         })
     }
 
@@ -533,7 +559,7 @@ impl ConfigureEngineEvm<ExecutionData> for AlpenEvmConfig {
     ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
         Ok(AlpenBlockExecutionCtx {
             inner: self.inner.context_for_payload(payload)?,
-            da_rate: da_rate_of(&payload.payload.as_v1().extra_data),
+            da_rate: self.committed_da_rate(&payload.payload.as_v1().extra_data),
         })
     }
 
