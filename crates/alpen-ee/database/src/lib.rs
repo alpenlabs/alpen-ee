@@ -3,6 +3,10 @@
 // Referenced only from `#[serde(with = "hex::serde")]` attributes, which the
 // unused-crate-dependencies lint cannot see.
 use hex as _;
+// Only the console's reflection tests use it, but it is a dev-dependency of
+// every test build.
+#[cfg(all(test, not(feature = "console")))]
+use proptest as _;
 
 #[cfg(feature = "console")]
 pub mod console;
@@ -13,6 +17,8 @@ mod instrumentation;
 mod mdbxdb;
 mod serialization_types;
 mod storage;
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_db;
 
 pub use error::{DbError, DbResult};
 #[cfg(feature = "test-utils")]

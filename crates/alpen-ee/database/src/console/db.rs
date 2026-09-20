@@ -787,12 +787,7 @@ fn open_env(path: &Path, name: &str, mode: AttachMode) -> eyre::Result<MdbxEnv> 
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        env,
-        path::{Path, PathBuf},
-        process,
-        sync::atomic::{AtomicU32, Ordering},
-    };
+    use std::path::Path;
 
     use alpen_store_mdbx::{DbError, Direction, MdbxConfig, MdbxEnv, TableSpec};
     use strata_acct_types::Hash;
@@ -806,14 +801,10 @@ mod tests {
         },
         AttachMode, ConsoleDb, StagedSummary,
     };
-    use crate::mdbxdb::{ExecBlockFinalizedSchema, ProverTaskSchema};
-
-    static COUNTER: AtomicU32 = AtomicU32::new(0);
-
-    fn temp_datadir() -> PathBuf {
-        let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
-        env::temp_dir().join(format!("alpen-ee-console-{}-{unique}", process::id()))
-    }
+    use crate::{
+        mdbxdb::{ExecBlockFinalizedSchema, ProverTaskSchema},
+        test_db::TempDatadir,
+    };
 
     /// Creates a prover env with two tasks: a pending one and a permanently
     /// failed one. The env handle is dropped before returning so the console can
@@ -852,7 +843,7 @@ mod tests {
 
     #[test]
     fn attaches_and_reflects_prover_tasks() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_prover_env(&datadir);
 
         let db = ConsoleDb::attach_readonly(&datadir).unwrap();
@@ -930,7 +921,7 @@ mod tests {
 
     #[test]
     fn a_scan_walks_in_either_direction_and_stops_at_its_limit() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_prover_env(&datadir);
         let db = ConsoleDb::attach_readonly(&datadir).unwrap();
 
@@ -983,7 +974,7 @@ mod tests {
     /// A visitor's error ends the walk and comes back as itself.
     #[test]
     fn a_visitor_error_ends_the_scan_and_is_returned() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_prover_env(&datadir);
         let db = ConsoleDb::attach_readonly(&datadir).unwrap();
 
@@ -1007,7 +998,7 @@ mod tests {
 
     #[test]
     fn a_keys_walk_renders_every_key_without_a_value() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_prover_env(&datadir);
         let db = ConsoleDb::attach_readonly(&datadir).unwrap();
 
@@ -1035,7 +1026,7 @@ mod tests {
     /// later at commit.
     #[test]
     fn a_read_only_attach_refuses_to_stage() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_prover_env(&datadir);
 
         let db = ConsoleDb::attach_readonly(&datadir).unwrap();
@@ -1046,7 +1037,7 @@ mod tests {
 
     #[test]
     fn staging_rejects_an_unknown_table_and_a_bad_key() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_prover_env(&datadir);
 
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
@@ -1062,7 +1053,7 @@ mod tests {
     /// prompt beats failing the whole batch later.
     #[test]
     fn staging_rejects_a_key_that_is_not_present() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_prover_env(&datadir);
 
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
@@ -1073,7 +1064,7 @@ mod tests {
     /// Nothing reaches the store until commit, and abort leaves it untouched.
     #[test]
     fn staged_deletes_only_land_on_commit() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_prover_env(&datadir);
 
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
@@ -1101,7 +1092,7 @@ mod tests {
 
     #[test]
     fn a_batch_commits_every_staged_edit_at_once() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_prover_env(&datadir);
 
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
@@ -1114,7 +1105,7 @@ mod tests {
 
     #[test]
     fn committing_nothing_is_not_an_error() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_prover_env(&datadir);
 
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
@@ -1125,7 +1116,7 @@ mod tests {
     /// it must fail while anything else holds the environment.
     #[test]
     fn a_read_write_attach_is_refused_while_the_env_is_held() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_prover_env(&datadir);
 
         let holder = ConsoleDb::attach_readonly(&datadir).unwrap();
@@ -1139,7 +1130,7 @@ mod tests {
     /// A field edit must change the named field and nothing else.
     #[test]
     fn a_staged_set_changes_only_the_named_field() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_prover_env(&datadir);
 
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
@@ -1172,7 +1163,7 @@ mod tests {
 
     #[test]
     fn a_set_rejects_an_unknown_field_and_a_bad_value() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_prover_env(&datadir);
 
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
@@ -1196,7 +1187,7 @@ mod tests {
 
     #[test]
     fn a_read_only_attach_refuses_a_set() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_prover_env(&datadir);
 
         let db = ConsoleDb::attach_readonly(&datadir).unwrap();
@@ -1214,7 +1205,7 @@ mod tests {
     /// Deletes and edits in one batch land together or not at all.
     #[test]
     fn a_mixed_batch_commits_atomically() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_prover_env(&datadir);
 
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
@@ -1246,7 +1237,7 @@ mod tests {
     /// to.
     #[test]
     fn a_value_read_out_can_be_edited_and_put_back() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_prover_env(&datadir);
 
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
@@ -1268,7 +1259,7 @@ mod tests {
     /// A value carries no key, so the same one can be written somewhere else.
     #[test]
     fn a_value_can_be_put_at_a_different_key() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_prover_env(&datadir);
 
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
@@ -1287,7 +1278,7 @@ mod tests {
     /// Overwriting is allowed, and the staged line says which it is.
     #[test]
     fn a_put_over_an_existing_key_overwrites() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_prover_env(&datadir);
 
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
@@ -1313,7 +1304,7 @@ mod tests {
     /// no enum literal — and what gets stored is the canonical variant.
     #[test]
     fn an_enum_field_accepts_its_variant_name_as_a_string() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_prover_env(&datadir);
 
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
@@ -1337,7 +1328,7 @@ mod tests {
     /// A name that is not a variant is refused rather than stored as a string.
     #[test]
     fn an_unknown_variant_name_is_refused() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_prover_env(&datadir);
 
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
@@ -1355,7 +1346,7 @@ mod tests {
 
     #[test]
     fn a_read_only_attach_refuses_a_put() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_prover_env(&datadir);
 
         let db = ConsoleDb::attach_readonly(&datadir).unwrap();
@@ -1387,7 +1378,7 @@ mod tests {
     /// prover store — so an absent one is listed, not fatal.
     #[test]
     fn an_absent_environment_is_listed_and_its_tables_are_refused() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_env(&datadir, "prover");
 
         let db = ConsoleDb::attach(&datadir, AttachMode::ReadOnly, two_env_specs()).unwrap();
@@ -1410,7 +1401,7 @@ mod tests {
     /// bare table name, since it is unique there.
     #[test]
     fn a_prover_only_datadir_attaches_with_the_other_environments_absent() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_prover_env(&datadir);
 
         let db = ConsoleDb::attach_readonly(&datadir).unwrap();
@@ -1427,14 +1418,14 @@ mod tests {
 
     #[test]
     fn a_datadir_with_no_environment_is_refused() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         let err = ConsoleDb::attach_readonly(&datadir).unwrap_err();
         assert!(err.to_string().contains("no EE environment"), "{err}");
     }
 
     #[test]
     fn a_bare_name_present_in_two_environments_must_be_qualified() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_env(&datadir, "node");
         seed_env(&datadir, "prover");
 
@@ -1464,7 +1455,7 @@ mod tests {
     /// are gone from the batch afterwards.
     #[test]
     fn a_commit_spanning_environments_lands_in_each() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_env(&datadir, "node");
         seed_env(&datadir, "prover");
 
@@ -1490,7 +1481,7 @@ mod tests {
     /// just the first.
     #[test]
     fn a_read_write_attach_holds_every_present_environment() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_env(&datadir, "node");
         seed_env(&datadir, "prover");
 
@@ -1544,7 +1535,7 @@ mod tests {
 
     #[test]
     fn a_range_covers_its_ends_and_snaps_to_the_keys_inside_it() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         let db = heights_db(&datadir);
         let t = "ExecBlockFinalizedSchema";
 
@@ -1589,7 +1580,7 @@ mod tests {
     /// rather than answered wrongly; the batch-id tables are borsh-encoded.
     #[test]
     fn a_range_is_refused_on_an_unordered_key() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_prover_env(&datadir);
         let db = ConsoleDb::attach_readonly(&datadir).unwrap();
 
@@ -1639,7 +1630,7 @@ mod tests {
     /// A prefix on a decimal key has no meaning, and says so.
     #[test]
     fn a_prefix_is_refused_on_a_decimal_key() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         let db = heights_db(&datadir);
         let err = db
             .keys(
@@ -1657,7 +1648,7 @@ mod tests {
 
     #[test]
     fn a_second_edit_to_a_staged_key_is_refused_and_names_the_first() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_prover_env(&datadir);
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
 
@@ -1690,7 +1681,7 @@ mod tests {
 
     #[test]
     fn a_list_delete_stages_every_key_or_nothing() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_prover_env(&datadir);
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
 
@@ -1719,7 +1710,7 @@ mod tests {
 
     #[test]
     fn the_summary_counts_by_table_and_the_commit_reports_by_environment() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_env(&datadir, "node");
         seed_env(&datadir, "prover");
         let db = ConsoleDb::attach(&datadir, AttachMode::ReadWrite, two_env_specs()).unwrap();
@@ -1763,7 +1754,7 @@ mod tests {
     /// that in one call and one commit.
     #[test]
     fn ten_thousand_deletes_stage_and_commit_in_one_batch() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         let prover = datadir.join("mdbx").join("prover");
         let env = MdbxEnv::open(
             &prover,
@@ -1796,7 +1787,7 @@ mod tests {
     /// not make a second edit of the same key look like a different one.
     #[test]
     fn a_key_is_one_key_to_the_batch_however_it_is_spelled() {
-        let datadir = temp_datadir();
+        let datadir = TempDatadir::new();
         seed_prover_env(&datadir);
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
 
