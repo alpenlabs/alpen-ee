@@ -7,10 +7,14 @@ version = "0.3.0-alpha.1"
 workspace = true
 
 [features]
+# Exposes the operator-console core (table registry, row reflection, class
+# model) consumed by the `dbconsole` binary.
+console = ["dep:alloy-primitives"]
 # Exposes helpers for constructing EE stores in downstream tests.
 test-utils = []
 
 [dependencies]
+alloy-primitives = { workspace = true, optional = true }
 alpen-ee-common.workspace = true
 alpen-ee-params.workspace = true
 alpen-reth-db.workspace = true
@@ -41,5 +45,6 @@ tokio.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+proptest.workspace = true
 alpen-ee-common = { workspace = true, features = ["test-utils"] }
 strata-db-tests.workspace = true

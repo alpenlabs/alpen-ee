@@ -4,6 +4,8 @@
 // unused-crate-dependencies lint cannot see.
 use hex as _;
 
+#[cfg(feature = "console")]
+pub mod console;
 pub mod database;
 pub mod error;
 mod init;
