@@ -115,6 +115,7 @@ impl AlpenEvmConfig {
                 .iter()
                 .map(|config| config.block_assembler().clone())
                 .collect(),
+            stamp_header_extra: !eest_fixture_mode,
         };
 
         Self {
@@ -134,9 +135,9 @@ impl AlpenEvmConfig {
     /// Uses standard Ethereum header semantics for canonical EEST fixtures.
     ///
     /// In this mode arbitrary valid Ethereum `extra_data` is not interpreted
-    /// as an Alpen version stamp. Every fixture executes under V0 and an
-    /// undecodable DA-rate body contributes a zero DA charge. The hidden
-    /// `--eest-fixture-mode` launch path is the only caller.
+    /// as an Alpen version or DA-rate commitment. Every fixture executes
+    /// under V0 with no Alpen DA charge. The hidden `--eest-fixture-mode`
+    /// launch path is the only caller.
     pub fn with_eest_fixture_mode(self) -> Self {
         let configs = self
             .configs
@@ -145,6 +146,7 @@ impl AlpenEvmConfig {
                 config
                     .with_ethereum_block_gas_limit()
                     .with_prague_system_contract_code_validation()
+                    .with_standard_ethereum_extra_data()
             })
             .collect();
         Self::from_configs(self.evm_spec, configs, true)
@@ -288,8 +290,8 @@ impl BlockExecutorFactory for AlpenBlockExecutorFactory {
 }
 
 /// Version-dispatching [`BlockAssembler`]: assembles under the version
-/// carried on the execution context and stamps that version into the built
-/// header's `extra_data`.
+/// carried on the execution context and, outside isolated EEST fixture mode,
+/// stamps that version into the built header's `extra_data`.
 ///
 /// Stamping happens per assembled block, not via the inner assemblers'
 /// static `extra_data` field: the layout is per-block data (future versions
@@ -299,6 +301,10 @@ impl BlockExecutorFactory for AlpenBlockExecutorFactory {
 #[derive(Debug, Clone)]
 pub struct AlpenBlockAssembler {
     inners: Vec<VersionedAssembler>,
+    /// Production blocks commit the Alpen version and DA rate. Canonical
+    /// EEST blocks preserve the standard Ethereum field supplied by the
+    /// payload attributes.
+    stamp_header_extra: bool,
 }
 
 impl BlockAssembler<AlpenBlockExecutorFactory> for AlpenBlockAssembler {
@@ -326,9 +332,11 @@ impl BlockAssembler<AlpenBlockExecutorFactory> for AlpenBlockAssembler {
         // the block: the version that selected its rules, and the DA rate its
         // execution charged. Taking them from anywhere else would let the
         // header disagree with what actually ran.
-        block.header.extra_data = HeaderExtra::new(spec_version, da_rate.saturating_to())
-            .encode()
-            .into();
+        if self.stamp_header_extra {
+            block.header.extra_data = HeaderExtra::new(spec_version, da_rate.saturating_to())
+                .encode()
+                .into();
+        }
         Ok(block)
     }
 }
@@ -449,12 +457,13 @@ mod tests {
     use alloy_primitives::Bytes;
     use alpen_ee_params::{AlpenSpecId, EvmSpec, HeaderExtra, HeaderExtraError};
     use alpen_reth_evm::evm::AlpenEvmFactory;
+    use reth_ethereum_primitives::Block;
     use reth_evm::{
         eth::EthBlockExecutionCtx,
         execute::{BlockAssembler, BlockAssemblerInput, BlockBuilder},
         ConfigureEvm, EvmEnv, NextBlockEnvAttributes,
     };
-    use reth_primitives_traits::{Header, SealedHeader};
+    use reth_primitives_traits::{Header, SealedBlock, SealedHeader};
     use reth_revm::database::StateProviderDatabase;
     use reth_storage_api::noop::NoopProvider;
     use revm::{database::State, primitives::hardfork::SpecId};
@@ -564,6 +573,31 @@ mod tests {
                 .expect("standard fixture extra_data resolves through V0");
             assert_eq!(env.cfg_env.spec, SpecId::PRAGUE);
         }
+    }
+
+    #[test]
+    fn eest_fixture_mode_ignores_decodable_alpen_da_rate_bytes() {
+        let header = Header {
+            number: 1,
+            extra_data: HeaderExtra::new(AlpenSpecId::V0, DA_RATE).encode().into(),
+            ..Default::default()
+        };
+        let block = SealedBlock::seal_slow(Block {
+            header,
+            body: Default::default(),
+        });
+
+        let production = test_config();
+        let production_context = production
+            .context_for_block(&block)
+            .expect("production block context resolves");
+        assert_eq!(production_context.inner.da_rate(), U256::from(DA_RATE));
+
+        let fixture = test_config().with_eest_fixture_mode();
+        let fixture_context = fixture
+            .context_for_block(&block)
+            .expect("fixture block context resolves");
+        assert_eq!(fixture_context.inner.da_rate(), U256::ZERO);
     }
 
     #[test]
@@ -710,5 +744,46 @@ mod tests {
                 "{version:?}"
             );
         }
+    }
+
+    #[test]
+    fn eest_fixture_assembler_preserves_standard_extra_data() {
+        let config = test_config().with_eest_fixture_mode();
+        let parent = SealedHeader::seal_slow(Header::default());
+        let output = Default::default();
+        let bundle_state = Default::default();
+        let provider = NoopProvider::default();
+        let extra_data = Bytes::from_static(b"ethereum-tests");
+        let ctx = AlpenBlockExecutionCtx {
+            inner: DaBlockExecutionCtx::new(
+                EthBlockExecutionCtx {
+                    parent_hash: parent.hash(),
+                    parent_beacon_block_root: None,
+                    ommers: &[],
+                    withdrawals: None,
+                    extra_data: extra_data.clone(),
+                    tx_count_hint: None,
+                    slot_number: None,
+                },
+                U256::ZERO,
+            ),
+            spec_version: AlpenSpecId::V0,
+        };
+
+        let block = config
+            .assembler
+            .assemble_block(BlockAssemblerInput::new(
+                EvmEnv::default(),
+                ctx,
+                &parent,
+                Vec::new(),
+                &output,
+                &bundle_state,
+                &provider,
+                Default::default(),
+            ))
+            .expect("empty fixture block assembles");
+
+        assert_eq!(block.header.extra_data, extra_data);
     }
 }
