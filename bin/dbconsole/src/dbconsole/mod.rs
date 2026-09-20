@@ -16,6 +16,7 @@ use signal_hook::{consts::SIGINT, flag};
 
 mod engine;
 mod handle;
+mod recipes;
 mod repl;
 mod session;
 mod value;
@@ -64,7 +65,8 @@ pub(crate) fn run(args: DbconsoleArgs) -> eyre::Result<()> {
     // transaction in flight completes before the interrupt is seen.
     let interrupted = Arc::new(AtomicBool::new(false));
     flag::register(SIGINT, interrupted.clone())?;
-    let session = session::Session::new(db, interrupted);
+    let mut session = session::Session::new(db, interrupted);
+    recipes::install(&mut session)?;
 
     print!("attached {mode} · {}", present.join(", "));
     if !absent.is_empty() {
