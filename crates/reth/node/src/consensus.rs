@@ -474,9 +474,7 @@ mod tests {
         let child = SealedHeader::seal_slow(Header {
             number: 2,
             parent_hash: parent.hash(),
-            // EIP-1559 applies the elasticity multiplier to the parent when
-            // validating the London activation block's gas-limit delta.
-            gas_limit: 60_000_000,
+            gas_limit: 30_000_000,
             timestamp: 1,
             base_fee_per_gas: Some(875_000_000),
             extra_data: HeaderExtra::new(version, 0).encode().into(),
@@ -504,7 +502,9 @@ mod tests {
         let child = SealedHeader::seal_slow(Header {
             number: 2,
             parent_hash: parent.hash(),
-            gas_limit: 30_000_000,
+            // EIP-1559 applies the elasticity multiplier to the parent when
+            // validating the London activation block's gas-limit delta.
+            gas_limit: 60_000_000,
             timestamp: 1,
             base_fee_per_gas: Some(base_fee_floor),
             extra_data,
