@@ -319,6 +319,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use alloy_eips::eip1559::INITIAL_BASE_FEE;
     use alloy_primitives::Bytes;
     use alpen_ee_params::{AlpenSpecId, EvmSpec, HeaderExtra, DEFAULT_BASE_FEE_FLOOR};
     use reth_consensus::HeaderValidator;
@@ -477,6 +478,34 @@ mod tests {
             timestamp: 1,
             base_fee_per_gas: Some(875_000_000),
             extra_data: HeaderExtra::new(version, 0).encode().into(),
+            ..Default::default()
+        });
+
+        let result = consensus.validate_header_against_parent(&child, &parent);
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[test]
+    fn configured_floor_applies_on_the_london_activation_block() {
+        let evm_spec: EvmSpec =
+            serde_json::from_str(r#"{"config":{"chainId":2892,"londonBlock":2}}"#)
+                .expect("genesis document parses");
+        let base_fee_floor = INITIAL_BASE_FEE + 1;
+        let consensus = AlpenConsensus::new(&evm_spec, base_fee_floor);
+        let extra_data: Bytes = HeaderExtra::new(AlpenSpecId::V0, 0).encode().into();
+        let parent = SealedHeader::seal_slow(Header {
+            number: 1,
+            gas_limit: 30_000_000,
+            extra_data: extra_data.clone(),
+            ..Default::default()
+        });
+        let child = SealedHeader::seal_slow(Header {
+            number: 2,
+            parent_hash: parent.hash(),
+            gas_limit: 30_000_000,
+            timestamp: 1,
+            base_fee_per_gas: Some(base_fee_floor),
+            extra_data,
             ..Default::default()
         });
 

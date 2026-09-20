@@ -69,7 +69,7 @@ where
         .ethereum_fork_activation(EthereumHardfork::London)
         .transitions_at_block(header.number())
     {
-        return Some(INITIAL_BASE_FEE);
+        return Some(apply_base_fee_floor(INITIAL_BASE_FEE, base_fee_floor));
     }
     // Otherwise: the floored EIP-1559 recurrence from the parent.
     chain_spec
