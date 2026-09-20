@@ -9,15 +9,20 @@
 //! schema and codecs; the scripting engine (rhai) and the REPL live in the
 //! binary. See the `ee-db-console` design doc.
 
+mod db;
 mod key;
 mod mirrors;
 mod reflect;
+mod registry;
 mod value;
 
+pub use alpen_store_mdbx::Direction;
+pub use db::{AttachMode, CommitReport, ConsoleDb, EnvStatus, StagedOp, StagedSummary};
 pub use key::ConsoleKey;
 pub use mirrors::ProofReceiptMirror;
 pub use reflect::{
     BytesReflector, Mirror, MirrorReflector, ReflectError, SerdeReflector, Unreflectable,
     ValueReflector,
 };
+pub use registry::{Range, TableInfo, TableReflect, KEY_FIELD};
 pub use value::{hex, parse_hex, FieldValue, Record};

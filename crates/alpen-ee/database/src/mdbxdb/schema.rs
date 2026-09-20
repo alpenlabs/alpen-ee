@@ -44,6 +44,8 @@ use crate::serialization_types::{
 macro_rules! impl_node_id_key_codec {
     ($schema:ty) => {
         impl KeyCodec<$schema> for TxNodeId {
+            const ORDERED: bool = true;
+
             fn encode_key(&self) -> Result<Vec<u8>, CodecError> {
                 Ok(self.0 .0.to_vec())
             }
