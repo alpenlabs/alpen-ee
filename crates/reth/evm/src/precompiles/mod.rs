@@ -49,13 +49,31 @@ const fn precompile_spec_index(spec: PrecompileSpecId) -> usize {
     }
 }
 
-fn alpen_precompiles(spec: PrecompileSpecId) -> Precompiles {
+fn supported_ethereum_precompiles(spec: PrecompileSpecId) -> Precompiles {
     let mut unsupported = Precompiles::default();
     unsupported.extend([kzg_point_evaluation::POINT_EVALUATION]);
 
-    let mut precompiles = Precompiles::new(spec).difference(&unsupported);
+    Precompiles::new(spec).difference(&unsupported)
+}
+
+fn alpen_precompiles(spec: PrecompileSpecId) -> Precompiles {
+    let mut precompiles = supported_ethereum_precompiles(spec);
     precompiles.extend([schnorr::SCHNORR_SIGNATURE_VALIDATION]);
     precompiles
+}
+
+fn precompiles_for_all_specs(
+    create: fn(PrecompileSpecId) -> Precompiles,
+) -> [Precompiles; PRECOMPILE_SPEC_COUNT] {
+    [
+        create(PrecompileSpecId::HOMESTEAD),
+        create(PrecompileSpecId::BYZANTIUM),
+        create(PrecompileSpecId::ISTANBUL),
+        create(PrecompileSpecId::BERLIN),
+        create(PrecompileSpecId::CANCUN),
+        create(PrecompileSpecId::PRAGUE),
+        create(PrecompileSpecId::OSAKA),
+    ]
 }
 
 /// Returns Alpen's precompiles for the requested EVM spec.
@@ -65,17 +83,21 @@ fn alpen_precompiles(spec: PrecompileSpecId) -> Precompiles {
 /// Schnorr verifier at every fork.
 pub fn load_precompiles(spec: SpecId) -> &'static Precompiles {
     static INSTANCES: OnceLock<[Precompiles; PRECOMPILE_SPEC_COUNT]> = OnceLock::new();
-    let instances = INSTANCES.get_or_init(|| {
-        [
-            alpen_precompiles(PrecompileSpecId::HOMESTEAD),
-            alpen_precompiles(PrecompileSpecId::BYZANTIUM),
-            alpen_precompiles(PrecompileSpecId::ISTANBUL),
-            alpen_precompiles(PrecompileSpecId::BERLIN),
-            alpen_precompiles(PrecompileSpecId::CANCUN),
-            alpen_precompiles(PrecompileSpecId::PRAGUE),
-            alpen_precompiles(PrecompileSpecId::OSAKA),
-        ]
-    });
+    let instances = INSTANCES.get_or_init(|| precompiles_for_all_specs(alpen_precompiles));
+
+    &instances[precompile_spec_index(spec.into())]
+}
+
+/// Returns Ethereum's fork-aware precompiles except for Alpen's unsupported
+/// EIP-4844 point-evaluation precompile.
+///
+/// This set is used only by the isolated canonical EEST fixture process. It
+/// deliberately excludes Alpen's bridge and Schnorr precompiles so fixtures
+/// observe Ethereum semantics at those addresses.
+pub(crate) fn load_supported_ethereum_precompiles(spec: SpecId) -> &'static Precompiles {
+    static INSTANCES: OnceLock<[Precompiles; PRECOMPILE_SPEC_COUNT]> = OnceLock::new();
+    let instances =
+        INSTANCES.get_or_init(|| precompiles_for_all_specs(supported_ethereum_precompiles));
 
     &instances[precompile_spec_index(spec.into())]
 }
@@ -85,7 +107,7 @@ mod tests {
     use revm::precompile::u64_to_address;
     use revm_primitives::hardfork::SpecId;
 
-    use super::{load_precompiles, schnorr};
+    use super::{load_precompiles, load_supported_ethereum_precompiles, schnorr};
 
     #[test]
     fn ethereum_precompiles_follow_the_active_fork() {
@@ -104,6 +126,23 @@ mod tests {
     fn unsupported_point_evaluation_is_absent_after_cancun() {
         for spec in [SpecId::CANCUN, SpecId::PRAGUE, SpecId::OSAKA] {
             assert!(!load_precompiles(spec).contains(&u64_to_address(10)));
+            assert!(!load_supported_ethereum_precompiles(spec).contains(&u64_to_address(10)));
+        }
+    }
+
+    #[test]
+    fn canonical_fixture_precompiles_exclude_schnorr() {
+        for spec in [
+            SpecId::HOMESTEAD,
+            SpecId::BYZANTIUM,
+            SpecId::ISTANBUL,
+            SpecId::BERLIN,
+            SpecId::CANCUN,
+            SpecId::PRAGUE,
+            SpecId::OSAKA,
+        ] {
+            assert!(!load_supported_ethereum_precompiles(spec)
+                .contains(schnorr::SCHNORR_SIGNATURE_VALIDATION.address()));
         }
     }
 

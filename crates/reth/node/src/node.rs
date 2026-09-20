@@ -159,7 +159,7 @@ where
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         let evm_factory = if self.eest_fixture_mode {
-            self.evm_factory.clone().with_ethereum_beneficiary_reward()
+            self.evm_factory.clone().with_eest_fixture_semantics()
         } else {
             self.evm_factory.clone()
         };

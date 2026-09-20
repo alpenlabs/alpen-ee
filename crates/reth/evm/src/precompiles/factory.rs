@@ -5,7 +5,9 @@ use strata_bridge_params::BridgeParams;
 
 use crate::{
     constants::{BRIDGEOUT_PRECOMPILE_ADDRESS, BRIDGEOUT_PRECOMPILE_ID},
-    precompiles::{bridge::bridge_context_call, AlpenEvmPrecompiles},
+    precompiles::{
+        bridge::bridge_context_call, load_supported_ethereum_precompiles, AlpenEvmPrecompiles,
+    },
 };
 
 /// Creates a precompiles map with Alpen-specific precompiles, including the bridge precompile.
@@ -22,4 +24,12 @@ pub fn create_precompiles_map(spec: SpecId, bridge_params: BridgeParams) -> Prec
     });
 
     precompiles
+}
+
+/// Creates the canonical precompile map used by isolated EEST fixtures.
+///
+/// EIP-4844 remains unsupported, so point evaluation is absent. Alpen-only
+/// bridge and Schnorr precompiles are also absent.
+pub(crate) fn create_eest_fixture_precompiles_map(spec: SpecId) -> PrecompilesMap {
+    PrecompilesMap::from_static(load_supported_ethereum_precompiles(spec))
 }
