@@ -51,6 +51,7 @@ const TX_GAS_LIMIT_BLOCK_MULTIPLE: u64 = 4;
 pub struct AlpenEvmFactory {
     bridge_params: BridgeParams,
     beneficiary_reward_policy: BeneficiaryRewardPolicy,
+    precompile_policy: PrecompilePolicy,
 }
 
 /// Determines which transaction fees are credited to the block beneficiary.
@@ -60,6 +61,15 @@ pub enum BeneficiaryRewardPolicy {
     AllGasFees,
     /// Applies Ethereum's fork-aware reward rule, including EIP-1559 base-fee burning.
     Ethereum,
+}
+
+/// Determines which precompile surface is exposed by the EVM.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PrecompilePolicy {
+    /// Alpen's production bridge and Schnorr precompiles plus supported Ethereum precompiles.
+    Alpen,
+    /// Ethereum's precompiles except for unsupported EIP-4844 point evaluation.
+    EestFixture,
 }
 
 // Manual instead of derived: `BridgeParams` has no `Default` (denomination
@@ -77,6 +87,7 @@ impl Default for AlpenEvmFactory {
             )
             .expect("valid bridge params"),
             beneficiary_reward_policy: BeneficiaryRewardPolicy::AllGasFees,
+            precompile_policy: PrecompilePolicy::Alpen,
         }
     }
 }
@@ -95,6 +106,7 @@ impl AlpenEvmFactory {
             )
             .expect("withdrawal policy constructed from wei must be valid"),
             beneficiary_reward_policy: BeneficiaryRewardPolicy::AllGasFees,
+            precompile_policy: PrecompilePolicy::Alpen,
         }
     }
 
@@ -111,6 +123,7 @@ impl AlpenEvmFactory {
         Self {
             bridge_params: *bp,
             beneficiary_reward_policy: BeneficiaryRewardPolicy::AllGasFees,
+            precompile_policy: PrecompilePolicy::Alpen,
         }
     }
 
@@ -121,6 +134,24 @@ impl AlpenEvmFactory {
     pub fn with_ethereum_beneficiary_reward(mut self) -> Self {
         self.beneficiary_reward_policy = BeneficiaryRewardPolicy::Ethereum;
         self
+    }
+
+    /// Uses canonical Ethereum execution semantics for isolated EEST fixtures.
+    ///
+    /// The fixture surface burns the base fee and excludes Alpen-only
+    /// precompiles. EIP-4844 point evaluation remains absent because Alpen does
+    /// not support EIP-4844.
+    pub fn with_eest_fixture_semantics(mut self) -> Self {
+        self.beneficiary_reward_policy = BeneficiaryRewardPolicy::Ethereum;
+        self.precompile_policy = PrecompilePolicy::EestFixture;
+        self
+    }
+
+    fn precompiles(&self, spec: SpecId) -> PrecompilesMap {
+        match self.precompile_policy {
+            PrecompilePolicy::Alpen => factory::create_precompiles_map(spec, self.bridge_params),
+            PrecompilePolicy::EestFixture => factory::create_eest_fixture_precompiles_map(spec),
+        }
     }
 }
 
@@ -166,7 +197,7 @@ impl EvmFactory for AlpenEvmFactory {
                 .map_or(tx_gas_cap, |c| c.min(tx_gas_cap)),
         );
 
-        let precompiles = factory::create_precompiles_map(input.cfg_env.spec, self.bridge_params);
+        let precompiles = self.precompiles(input.cfg_env.spec);
 
         let evm = Context::mainnet()
             .with_db(db)
@@ -210,12 +241,14 @@ mod tests {
     use revm::{
         context::{BlockEnv, TxEnv},
         database::{CacheDB, EmptyDB},
+        precompile::u64_to_address,
         state::{AccountInfo, Bytecode},
         ExecuteEvm,
     };
     use revm_primitives::{address, hardfork::SpecId, TxKind, B256, U256};
 
     use super::AlpenEvmFactory;
+    use crate::constants::{BRIDGEOUT_PRECOMPILE_ADDRESS, SCHNORR_PRECOMPILE_ADDRESS};
 
     const BASE_FEE: u64 = 7;
     const GAS_USED: u64 = 21_000;
@@ -275,5 +308,20 @@ mod tests {
 
         assert_eq!(zero_tip_balance, U256::ZERO);
         assert_eq!(tipped_balance, U256::from(4 * GAS_USED));
+    }
+
+    #[test]
+    fn eest_fixture_exposes_only_supported_ethereum_precompiles() {
+        let production = AlpenEvmFactory::default().precompiles(SpecId::PRAGUE);
+        let fixture = AlpenEvmFactory::default()
+            .with_eest_fixture_semantics()
+            .precompiles(SpecId::PRAGUE);
+
+        assert!(production.get(&BRIDGEOUT_PRECOMPILE_ADDRESS).is_some());
+        assert!(production.get(&SCHNORR_PRECOMPILE_ADDRESS).is_some());
+        assert!(fixture.get(&BRIDGEOUT_PRECOMPILE_ADDRESS).is_none());
+        assert!(fixture.get(&SCHNORR_PRECOMPILE_ADDRESS).is_none());
+        assert!(fixture.get(&u64_to_address(10)).is_none());
+        assert!(fixture.get(&u64_to_address(11)).is_some());
     }
 }
