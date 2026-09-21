@@ -440,10 +440,8 @@ mod tests {
             ..Default::default()
         });
 
-        assert_eq!(
-            consensus.validate_header_against_parent(&child, &parent),
-            Ok(())
-        );
+        let result = consensus.validate_header_against_parent(&child, &parent);
+        assert!(result.is_ok(), "{result:?}");
     }
 
     #[test]
