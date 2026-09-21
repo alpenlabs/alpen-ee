@@ -124,7 +124,6 @@ class AlpenClientFactory(flexitest.Factory):
         beneficiary_address: str | None = None,
         da_rate_wei_per_byte: int = 0,
         base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR,
-        genesis_base_fee_per_gas: int | None = None,
         prover: ProverBackend = NATIVE_BACKEND,
         eest_fixture_mode: bool = False,
         **kwargs,
@@ -205,7 +204,6 @@ class AlpenClientFactory(flexitest.Factory):
             da_magic_bytes=da_config.magic_bytes.decode("ascii"),
             spec_schedule=prover.genesis_spec_schedule,
             base_fee_floor=base_fee_floor,
-            genesis_base_fee_per_gas=genesis_base_fee_per_gas,
         )
 
         ol_config = (
@@ -358,7 +356,6 @@ class AlpenClientFactory(flexitest.Factory):
         max_withdrawal_amount: int | None = 1_000_000_000,
         spec_schedule: dict[str, int] | None = None,
         base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR,
-        genesis_base_fee_per_gas: int | None = None,
         **kwargs,
     ) -> AlpenClientService:
         """
@@ -421,7 +418,6 @@ class AlpenClientFactory(flexitest.Factory):
             max_withdrawal_amount=max_withdrawal_amount,
             spec_schedule=spec_schedule,
             base_fee_floor=base_fee_floor,
-            genesis_base_fee_per_gas=genesis_base_fee_per_gas,
         )
 
         alpen_config = AlpenClientConfig(
