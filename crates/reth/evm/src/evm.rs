@@ -322,7 +322,7 @@ mod tests {
 
     #[test]
     fn ethereum_reward_policy_only_rewards_priority_fee() {
-        let factory = AlpenEvmFactory::default().with_ethereum_beneficiary_reward();
+        let factory = AlpenEvmFactory::default().with_eest_fixture_semantics();
         let zero_tip_balance = beneficiary_balance(&factory, u128::from(BASE_FEE));
         let gas_price_with_tip = u128::from(BASE_FEE + 4);
         let tipped_balance = beneficiary_balance(&factory, gas_price_with_tip);
