@@ -17,7 +17,9 @@
 use std::{fmt, marker::PhantomData, ops::ControlFlow};
 
 use alpen_reth_db::mdbx::{BlockHashByNumber, BlockStateChangesSchema, PublishedCodeHashSchema};
-use alpen_store_mdbx::{Direction, KeyCodec, Reader, Schema, ValueCodec, Writer};
+use alpen_store_mdbx::{
+    Direction, KeyCodec, MdbxEnv, Reader, Schema, UpgradeCtx, ValueCodec, Writer,
+};
 
 use super::{
     key::ConsoleKey,
@@ -89,10 +91,11 @@ pub trait TableReflect: fmt::Debug + Send + Sync {
     ///
     /// The visitor sees the whole record — key and value — and keeps whatever
     /// it wants in whatever form it wants, so a count keeps nothing and a scan
-    /// converts a match exactly once. The decode loop stays native.
+    /// converts a match exactly once. The decode loop stays native, and reads
+    /// in pages of [`SCAN_PAGE_ROWS`], each its own read transaction.
     fn scan(
         &self,
-        reader: &Reader<'_>,
+        env: &MdbxEnv,
         range: &Range,
         direction: Direction,
         limit: Option<usize>,
@@ -104,7 +107,7 @@ pub trait TableReflect: fmt::Debug + Send + Sync {
     /// the end of the range, and returns the number of matches.
     fn keys(
         &self,
-        reader: &Reader<'_>,
+        env: &MdbxEnv,
         range: &Range,
         direction: Direction,
         limit: Option<usize>,
@@ -201,19 +204,16 @@ where
 
     fn scan(
         &self,
-        reader: &Reader<'_>,
+        env: &MdbxEnv,
         range: &Range,
         direction: Direction,
         limit: Option<usize>,
         visit: &mut dyn FnMut(&Record) -> eyre::Result<bool>,
     ) -> eyre::Result<usize> {
         let window = Window::resolve::<S>(range)?;
-        // Values carry their version tag; the context lets an old version's
-        // up-converter read other tables through the same transaction.
-        let ctx = reader.upgrade_ctx();
-        walk_matching::<S>(reader, &window, direction, limit, |key, value| {
+        walk_paged::<S>(env, &window, direction, limit, |key, value, ctx| {
             let key = <S::Key as KeyCodec<S>>::decode_key(key)?;
-            let value = <S::Value as ValueCodec<S>>::decode_value(value, &ctx)?;
+            let value = <S::Value as ValueCodec<S>>::decode_value(value, ctx)?;
             let record = Record::new(key.render(), R::to_value(&value)?);
             visit(&record)
         })
@@ -221,14 +221,14 @@ where
 
     fn keys(
         &self,
-        reader: &Reader<'_>,
+        env: &MdbxEnv,
         range: &Range,
         direction: Direction,
         limit: Option<usize>,
         visit: &mut dyn FnMut(&str) -> eyre::Result<bool>,
     ) -> eyre::Result<usize> {
         let window = Window::resolve::<S>(range)?;
-        walk_matching::<S>(reader, &window, direction, limit, |key, _value| {
+        walk_paged::<S>(env, &window, direction, limit, |key, _value, _ctx| {
             let key = <S::Key as KeyCodec<S>>::decode_key(key)?;
             visit(&key.render())
         })
@@ -380,24 +380,90 @@ impl Window {
     }
 }
 
+/// Rows a walk reads per read transaction.
+///
+/// A walk is split into pages so that no read transaction stays open for
+/// long: a long-lived reader pins the store's snapshot, and a node writing
+/// underneath it cannot reclaim pages until the reader ends (see
+/// `MdbxConfig`). Between pages the walk resumes after the last key it read,
+/// so a scan beside a running node is not one atomic snapshot: a row written
+/// or removed while it runs may or may not be seen.
+pub const SCAN_PAGE_ROWS: usize = 10_000;
+
 /// Walks `S` raw within `window`, counting the entries `judge` accepts and
-/// stopping at `limit` of them.
+/// stopping at `limit` of them, [`SCAN_PAGE_ROWS`] per read transaction.
 ///
 /// `judge` decodes as much of the entry as it needs and returns whether it
-/// matched. Its first error ends the walk and is returned as is — the store's
-/// own error type never has to carry it, which is what the old
-/// "surface a fake error to stop" dance was for.
-fn walk_matching<S: Schema>(
-    reader: &Reader<'_>,
+/// matched; it gets the page's upgrade context, since a value carries its
+/// version tag and an old version's up-converter may read other tables
+/// through the same transaction. Its first error ends the walk and is
+/// returned as is — the store's own error type never has to carry it.
+fn walk_paged<S: Schema>(
+    env: &MdbxEnv,
     window: &Window,
     direction: Direction,
     limit: Option<usize>,
-    mut judge: impl FnMut(&[u8], &[u8]) -> eyre::Result<bool>,
+    mut judge: impl FnMut(&[u8], &[u8], &UpgradeCtx<'_>) -> eyre::Result<bool>,
 ) -> eyre::Result<usize> {
     let mut matches = 0;
+    let mut resume: Option<Vec<u8>> = None;
+    loop {
+        let remaining = limit.map(|limit| limit.saturating_sub(matches));
+        if remaining == Some(0) {
+            break;
+        }
+        let page = env.view(|reader| {
+            walk_page::<S>(
+                reader,
+                window,
+                direction,
+                resume.as_deref(),
+                remaining,
+                &mut judge,
+            )
+        })?;
+        matches += page.matches;
+        match page.resume_after {
+            Some(key) => resume = Some(key),
+            None => break,
+        }
+    }
+    Ok(matches)
+}
+
+/// One page of a walk.
+struct Page {
+    /// Entries `judge` accepted on this page.
+    matches: usize,
+    /// The last key read, when the page filled before the walk was done;
+    /// `None` when the walk reached the end of the window or its limit.
+    resume_after: Option<Vec<u8>>,
+}
+
+/// Walks up to [`SCAN_PAGE_ROWS`] entries of `S` within `window` in one read
+/// transaction, continuing after `resume` when the walk is a resumed one.
+fn walk_page<S: Schema>(
+    reader: &Reader<'_>,
+    window: &Window,
+    direction: Direction,
+    resume: Option<&[u8]>,
+    limit: Option<usize>,
+    judge: &mut impl FnMut(&[u8], &[u8], &UpgradeCtx<'_>) -> eyre::Result<bool>,
+) -> eyre::Result<Page> {
+    let ctx = reader.upgrade_ctx();
+    let mut matches = 0;
+    let mut seen = 0;
     let mut failed: Option<eyre::Error> = None;
-    let start = window.start(direction);
+    let mut resume_after = None;
+    let start = resume
+        .map(<[u8]>::to_vec)
+        .or_else(|| window.start(direction));
     reader.walk::<S>(start.as_deref(), direction, |key, value| {
+        // A resumed walk is positioned on the key the last page ended with,
+        // which that page already judged.
+        if resume.is_some_and(|last| last == key) {
+            return Ok(ControlFlow::Continue(()));
+        }
         // The walk starts at the window's near edge, so a key outside it on
         // the near side is at most the one the cursor snapped to; a key past
         // the far edge ends the walk.
@@ -408,7 +474,8 @@ fn walk_matching<S: Schema>(
             }
             _ => return Ok(ControlFlow::Continue(())),
         }
-        match judge(key, value) {
+        seen += 1;
+        match judge(key, value, &ctx) {
             Ok(true) => {
                 matches += 1;
                 if limit.is_some_and(|limit| matches >= limit) {
@@ -421,12 +488,19 @@ fn walk_matching<S: Schema>(
                 return Ok(ControlFlow::Break(()));
             }
         }
+        if seen >= SCAN_PAGE_ROWS {
+            resume_after = Some(key.to_vec());
+            return Ok(ControlFlow::Break(()));
+        }
         Ok(ControlFlow::Continue(()))
     })?;
-    match failed {
-        Some(err) => Err(err),
-        None => Ok(matches),
+    if let Some(err) = failed {
+        return Err(err);
     }
+    Ok(Page {
+        matches,
+        resume_after,
+    })
 }
 
 /// The name a record's key is presented under in the script shell.

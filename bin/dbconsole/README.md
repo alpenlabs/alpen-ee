@@ -434,7 +434,12 @@ printf '.tables\n.quit\n' | dbconsole --datadir <dir>
 
 Piped input is read line by line, and an unfinished input (an open `fn` body,
 a `for` block) is joined with the lines after it, so a script piped in behaves
-as it would typed.
+as it would typed, with one difference: the first input that fails ends the
+run with exit status 1, like a shell under `set -e`, so a `commit()` further
+down never applies a batch that was only half staged. A meta-command that
+fails (a `.load` whose file errors part-way, an unknown table in `.schema`)
+and input that ends inside an unfinished expression count as failures too.
+At the prompt the error is shown and you decide.
 
 ---
 
@@ -501,7 +506,7 @@ until you say otherwise. `.recipes` lists them:
 | `prover_abandon(key, reason)` | the task's status to `PermanentFailure` |
 | `prover_delete(key)` | the task, its receipt, and the proof-id index entries of an account receipt |
 | `chain_summary()` | nothing; tip and finalized heights, counts, latest batch and chunk |
-| `drop_chain_above(height)` | every exec block above `height` with its payload, accessed state and witness; the height and finalized entries; the witness environment's diffs above `height`; then `revert_batches_from` for the first batch ending above `height` |
+| `drop_chain_above(height)` | every exec block above `height` with its payload, accessed state and witness; the height and finalized entries; the witness environment's diffs above `height`; the OL epoch entries whose accepted account state points at a dropped block, so the tracker resumes from the last surviving epoch; then `revert_batches_from` for the first batch ending above `height`. Chain, witness and batches are each cut by their own top, so a witness that ran ahead is trimmed even when the chain is already at `height` |
 | `batch_summary()` | nothing; batches and chunks counted by status |
 | `revert_batches_from(idx)` | batches from `idx`, their id and chunk-list entries, and every chunk of those batches |
 | `broadcast_summary()` | nothing; the L1 queue by status, replacement chains, envelopes |
@@ -617,6 +622,11 @@ start and attach. Memory is the thing to watch, not time:
   so "last N by key" reads N rows.
 - A range or prefix walk seeks straight to its first key and stops at its
   last, so its cost is the size of the range, not the table.
+- Every walk reads in pages of 10,000 rows, each its own short read
+  transaction, so a slow predicate beside a running node never pins the
+  store's snapshot and blocks page reclamation. The price is that such a walk
+  is not atomic: a row the node writes or removes while it runs may or may
+  not be seen. With the node stopped nothing changes underneath it.
 - `sort` and `extract` run in the console *after* the scan returns, so "newest
   N" on a hash-keyed table still reads every row.
 - `keys`/`keys_where` never decode a value, which matters on a table whose

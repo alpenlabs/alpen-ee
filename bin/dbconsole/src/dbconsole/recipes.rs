@@ -257,6 +257,10 @@ mod tests {
         assert_eq!(staged_of(&ops, "BlockStateChangesSchema").len(), 1);
         // The genesis batch ends at block 0 and stays.
         assert!(staged_of(&ops, "BatchByIdxSchema").is_empty());
+        // The seeded epoch's account state points at block 2, which is gone,
+        // so the epoch goes with it.
+        assert_eq!(staged_of(&ops, "OLBlockAtEpochSchema").len(), 1);
+        assert_eq!(staged_of(&ops, "AccountStateAtOLEpochSchema").len(), 1);
         // Node edits were staged before witness edits.
         assert_eq!(ops[0].env(), "node");
         assert_eq!(ops.last().unwrap().env(), "witness");
@@ -269,10 +273,30 @@ mod tests {
         assert_eq!(db.count("BlockHashByNumber").unwrap(), 0);
         assert_eq!(db.count("BlockStateChangesSchema").unwrap(), 0);
         assert_eq!(db.count("BlockAccessedStateSchema").unwrap(), 1);
+        assert_eq!(db.count("OLBlockAtEpochSchema").unwrap(), 0);
+        assert_eq!(db.count("AccountStateAtOLEpochSchema").unwrap(), 0);
 
         // Nothing above the tip: nothing staged.
         assert_eq!(int(&mut session, "drop_chain_above(1)"), 0);
         assert_eq!(int(&mut session, "drop_chain_above(99)"), 0);
+    }
+
+    /// The witness environment is trimmed by its own top: with the chain
+    /// already at the height and the witness ahead of it, only the witness
+    /// rows go.
+    #[test]
+    fn drop_chain_above_trims_a_witness_that_ran_ahead_of_the_chain_tip() {
+        let (_datadir, mut session) = seeded_session();
+        // Seeded: chain tip 2, witness diff at block number 6.
+        assert_eq!(int(&mut session, "drop_chain_above(2)"), 2);
+        let ops = session.db().staged();
+        assert!(ops.iter().all(|op| op.env() == "witness"), "{ops:?}");
+        assert_eq!(staged_of(&ops, "BlockHashByNumber").len(), 1);
+        assert_eq!(staged_of(&ops, "BlockStateChangesSchema").len(), 1);
+        assert_eq!(int(&mut session, "commit()"), 2);
+        assert_eq!(session.db().count("ExecBlockSchema").unwrap(), 3);
+        assert_eq!(session.db().count("BlockHashByNumber").unwrap(), 0);
+        assert_eq!(int(&mut session, "drop_chain_above(2)"), 0);
     }
 
     #[test]
