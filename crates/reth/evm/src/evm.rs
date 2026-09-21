@@ -79,16 +79,10 @@ impl Default for AlpenEvmFactory {
     /// an `AlpenEvmFactory` but don't exercise bridge-out validation. Not
     /// valid params for any real network.
     fn default() -> Self {
-        Self {
-            bridge_params: BridgeParams::new_with_descriptor_limit(
-                100_000_000,
-                Some(1_000_000_000),
-                81,
-            )
-            .expect("valid bridge params"),
-            beneficiary_reward_policy: BeneficiaryRewardPolicy::AllGasFees,
-            precompile_policy: PrecompilePolicy::Alpen,
-        }
+        let bridge_params =
+            BridgeParams::new_with_descriptor_limit(100_000_000, Some(1_000_000_000), 81)
+                .expect("valid bridge params");
+        Self::from_bridge_params(&bridge_params)
     }
 }
 
@@ -98,16 +92,13 @@ impl AlpenEvmFactory {
         let max_withdrawal_amount =
             max_withdrawal_wei.map(|max| wei_to_sats_exact(max, "max_withdrawal_wei"));
 
-        Self {
-            bridge_params: BridgeParams::new_with_descriptor_limit(
-                denomination,
-                max_withdrawal_amount,
-                DEFAULT_MAX_WITHDRAWAL_DESCRIPTOR_LEN,
-            )
-            .expect("withdrawal policy constructed from wei must be valid"),
-            beneficiary_reward_policy: BeneficiaryRewardPolicy::AllGasFees,
-            precompile_policy: PrecompilePolicy::Alpen,
-        }
+        let bridge_params = BridgeParams::new_with_descriptor_limit(
+            denomination,
+            max_withdrawal_amount,
+            DEFAULT_MAX_WITHDRAWAL_DESCRIPTOR_LEN,
+        )
+        .expect("withdrawal policy constructed from wei must be valid");
+        Self::from_bridge_params(&bridge_params)
     }
 
     pub fn max_withdrawal_descriptor_len(&self) -> u32 {
@@ -125,15 +116,6 @@ impl AlpenEvmFactory {
             beneficiary_reward_policy: BeneficiaryRewardPolicy::AllGasFees,
             precompile_policy: PrecompilePolicy::Alpen,
         }
-    }
-
-    /// Uses Ethereum's fork-aware beneficiary reward rule.
-    ///
-    /// This exists for canonical Ethereum conformance fixtures. Production
-    /// Alpen execution must retain [`BeneficiaryRewardPolicy::AllGasFees`].
-    pub fn with_ethereum_beneficiary_reward(mut self) -> Self {
-        self.beneficiary_reward_policy = BeneficiaryRewardPolicy::Ethereum;
-        self
     }
 
     /// Uses canonical Ethereum execution semantics for isolated EEST fixtures.
@@ -301,7 +283,7 @@ mod tests {
 
     #[test]
     fn ethereum_reward_policy_only_rewards_priority_fee() {
-        let factory = AlpenEvmFactory::default().with_ethereum_beneficiary_reward();
+        let factory = AlpenEvmFactory::default().with_eest_fixture_semantics();
         let zero_tip_balance = beneficiary_balance(&factory, u128::from(BASE_FEE));
         let gas_price_with_tip = u128::from(BASE_FEE + 4);
         let tipped_balance = beneficiary_balance(&factory, gas_price_with_tip);
