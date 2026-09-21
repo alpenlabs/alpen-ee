@@ -13,7 +13,7 @@ use reth_node_api::{
     PayloadOrAttributes, PayloadValidator,
 };
 use reth_node_builder::rpc::PayloadValidatorBuilder;
-use reth_primitives_traits::{NodePrimitives, SealedBlock};
+use reth_primitives_traits::{NodePrimitives, SealedBlock, SignedTransaction};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -100,10 +100,25 @@ impl PayloadValidator<AlpenEngineTypes> for AlpenEngineValidator {
     ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
         let spec_version = payload_spec_version(&payload).map_err(NewPayloadError::other)?;
         let inner = version_indexed(&self.inners, spec_version);
-        inner
+        let block = inner
             .ensure_well_formed_payload(payload)
-            .map_err(Into::into)
+            .map_err(NewPayloadError::from)?;
+        validate_transaction_signatures(&block)?;
+        Ok(block)
     }
+}
+
+/// Recovers every payload transaction signer before Reth starts block execution.
+///
+/// Reth v2.2.0 otherwise discovers malformed signatures inside its payload-processing worker and
+/// reports the aborted worker as an internal Engine API error. Rejecting the malformed payload at
+/// this validation boundary returns the required `INVALID` payload status instead.
+fn validate_transaction_signatures(block: &SealedBlock<Block>) -> Result<(), NewPayloadError> {
+    block
+        .body()
+        .transactions()
+        .try_for_each(|transaction| transaction.try_recover().map(|_| ()))
+        .map_err(NewPayloadError::other)
 }
 
 impl EngineApiValidator<AlpenEngineTypes> for AlpenEngineValidator {
@@ -177,5 +192,47 @@ where
 
     async fn build(self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
         Ok(AlpenEngineValidator::new(ctx.node.evm_config().evm_spec()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy_consensus::{crypto::SECP256K1N_HALF, BlockBody, SignableTransaction, TxLegacy};
+    use alloy_primitives::{Signature, U256};
+    use reth_ethereum_primitives::{Block, TransactionSigned};
+    use reth_node_api::NewPayloadError;
+    use reth_primitives_traits::SealedBlock;
+
+    use super::validate_transaction_signatures;
+
+    fn sealed_block_with_signature(signature: Signature) -> SealedBlock<Block> {
+        let transaction: TransactionSigned = TxLegacy::default().into_signed(signature).into();
+        let body = BlockBody {
+            transactions: vec![transaction],
+            ..Default::default()
+        };
+        SealedBlock::seal_slow(Block {
+            header: Default::default(),
+            body,
+        })
+    }
+
+    #[test]
+    fn valid_payload_transaction_signature_is_accepted() {
+        let block = sealed_block_with_signature(Signature::test_signature());
+
+        validate_transaction_signatures(&block).expect("valid signature must be accepted");
+    }
+
+    #[test]
+    fn malformed_payload_transaction_signature_is_invalid_payload_input() {
+        let high_s_signature = Signature::new(U256::ONE, SECP256K1N_HALF + U256::ONE, false);
+        let block = sealed_block_with_signature(high_s_signature);
+
+        let error = validate_transaction_signatures(&block)
+            .expect_err("high-s signature must be rejected before execution");
+
+        assert!(matches!(error, NewPayloadError::Other(_)));
+        assert_eq!(error.to_string(), "Failed to recover the signer");
     }
 }
