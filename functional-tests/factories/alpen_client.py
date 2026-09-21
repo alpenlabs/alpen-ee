@@ -47,21 +47,19 @@ def _required_eest_engine_file(name: str) -> Path:
     return path
 
 
+def _private_file_opener(path: str, flags: int) -> int:
+    return os.open(path, flags, 0o600)
+
+
 def _write_new_private_file(path: Path, contents: str, description: str) -> None:
     """Write a new owner-only file without replacing a pre-existing path."""
     try:
-        with path.open("x", encoding="utf-8") as file_handle:
+        with open(path, "x", encoding="utf-8", opener=_private_file_opener) as file_handle:
             file_handle.write(contents)
     except FileExistsError as exc:
         raise RuntimeError(f"refusing to overwrite existing {description}: {path}") from exc
-    except OSError as exc:
+    except (OSError, UnicodeError) as exc:
         raise RuntimeError(f"failed to write {description} {path}: {exc}") from exc
-    try:
-        path.chmod(0o600)
-    except OSError as exc:
-        raise RuntimeError(
-            f"failed to restrict {description} permissions for {path}: {exc}"
-        ) from exc
 
 
 def generate_sequencer_keypair() -> tuple[str, str]:
@@ -150,8 +148,7 @@ class AlpenClientFactory(flexitest.Factory):
 
         if not isinstance(eest_fixture_mode, bool):
             raise TypeError(
-                "eest_fixture_mode must be a boolean, "
-                f"got {type(eest_fixture_mode).__name__}"
+                f"eest_fixture_mode must be a boolean, got {type(eest_fixture_mode).__name__}"
             )
 
         engine_jwt_secret_path: Path | None = None
