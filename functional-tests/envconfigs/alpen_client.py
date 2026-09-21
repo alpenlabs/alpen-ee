@@ -104,8 +104,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
             raise ValueError(f"da_magic_bytes must be exactly 4 bytes, got {len(da_magic_bytes)}")
         if not isinstance(eest_fixture_mode, bool):
             raise TypeError(
-                "eest_fixture_mode must be a boolean, "
-                f"got {type(eest_fixture_mode).__name__}"
+                f"eest_fixture_mode must be a boolean, got {type(eest_fixture_mode).__name__}"
             )
 
     def init(self, ectx: flexitest.EnvContext) -> flexitest.LiveEnv:

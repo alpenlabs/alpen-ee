@@ -81,8 +81,7 @@ class EeOLEnv(flexitest.EnvConfig):
             raise ValueError("mesh_bootnodes requires enable_discovery=True")
         if not isinstance(eest_fixture_mode, bool):
             raise TypeError(
-                "eest_fixture_mode must be a boolean, "
-                f"got {type(eest_fixture_mode).__name__}"
+                f"eest_fixture_mode must be a boolean, got {type(eest_fixture_mode).__name__}"
             )
 
     def init(self, ectx: flexitest.EnvContext) -> flexitest.LiveEnv:
