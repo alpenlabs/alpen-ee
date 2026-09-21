@@ -68,13 +68,15 @@ pub(crate) fn run(args: DbconsoleArgs) -> eyre::Result<()> {
     let mut session = session::Session::new(db, interrupted);
     recipes::install(&mut session)?;
 
-    print!("attached {mode} · {}", present.join(", "));
+    // The banner is chatter, not a result: it goes to stderr so that
+    // `dbconsole -c '...'` in a script captures only the value.
+    eprint!("attached {mode} · {}", present.join(", "));
     if !absent.is_empty() {
-        print!(" (absent: {})", absent.join(", "));
+        eprint!(" (absent: {})", absent.join(", "));
     }
-    println!();
+    eprintln!();
     if args.allow_writes {
-        println!("writes are staged; `commit()` applies them, `abort()` discards them");
+        eprintln!("writes are staged; `commit()` applies them, `abort()` discards them");
     }
 
     let mut repl = repl::Repl::new(session);

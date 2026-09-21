@@ -75,10 +75,21 @@ impl Repl {
 
     /// Reads inputs from a non-terminal stdin, no editing, no history.
     fn run_piped(&mut self) -> eyre::Result<()> {
+        self.run_reader(io::stdin().lock())
+    }
+
+    /// Runs the inputs `reader` yields, one after another, the way a shell
+    /// runs a script under `set -e`: the first input that fails ends the run
+    /// with an error, so a `commit()` further down can never apply a batch
+    /// that was only half staged. At the prompt the error is shown and the
+    /// operator decides; here nobody is watching.
+    fn run_reader(&mut self, reader: impl BufRead) -> eyre::Result<()> {
         let parser = Engine::new();
         let mut pending = String::new();
-        for line in io::stdin().lock().lines() {
+        let mut line_number = 0usize;
+        for line in reader.lines() {
             let line = line?;
+            line_number += 1;
             if pending.is_empty() && line.trim().is_empty() {
                 continue;
             }
@@ -88,25 +99,42 @@ impl Repl {
                 continue;
             }
             let input = mem::take(&mut pending);
-            if self.handle(input.trim()) {
-                return Ok(());
+            let input = input.trim();
+            let outcome = match input.strip_prefix('.') {
+                Some(rest) => self.meta(rest),
+                None => self.eval_and_print(input).map(|()| false),
+            };
+            match outcome {
+                Ok(true) => return Ok(()),
+                Ok(false) => {}
+                Err(err) => eyre::bail!(
+                    "line {line_number}: {err}\nstopped there; the rest of the input was not \
+                     run and nothing staged was committed"
+                ),
             }
         }
         if !pending.trim().is_empty() {
-            eprintln!("error: input ended inside an unfinished expression");
+            eyre::bail!(
+                "input ended inside an unfinished expression, which was not run; nothing \
+                 staged was committed"
+            );
         }
         Ok(())
     }
 
     /// Runs one input, meta-command or script. Returns `true` to exit.
     fn handle(&mut self, input: &str) -> bool {
-        if let Some(rest) = input.strip_prefix('.') {
-            return self.meta(rest);
+        let outcome = match input.strip_prefix('.') {
+            Some(rest) => self.meta(rest),
+            None => self.eval_and_print(input).map(|()| false),
+        };
+        match outcome {
+            Ok(exit) => exit,
+            Err(err) => {
+                eprintln!("error: {err}");
+                false
+            }
         }
-        if let Err(err) = self.eval_and_print(input) {
-            eprintln!("error: {err}");
-        }
-        false
     }
 
     fn run_editor(&mut self) -> eyre::Result<()> {
@@ -176,21 +204,22 @@ impl Repl {
     }
 
     /// Handles a dot meta-command (already stripped of the leading `.`).
-    /// Returns `true` if the session should exit.
-    fn meta(&mut self, line: &str) -> bool {
+    /// Returns `true` if the session should exit, and an error for a
+    /// command that could not do its job, which a piped run treats like a
+    /// failed evaluation.
+    fn meta(&mut self, line: &str) -> eyre::Result<bool> {
         let mut parts = line.splitn(2, char::is_whitespace);
         let command = parts.next().unwrap_or("");
         let rest = parts.next().map(str::trim).unwrap_or("");
         match command {
-            "quit" | "exit" => return true,
+            "quit" | "exit" => return Ok(true),
             "help" => print_help(),
             "tables" => self.print_tables(),
             "schema" => {
                 if rest.is_empty() {
-                    eprintln!("usage: .schema <table>");
-                } else {
-                    self.print_schema(rest);
+                    eyre::bail!("usage: .schema <table>");
                 }
+                self.print_schema(rest)?;
             }
             "staged" => self.print_staged(rest == "full"),
             "fns" => self.print_functions(
@@ -202,20 +231,15 @@ impl Repl {
             }
             "load" => {
                 if rest.is_empty() {
-                    eprintln!("usage: .load <file.rhai>");
-                } else {
-                    match self.session.load_file(Path::new(rest)) {
-                        Ok(result) => {
-                            print_result(&result);
-                            println!("loaded {rest}");
-                        }
-                        Err(err) => eprintln!("error: {err}"),
-                    }
+                    eyre::bail!("usage: .load <file.rhai>");
                 }
+                let result = self.session.load_file(Path::new(rest))?;
+                print_result(&result);
+                println!("loaded {rest}");
             }
-            other => eprintln!("unknown meta-command .{other}; try .help"),
+            other => eyre::bail!("unknown meta-command .{other}; try .help"),
         }
-        false
+        Ok(false)
     }
 
     /// Prints functions with their doc comments, or `empty` if there are none.
@@ -285,16 +309,13 @@ impl Repl {
     }
 
     /// Prints one table's schema description.
-    fn print_schema(&self, name: &str) {
-        match self.session.db().info(name) {
-            Ok(info) => {
-                println!("  table: {}", info.name);
-                println!("  env:   {}", info.env);
-                println!("  key:   {}", info.key_desc);
-                println!("  value: {}", info.value_desc);
-            }
-            Err(err) => eprintln!("error: {err}"),
-        }
+    fn print_schema(&self, name: &str) -> eyre::Result<()> {
+        let info = self.session.db().info(name)?;
+        println!("  table: {}", info.name);
+        println!("  env:   {}", info.env);
+        println!("  key:   {}", info.key_desc);
+        println!("  value: {}", info.value_desc);
+        Ok(())
     }
 }
 
@@ -460,5 +481,81 @@ fn render_scalar(value: &Dynamic) -> String {
         "null".to_owned()
     } else {
         value.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        io::Cursor,
+        sync::{atomic::AtomicBool, Arc},
+    };
+
+    use alpen_ee_database::{console::ConsoleDb, test_db::TempDatadir};
+
+    use super::*;
+    use crate::dbconsole::recipes;
+
+    #[test]
+    fn a_piped_run_stops_at_the_first_error_and_commits_nothing() {
+        let datadir = TempDatadir::seeded();
+        let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
+        let mut session = Session::new(db, Arc::new(AtomicBool::new(false)));
+        recipes::install(&mut session).unwrap();
+        let mut repl = Repl::new(session);
+
+        let input = "let k = first(\"ProverTaskSchema\").key;\n\
+                     set(\"ProverTaskSchema\", k, \"updated_at_secs\", 7)\n\
+                     nope()\n\
+                     commit()\n";
+        let err = repl.run_reader(Cursor::new(input)).unwrap_err();
+        assert!(err.to_string().starts_with("line 3:"), "{err}");
+
+        // The edit is still only staged, and the store holds the old value.
+        assert_eq!(repl.session.db().staged().len(), 1);
+        let stored = repl
+            .session
+            .eval(
+                "get(\"ProverTaskSchema\", first(\"ProverTaskSchema\").key).value.updated_at_secs",
+            )
+            .unwrap();
+        assert_ne!(stored.as_int().unwrap(), 7);
+    }
+
+    /// A `.load` that stages edits and then fails is a failed input too:
+    /// the run stops before a later `commit()`.
+    #[test]
+    fn a_piped_run_stops_when_a_loaded_file_fails() {
+        let datadir = TempDatadir::seeded();
+        let script = datadir.join("partial.rhai");
+        fs::write(
+            &script,
+            "set(\"ProverTaskSchema\", first(\"ProverTaskSchema\").key, \"updated_at_secs\", 7);\nnope()\n",
+        )
+        .unwrap();
+        let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
+        let mut repl = Repl::new(Session::new(db, Arc::new(AtomicBool::new(false))));
+
+        let input = format!(".load {}\ncommit()\n", script.display());
+        let err = repl.run_reader(Cursor::new(input)).unwrap_err();
+        assert!(err.to_string().starts_with("line 1:"), "{err}");
+        assert_eq!(repl.session.db().staged().len(), 1);
+
+        // So is an unknown meta-command, and input that ends mid-expression.
+        let err = repl.run_reader(Cursor::new(".bogus\n")).unwrap_err();
+        assert!(err.to_string().contains("unknown meta-command"), "{err}");
+        let err = repl.run_reader(Cursor::new("commit(\n")).unwrap_err();
+        assert!(err.to_string().contains("unfinished"), "{err}");
+        assert_eq!(repl.session.db().staged().len(), 1);
+    }
+
+    #[test]
+    fn a_piped_run_that_succeeds_runs_to_the_end() {
+        let datadir = TempDatadir::seeded();
+        let db = ConsoleDb::attach_readonly(&datadir).unwrap();
+        let mut repl = Repl::new(Session::new(db, Arc::new(AtomicBool::new(false))));
+        let input = "fn twice(x) {\n  x * 2\n}\ntwice(2)\n.quit\nthis is never read\n";
+        repl.run_reader(Cursor::new(input)).unwrap();
+        assert_eq!(repl.session.functions().len(), 1);
     }
 }

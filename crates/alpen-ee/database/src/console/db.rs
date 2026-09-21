@@ -422,8 +422,8 @@ impl ConsoleDb {
     ) -> eyre::Result<usize> {
         let resolved = self.table(name)?;
         resolved
-            .env
-            .view(|reader| resolved.table.scan(reader, range, direction, limit, visit))
+            .table
+            .scan(resolved.env, range, direction, limit, visit)
     }
 
     /// Counts the records in a table matching `pred`, keeping none of them.
@@ -448,8 +448,8 @@ impl ConsoleDb {
     ) -> eyre::Result<usize> {
         let resolved = self.table(name)?;
         resolved
-            .env
-            .view(|reader| resolved.table.keys(reader, range, direction, limit, visit))
+            .table
+            .keys(resolved.env, range, direction, limit, visit)
     }
 
     // --- Staged writes ----------------------------------------------------
@@ -795,7 +795,7 @@ mod tests {
 
     use super::{
         super::{
-            registry::{heights_test_tables, prover_env_tables, EnvSpec, Range},
+            registry::{heights_test_tables, prover_env_tables, EnvSpec, Range, SCAN_PAGE_ROWS},
             value::FieldValue,
             Record,
         },
@@ -1517,6 +1517,24 @@ mod tests {
         .unwrap();
     }
 
+    /// Seeds finalized heights 1..=count, enough to span several pages.
+    fn seed_many_heights(datadir: &Path, count: u64) {
+        let node = datadir.join("mdbx").join("node");
+        let env = MdbxEnv::open(
+            &node,
+            &MdbxConfig::default(),
+            &[TableSpec::of::<ExecBlockFinalizedSchema>()],
+        )
+        .unwrap();
+        env.update(|writer| {
+            for height in 1..=count {
+                writer.put::<ExecBlockFinalizedSchema>(&height, &Hash::from([height as u8; 32]))?;
+            }
+            Ok::<_, DbError>(())
+        })
+        .unwrap();
+    }
+
     fn heights_db(datadir: &Path) -> ConsoleDb {
         seed_heights(datadir);
         let specs = vec![EnvSpec {
@@ -1531,6 +1549,47 @@ mod tests {
             from: from.to_owned(),
             to: to.to_owned(),
         }
+    }
+
+    /// A walk reads in pages, each its own read transaction, and resumes
+    /// after the last key of a page: nothing is skipped or seen twice in
+    /// either direction, across a range edge, or under a limit past a page.
+    #[test]
+    fn a_walk_pages_across_read_transactions_without_skipping_or_repeating() {
+        let datadir = TempDatadir::new();
+        let count = (SCAN_PAGE_ROWS * 2 + 7) as u64;
+        seed_many_heights(&datadir, count);
+        let specs = vec![EnvSpec {
+            name: "node",
+            tables: heights_test_tables,
+        }];
+        let db = ConsoleDb::attach(&datadir, AttachMode::ReadOnly, specs).unwrap();
+        let t = "ExecBlockFinalizedSchema";
+
+        let forward = keys_of(&db, t, &Range::All, Direction::Forward);
+        let expected: Vec<String> = (1..=count).map(|h| h.to_string()).collect();
+        assert_eq!(forward, expected);
+        let mut backward = keys_of(&db, t, &Range::All, Direction::Backward);
+        backward.reverse();
+        assert_eq!(backward, expected);
+
+        let from = (SCAN_PAGE_ROWS - 3).to_string();
+        let to = (SCAN_PAGE_ROWS + 3).to_string();
+        assert_eq!(
+            keys_of(&db, t, &between(&from, &to), Direction::Forward).len(),
+            7
+        );
+
+        let limit = SCAN_PAGE_ROWS + 5;
+        let mut seen = 0;
+        let matched = db
+            .scan(t, &Range::All, Direction::Forward, Some(limit), &mut |_| {
+                seen += 1;
+                Ok(true)
+            })
+            .unwrap();
+        assert_eq!(matched, limit);
+        assert_eq!(seen, limit);
     }
 
     #[test]

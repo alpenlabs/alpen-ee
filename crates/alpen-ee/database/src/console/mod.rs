@@ -24,5 +24,5 @@ pub use reflect::{
     BytesReflector, Mirror, MirrorReflector, ReflectError, SerdeReflector, Unreflectable,
     ValueReflector,
 };
-pub use registry::{Range, TableInfo, TableReflect, KEY_FIELD};
+pub use registry::{Range, TableInfo, TableReflect, KEY_FIELD, SCAN_PAGE_ROWS};
 pub use value::{hex, parse_hex, FieldValue, Record};
