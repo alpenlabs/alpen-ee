@@ -77,9 +77,6 @@ use crate::{
     service_executor::ServiceExecutor,
 };
 
-// TODO: make this configurable
-const MAX_DA_SIZE_BYTES: u64 = 200 * 1024; // 200kb
-
 /// What the sequencer path needs from [`crate::node`]'s bootstrap that a
 /// full node has no use for: the MDBX handle its extra databases come from,
 /// the OL client behind the tracker, and the genesis epoch both were seeded
@@ -506,7 +503,7 @@ where
         ),
         (SealOnRotation, RotationDataProvider::new(storage.clone())),
         (
-            MaxDaSizeSealing::new(MAX_DA_SIZE_BYTES),
+            MaxDaSizeSealing::new(sequencer_config.batch_sealing_da_size_bytes),
             DaSizeProvider::new(sequencer_dbs.witness_db())
         )
     ];

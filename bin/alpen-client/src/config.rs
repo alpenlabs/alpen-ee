@@ -34,6 +34,7 @@ const DEFAULT_HEALTH_CHECK_PORT: u16 = 8080;
 const DEFAULT_BENEFICIARY_ADDRESS: Address = address!("5400000000000000000000000000000000000010");
 const DEFAULT_L1_REORG_SAFE_DEPTH: u32 = 6;
 const DEFAULT_BATCH_SEALING_BLOCK_COUNT: u64 = 100;
+const DEFAULT_BATCH_SEALING_DA_SIZE_BYTES: u64 = 200 * 1024; // # 200 KiB
 const DEFAULT_DB_RETRY_COUNT: u16 = 5;
 const DEFAULT_BLOCKTIME_MS: NonZeroU64 = NonZeroU64::new(5_000).expect("5000 is always NonZero");
 const DEFAULT_BATCH_EVENT_CHANNEL_CAPACITY: NonZeroUsize =
@@ -68,6 +69,10 @@ fn default_blocktime_ms() -> NonZeroU64 {
 
 fn default_batch_sealing_block_count() -> u64 {
     DEFAULT_BATCH_SEALING_BLOCK_COUNT
+}
+
+fn default_batch_sealing_da_size_bytes() -> u64 {
+    DEFAULT_BATCH_SEALING_DA_SIZE_BYTES
 }
 
 fn default_batch_event_channel_capacity() -> NonZeroUsize {
@@ -408,6 +413,10 @@ pub(crate) struct SequencerConfig {
     pub(crate) blocktime_ms: NonZeroU64,
     #[serde(default = "default_batch_sealing_block_count")]
     pub(crate) batch_sealing_block_count: u64,
+    /// Seals a batch before the estimated encoded size of its state diff would
+    /// exceed this many bytes.
+    #[serde(default = "default_batch_sealing_da_size_bytes")]
+    pub(crate) batch_sealing_da_size_bytes: u64,
     /// Omitting this falls back to `batch_sealing_block_count`, a sibling
     /// field rather than a constant, which no serde default can express.
     /// [`SequencerConfig::chunk_sealing_block_count`] applies the fallback.
@@ -813,6 +822,10 @@ mod tests {
         assert_eq!(seq.config.blocktime_ms.get(), 5_000);
         assert_eq!(seq.config.batch_sealing_block_count, 100);
         assert_eq!(seq.config.chunk_sealing_block_count(), 100);
+        assert_eq!(
+            seq.config.batch_sealing_da_size_bytes,
+            DEFAULT_BATCH_SEALING_DA_SIZE_BYTES
+        );
         assert_eq!(seq.config.broadcaster.max_fee_rate_sat_vb.get(), 1_000);
     }
 
