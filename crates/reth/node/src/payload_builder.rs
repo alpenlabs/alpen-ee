@@ -10,7 +10,7 @@ use std::{
 use alloy_consensus::{Header, Transaction};
 use alloy_eips::eip4895::Withdrawals;
 use alpen_reth_evm::{
-    base_fee::apply_base_fee_floor,
+    base_fee::next_floored_base_fee,
     constants::BRIDGEOUT_PRECOMPILE_ADDRESS,
     da_fee::{DA_COVERAGE_CAPPED, DA_COVERAGE_UNKNOWN},
     extract_withdrawal_intents,
@@ -306,20 +306,31 @@ where
         slot_number: attributes.slot_number,
     };
 
-    // Build the next block's EVM env and apply the configured base-fee floor. `next_evm_env`
-    // computes the pure EIP-1559 base fee; the sealed header takes its floored value from this
-    // env. This inlines `builder_for_next_block_with_version`
-    // so the floor can be inserted between `next_evm_env` and block-builder construction,
-    // keeping the floor logic in the builder rather than inside `AlpenEvmConfig`.
+    // Use the same next-block fee rule as host validation. Reth's `next_evm_env`
+    // defaults a missing parent base fee to zero, so clamping its result would
+    // build an invalid London-activation block when the configured floor is
+    // below the EIP-1559 initial base fee.
     //
     // The env comes from the version's inner config, but the builder is driven through the
     // outer version-aware config: that is what carries `spec_version` into the executor and
     // assembler, so the rules the block builds under are the rules its header claims.
+    let chain_spec = versioned_config.chain_spec().clone();
+    let next_number = parent_header
+        .number
+        .checked_add(1)
+        .ok_or_else(|| PayloadBuilderError::other(io::Error::other("block number overflow")))?;
     let mut evm_env = versioned_config
         .next_evm_env(&parent_header, &next_block_attrs)
         .map_err(PayloadBuilderError::other)?;
-    evm_env.block_env.basefee =
-        apply_base_fee_floor(evm_env.block_env.basefee, fee_config.base_fee_floor);
+    if let Some(base_fee) = next_floored_base_fee(
+        parent_header.header(),
+        chain_spec.as_ref(),
+        next_number,
+        attributes.timestamp,
+        fee_config.base_fee_floor,
+    ) {
+        evm_env.block_env.basefee = base_fee;
+    }
 
     let evm = evm_config.evm_with_env(&mut db, evm_env);
     let block_ctx = evm_config.context_for_next_block_with_version(
@@ -337,8 +348,6 @@ where
 
     // Fork queries must agree with the EVM env, so use the per-version spec
     // the block builds under, not the node's boot chain spec.
-    let chain_spec = versioned_config.chain_spec().clone();
-
     debug!(target: "payload_builder", id=%payload_id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
     let mut cumulative_gas_used = 0;
     let block_gas_limit: u64 = builder.evm_mut().block().gas_limit;

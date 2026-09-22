@@ -7,10 +7,8 @@
 //! cost, and the effective-gas conversion (`da_fee / base_fee`, see [`crate::da_fee`]) stays
 //! well-defined.
 //!
-//! [`expected_floored_base_fee`] is the single source of truth for the host's against-parent
-//! rule. The block builder applies the same configured floor to its freshly computed base fee.
-//! The block builder applies the same floor to its freshly computed base fee via
-//! [`apply_base_fee_floor`].
+//! [`next_floored_base_fee`] is the single source of truth for both payload construction and
+//! against-parent validation, including the London activation block.
 //!
 //! # Activation
 //!
@@ -34,23 +32,48 @@ pub const BASE_FEE_FLOOR: u64 = DEFAULT_BASE_FEE_FLOOR;
 
 /// Clamps an already-computed EIP-1559 base fee to `base_fee_floor`.
 ///
-/// The single clamping primitive, so the floor logic lives in one place; both
-/// [`expected_floored_base_fee`] and the block builder call it.
+/// The single clamping primitive used by [`next_floored_base_fee`].
 pub fn apply_base_fee_floor(base_fee: u64, base_fee_floor: u64) -> u64 {
     base_fee.max(base_fee_floor)
 }
 
-/// The protocol's expected base fee for `header`, given its `parent`: the floored EIP-1559
-/// recurrence `max(base_fee_floor, next_block_base_fee(parent))`.
+/// The protocol's base fee for the next block built on `parent`.
 ///
 /// Returns `None` for pre-London blocks (no base fee is defined). This is the single source of
-/// truth for the host base-fee-against-parent rule. The payload builder invokes the same clamp
-/// when it constructs a block.
+/// truth shared by the payload builder and host against-parent validator.
 ///
 /// Mirrors reth's `validate_against_parent_eip1559_base_fee` exactly, except for the
 /// [`apply_base_fee_floor`] clamp on the recurrence result. The chain-spec's
 /// [`next_block_base_fee`](EthChainSpec::next_block_base_fee) supplies the EIP-1559 params, so
 /// callers cannot desync on parameter selection.
+pub fn next_floored_base_fee<ChainSpec>(
+    parent: &ChainSpec::Header,
+    chain_spec: &ChainSpec,
+    next_number: u64,
+    next_timestamp: u64,
+    base_fee_floor: u64,
+) -> Option<u64>
+where
+    ChainSpec: EthChainSpec + EthereumHardforks,
+{
+    // Pre-London blocks have no base fee.
+    if !chain_spec.is_london_active_at_block(next_number) {
+        return None;
+    }
+    // The London-activation block itself uses the fixed initial base fee (no parent recurrence).
+    if chain_spec
+        .ethereum_fork_activation(EthereumHardfork::London)
+        .transitions_at_block(next_number)
+    {
+        return Some(apply_base_fee_floor(INITIAL_BASE_FEE, base_fee_floor));
+    }
+    // Otherwise: the floored EIP-1559 recurrence from the parent.
+    chain_spec
+        .next_block_base_fee(parent, next_timestamp)
+        .map(|base_fee| apply_base_fee_floor(base_fee, base_fee_floor))
+}
+
+/// The expected fee for `header` as checked against `parent` by host consensus.
 pub fn expected_floored_base_fee<ChainSpec>(
     header: &ChainSpec::Header,
     parent: &ChainSpec::Header,
@@ -60,26 +83,22 @@ pub fn expected_floored_base_fee<ChainSpec>(
 where
     ChainSpec: EthChainSpec + EthereumHardforks,
 {
-    // Pre-London blocks have no base fee.
-    if !chain_spec.is_london_active_at_block(header.number()) {
-        return None;
-    }
-    // The London-activation block itself uses the fixed initial base fee (no parent recurrence).
-    if chain_spec
-        .ethereum_fork_activation(EthereumHardfork::London)
-        .transitions_at_block(header.number())
-    {
-        return Some(apply_base_fee_floor(INITIAL_BASE_FEE, base_fee_floor));
-    }
-    // Otherwise: the floored EIP-1559 recurrence from the parent.
-    chain_spec
-        .next_block_base_fee(parent, header.timestamp())
-        .map(|base_fee| apply_base_fee_floor(base_fee, base_fee_floor))
+    next_floored_base_fee(
+        parent,
+        chain_spec,
+        header.number(),
+        header.timestamp(),
+        base_fee_floor,
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_base_fee_floor, BASE_FEE_FLOOR};
+    use alloy_consensus::Header;
+    use alloy_eips::eip1559::INITIAL_BASE_FEE;
+    use alpen_ee_params::{AlpenSpecId, EvmSpec};
+
+    use super::{apply_base_fee_floor, next_floored_base_fee, BASE_FEE_FLOOR};
 
     #[test]
     fn floor_clamps_below_and_passes_through_above() {
@@ -108,5 +127,31 @@ mod tests {
     #[test]
     fn zero_floor_preserves_zero_base_fee() {
         assert_eq!(apply_base_fee_floor(0, 0), 0);
+    }
+
+    #[test]
+    fn delayed_london_activation_uses_initial_fee_with_zero_floor() {
+        let evm_spec: EvmSpec =
+            serde_json::from_str(r#"{"config":{"chainId":2892,"londonBlock":2}}"#)
+                .expect("genesis document parses");
+        let chain_spec = evm_spec.chain_spec(AlpenSpecId::V0);
+        let parent = Header {
+            number: 1,
+            gas_limit: 30_000_000,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            next_floored_base_fee(&parent, chain_spec.as_ref(), 1, 0, 0),
+            None
+        );
+        assert_eq!(
+            next_floored_base_fee(&parent, chain_spec.as_ref(), 2, 1, 0),
+            Some(INITIAL_BASE_FEE)
+        );
+        assert_eq!(
+            next_floored_base_fee(&parent, chain_spec.as_ref(), 2, 1, INITIAL_BASE_FEE + 1),
+            Some(INITIAL_BASE_FEE + 1)
+        );
     }
 }
