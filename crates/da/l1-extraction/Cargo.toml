@@ -7,8 +7,11 @@ version = "0.3.0-alpha.1"
 workspace = true
 
 [dependencies]
+alpen-params.workspace = true
 strata-btc-types.workspace = true
 strata-identifiers.workspace = true
+strata-l1-envelope-fmt.workspace = true
+strata-l1-txfmt.workspace = true
 strata-retry.workspace = true
 
 bitcoin.workspace = true
@@ -17,3 +20,7 @@ futures.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+alpen-da-types.workspace = true
+strata-l1-envelope-fmt = { workspace = true, features = ["test-utils"] }
