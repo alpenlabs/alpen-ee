@@ -8,6 +8,7 @@ members = [
   "crates/chain-types",
   "crates/chunk-runtime",
   "crates/common",
+  "crates/da/l1-extraction",
   "crates/da/provider",
   "crates/da/runtime",
   "crates/da/types",
@@ -74,6 +75,7 @@ alpen-block-assembly = { path = "crates/block-assembly" }
 alpen-chain-types = { path = "crates/chain-types" }
 alpen-chunk-runtime = { path = "crates/chunk-runtime" }
 alpen-common = { path = "crates/common" }
+alpen-da-l1-extraction = { path = "crates/da/l1-extraction" }
 alpen-da-provider = { path = "crates/da/provider" }
 alpen-da-runtime = { path = "crates/da/runtime" }
 alpen-da-types = { path = "crates/da/types" }
