@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from common.alpen_params import (
+    DEFAULT_BASE_FEE_FLOOR,
     EEST_BASE_FEE_FLOOR,
     EEST_BLOCK_GAS_LIMIT,
     EEST_CHAIN,
@@ -28,11 +29,8 @@ class AlpenParamsTests(unittest.TestCase):
     def test_scheduled_eest_keeps_the_proving_environment(self) -> None:
         env = make_eest_proof_env()
         self.assertFalse(env.alpen_env_params.eest_fixture_mode)
-        self.assertEqual(env.alpen_env_params.base_fee_floor, EEST_BASE_FEE_FLOOR)
-        self.assertEqual(
-            env.alpen_env_params.genesis_base_fee_per_gas,
-            EEST_GENESIS_BASE_FEE_PER_GAS,
-        )
+        self.assertEqual(env.alpen_env_params.base_fee_floor, DEFAULT_BASE_FEE_FLOOR)
+        self.assertIsNone(env.alpen_env_params.genesis_base_fee_per_gas)
 
     def test_eest_fee_configuration_changes_only_the_generated_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

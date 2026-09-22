@@ -21,7 +21,6 @@ import flexitest
 from flexitest.runtime import load_module_at, scan_dir_for_modules
 
 # Import environments
-from common.alpen_params import EEST_BASE_FEE_FLOOR, EEST_GENESIS_BASE_FEE_PER_GAS
 from common.config import ServiceType
 from common.keepalive import KEEP_ALIVE_TEST_NAME, load_keepalive_test
 from common.runtime import TestRuntimeWithLogging
@@ -42,8 +41,6 @@ def make_eest_proof_env() -> EeOLEnv:
         fullnode_count=0,
         pre_generate_blocks=110,
         batch_sealing_block_count=5,
-        base_fee_floor=EEST_BASE_FEE_FLOOR,
-        genesis_base_fee_per_gas=EEST_GENESIS_BASE_FEE_PER_GAS,
     )
 
 
