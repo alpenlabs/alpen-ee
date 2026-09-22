@@ -6,6 +6,7 @@ use alpen_reth_node::{da_fee_rate_channel, DaFeeRateHandle, DaFeeRateUpdater};
 use strata_btcio::writer::FeeRateError;
 use thiserror::Error;
 use tokio::time::{error::Elapsed, timeout, Instant};
+use tracing::warn;
 
 use super::{
     policy::{DaFeeRatePolicy, DaFeeRatePolicyError},
@@ -118,7 +119,8 @@ impl DaFeeRateServiceState {
         let adjustment =
             AffineAdjustment::new(config.multiplier_bps(), config.offset_wei_per_byte());
         let rate_bounds = config.rate_bounds();
-        let adjusted_rate = adjust_rate(adjustment, policy_rate, rate_bounds)?;
+        let positive_floor = rate_bounds.map_or(1, |(minimum, _)| minimum.max(1));
+        let adjusted_rate = adjust_rate(adjustment, policy_rate, rate_bounds, positive_floor)?;
         let (updater, handle) = da_fee_rate_channel(adjusted_rate.wei_per_byte());
 
         Ok(Self {
@@ -145,7 +147,12 @@ impl DaFeeRateServiceState {
         now: Instant,
         rate: PolicyRate,
     ) -> Result<RateUpdate, RateResolutionError> {
-        let adjusted_rate = adjust_rate(self.adjustment, rate, self.rate_bounds)?;
+        let adjusted_rate = adjust_rate(
+            self.adjustment,
+            rate,
+            self.rate_bounds,
+            self.handle.current_rate(),
+        )?;
         let changed =
             self.updater.publish(adjusted_rate.wei_per_byte()) != adjusted_rate.wei_per_byte();
 
@@ -176,15 +183,25 @@ fn adjust_rate(
     adjustment: AffineAdjustment,
     policy_rate: PolicyRate,
     rate_bounds: Option<(u64, u64)>,
+    zero_rate_fallback: u64,
 ) -> Result<AdjustedRate, RateResolutionError> {
     let adjusted_rate = adjustment.apply(policy_rate)?;
-    let rate = adjusted_rate.wei_per_byte();
+    let rate = if adjusted_rate.wei_per_byte() == 0 {
+        warn!(
+            policy_rate_wei_per_byte = policy_rate.wei_per_byte(),
+            fallback_rate_wei_per_byte = zero_rate_fallback,
+            "DA fee rate resolved to zero; using the positive fallback"
+        );
+        zero_rate_fallback
+    } else {
+        adjusted_rate.wei_per_byte()
+    };
     if let Some((min, max)) = rate_bounds {
         if !(min..=max).contains(&rate) {
             return Err(RateResolutionError::OutsideBounds { rate, min, max });
         }
     }
-    Ok(adjusted_rate)
+    Ok(AdjustedRate::new(rate))
 }
 
 /// Fetches a policy rate within the service's source timeout.
@@ -266,6 +283,37 @@ mod tests {
             error,
             RateResolutionError::OutsideBounds { rate: 9, .. }
         ));
+    }
+
+    #[test]
+    fn zero_rate_uses_the_positive_floor_and_retains_it_on_refresh() {
+        let config: DaFeeRateConfig = toml::from_str(
+            r#"
+            policy = "writer_backed"
+            refresh_interval_seconds = 5
+            stale_after_seconds = 10
+            min_rate_wei_per_byte = 10
+            max_rate_wei_per_byte = 20
+            "#,
+        )
+        .unwrap();
+        let mut state = DaFeeRateServiceState::new(
+            Box::new(ScriptedPolicy::new([])),
+            &config,
+            PolicyRate::new(0),
+        )
+        .unwrap();
+        let previous_success = state.last_success_at;
+
+        let refreshed_at = previous_success + Duration::from_secs(1);
+        let update = state
+            .apply_policy_rate(refreshed_at, PolicyRate::new(0))
+            .unwrap();
+
+        assert!(!update.changed);
+        assert_eq!(update.adjusted_rate.wei_per_byte(), 10);
+        assert_eq!(state.handle.current_rate(), 10);
+        assert_eq!(state.last_success_at, refreshed_at);
     }
 
     #[test]

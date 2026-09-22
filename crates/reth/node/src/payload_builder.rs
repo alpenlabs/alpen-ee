@@ -9,7 +9,10 @@ use alloy_eips::eip4895::Withdrawals;
 use alpen_reth_evm::{
     base_fee::next_floored_base_fee,
     constants::BRIDGEOUT_PRECOMPILE_ADDRESS,
-    da_fee::{DA_COVERAGE_CAPPED, DA_COVERAGE_UNKNOWN},
+    da_fee::{
+        constrain_next_da_rate, stamped_da_rate_from_extra_data, DA_COVERAGE_CAPPED,
+        DA_COVERAGE_UNKNOWN,
+    },
     extract_withdrawal_intents,
 };
 use alpen_reth_primitives::WithdrawalIntent;
@@ -200,7 +203,7 @@ type BestTransactionsIter<Pool> = Box<
 #[inline]
 fn try_build_payload<Pool, Client, F>(
     evm_config: AlpenEvmConfig,
-    da_rate: u64,
+    candidate_da_rate: u64,
     base_fee_floor: u64,
     client: Client,
     _pool: Pool,
@@ -227,6 +230,10 @@ where
         attributes,
         payload_id,
     } = config;
+    let da_rate = constrain_next_da_rate(
+        stamped_da_rate_from_extra_data(&parent_header.extra_data),
+        candidate_da_rate,
+    );
 
     // Refuse a spec version this binary has no variant for: it was resolved by newer code,
     // and failing beats building under rules older than the ones asked for.
@@ -570,10 +577,11 @@ mod tests {
     use crate::{da_fee_rate_channel, payload::AlpenPayloadAttributes};
 
     #[test]
-    fn payload_attempts_sample_the_rate_independently() {
-        const INITIAL_RATE: u64 = 17;
-        const FIRST_ATTEMPT_RATE: u64 = 29;
-        const SECOND_ATTEMPT_RATE: u64 = 41;
+    fn payload_attempts_sample_rates_independently_and_bound_increases() {
+        const PARENT_RATE: u64 = 100;
+        const INITIAL_RATE: u64 = 101;
+        const FIRST_ATTEMPT_RATE: u64 = 105;
+        const SECOND_ATTEMPT_RATE: u64 = 120;
 
         let evm_spec: EvmSpec =
             serde_json::from_str(r#"{"config":{"chainId":2892,"shanghaiTime":0}}"#)
@@ -590,6 +598,9 @@ mod tests {
         let parent = Arc::new(SealedHeader::seal_slow(Header {
             gas_limit: 30_000_000,
             base_fee_per_gas: Some(7),
+            extra_data: HeaderExtra::new(AlpenSpecId::V0, PARENT_RATE)
+                .encode()
+                .into(),
             ..Default::default()
         }));
         let attributes = |timestamp| {
@@ -620,10 +631,8 @@ mod tests {
             ))
             .expect("empty payload builds");
 
-        for (payload, expected_rate) in [
-            (first_payload, FIRST_ATTEMPT_RATE),
-            (second_payload, SECOND_ATTEMPT_RATE),
-        ] {
+        for (payload, expected_rate) in [(first_payload, FIRST_ATTEMPT_RATE), (second_payload, 110)]
+        {
             let header_extra = HeaderExtra::decode(&payload.block().header().extra_data)
                 .expect("built payload carries valid header extra data");
             assert_eq!(header_extra.da_rate(), expected_rate);

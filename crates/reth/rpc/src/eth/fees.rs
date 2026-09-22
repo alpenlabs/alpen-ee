@@ -13,7 +13,10 @@ use alloy_rpc_types_eth::{
     state::{EvmOverrides, StateOverride},
     BlockId,
 };
-use alpen_reth_evm::da_fee::{calc_diff_size, da_rate_from_extra_data};
+use alpen_reth_evm::da_fee::{
+    calc_diff_size, constrain_next_da_rate, stamped_da_rate_from_extra_data,
+    DA_RATE_SAFETY_MARGIN_BPS,
+};
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_provider::ProviderError;
@@ -28,19 +31,12 @@ use crate::AlpenEthApi;
 /// Basis-points denominator for the DA-fee safety margin.
 const BPS_DENOM: u64 = 10_000;
 
-/// Safety margin folded into the quoted DA fee (10%).
-///
-/// The quote inflates the DA fee so the signed effective-gas envelope still covers the
-/// charge if the committed DA rate ticks up between the quote and block inclusion. See
-/// the fee-model spec (§11, safety).
-const DA_FEE_SAFETY_MARGIN_BPS: u64 = 1_000;
-
 /// Quotes the DA fee (wei) for a diff of `diff_size` bytes at `da_rate`, including the
 /// safety margin.
 pub(crate) fn quote_da_fee(da_rate: u64, diff_size: u64) -> U256 {
     U256::from(da_rate)
         .saturating_mul(U256::from(diff_size))
-        .saturating_mul(U256::from(BPS_DENOM + DA_FEE_SAFETY_MARGIN_BPS))
+        .saturating_mul(U256::from(BPS_DENOM + DA_RATE_SAFETY_MARGIN_BPS))
         / U256::from(BPS_DENOM)
 }
 
@@ -64,7 +60,7 @@ pub(crate) struct DaFeeQuote {
     pub base_fee: u64,
     /// Estimated per-transaction DA payload size (bytes).
     pub diff_size: u64,
-    /// Committed DA rate (wei per DA byte) read from the head block header.
+    /// DA rate (wei per DA byte) used for the quote.
     pub da_rate: u64,
     /// DA fee (wei), including the safety margin.
     pub da_fee: U256,
@@ -84,7 +80,7 @@ pub struct FeeEstimate {
     pub base_fee: u64,
     /// Estimated per-transaction DA payload size (bytes).
     pub diff_size: u64,
-    /// Committed DA rate (wei per DA byte) read from the head block header.
+    /// DA rate (wei per DA byte) used for the estimate.
     pub da_rate: u64,
     /// DA fee charged for this transaction (wei), including the safety margin.
     pub da_fee: U256,
@@ -137,8 +133,10 @@ where
                 .map_err(EthApiError::from_eth_err::<ProviderError>)?
                 .ok_or_else(|| EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?,
         };
-        let da_rate =
-            da_rate_override.unwrap_or_else(|| da_rate_from_extra_data(header.extra_data()));
+        let committed_da_rate = stamped_da_rate_from_extra_data(header.extra_data());
+        let da_rate = da_rate_override
+            .map(|candidate| constrain_next_da_rate(committed_da_rate, candidate))
+            .unwrap_or_else(|| committed_da_rate.unwrap_or(0));
         let base_fee = header.base_fee_per_gas().unwrap_or_default();
         let da_fee = quote_da_fee(da_rate, diff_size);
 

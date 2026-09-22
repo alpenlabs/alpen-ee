@@ -25,6 +25,11 @@ impl PolicyRate {
 pub(super) struct AdjustedRate(u64);
 
 impl AdjustedRate {
+    /// Creates an adjusted rate denominated in wei per DA byte.
+    pub(super) const fn new(wei_per_byte: u64) -> Self {
+        Self(wei_per_byte)
+    }
+
     /// Returns the rate in wei per DA byte.
     pub(super) const fn wei_per_byte(self) -> u64 {
         self.0
