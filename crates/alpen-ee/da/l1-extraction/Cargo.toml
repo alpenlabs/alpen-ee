@@ -9,6 +9,7 @@ workspace = true
 [dependencies]
 alpen-ee-da-types.workspace = true
 strata-btc-types.workspace = true
+strata-codec.workspace = true
 strata-common = { workspace = true, features = ["async"] }
 strata-identifiers.workspace = true
 strata-l1-envelope-fmt.workspace = true
