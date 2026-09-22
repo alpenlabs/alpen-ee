@@ -126,6 +126,10 @@ where
 
                 state.pop_pending();
 
+                // An empty accumulator skips the check: the first block of a
+                // chunk is always admitted, even if it alone exceeds a limit.
+                // Such a chunk is sealed by this same check when the next
+                // block arrives.
                 let exceeded = (!state.accumulator().is_empty())
                     .then(|| {
                         state

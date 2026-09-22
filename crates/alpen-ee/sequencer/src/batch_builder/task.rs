@@ -352,6 +352,10 @@ where
         // Check if adding this block would exceed threshold. The write happens
         // before the block leaves the queue, so a failed seal leaves it at the
         // front for the next poll to retry.
+        //
+        // An empty accumulator skips the check: the first block of a batch is
+        // always admitted, even if it alone exceeds a limit. Such a batch is
+        // sealed by this same check when the next block arrives.
         let exceeded = (!state.accumulator().is_empty())
             .then(|| {
                 state

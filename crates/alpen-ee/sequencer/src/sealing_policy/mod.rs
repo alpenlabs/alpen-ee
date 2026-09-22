@@ -7,9 +7,6 @@
 //!
 //! A [`SealingPolicy`] determines when to seal based on the accumulated state.
 //!
-//! These traits are used by the batch builder (and will be used by the chunk
-//! builder) with different policy implementations.
-//!
 //! # Built-in policies
 //!
 //! | Module | Seals when… |
