@@ -42,6 +42,34 @@ EEST_BASE_FEE_FLOOR = 0
 EEST_GENESIS_BASE_FEE_PER_GAS = 7
 
 
+def resolve_base_fee_settings(
+    eest_fixture_mode: bool,
+    base_fee_floor: int | None,
+    genesis_base_fee_per_gas: int | None,
+) -> tuple[int, int | None]:
+    """Use canonical EEST fees for fixtures, retaining production defaults elsewhere."""
+    if not isinstance(eest_fixture_mode, bool):
+        raise TypeError("eest_fixture_mode must be a boolean")
+    if base_fee_floor is not None and (
+        isinstance(base_fee_floor, bool) or not isinstance(base_fee_floor, int)
+    ):
+        raise TypeError("base_fee_floor must be an integer or None")
+    if genesis_base_fee_per_gas is not None and (
+        isinstance(genesis_base_fee_per_gas, bool) or not isinstance(genesis_base_fee_per_gas, int)
+    ):
+        raise TypeError("genesis_base_fee_per_gas must be an integer or None")
+    if not eest_fixture_mode:
+        return (
+            DEFAULT_BASE_FEE_FLOOR if base_fee_floor is None else base_fee_floor,
+            genesis_base_fee_per_gas,
+        )
+    if base_fee_floor not in (None, EEST_BASE_FEE_FLOOR):
+        raise ValueError("EEST fixture mode requires a zero base fee floor")
+    if genesis_base_fee_per_gas not in (None, EEST_GENESIS_BASE_FEE_PER_GAS):
+        raise ValueError("EEST fixture mode requires a 7 wei genesis base fee")
+    return EEST_BASE_FEE_FLOOR, EEST_GENESIS_BASE_FEE_PER_GAS
+
+
 #: Spec schedule a chain launched from current source runs: every known
 #: version active from genesis (coordinate 0). A test rehearsing an upgrade
 #: launches further back instead, leaving the version it upgrades to

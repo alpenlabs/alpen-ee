@@ -4,7 +4,6 @@ Alpen-client test environment configurations.
 
 import flexitest
 
-from common.alpen_params import DEFAULT_BASE_FEE_FLOOR
 from common.config.config import EpochSealingConfig
 from common.config.constants import ServiceType
 from common.prover_backend import NATIVE_BACKEND, ProverBackend
@@ -45,7 +44,7 @@ class EeOLEnv(flexitest.EnvConfig):
         batch_sealing_block_count: int = 10,
         prover: ProverBackend = NATIVE_BACKEND,
         chunk_sealing_block_count: int | None = None,
-        base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR,
+        base_fee_floor: int | None = None,
         genesis_base_fee_per_gas: int | None = None,
         eest_fixture_mode: bool = False,
     ):

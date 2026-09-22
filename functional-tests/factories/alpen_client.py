@@ -17,6 +17,7 @@ from common.alpen_params import (
     EEST_MAX_TX_INPUT_BYTES,
     EEST_RPC_TX_FEE_CAP,
     compose_alpen_params,
+    resolve_base_fee_settings,
 )
 from common.config import (
     AlpenAdminRpcConfig,
@@ -123,7 +124,7 @@ class AlpenClientFactory(flexitest.Factory):
         max_withdrawal_amount: int | None = 1_000_000_000,
         beneficiary_address: str | None = None,
         da_rate_wei_per_byte: int = 0,
-        base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR,
+        base_fee_floor: int | None = None,
         genesis_base_fee_per_gas: int | None = None,
         prover: ProverBackend = NATIVE_BACKEND,
         eest_fixture_mode: bool = False,
@@ -145,6 +146,15 @@ class AlpenClientFactory(flexitest.Factory):
             prover: Which EE prover backend to run, and which spec versions
                 it has resident programs for; see common/prover_backend.py
         """
+        if not isinstance(eest_fixture_mode, bool):
+            raise TypeError(
+                f"eest_fixture_mode must be a boolean, got {type(eest_fixture_mode).__name__}"
+            )
+
+        base_fee_floor, genesis_base_fee_per_gas = resolve_base_fee_settings(
+            eest_fixture_mode, base_fee_floor, genesis_base_fee_per_gas
+        )
+
         ctx: flexitest.EnvContext = kwargs["ctx"]
 
         datadir = Path(ctx.make_service_dir("ee_sequencer"))
@@ -153,11 +163,6 @@ class AlpenClientFactory(flexitest.Factory):
         authrpc_port = self.next_port()
         admin_rpc_port = self.next_port()
         logfile = datadir / "service.log"
-
-        if not isinstance(eest_fixture_mode, bool):
-            raise TypeError(
-                f"eest_fixture_mode must be a boolean, got {type(eest_fixture_mode).__name__}"
-            )
 
         engine_jwt_secret_path: Path | None = None
         engine_endpoint_path: Path | None = None

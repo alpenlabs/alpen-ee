@@ -14,8 +14,11 @@ from common.alpen_params import (
     EEST_MAX_TX_INPUT_BYTES,
     EEST_RPC_TX_FEE_CAP,
     compose_alpen_params,
+    resolve_base_fee_settings,
 )
 from entry import make_eest_proof_env
+from envconfigs.alpen_client import AlpenClientEnv, AlpenClientEnvParams
+from envconfigs.el_ol import EeOLEnv
 
 
 class AlpenParamsTests(unittest.TestCase):
@@ -29,8 +32,36 @@ class AlpenParamsTests(unittest.TestCase):
     def test_scheduled_eest_keeps_the_proving_environment(self) -> None:
         env = make_eest_proof_env()
         self.assertFalse(env.alpen_env_params.eest_fixture_mode)
-        self.assertEqual(env.alpen_env_params.base_fee_floor, DEFAULT_BASE_FEE_FLOOR)
-        self.assertIsNone(env.alpen_env_params.genesis_base_fee_per_gas)
+        self.assertEqual(env.alpen_env_params.base_fee_floor, EEST_BASE_FEE_FLOOR)
+        self.assertEqual(
+            env.alpen_env_params.genesis_base_fee_per_gas,
+            EEST_GENESIS_BASE_FEE_PER_GAS,
+        )
+
+    def test_fixture_envs_use_canonical_eest_fees(self) -> None:
+        for params in (
+            AlpenClientEnv(fullnode_count=0, eest_fixture_mode=True).env_params,
+            EeOLEnv(fullnode_count=0, eest_fixture_mode=True).alpen_env_params,
+            AlpenClientEnvParams(
+                fullnode_count=0,
+                enable_discovery=False,
+                pure_discovery=False,
+                mesh_bootnodes=False,
+                eest_fixture_mode=True,
+            ),
+        ):
+            self.assertEqual(params.base_fee_floor, EEST_BASE_FEE_FLOOR)
+            self.assertEqual(params.genesis_base_fee_per_gas, EEST_GENESIS_BASE_FEE_PER_GAS)
+
+    def test_fixture_rejects_incompatible_explicit_fees(self) -> None:
+        with self.assertRaisesRegex(ValueError, "zero base fee floor"):
+            resolve_base_fee_settings(True, DEFAULT_BASE_FEE_FLOOR, None)
+        with self.assertRaisesRegex(ValueError, "7 wei genesis base fee"):
+            resolve_base_fee_settings(True, None, 8)
+
+    def test_fixture_requires_isolated_sequencer(self) -> None:
+        with self.assertRaisesRegex(ValueError, "fullnode_count=0"):
+            AlpenClientEnv(eest_fixture_mode=True)
 
     def test_eest_fee_configuration_changes_only_the_generated_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

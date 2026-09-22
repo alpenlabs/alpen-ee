@@ -8,7 +8,7 @@ from typing import cast
 
 import flexitest
 
-from common.alpen_params import DEFAULT_BASE_FEE_FLOOR
+from common.alpen_params import resolve_base_fee_settings
 from common.config import EeDaConfig, ServiceType
 from common.prover_backend import NATIVE_BACKEND, ProverBackend
 from common.services.bitcoin import BitcoinService
@@ -46,9 +46,16 @@ class AlpenClientEnvParams:
     prover: ProverBackend = NATIVE_BACKEND
     da_rate_wei_per_byte: int = 0
     forward_tx: bool = True
-    base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR
+    base_fee_floor: int | None = None
     genesis_base_fee_per_gas: int | None = None
     eest_fixture_mode: bool = False
+
+    def __post_init__(self) -> None:
+        self.base_fee_floor, self.genesis_base_fee_per_gas = resolve_base_fee_settings(
+            self.eest_fixture_mode, self.base_fee_floor, self.genesis_base_fee_per_gas
+        )
+        if self.eest_fixture_mode and self.fullnode_count != 0:
+            raise ValueError("EEST fixture mode requires fullnode_count=0")
 
 
 class AlpenClientEnv(flexitest.EnvConfig):
@@ -80,7 +87,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
         beneficiary_address: str | None = None,
         da_rate_wei_per_byte: int = 0,
         forward_tx: bool = True,
-        base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR,
+        base_fee_floor: int | None = None,
         genesis_base_fee_per_gas: int | None = None,
         eest_fixture_mode: bool = False,
     ):
