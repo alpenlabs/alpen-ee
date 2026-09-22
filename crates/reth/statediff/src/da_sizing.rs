@@ -116,7 +116,7 @@ impl DaEntry {
 
 /// A state diff that can enumerate its DA-relevant entries.
 ///
-/// Implementors decide what counts as changed. Entries that would not be encoded, such
+/// Implementers decide what counts as changed. Entries that would not be encoded, such
 /// as values that reverted within a batch, must not be yielded.
 pub trait DaSizable {
     /// Yields every entry that contributes to the encoded size.
