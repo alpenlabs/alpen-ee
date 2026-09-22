@@ -48,6 +48,7 @@ sequencer = [
   "dep:alpen-ee-sequencer",
   "dep:alpen-reth-db",
   "dep:alpen-reth-exex",
+  "dep:alpen-reth-statediff",
   "dep:alpen-reth-witness",
   "dep:bitcoind-async-client",
   "dep:k256",
@@ -107,7 +108,7 @@ alpen-reth-evm.workspace = true
 alpen-reth-exex = { workspace = true, optional = true }
 alpen-reth-node.workspace = true
 alpen-reth-rpc.workspace = true
-alpen-reth-statediff.workspace = true
+alpen-reth-statediff = { workspace = true, optional = true }
 alpen-reth-witness = { workspace = true, optional = true }
 bitcoind-async-client = { workspace = true, optional = true }
 k256 = { workspace = true, optional = true }
