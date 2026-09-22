@@ -1298,6 +1298,11 @@ mod tests {
                 network = "regtest"
                 [sequencer.l1_fee_policy]
                 fee_policy = "bitcoind"
+                [sequencer.da_fee_rate]
+                policy = "fixed"
+                fixed_rate_wei_per_byte = 0
+                refresh_interval_seconds = 60
+                stale_after_seconds = 300
             "#
             )
         }

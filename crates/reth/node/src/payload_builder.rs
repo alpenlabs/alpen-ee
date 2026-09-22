@@ -558,11 +558,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use alloy_rpc_types::engine::PayloadAttributes as EthPayloadAttributes;
+    use alloy_rpc_types::engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
     use alpen_ee_params::{AlpenSpecId, EvmSpec, HeaderExtra};
     use alpen_reth_evm::evm::AlpenEvmFactory;
-    use reth_node_api::{BuiltPayload, PayloadBuilderAttributes};
-    use reth_primitives::{Header, SealedHeader};
+    use reth_node_api::BuiltPayload;
+    use reth_primitives_traits::SealedHeader;
     use reth_storage_api::noop::NoopProvider;
     use reth_transaction_pool::noop::NoopTransactionPool;
 
@@ -593,28 +593,31 @@ mod tests {
             ..Default::default()
         }));
         let attributes = |timestamp| {
-            AlpenPayloadBuilderAttributes::try_new(
-                parent.hash(),
-                AlpenPayloadAttributes::new_from_eth(
-                    EthPayloadAttributes {
-                        timestamp,
-                        withdrawals: Some(Vec::new()),
-                        ..Default::default()
-                    },
-                    AlpenSpecId::V0,
-                ),
-                0,
+            AlpenPayloadAttributes::new_from_eth(
+                EthPayloadAttributes {
+                    timestamp,
+                    withdrawals: Some(Vec::new()),
+                    ..Default::default()
+                },
+                AlpenSpecId::V0,
             )
-            .expect("payload attributes are valid")
         };
 
         updater.publish(FIRST_ATTEMPT_RATE);
         let first_payload = builder
-            .build_empty_payload(PayloadConfig::new(parent.clone(), attributes(1)))
+            .build_empty_payload(PayloadConfig::new(
+                parent.clone(),
+                attributes(1),
+                PayloadId::default(),
+            ))
             .expect("empty payload builds");
         updater.publish(SECOND_ATTEMPT_RATE);
         let second_payload = builder
-            .build_empty_payload(PayloadConfig::new(parent.clone(), attributes(2)))
+            .build_empty_payload(PayloadConfig::new(
+                parent.clone(),
+                attributes(2),
+                PayloadId::default(),
+            ))
             .expect("empty payload builds");
 
         for (payload, expected_rate) in [

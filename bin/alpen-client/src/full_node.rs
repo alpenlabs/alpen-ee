@@ -6,8 +6,6 @@
 //! genesis work beyond what [`crate::node`] already did, no ExExes, and no
 //! services past the two every node runs.
 
-use std::sync::Arc;
-
 use alpen_ee_common::BlockNumHash;
 use alpen_ee_rpc_server::{AlpenEeRpcServer, EeRpcServer};
 use alpen_reth_evm::evm::AlpenEvmFactory;
