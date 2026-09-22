@@ -2,7 +2,7 @@
 //!
 //! Seals a batch once the estimated encoded size of its state diff would exceed a
 //! configured byte limit. The pending batch is accumulated in a [`BatchBuilder`] and
-//! sized through [`estimate_da_size`]; the incoming block is sized on a [`BatchWithBlock`]
+//! sized through [`estimate_da_size`]; the incoming block is sized on a [`ProjectedBatch`]
 //! view so shared and reverted entries are counted exactly once.
 
 use std::sync::Arc;
@@ -15,7 +15,7 @@ use alpen_reth_statediff::{estimate_da_size, BatchBuilder, BlockStateChanges};
 use async_trait::async_trait;
 use strata_acct_types::Hash;
 
-use super::batch_with_block::BatchWithBlock;
+use super::projected_batch::ProjectedBatch;
 
 /// Fetches per-block state changes from the state diff store.
 #[derive(Debug, Clone)]
@@ -82,7 +82,7 @@ impl SealingPolicy<DaBatchSizePolicy> for MaxDaSizeSealing {
         accumulated_diff: &BatchBuilder,
         block_diff: &BlockStateChanges,
     ) -> bool {
-        estimate_da_size(&BatchWithBlock::new(accumulated_diff, block_diff)) > self.max_size()
+        estimate_da_size(&ProjectedBatch::new(accumulated_diff, block_diff)) > self.max_size()
     }
 }
 
@@ -117,7 +117,7 @@ mod tests {
     fn would_exceed_compares_projected_size_to_limit() {
         let block = block_touching(Address::from([0x11u8; 20]), 0, 1);
         let empty = BatchBuilder::new();
-        let total = estimate_da_size(&BatchWithBlock::new(&empty, &block));
+        let total = estimate_da_size(&ProjectedBatch::new(&empty, &block));
 
         // A limit exactly at the projected size admits the block; one byte less seals.
         assert!(!MaxDaSizeSealing::new(total).would_exceed(&empty, &block));

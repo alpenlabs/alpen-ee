@@ -1,6 +1,6 @@
 //! Read-only view of a batch builder with one more block applied.
 //!
-//! [`BatchWithBlock`] yields the DA entries a [`BatchBuilder`] would hold after
+//! [`ProjectedBatch`] yields the DA entries a [`BatchBuilder`] would hold after
 //! `apply_block`, without cloning or mutating it. The sealing policy sizes this view to
 //! decide whether a block still fits, then applies the block for real only if it does.
 
@@ -11,18 +11,18 @@ use alpen_reth_statediff::{BatchBuilder, BlockStateChanges, DaEntry, DaSizable};
 /// Merges with the same rule as `apply_block`: the builder's original wins where it
 /// already tracks an entry, the block's current wins where the block touches one.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct BatchWithBlock<'a> {
+pub(crate) struct ProjectedBatch<'a> {
     builder: &'a BatchBuilder,
     block: &'a BlockStateChanges,
 }
 
-impl<'a> BatchWithBlock<'a> {
+impl<'a> ProjectedBatch<'a> {
     pub(crate) fn new(builder: &'a BatchBuilder, block: &'a BlockStateChanges) -> Self {
         Self { builder, block }
     }
 }
 
-impl DaSizable for BatchWithBlock<'_> {
+impl DaSizable for ProjectedBatch<'_> {
     fn da_entries(&self) -> impl Iterator<Item = DaEntry> + '_ {
         let tracked_accounts = self.builder.accounts();
         let block_accounts = &self.block.accounts;
@@ -230,7 +230,7 @@ mod tests {
             .deployed_bytecodes
             .insert(hash(0xbb), Bytes::from(vec![0x60u8; 32]));
 
-        let view = BatchWithBlock::new(&builder, &block);
+        let view = ProjectedBatch::new(&builder, &block);
         let expected = applied(&builder, &block);
 
         assert_eq!(sorted_entries(&view), sorted_entries(&expected));
@@ -255,7 +255,7 @@ mod tests {
         account(&mut block, contract, Some(snapshot(0, 1, hash(0xaa))), None);
         slot(&mut block, contract, 1, 5, 0);
 
-        let view = BatchWithBlock::new(&builder, &block);
+        let view = ProjectedBatch::new(&builder, &block);
         let expected = applied(&builder, &block);
 
         assert_eq!(sorted_entries(&view), sorted_entries(&expected));
@@ -281,7 +281,7 @@ mod tests {
         slot(&mut block, addr(0x44), 1, 0, 1);
 
         let builder = BatchBuilder::new();
-        let view = BatchWithBlock::new(&builder, &block);
+        let view = ProjectedBatch::new(&builder, &block);
         assert_eq!(sorted_entries(&view), sorted_entries(&block));
     }
 }
