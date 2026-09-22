@@ -117,10 +117,14 @@ impl AlpenEthereumNode {
     ///
     /// The mode retains standard Ethereum `extra_data` in imported fixtures
     /// and selects fork-aware canonical precompiles instead of Alpen's
-    /// production set. It must never be enabled by production startup paths.
+    /// production set, while applying Ethereum's beneficiary reward rule.
+    /// It must never be enabled by production startup paths.
     pub fn with_eest_fixture_mode(mut self) -> Self {
         self.eest_fixture_mode = true;
-        self.evm_factory = self.evm_factory.with_eest_fixture_precompiles();
+        self.evm_factory = self
+            .evm_factory
+            .with_eest_fixture_precompiles()
+            .with_ethereum_beneficiary_reward();
         self
     }
 }
