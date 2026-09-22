@@ -166,11 +166,24 @@ impl EvmHeaderSummary {
     }
 }
 
+/// Decodes a [`DaBlob`] from contiguous payload bytes.
+///
+/// Trailing bytes after a complete `DaBlob` are rejected.
+/// `spec_version` names the layout the blob was encoded under.
+pub fn decode_da_blob(payload: &[u8], spec_version: AlpenSpecId) -> Result<DaBlob, CodecError> {
+    let mut dec = BufDecoder::new(payload);
+    let blob = DaBlob::decode(spec_version, &mut dec)?;
+    if dec.remaining() > 0 {
+        return Err(CodecError::ExtraInput);
+    }
+    Ok(blob)
+}
+
 /// Decodes a [`DaBlob`] across ordered payload chunks.
 ///
 /// `chunks` must be in commit-output order. The blob is decoded directly across
 /// the chunk slices (no intermediate contiguous copy), and any trailing bytes
-/// after a complete `DaBlob` are rejected — matching `decode_buf_exact`.
+/// after a complete `DaBlob` are rejected, matching contiguous decoding.
 /// `spec_version` names the layout the blob was encoded under.
 pub fn decode_da_blob_from_chunks(
     chunks: &[Vec<u8>],
@@ -379,6 +392,36 @@ mod tests {
     #[test]
     fn empty_chunks_is_error() {
         assert!(decode_da_blob_from_chunks(&[], AlpenSpecId::V1).is_err());
+    }
+
+    #[test]
+    fn decodes_contiguous_payload() {
+        for spec_version in VERSIONS {
+            let encoded = sample_blob(spec_version).encode_to_vec().unwrap();
+            let got = decode_da_blob(&encoded, spec_version).expect("decode contiguous payload");
+            assert_eq!(got.encode_to_vec().unwrap(), encoded);
+        }
+    }
+
+    #[test]
+    fn contiguous_payload_does_not_decode_under_another_layout() {
+        let v0 = sample_blob(AlpenSpecId::V0).encode_to_vec().unwrap();
+        let v1 = sample_blob(AlpenSpecId::V1).encode_to_vec().unwrap();
+
+        assert!(decode_da_blob(&v0, AlpenSpecId::V1).is_err());
+        assert!(decode_da_blob(&v1, AlpenSpecId::V0).is_err());
+    }
+
+    #[test]
+    fn contiguous_trailing_bytes_are_rejected() {
+        for spec_version in VERSIONS {
+            let mut encoded = sample_blob(spec_version).encode_to_vec().unwrap();
+            encoded.push(0xFF);
+            assert!(matches!(
+                decode_da_blob(&encoded, spec_version),
+                Err(CodecError::ExtraInput)
+            ));
+        }
     }
 
     #[test]
