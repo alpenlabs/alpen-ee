@@ -7,9 +7,12 @@ version = "0.3.0-alpha.1"
 workspace = true
 
 [dependencies]
+alpen-da-types.workspace = true
 strata-btc-types.workspace = true
 strata-common = { workspace = true, features = ["async"] }
 strata-identifiers.workspace = true
+strata-l1-envelope-fmt.workspace = true
+strata-l1-txfmt.workspace = true
 
 bitcoin.workspace = true
 bitcoind-async-client.workspace = true
@@ -17,3 +20,6 @@ futures.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+strata-l1-envelope-fmt = { workspace = true, features = ["test-utils"] }
