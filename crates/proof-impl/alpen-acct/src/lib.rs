@@ -58,6 +58,7 @@ pub fn process_ee_acct_update(
         rkyv::access::<ArchivedUpdatePrivateInput, RkyvError>(&upd_buf)
             .expect("failed to access rkyv update archive");
 
+    // Proof execution uses the production precompile set, never the isolated EEST fixture set.
     let evm_factory = AlpenEvmFactory::from_bridge_params(params.bridge_params());
 
     let da_buf = zkvm.read_buf();

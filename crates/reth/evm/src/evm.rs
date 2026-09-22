@@ -35,8 +35,9 @@ const TX_GAS_LIMIT_BLOCK_MULTIPLE: u64 = 4;
 
 /// Custom EVM configuration.
 ///
-/// Carries only the bridge withdrawal policy used for precompile validation — it is a pure,
-/// shareable config object with no interior-mutable per-execution state.
+/// Carries the bridge withdrawal policy and an explicitly selected precompile
+/// surface. The default is the production surface shared with proof guests.
+/// This is a pure, shareable config object with no interior-mutable state.
 ///
 /// Neither the per-block DA rate (an input) nor the per-transaction DA-coverage report (an
 /// output) is held here. reth's `EvmEnv` plumbing cannot thread a per-block value into
@@ -49,6 +50,13 @@ const TX_GAS_LIMIT_BLOCK_MULTIPLE: u64 = 4;
 #[derive(Debug, Clone)]
 pub struct AlpenEvmFactory {
     bridge_params: BridgeParams,
+    precompile_policy: PrecompilePolicy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PrecompilePolicy {
+    Alpen,
+    EestFixture,
 }
 
 // Manual instead of derived: `BridgeParams` has no `Default` (denomination
@@ -58,14 +66,10 @@ impl Default for AlpenEvmFactory {
     /// an `AlpenEvmFactory` but don't exercise bridge-out validation. Not
     /// valid params for any real network.
     fn default() -> Self {
-        Self {
-            bridge_params: BridgeParams::new_with_descriptor_limit(
-                100_000_000,
-                Some(1_000_000_000),
-                81,
-            )
-            .expect("valid bridge params"),
-        }
+        let bridge_params =
+            BridgeParams::new_with_descriptor_limit(100_000_000, Some(1_000_000_000), 81)
+                .expect("valid bridge params");
+        Self::from_bridge_params(&bridge_params)
     }
 }
 
@@ -75,14 +79,13 @@ impl AlpenEvmFactory {
         let max_withdrawal_amount =
             max_withdrawal_wei.map(|max| wei_to_sats_exact(max, "max_withdrawal_wei"));
 
-        Self {
-            bridge_params: BridgeParams::new_with_descriptor_limit(
-                denomination,
-                max_withdrawal_amount,
-                DEFAULT_MAX_WITHDRAWAL_DESCRIPTOR_LEN,
-            )
-            .expect("withdrawal policy constructed from wei must be valid"),
-        }
+        let bridge_params = BridgeParams::new_with_descriptor_limit(
+            denomination,
+            max_withdrawal_amount,
+            DEFAULT_MAX_WITHDRAWAL_DESCRIPTOR_LEN,
+        )
+        .expect("withdrawal policy constructed from wei must be valid");
+        Self::from_bridge_params(&bridge_params)
     }
 
     pub fn max_withdrawal_descriptor_len(&self) -> u32 {
@@ -94,8 +97,34 @@ impl AlpenEvmFactory {
     }
 
     /// Creates an [`AlpenEvmFactory`] from [`BridgeParams`].
+    ///
+    /// Node production paths and proof guests use this constructor. It must
+    /// retain the pre-#143 Berlin+BLS+Schnorr surface at every EVM spec.
     pub fn from_bridge_params(bp: &BridgeParams) -> Self {
-        Self { bridge_params: *bp }
+        Self {
+            bridge_params: *bp,
+            precompile_policy: PrecompilePolicy::Alpen,
+        }
+    }
+
+    /// Selects fork-aware canonical precompiles for the isolated EEST node.
+    ///
+    /// This must not be used by sequencers, full nodes, or proof guests.
+    pub fn with_eest_fixture_precompiles(mut self) -> Self {
+        self.precompile_policy = PrecompilePolicy::EestFixture;
+        self
+    }
+
+    /// Reports whether the isolated fixture precompile surface is selected.
+    pub const fn uses_eest_fixture_precompiles(&self) -> bool {
+        matches!(self.precompile_policy, PrecompilePolicy::EestFixture)
+    }
+
+    fn precompiles(&self, spec: SpecId) -> PrecompilesMap {
+        match self.precompile_policy {
+            PrecompilePolicy::Alpen => factory::create_precompiles_map(spec, self.bridge_params),
+            PrecompilePolicy::EestFixture => factory::create_eest_fixture_precompiles_map(spec),
+        }
     }
 }
 
@@ -141,7 +170,7 @@ impl EvmFactory for AlpenEvmFactory {
                 .map_or(tx_gas_cap, |c| c.min(tx_gas_cap)),
         );
 
-        let precompiles = factory::create_precompiles_map(input.cfg_env.spec, self.bridge_params);
+        let precompiles = self.precompiles(input.cfg_env.spec);
 
         let evm = Context::mainnet()
             .with_db(db)
@@ -169,5 +198,44 @@ impl EvmFactory for AlpenEvmFactory {
             U256::ZERO,
             new_da_report_cell(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use revm::precompile::u64_to_address;
+    use revm_primitives::{hardfork::SpecId, U256};
+
+    use super::AlpenEvmFactory;
+    use crate::constants::{BRIDGEOUT_PRECOMPILE_ADDRESS, SCHNORR_PRECOMPILE_ADDRESS};
+
+    #[test]
+    fn production_and_guest_constructor_retains_alpen_precompiles_under_osaka() {
+        let default_factory = AlpenEvmFactory::default();
+        let guest_factory = AlpenEvmFactory::from_bridge_params(default_factory.bridge_params());
+        let explicit_factory =
+            AlpenEvmFactory::new(U256::from(1_000_000_000_000_000_000_u64), None);
+
+        for factory in [default_factory, guest_factory, explicit_factory] {
+            assert!(!factory.uses_eest_fixture_precompiles());
+            let precompiles = factory.precompiles(SpecId::OSAKA);
+            assert!(precompiles.get(&BRIDGEOUT_PRECOMPILE_ADDRESS).is_some());
+            assert!(precompiles.get(&SCHNORR_PRECOMPILE_ADDRESS).is_some());
+            assert!(precompiles.get(&u64_to_address(11)).is_some());
+            assert!(precompiles.get(&u64_to_address(256)).is_none());
+        }
+    }
+
+    #[test]
+    fn fixture_factory_excludes_alpen_precompiles_and_uses_osaka_set() {
+        let factory = AlpenEvmFactory::default().with_eest_fixture_precompiles();
+        assert!(factory.uses_eest_fixture_precompiles());
+        let precompiles = factory.precompiles(SpecId::OSAKA);
+
+        assert!(precompiles.get(&BRIDGEOUT_PRECOMPILE_ADDRESS).is_none());
+        assert!(precompiles.get(&SCHNORR_PRECOMPILE_ADDRESS).is_none());
+        assert!(precompiles.get(&u64_to_address(10)).is_none());
+        assert!(precompiles.get(&u64_to_address(11)).is_some());
+        assert!(precompiles.get(&u64_to_address(256)).is_some());
     }
 }
