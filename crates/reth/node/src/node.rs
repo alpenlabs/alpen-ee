@@ -193,12 +193,7 @@ where
     >;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
-        let evm_factory = if self.eest_fixture_mode {
-            self.evm_factory.clone().with_ethereum_beneficiary_reward()
-        } else {
-            self.evm_factory.clone()
-        };
-        let executor = AlpenExecutorBuilder::new(evm_factory, self.evm_spec.clone());
+        let executor = AlpenExecutorBuilder::new(self.evm_factory.clone(), self.evm_spec.clone());
         let consensus = AlpenConsensusBuilder::new(self.evm_spec.clone(), self.base_fee_floor);
         let executor = if self.eest_fixture_mode {
             executor.with_eest_fixture_mode()
