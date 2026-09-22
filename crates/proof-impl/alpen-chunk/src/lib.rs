@@ -34,6 +34,7 @@ pub use program::{EeChunkProgram, EeChunkProofInput};
 /// chunk straddles an activation boundary.
 pub fn process_ee_chunk(zkvm: &impl ZkVmEnvSerde, params: &AlpenParams, spec_version: AlpenSpecId) {
     let chain_spec: Arc<ChainSpec> = params.evm_spec().chain_spec(spec_version).clone();
+    // Proof execution uses the production precompile set, never the isolated EEST fixture set.
     let evm_factory = AlpenEvmFactory::from_bridge_params(params.bridge_params());
     let ee = EvmExecutionEnvironment::new(chain_spec, evm_factory);
 

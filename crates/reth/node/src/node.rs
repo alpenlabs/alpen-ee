@@ -116,10 +116,42 @@ impl AlpenEthereumNode {
     /// Configures this node as the isolated canonical EEST fixture process.
     ///
     /// The mode retains standard Ethereum `extra_data` in imported fixtures
-    /// and must never be enabled by production startup paths.
+    /// and selects fork-aware canonical precompiles instead of Alpen's
+    /// production set. It must never be enabled by production startup paths.
     pub fn with_eest_fixture_mode(mut self) -> Self {
         self.eest_fixture_mode = true;
+        self.evm_factory = self.evm_factory.with_eest_fixture_precompiles();
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{atomic::AtomicU64, Arc};
+
+    use alpen_ee_params::EvmSpec;
+    use alpen_reth_evm::evm::AlpenEvmFactory;
+
+    use super::{AlpenEthereumNode, AlpenNodeMode};
+
+    #[test]
+    fn fixture_mode_selects_canonical_precompiles_only_for_fixture_node() {
+        let evm_spec: EvmSpec = serde_json::from_str(
+            r#"{"config":{"chainId":2892,"shanghaiTime":0,"cancunTime":0,"pragueTime":0}}"#,
+        )
+        .expect("test chain spec must parse");
+        let production = AlpenEthereumNode::new(
+            AlpenEvmFactory::default(),
+            evm_spec,
+            AlpenNodeMode::sequencer(),
+            Arc::new(AtomicU64::new(0)),
+            0,
+        );
+        assert!(!production.evm_factory.uses_eest_fixture_precompiles());
+
+        let fixture = production.with_eest_fixture_mode();
+        assert!(fixture.eest_fixture_mode);
+        assert!(fixture.evm_factory.uses_eest_fixture_precompiles());
     }
 }
 
