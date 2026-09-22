@@ -21,6 +21,7 @@ import flexitest
 from flexitest.runtime import load_module_at, scan_dir_for_modules
 
 # Import environments
+from common.alpen_params import EEST_BASE_FEE_FLOOR, EEST_GENESIS_BASE_FEE_PER_GAS
 from common.config import ServiceType
 from common.keepalive import KEEP_ALIVE_TEST_NAME, load_keepalive_test
 from common.runtime import TestRuntimeWithLogging
@@ -33,6 +34,17 @@ from factories.alpen_client import AlpenClientFactory
 from factories.bitcoin import BitcoinFactory
 from factories.signer import SignerFactory
 from factories.strata import StrataFactory
+
+
+def make_eest_proof_env() -> EeOLEnv:
+    """Keep the scheduled EEST proof job on the normal OL/EE service path."""
+    return EeOLEnv(
+        fullnode_count=0,
+        pre_generate_blocks=110,
+        batch_sealing_block_count=5,
+        base_fee_floor=EEST_BASE_FEE_FLOOR,
+        genesis_base_fee_per_gas=EEST_GENESIS_BASE_FEE_PER_GAS,
+    )
 
 
 def disabled_tests() -> frozenset[str]:
@@ -296,17 +308,10 @@ def main(argv: list[str]) -> int:
     global_envs: dict[str, flexitest.EnvConfig] = {
         # Alpen-client (EE) environments
         "alpen_ee": AlpenClientEnv(),
-        # EEST requires the Alpen execution client, but must isolate every
-        # fixture by Engine forkchoice without EE services consuming reorged
-        # canonical-head notifications.
-        "alpen_eest": EeOLEnv(
-            fullnode_count=0,
-            pre_generate_blocks=110,
-            batch_sealing_block_count=5,
-            base_fee_floor=0,
-            genesis_base_fee_per_gas=7,
-            eest_fixture_mode=True,
-        ),
+        # The scheduled transaction-remote EEST job needs the normal OL/EE
+        # services, including proving. Canonical EngineX fixtures opt into the
+        # isolated Engine mode through the Hive launcher instead.
+        "alpen_eest": make_eest_proof_env(),
         "alpen_ee_discovery": AlpenClientEnv(enable_discovery=True, pure_discovery=True),
         "alpen_ee_multi": AlpenClientEnv(fullnode_count=3, forward_tx=False),
         "alpen_ee_mesh": AlpenClientEnv(
