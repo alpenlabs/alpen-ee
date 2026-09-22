@@ -1,0 +1,118 @@
+"""Tests for generated Alpen parameter artifacts."""
+
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from common.alpen_params import (
+    DEFAULT_BASE_FEE_FLOOR,
+    EEST_BASE_FEE_FLOOR,
+    EEST_BLOCK_GAS_LIMIT,
+    EEST_CHAIN,
+    EEST_GENESIS_BASE_FEE_PER_GAS,
+    EEST_MAX_TX_INPUT_BYTES,
+    EEST_RPC_TX_FEE_CAP,
+    compose_alpen_params,
+    resolve_base_fee_settings,
+)
+from entry import make_eest_proof_env
+from envconfigs.alpen_client import AlpenClientEnv, AlpenClientEnvParams
+from envconfigs.el_ol import EeOLEnv
+
+
+class AlpenParamsTests(unittest.TestCase):
+    """Verify functional-test parameter composition."""
+
+    def test_eest_transaction_admission_limits_cover_reviewed_vectors(self) -> None:
+        self.assertEqual(EEST_BLOCK_GAS_LIMIT, 120_000_000)
+        self.assertGreaterEqual(EEST_MAX_TX_INPUT_BYTES, 1_231_210)
+        self.assertEqual(EEST_RPC_TX_FEE_CAP, 0)
+
+    def test_scheduled_eest_keeps_the_proving_environment(self) -> None:
+        env = make_eest_proof_env()
+        self.assertFalse(env.alpen_env_params.eest_fixture_mode)
+        self.assertEqual(env.alpen_env_params.base_fee_floor, EEST_BASE_FEE_FLOOR)
+        self.assertEqual(
+            env.alpen_env_params.genesis_base_fee_per_gas,
+            EEST_GENESIS_BASE_FEE_PER_GAS,
+        )
+
+    def test_fixture_envs_use_canonical_eest_fees(self) -> None:
+        for params in (
+            AlpenClientEnv(fullnode_count=0, eest_fixture_mode=True).env_params,
+            EeOLEnv(fullnode_count=0, eest_fixture_mode=True).alpen_env_params,
+            AlpenClientEnvParams(
+                fullnode_count=0,
+                enable_discovery=False,
+                pure_discovery=False,
+                mesh_bootnodes=False,
+                eest_fixture_mode=True,
+            ),
+        ):
+            self.assertEqual(params.base_fee_floor, EEST_BASE_FEE_FLOOR)
+            self.assertEqual(params.genesis_base_fee_per_gas, EEST_GENESIS_BASE_FEE_PER_GAS)
+
+    def test_fixture_rejects_incompatible_explicit_fees(self) -> None:
+        with self.assertRaisesRegex(ValueError, "zero base fee floor"):
+            resolve_base_fee_settings(True, DEFAULT_BASE_FEE_FLOOR, None)
+        with self.assertRaisesRegex(ValueError, "7 wei genesis base fee"):
+            resolve_base_fee_settings(True, None, 8)
+
+    def test_fixture_requires_isolated_sequencer(self) -> None:
+        with self.assertRaisesRegex(ValueError, "fullnode_count=0"):
+            AlpenClientEnv(eest_fixture_mode=True)
+
+    def test_eest_fee_configuration_changes_only_the_generated_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            datadir = Path(temporary_directory)
+            ee_params_path = datadir / "ee-params.json"
+            ee_params_path.write_text(json.dumps({"account_id": "0x01"}))
+
+            params_path = compose_alpen_params(
+                datadir,
+                ee_params_path,
+                base_fee_floor=EEST_BASE_FEE_FLOOR,
+                genesis_base_fee_per_gas=EEST_GENESIS_BASE_FEE_PER_GAS,
+            )
+
+            params = json.loads(params_path.read_text())
+
+        self.assertEqual(params["base_fee_floor"], EEST_BASE_FEE_FLOOR)
+        self.assertEqual(
+            params["evm_spec"]["baseFeePerGas"],
+            hex(EEST_GENESIS_BASE_FEE_PER_GAS),
+        )
+
+    def test_eest_chain_predeploys_canonical_system_contracts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            datadir = Path(temporary_directory)
+            ee_params_path = datadir / "ee-params.json"
+            ee_params_path.write_text(json.dumps({"account_id": "0x01"}))
+
+            params_path = compose_alpen_params(
+                datadir,
+                ee_params_path,
+                chain=EEST_CHAIN,
+            )
+
+            params = json.loads(params_path.read_text())
+
+        alloc = params["evm_spec"]["alloc"]
+        self.assertEqual(int(params["evm_spec"]["gasLimit"], 16), EEST_BLOCK_GAS_LIMIT)
+        self.assertEqual(
+            alloc["0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02"]["code"],
+            "0x3373fffffffffffffffffffffffffffffffffffffffe14604d57602036146024575f5ffd5b5f35801560495762001fff810690815414603c575f5ffd5b62001fff01545f5260205ff35b5f5ffd5b62001fff42064281555f359062001fff015500",
+        )
+        self.assertEqual(
+            alloc["0x0000F90827F1C53a10cb7A02335B175320002935"]["code"],
+            "0x3373fffffffffffffffffffffffffffffffffffffffe14604657602036036042575f35600143038111604257611fff81430311604257611fff9006545f5260205ff35b5f5ffd5b5f35611fff60014303065500",
+        )
+        self.assertEqual(
+            alloc["0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02"]["nonce"],
+            "0x1",
+        )
+        self.assertEqual(
+            alloc["0x0000F90827F1C53a10cb7A02335B175320002935"]["nonce"],
+            "0x1",
+        )

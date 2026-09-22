@@ -1,14 +1,18 @@
 //! CLI argument definitions for the alpen-client binary.
 //!
 //! [`AdditionalConfig`] is the reth CLI extension type plugged into
-//! `NodeCommand<AlpenChainSpecParser, AdditionalConfig>`. Three flags, three
-//! concerns: reth's own `--config` (reth internals, untouched here),
-//! `--alpen-params` (chain/protocol parameters), `--alpen-config` (this
-//! node's own configuration, see [`crate::config`]).
+//! `NodeCommand<AlpenChainSpecParser, AdditionalConfig>`. Its public
+//! configuration flags have separate concerns: reth's own `--config` (reth
+//! internals, untouched here), `--alpen-params` (chain/protocol parameters),
+//! and `--alpen-config` (this node's own configuration, see
+//! [`crate::config`]). Hidden EEST-only switches isolate fixture behavior from
+//! deployed nodes.
 
 use std::{env, fs, path::Path, sync::Arc};
 
 use alpen_ee_params::AlpenParams;
+#[cfg(test)]
+use clap::error::ErrorKind;
 use clap::ArgAction;
 use eyre::Context;
 #[cfg(feature = "sequencer")]
@@ -51,6 +55,27 @@ pub(crate) struct AdditionalConfig {
         value_parser = alpen_config_value_parser,
     )]
     pub alpen_config: Arc<AlpenClientConfig>,
+
+    /// Launch only the execution client required by the EEST fixture driver.
+    ///
+    /// This is intentionally a CLI switch rather than a persisted node
+    /// configuration value. It must never change the behavior of a deployed
+    /// sequencer: it starts the Alpen EVM, payload builder, consensus, and
+    /// authenticated Engine API, but deliberately omits OL, DA, batch, chunk,
+    /// gossip, and proving services so an EEST case can safely reorg to its
+    /// fixture baseline.
+    #[arg(long, hide = true)]
+    pub eest_fixture_mode: bool,
+
+    /// Rewind the canonical head when the EEST remote driver restores its baseline.
+    ///
+    /// This is separate from [`Self::eest_fixture_mode`] because canonical
+    /// EngineX fixtures deliberately submit sibling blocks to exercise the
+    /// client's normal reorganization path. Enabling Reth's explicit unwind
+    /// mode there replaces the genesis state with an in-memory overlay whose
+    /// anchor is the nonexistent genesis parent.
+    #[arg(long, hide = true, requires = "eest_fixture_mode")]
+    pub eest_unwind_canonical_head: bool,
 }
 
 /// Logging and telemetry args.
@@ -194,6 +219,23 @@ mod tests {
 
         assert_eq!(config.alpen_params.genesis_block_info().blocknum(), 0);
         assert!(matches!(config.alpen_config.mode, NodeMode::FullNode(_)));
+    }
+
+    #[test]
+    fn parses_the_test_only_eest_switches() {
+        let config =
+            parse_additional_config(&["--eest-fixture-mode", "--eest-unwind-canonical-head"]);
+
+        assert!(config.eest_fixture_mode);
+        assert!(config.eest_unwind_canonical_head);
+    }
+
+    #[test]
+    fn eest_unwind_requires_fixture_mode() {
+        let error = AdditionalConfig::try_parse_from(base_argv(&["--eest-unwind-canonical-head"]))
+            .expect_err("canonical-head unwind must require isolated fixture mode");
+
+        assert_eq!(error.kind(), ErrorKind::MissingRequiredArgument);
     }
 
     /// Catches arg id / flag collisions between the flattened Alpen arg

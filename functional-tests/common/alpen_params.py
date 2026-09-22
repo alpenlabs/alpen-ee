@@ -24,10 +24,50 @@ CHAIN_SPEC_FILES = {
     "devnet": _CHAINSPEC_DIR / "devnet-chain.json",
     "testnet": _CHAINSPEC_DIR / "testnet-chain.json",
     "testnet3": _CHAINSPEC_DIR / "testnet3-chain.json",
+    "eest": _CHAINSPEC_DIR / "alpen-eest-chain.json",
 }
 
 DEFAULT_BASE_FEE_FLOOR = 1_000_000_000
+EEST_CHAIN = "eest"
+# Match execution-specs' EnvironmentDefaults.gas_limit. This affects only
+# the isolated conformance chain, not the production network's gas policy.
+EEST_BLOCK_GAS_LIMIT = 120_000_000
+# Keep the EEST-only transaction admission ceiling bounded while admitting the
+# largest reviewed Prague vector (1,231,210 encoded bytes).
+EEST_MAX_TX_INPUT_BYTES = 2 * 1024 * 1024
+# The canonical 120M gas envelope can exceed Reth's default 1 ETH RPC fee cap
+# even when the vector is valid. Zero disables that policy cap only in EEST.
+EEST_RPC_TX_FEE_CAP = 0
 EEST_BASE_FEE_FLOOR = 0
+EEST_GENESIS_BASE_FEE_PER_GAS = 7
+
+
+def resolve_base_fee_settings(
+    eest_fixture_mode: bool,
+    base_fee_floor: int | None,
+    genesis_base_fee_per_gas: int | None,
+) -> tuple[int, int | None]:
+    """Use canonical EEST fees for fixtures, retaining production defaults elsewhere."""
+    if not isinstance(eest_fixture_mode, bool):
+        raise TypeError("eest_fixture_mode must be a boolean")
+    if base_fee_floor is not None and (
+        isinstance(base_fee_floor, bool) or not isinstance(base_fee_floor, int)
+    ):
+        raise TypeError("base_fee_floor must be an integer or None")
+    if genesis_base_fee_per_gas is not None and (
+        isinstance(genesis_base_fee_per_gas, bool) or not isinstance(genesis_base_fee_per_gas, int)
+    ):
+        raise TypeError("genesis_base_fee_per_gas must be an integer or None")
+    if not eest_fixture_mode:
+        return (
+            DEFAULT_BASE_FEE_FLOOR if base_fee_floor is None else base_fee_floor,
+            genesis_base_fee_per_gas,
+        )
+    if base_fee_floor not in (None, EEST_BASE_FEE_FLOOR):
+        raise ValueError("EEST fixture mode requires a zero base fee floor")
+    if genesis_base_fee_per_gas not in (None, EEST_GENESIS_BASE_FEE_PER_GAS):
+        raise ValueError("EEST fixture mode requires a 7 wei genesis base fee")
+    return EEST_BASE_FEE_FLOOR, EEST_GENESIS_BASE_FEE_PER_GAS
 
 
 #: Spec schedule a chain launched from current source runs: every known
@@ -47,6 +87,7 @@ def compose_alpen_params(
     da_magic_bytes: str = "ALPN",
     spec_schedule: dict[str, int] | None = None,
     base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR,
+    genesis_base_fee_per_gas: int | None = None,
 ) -> Path:
     """Writes ``alpen-params.json`` into ``datadir`` and returns its path.
 
@@ -66,6 +107,9 @@ def compose_alpen_params(
         base_fee_floor: minimum EIP-1559 base fee in wei. Production tests
             retain the 1 gwei floor; EEST sets this to zero to exercise the
             standard Ethereum recurrence.
+        genesis_base_fee_per_gas: optional EIP-1559 base fee in the genesis
+            header. EEST sets this to its canonical 7 wei baseline; other
+            environments retain their selected chain spec's genesis value.
     """
     if max_withdrawal_amount == 0:
         raise ValueError("max_withdrawal_amount=0 is not a valid cap; pass None to disable it")
@@ -73,9 +117,18 @@ def compose_alpen_params(
         raise TypeError("base_fee_floor must be an integer")
     if not 0 <= base_fee_floor <= 2**64 - 1:
         raise ValueError("base_fee_floor must be between 0 and 2**64 - 1")
+    if genesis_base_fee_per_gas is not None:
+        if isinstance(genesis_base_fee_per_gas, bool) or not isinstance(
+            genesis_base_fee_per_gas, int
+        ):
+            raise TypeError("genesis_base_fee_per_gas must be an integer or None")
+        if not 0 <= genesis_base_fee_per_gas <= 2**64 - 1:
+            raise ValueError("genesis_base_fee_per_gas must be between 0 and 2**64 - 1")
 
     ee_params = json.loads(Path(ee_params_path).read_text())
     evm_spec = json.loads(CHAIN_SPEC_FILES[chain].read_text())
+    if genesis_base_fee_per_gas is not None:
+        evm_spec["baseFeePerGas"] = hex(genesis_base_fee_per_gas)
 
     params = {
         "strata_exec_account_id": ee_params["account_id"],

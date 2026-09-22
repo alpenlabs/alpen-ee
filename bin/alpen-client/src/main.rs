@@ -32,6 +32,7 @@ static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::ne
 
 mod args;
 mod config;
+mod eest;
 mod full_node;
 mod gossip;
 mod node;
@@ -84,6 +85,13 @@ fn main() {
     command
         .engine
         .always_process_payload_attributes_on_canonical_head = true;
+    // The transaction-driven EEST remote adapter restores its fixture
+    // baseline by sending an Engine forkchoice update to a canonical ancestor.
+    // EngineX instead submits sibling blocks to exercise the ordinary reorg
+    // path, so its fixture process must not enable this explicit unwind mode.
+    // Clap requires the hidden fixture switch whenever unwind is requested;
+    // production launchers therefore cannot opt into it accidentally.
+    command.engine.allow_unwind_canonical_header = command.ext.eest_unwind_canonical_head;
 
     if let Err(err) = run(command, node::launch) {
         eprintln!("Error: {err:?}");

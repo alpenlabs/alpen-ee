@@ -8,7 +8,8 @@ from typing import cast
 
 import flexitest
 
-from common.alpen_params import DEFAULT_BASE_FEE_FLOOR
+from common.alpen_params import resolve_base_fee_settings
+from common.bitcoin_mining import generate_blocks_in_chunks
 from common.config import EeDaConfig, ServiceType
 from common.prover_backend import NATIVE_BACKEND, ProverBackend
 from common.services.bitcoin import BitcoinService
@@ -19,16 +20,6 @@ from factories.bitcoin import BitcoinFactory
 DEFAULT_DA_MAGIC_BYTES = b"ALPN"
 DA_WALLET_FUNDING_OUTPUTS = 25
 INITIAL_L1_MATURITY_BLOCKS = 101
-INITIAL_L1_MINE_CHUNK_SIZE = 10
-
-
-def _generate_blocks_in_chunks(btc_rpc, block_count: int, mining_address: str) -> None:
-    """Mine regtest blocks without relying on one long-running RPC call."""
-    remaining = block_count
-    while remaining > 0:
-        chunk = min(remaining, INITIAL_L1_MINE_CHUNK_SIZE)
-        btc_rpc.proxy.generatetoaddress(chunk, mining_address)
-        remaining -= chunk
 
 
 @dataclass
@@ -46,7 +37,16 @@ class AlpenClientEnvParams:
     prover: ProverBackend = NATIVE_BACKEND
     da_rate_wei_per_byte: int = 0
     forward_tx: bool = True
-    base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR
+    base_fee_floor: int | None = None
+    genesis_base_fee_per_gas: int | None = None
+    eest_fixture_mode: bool = False
+
+    def __post_init__(self) -> None:
+        self.base_fee_floor, self.genesis_base_fee_per_gas = resolve_base_fee_settings(
+            self.eest_fixture_mode, self.base_fee_floor, self.genesis_base_fee_per_gas
+        )
+        if self.eest_fixture_mode and self.fullnode_count != 0:
+            raise ValueError("EEST fixture mode requires fullnode_count=0")
 
 
 class AlpenClientEnv(flexitest.EnvConfig):
@@ -78,7 +78,9 @@ class AlpenClientEnv(flexitest.EnvConfig):
         beneficiary_address: str | None = None,
         da_rate_wei_per_byte: int = 0,
         forward_tx: bool = True,
-        base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR,
+        base_fee_floor: int | None = None,
+        genesis_base_fee_per_gas: int | None = None,
+        eest_fixture_mode: bool = False,
     ):
         self.env_params = AlpenClientEnvParams(
             fullnode_count=fullnode_count,
@@ -92,6 +94,8 @@ class AlpenClientEnv(flexitest.EnvConfig):
             da_rate_wei_per_byte=da_rate_wei_per_byte,
             forward_tx=forward_tx,
             base_fee_floor=base_fee_floor,
+            genesis_base_fee_per_gas=genesis_base_fee_per_gas,
+            eest_fixture_mode=eest_fixture_mode,
         )
         if pure_discovery and not enable_discovery:
             raise ValueError("pure_discovery requires enable_discovery=True")
@@ -99,6 +103,10 @@ class AlpenClientEnv(flexitest.EnvConfig):
             raise ValueError("mesh_bootnodes requires enable_discovery=True")
         if len(da_magic_bytes) != 4:
             raise ValueError(f"da_magic_bytes must be exactly 4 bytes, got {len(da_magic_bytes)}")
+        if not isinstance(eest_fixture_mode, bool):
+            raise TypeError(
+                f"eest_fixture_mode must be a boolean, got {type(eest_fixture_mode).__name__}"
+            )
 
     def init(self, ectx: flexitest.EnvContext) -> flexitest.LiveEnv:
         services = self.get_services(ectx, self.env_params)
@@ -129,7 +137,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
             btc_rpc = bitcoin.create_rpc()
             btc_rpc.proxy.createwallet("testwallet")
             mining_address = btc_rpc.proxy.getnewaddress()
-            _generate_blocks_in_chunks(btc_rpc, INITIAL_L1_MATURITY_BLOCKS, mining_address)
+            generate_blocks_in_chunks(btc_rpc, INITIAL_L1_MATURITY_BLOCKS, mining_address)
 
             # DA publishing can sign multiple commits before earlier
             # change outputs become confirmed spendable. Split a matured
@@ -177,6 +185,8 @@ class AlpenClientEnv(flexitest.EnvConfig):
             prover=envparams.prover,
             da_rate_wei_per_byte=envparams.da_rate_wei_per_byte,
             base_fee_floor=envparams.base_fee_floor,
+            genesis_base_fee_per_gas=envparams.genesis_base_fee_per_gas,
+            eest_fixture_mode=envparams.eest_fixture_mode,
         )
         sequencer.wait_for_ready(timeout=60)
         seq_enode = sequencer.get_enode()
@@ -207,6 +217,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
                 ee_params_path=ee_params_path,
                 spec_schedule=envparams.prover.genesis_spec_schedule,
                 base_fee_floor=envparams.base_fee_floor,
+                genesis_base_fee_per_gas=envparams.genesis_base_fee_per_gas,
             )
             fullnode.wait_for_ready(timeout=60)
             fullnodes.append(fullnode)

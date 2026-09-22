@@ -49,7 +49,7 @@ use crate::{args::sequencer_privkey_from_env, sequencer};
 use crate::{
     args::{ol_submit_bearer_token_from_env, AdditionalConfig},
     config::{AdminRpcConfig, AlpenClientConfig, NodeMode, OlSource},
-    full_node,
+    eest, full_node,
     gossip::{create_gossip_task, GossipConfig},
     ol::{DummyOLClient, OLClientKind, RpcOLClient},
     service_executor::ServiceExecutor,
@@ -60,6 +60,10 @@ pub(crate) async fn launch(
     builder: WithLaunchContext<NodeBuilder<reth_db::DatabaseEnv, ChainSpec>>,
     ext: AdditionalConfig,
 ) -> eyre::Result<()> {
+    if ext.eest_fixture_mode {
+        return eest::run(builder, ext.alpen_params).await;
+    }
+
     let alpen_config = ext.alpen_config.clone();
     let params = ext.alpen_params.clone();
 

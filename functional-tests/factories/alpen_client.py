@@ -10,7 +10,15 @@ from pathlib import Path
 
 import flexitest
 
-from common.alpen_params import DEFAULT_BASE_FEE_FLOOR, compose_alpen_params
+from common.alpen_params import (
+    DEFAULT_BASE_FEE_FLOOR,
+    EEST_BLOCK_GAS_LIMIT,
+    EEST_CHAIN,
+    EEST_MAX_TX_INPUT_BYTES,
+    EEST_RPC_TX_FEE_CAP,
+    compose_alpen_params,
+    resolve_base_fee_settings,
+)
 from common.config import (
     AlpenAdminRpcConfig,
     AlpenClientConfig,
@@ -30,6 +38,36 @@ from common.services import AlpenClientProps, AlpenClientService
 def generate_p2p_secret_key() -> str:
     """Generate a random 32-byte hex-encoded P2P secret key."""
     return secrets.token_hex(32)
+
+
+def _required_eest_engine_file(name: str) -> Path:
+    """Return the runner-owned absolute file path for EEST Engine metadata."""
+    raw_path = os.environ.get(name, "").strip()
+    if not raw_path:
+        raise RuntimeError(f"{name} is required when eest_fixture_mode=True")
+    path = Path(raw_path)
+    if not path.is_absolute():
+        raise RuntimeError(f"{name} must be an absolute path, got {raw_path!r}")
+    if path.is_symlink():
+        raise RuntimeError(f"{name} must not be a symlink: {path}")
+    if not path.parent.is_dir():
+        raise RuntimeError(f"{name} parent directory does not exist: {path.parent}")
+    return path
+
+
+def _private_file_opener(path: str, flags: int) -> int:
+    return os.open(path, flags, 0o600)
+
+
+def _write_new_private_file(path: Path, contents: str, description: str) -> None:
+    """Write a new owner-only file without replacing a pre-existing path."""
+    try:
+        with open(path, "x", encoding="utf-8", opener=_private_file_opener) as file_handle:
+            file_handle.write(contents)
+    except FileExistsError as exc:
+        raise RuntimeError(f"refusing to overwrite existing {description}: {path}") from exc
+    except (OSError, UnicodeError) as exc:
+        raise RuntimeError(f"failed to write {description} {path}: {exc}") from exc
 
 
 def generate_sequencer_keypair() -> tuple[str, str]:
@@ -86,8 +124,10 @@ class AlpenClientFactory(flexitest.Factory):
         max_withdrawal_amount: int | None = 1_000_000_000,
         beneficiary_address: str | None = None,
         da_rate_wei_per_byte: int = 0,
-        base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR,
+        base_fee_floor: int | None = None,
+        genesis_base_fee_per_gas: int | None = None,
         prover: ProverBackend = NATIVE_BACKEND,
+        eest_fixture_mode: bool = False,
         **kwargs,
     ) -> AlpenClientService:
         """
@@ -106,6 +146,15 @@ class AlpenClientFactory(flexitest.Factory):
             prover: Which EE prover backend to run, and which spec versions
                 it has resident programs for; see common/prover_backend.py
         """
+        if not isinstance(eest_fixture_mode, bool):
+            raise TypeError(
+                f"eest_fixture_mode must be a boolean, got {type(eest_fixture_mode).__name__}"
+            )
+
+        base_fee_floor, genesis_base_fee_per_gas = resolve_base_fee_settings(
+            eest_fixture_mode, base_fee_floor, genesis_base_fee_per_gas
+        )
+
         ctx: flexitest.EnvContext = kwargs["ctx"]
 
         datadir = Path(ctx.make_service_dir("ee_sequencer"))
@@ -114,6 +163,22 @@ class AlpenClientFactory(flexitest.Factory):
         authrpc_port = self.next_port()
         admin_rpc_port = self.next_port()
         logfile = datadir / "service.log"
+
+        engine_jwt_secret_path: Path | None = None
+        engine_endpoint_path: Path | None = None
+        if eest_fixture_mode:
+            engine_jwt_secret_path = _required_eest_engine_file("EEST_ENGINE_JWT_SECRET_FILE")
+            engine_endpoint_path = _required_eest_engine_file("EEST_ENGINE_ENDPOINT_FILE")
+            _write_new_private_file(
+                engine_jwt_secret_path,
+                f"{secrets.token_hex(32)}\n",
+                "EEST Engine JWT secret",
+            )
+            _write_new_private_file(
+                engine_endpoint_path,
+                f"http://127.0.0.1:{authrpc_port}\n",
+                "EEST Engine endpoint",
+            )
 
         # Generate P2P secret key if not provided
         if p2p_secret_key is None:
@@ -136,12 +201,16 @@ class AlpenClientFactory(flexitest.Factory):
         alpen_params_path = compose_alpen_params(
             datadir,
             ee_params_path,
-            chain=custom_chain,
+            # The isolated EEST engine must expose the canonical EIP-4788 and
+            # EIP-2935 system contracts. Keep that test-only allocation out of
+            # every regular functional-test chain specification.
+            chain=EEST_CHAIN if eest_fixture_mode else custom_chain,
             bridge_denomination=bridge_denomination,
             max_withdrawal_amount=max_withdrawal_amount,
             da_magic_bytes=da_config.magic_bytes.decode("ascii"),
             spec_schedule=prover.genesis_spec_schedule,
             base_fee_floor=base_fee_floor,
+            genesis_base_fee_per_gas=genesis_base_fee_per_gas,
         )
 
         ol_config = (
@@ -202,6 +271,21 @@ class AlpenClientFactory(flexitest.Factory):
             "--p2p-secret-key", str(p2p_secret_key_file),
             "-vvvv",
         ]
+        if eest_fixture_mode:
+            if engine_jwt_secret_path is None:
+                raise RuntimeError("EEST fixture mode did not create an Engine JWT secret path")
+            cmd.extend([
+                "--authrpc.jwtsecret",
+                str(engine_jwt_secret_path),
+                "--eest-fixture-mode",
+                "--eest-unwind-canonical-head",
+            ])
+            cmd.extend([
+                "--builder.gaslimit", str(EEST_BLOCK_GAS_LIMIT),
+                "--txpool.max-tx-gas", str(EEST_BLOCK_GAS_LIMIT),
+                "--txpool.max-tx-input-bytes", str(EEST_MAX_TX_INPUT_BYTES),
+                "--rpc.txfeecap", str(EEST_RPC_TX_FEE_CAP),
+            ])
         # fmt: on
 
         # Discovery mode configuration:
@@ -233,6 +317,12 @@ class AlpenClientFactory(flexitest.Factory):
             "mode": "sequencer",
             "enode": None,  # Will be populated after start
         }
+        if eest_fixture_mode:
+            if engine_jwt_secret_path is None or engine_endpoint_path is None:
+                raise RuntimeError("EEST fixture mode did not initialize Engine metadata paths")
+            props["engine_endpoint"] = f"http://127.0.0.1:{authrpc_port}"
+            props["engine_jwt_secret_path"] = str(engine_jwt_secret_path)
+            props["engine_endpoint_path"] = str(engine_endpoint_path)
 
         # Set environment variable for sequencer private key
         env = os.environ.copy()
@@ -278,6 +368,7 @@ class AlpenClientFactory(flexitest.Factory):
         max_withdrawal_amount: int | None = 1_000_000_000,
         spec_schedule: dict[str, int] | None = None,
         base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR,
+        genesis_base_fee_per_gas: int | None = None,
         **kwargs,
     ) -> AlpenClientService:
         """
@@ -340,6 +431,7 @@ class AlpenClientFactory(flexitest.Factory):
             max_withdrawal_amount=max_withdrawal_amount,
             spec_schedule=spec_schedule,
             base_fee_floor=base_fee_floor,
+            genesis_base_fee_per_gas=genesis_base_fee_per_gas,
         )
 
         alpen_config = AlpenClientConfig(
