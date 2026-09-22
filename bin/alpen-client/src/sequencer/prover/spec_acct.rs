@@ -446,7 +446,7 @@ fn map_witness_build_err(err: DaWitnessBuildError) -> PaasError {
         | E::WtxidsRootMismatch { .. }
         | E::DaTxNotFound { .. }
         | E::Parse(_)
-        | E::Reassembly(_) => PaasError::permanent(message),
+        | E::Decode(_) => PaasError::permanent(message),
     }
 }
 
