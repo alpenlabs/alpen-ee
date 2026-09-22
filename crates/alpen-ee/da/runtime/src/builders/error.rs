@@ -6,13 +6,10 @@ use strata_codec::CodecError;
 /// Error raised while building a [`DaWitness`](alpen_ee_da_types::DaWitness).
 ///
 /// Spans both layers of the build — L1 inclusion (block fetch, wtxid roots,
-/// blob reassembly) and EVM dedup resolution (state-diff/bytecode lookups) —
+/// blob decoding) and EVM dedup resolution (state-diff/bytecode lookups) —
 /// and carries enough categorization for the prover to map onto its own
 /// retry semantics: provider/store read failures vs. genuinely missing data
 /// vs. structurally inconsistent inputs.
-///
-/// Message convention matches the verifier's `DaVerificationError`: parameters
-/// go in parens, never after a colon.
 #[derive(Debug, thiserror::Error)]
 pub enum DaWitnessBuildError {
     /// A non-genesis batch referenced no DA blocks.
@@ -41,9 +38,9 @@ pub enum DaWitnessBuildError {
     /// Commit/reveal extraction from the witnessed transactions failed.
     #[error("extract DA chunks ({0})")]
     Parse(#[from] DaParseError),
-    /// Decoding the reassembled chunk payloads into a `DaBlob` failed.
-    #[error("reassemble DA blob ({0})")]
-    Reassembly(CodecError),
+    /// Decoding the recovered chunk payloads into a `DaBlob` failed.
+    #[error("decode DA blob: {0}")]
+    Decode(CodecError),
     /// The state-diff provider failed to read a block's diff.
     #[error("state-diff read failed for block {block} ({error})")]
     StateDiffProvider { block: String, error: String },
