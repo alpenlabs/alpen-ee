@@ -1359,12 +1359,15 @@ dependencies = [
 name = "alpen-da-l1-extraction"
 version = "0.3.0-alpha.1"
 dependencies = [
+ "alpen-da-types",
  "bitcoin",
  "bitcoind-async-client",
  "futures",
  "strata-btc-types",
  "strata-common",
  "strata-identifiers",
+ "strata-l1-envelope-fmt",
+ "strata-l1-txfmt",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
