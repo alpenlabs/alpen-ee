@@ -5,6 +5,7 @@ from typing import cast
 
 import flexitest
 
+from common.bitcoin_mining import generate_blocks_in_chunks
 from common.config import BitcoindConfig, EpochSealingConfig, ServiceType
 from common.config.params import GenesisAccountData, L1BlockCommitment, OLParams
 from common.prover_backend import NATIVE_BACKEND, ProverBackend
@@ -87,7 +88,7 @@ class StrataEnvConfig(flexitest.EnvConfig):
 
         if self.pre_generate_blocks > 0:
             addr = btc_rpc.proxy.getnewaddress()
-            btc_rpc.proxy.generatetoaddress(self.pre_generate_blocks, addr)
+            generate_blocks_in_chunks(btc_rpc, self.pre_generate_blocks, addr)
 
         if self.fund_test_cli_wallet:
             self._fund_bdk_wallet(btc_rpc)
