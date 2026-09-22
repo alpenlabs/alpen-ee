@@ -53,7 +53,6 @@ sequencer = [
   "dep:k256",
   "dep:metrics",
   "dep:reth-payload-builder",
-  "dep:reqwest",
   "dep:strata-btcio",
   "dep:strata-codec",
   "dep:strata-db-types",
@@ -151,7 +150,6 @@ clap.workspace = true
 eyre.workspace = true
 http.workspace = true
 jsonrpsee = { workspace = true, features = ["http-client", "server", "macros"] }
-reqwest = { workspace = true, optional = true }
 reth-chainspec.workspace = true
 reth-cli-commands.workspace = true
 reth-cli-runner.workspace = true

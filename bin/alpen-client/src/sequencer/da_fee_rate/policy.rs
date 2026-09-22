@@ -5,13 +5,11 @@ use std::sync::Arc;
 use alpen_reth_evm::WEI_PER_SAT;
 use async_trait::async_trait;
 use bitcoind_async_client::Client as BtcClient;
+use strata_btcio::writer::{resolve_fee_rate, FeeRateResolutionTimeouts};
 use strata_config::btcio::L1FeePolicyConfig;
 use thiserror::Error;
 
-use super::{
-    super::bitcoin_fee_rate::{resolve_fee_rate, FeeRateResolutionTimeouts},
-    rate::PolicyRate,
-};
+use super::rate::PolicyRate;
 
 /// Reports a failure to produce a usable policy rate.
 #[derive(Debug, Error)]
@@ -81,6 +79,7 @@ impl DaFeeRatePolicy for WriterBackedDaFeeRatePolicy {
         let fee_rate =
             resolve_fee_rate(self.client.as_ref(), &self.fee_policy_config, self.timeouts)
                 .await
+                .map_err(anyhow::Error::new)
                 .map_err(DaFeeRatePolicyError::Source)?;
         let fee_kwu = fee_rate.to_sat_per_kwu();
         const WEIGHT_UNITS_PER_KWU: u64 = 1000;
@@ -155,7 +154,10 @@ mod tests {
 
         assert!(matches!(&error, DaFeeRatePolicyError::Source(_)));
         let message = error.to_string();
-        assert!(message.contains("invalid mempool_base_url"), "{message}");
+        assert!(
+            message.contains("invalid mempool explorer configuration"),
+            "{message}"
+        );
         assert!(!message.contains(SECRET_URL), "{message}");
     }
 

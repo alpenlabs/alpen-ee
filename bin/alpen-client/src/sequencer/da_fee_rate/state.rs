@@ -3,6 +3,7 @@
 use std::{fmt, time::Duration};
 
 use alpen_reth_node::{da_fee_rate_channel, DaFeeRateHandle, DaFeeRateUpdater};
+use strata_btcio::writer::FeeRateError;
 use thiserror::Error;
 use tokio::time::{error::Elapsed, timeout, Instant};
 
@@ -74,7 +75,12 @@ impl RateResolutionError {
     pub(super) fn is_timeout(&self) -> bool {
         match self {
             Self::Timeout => true,
-            Self::Policy(DaFeeRatePolicyError::Source(error)) => error.is::<Elapsed>(),
+            Self::Policy(DaFeeRatePolicyError::Source(error)) => {
+                error.is::<Elapsed>()
+                    || error
+                        .downcast_ref::<FeeRateError>()
+                        .is_some_and(FeeRateError::is_timeout)
+            }
             Self::Policy(_) | Self::Adjustment(_) | Self::OutsideBounds { .. } => false,
         }
     }

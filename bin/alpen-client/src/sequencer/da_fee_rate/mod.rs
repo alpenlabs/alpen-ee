@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use bitcoind_async_client::Client as BtcClient;
+use strata_btcio::writer::FeeRateResolutionTimeouts;
 use strata_config::btcio::L1FeePolicyConfig;
 use strata_service::AsyncExecutor;
 
@@ -23,7 +24,6 @@ use self::{
     policy::{DaFeeRatePolicy, FixedDaFeeRatePolicy, WriterBackedDaFeeRatePolicy},
     state::DaFeeRateServiceState,
 };
-use super::bitcoin_fee_rate::FeeRateResolutionTimeouts;
 use crate::config::{DaFeeRateConfig, DaFeeRatePolicyConfig};
 
 /// Resolves the initial configured rate and starts its refresh service.
