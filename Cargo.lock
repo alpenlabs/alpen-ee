@@ -1294,6 +1294,7 @@ dependencies = [
  "bitcoind-async-client",
  "futures",
  "strata-btc-types",
+ "strata-codec",
  "strata-common",
  "strata-identifiers",
  "strata-l1-envelope-fmt",

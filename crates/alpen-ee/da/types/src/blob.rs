@@ -1,7 +1,7 @@
 //! DA codec types and format constants shared between producer and verifier.
 
 use alpen_reth_statediff::BatchStateDiff;
-use strata_codec::{Codec, CodecError, Decoder};
+use strata_codec::{decode_buf_exact, Codec, CodecError, Decoder};
 
 /// Magic bytes in the EE DA commit transaction marker output.
 ///
@@ -56,6 +56,13 @@ pub struct EvmHeaderSummary {
     pub gas_used: u64,
     /// Gas limit of the last EVM block.
     pub gas_limit: u64,
+}
+
+/// Decodes a [`DaBlob`] from contiguous payload bytes.
+///
+/// Trailing bytes after a complete `DaBlob` are rejected.
+pub fn decode_da_blob(payload: &[u8]) -> Result<DaBlob, CodecError> {
+    decode_buf_exact(payload)
 }
 
 /// Decodes a [`DaBlob`] across ordered payload chunks.
@@ -182,6 +189,23 @@ mod tests {
     #[test]
     fn empty_chunks_is_error() {
         assert!(decode_da_blob_from_chunks(&[]).is_err());
+    }
+
+    #[test]
+    fn decodes_contiguous_payload() {
+        let encoded = encode_to_vec(&make_da_blob()).unwrap();
+        let got = decode_da_blob(&encoded).expect("decode contiguous payload");
+        assert_eq!(encode_to_vec(&got).unwrap(), encoded);
+    }
+
+    #[test]
+    fn contiguous_trailing_bytes_are_rejected() {
+        let mut encoded = encode_to_vec(&make_da_blob()).unwrap();
+        encoded.push(0xFF);
+        assert!(matches!(
+            decode_da_blob(&encoded),
+            Err(CodecError::ExtraInput)
+        ));
     }
 
     #[test]
