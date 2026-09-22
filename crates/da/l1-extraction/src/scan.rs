@@ -4,7 +4,7 @@
 //! to `strata-l1-envelope-fmt`, then returns only payloads produced by the
 //! configured EE sequencer with the supported DA blob marker version.
 
-use alpen_da_types::DA_BLOB_VERSION;
+use alpen_params::AlpenSpecId;
 use bitcoin::{secp256k1::XOnlyPublicKey, Txid};
 use strata_identifiers::L1BlockCommitment;
 use strata_l1_envelope_fmt::{
@@ -46,13 +46,18 @@ impl DaL1Ref {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DaL1Observation {
     l1_ref: DaL1Ref,
+    spec_version: AlpenSpecId,
     payload: Vec<u8>,
 }
 
 impl DaL1Observation {
     /// Constructs an EE DA L1 observation.
-    pub(crate) fn new(l1_ref: DaL1Ref, payload: Vec<u8>) -> Self {
-        Self { l1_ref, payload }
+    pub(crate) fn new(l1_ref: DaL1Ref, spec_version: AlpenSpecId, payload: Vec<u8>) -> Self {
+        Self {
+            l1_ref,
+            spec_version,
+            payload,
+        }
     }
 
     /// Returns the L1 provenance for this observation.
@@ -63,6 +68,11 @@ impl DaL1Observation {
     /// Returns the marker-bearing commit transaction id.
     pub const fn commit_txid(&self) -> Txid {
         self.l1_ref.commit_txid()
+    }
+
+    /// Returns the spec version that defines the DA blob layout.
+    pub const fn spec_version(&self) -> AlpenSpecId {
+        self.spec_version
     }
 
     /// Returns the recovered DA payload bytes.
@@ -156,18 +166,24 @@ impl DaScanner {
                 }
             };
 
-            if version != DA_BLOB_VERSION {
-                warn!(
-                    %commit_txid,
-                    version,
-                    expected_version = DA_BLOB_VERSION,
-                    "ignoring EE DA payload with unsupported version"
-                );
-                continue;
-            }
+            let spec_version = match u16::try_from(version)
+                .ok()
+                .and_then(|version| AlpenSpecId::try_from(version).ok())
+            {
+                Some(spec_version) => spec_version,
+                None => {
+                    warn!(
+                        %commit_txid,
+                        version,
+                        "ignoring EE DA payload with unsupported version"
+                    );
+                    continue;
+                }
+            };
 
             let l1_ref = DaL1Ref::new(commit_txid, completion_block);
-            let observation = DaL1Observation::new(l1_ref, recovered_payload.into_payload());
+            let observation =
+                DaL1Observation::new(l1_ref, spec_version, recovered_payload.into_payload());
             da_observations.push(observation);
         }
 
@@ -184,6 +200,7 @@ fn read_da_blob_version(
 
 #[cfg(test)]
 mod tests {
+    use alpen_da_types::da_blob_version;
     use bitcoin::{
         block::{Header, Version},
         hashes::Hash,
@@ -198,6 +215,10 @@ mod tests {
 
     const SEQUENCER_KEY_SEED: u8 = 7;
     const NON_SEQUENCER_KEY_SEED: u8 = 8;
+
+    fn v0_blob_version() -> u32 {
+        da_blob_version(AlpenSpecId::V0)
+    }
 
     fn scan_preloaded_l1_blocks(
         blocks: &[L1BlockData],
@@ -245,7 +266,7 @@ mod tests {
     fn test_wrong_magic_rejected() {
         let set = commit_reveal_fixtures::build_commit_reveal_set(
             &make_other_magic_bytes(),
-            &DA_BLOB_VERSION.to_be_bytes(),
+            &v0_blob_version().to_be_bytes(),
             &[b"chunk".as_slice()],
             SEQUENCER_KEY_SEED,
         );
@@ -264,7 +285,7 @@ mod tests {
     fn test_wrong_producer_rejected() {
         let set = commit_reveal_fixtures::build_commit_reveal_set(
             &make_alpen_magic_bytes(),
-            &DA_BLOB_VERSION.to_be_bytes(),
+            &v0_blob_version().to_be_bytes(),
             &[b"chunk".as_slice()],
             NON_SEQUENCER_KEY_SEED,
         );
@@ -300,7 +321,7 @@ mod tests {
 
     #[test]
     fn test_unsupported_version_rejected() {
-        let unsupported_version = 1u32;
+        let unsupported_version = 2u32;
         let set = commit_reveal_fixtures::build_commit_reveal_set(
             &make_alpen_magic_bytes(),
             &unsupported_version.to_be_bytes(),
@@ -320,7 +341,7 @@ mod tests {
 
     #[test]
     fn test_rejected_payload_does_not_block_valid_payload() {
-        let unsupported_version = 1u32;
+        let unsupported_version = 2u32;
         let rejected = commit_reveal_fixtures::build_commit_reveal_set(
             &make_alpen_magic_bytes(),
             &unsupported_version.to_be_bytes(),
@@ -329,7 +350,7 @@ mod tests {
         );
         let valid = commit_reveal_fixtures::build_commit_reveal_set(
             &make_alpen_magic_bytes(),
-            &DA_BLOB_VERSION.to_be_bytes(),
+            &v0_blob_version().to_be_bytes(),
             &[b"chunk".as_slice(), b"tail".as_slice()],
             SEQUENCER_KEY_SEED,
         );
@@ -354,7 +375,7 @@ mod tests {
     fn test_payload_recovered_across_blocks() {
         let set = commit_reveal_fixtures::build_commit_reveal_set(
             &make_alpen_magic_bytes(),
-            &DA_BLOB_VERSION.to_be_bytes(),
+            &v0_blob_version().to_be_bytes(),
             &[b"chunk".as_slice()],
             SEQUENCER_KEY_SEED,
         );
@@ -378,13 +399,13 @@ mod tests {
     fn test_multiple_payloads_recovered() {
         let set0 = commit_reveal_fixtures::build_commit_reveal_set(
             &make_alpen_magic_bytes(),
-            &DA_BLOB_VERSION.to_be_bytes(),
+            &v0_blob_version().to_be_bytes(),
             &[b"chunk-0".as_slice()],
             SEQUENCER_KEY_SEED,
         );
         let set1 = commit_reveal_fixtures::build_commit_reveal_set(
             &make_alpen_magic_bytes(),
-            &DA_BLOB_VERSION.to_be_bytes(),
+            &da_blob_version(AlpenSpecId::V1).to_be_bytes(),
             &[b"chunk-1a".as_slice(), b"chunk-1b".as_slice()],
             SEQUENCER_KEY_SEED,
         );
@@ -402,10 +423,13 @@ mod tests {
 
         assert_eq!(observations.len(), 2);
         assert!(observations.iter().any(|observation| {
-            observation.commit_txid() == commit0_txid && observation.payload() == b"chunk-0"
+            observation.commit_txid() == commit0_txid
+                && observation.spec_version() == AlpenSpecId::V0
+                && observation.payload() == b"chunk-0"
         }));
         assert!(observations.iter().any(|observation| {
             observation.commit_txid() == commit1_txid
+                && observation.spec_version() == AlpenSpecId::V1
                 && observation.payload() == b"chunk-1achunk-1b"
         }));
     }

@@ -1360,10 +1360,12 @@ name = "alpen-da-l1-extraction"
 version = "0.3.0-alpha.1"
 dependencies = [
  "alpen-da-types",
+ "alpen-params",
  "bitcoin",
  "bitcoind-async-client",
  "futures",
  "strata-btc-types",
+ "strata-codec",
  "strata-common",
  "strata-identifiers",
  "strata-l1-envelope-fmt",
