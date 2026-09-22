@@ -110,24 +110,30 @@ impl Service for DaFeeRateService {
 
 impl AsyncService for DaFeeRateService {
     async fn process_input(state: &mut Self::State, _input: Self::Msg) -> anyhow::Result<Response> {
-        let fetch_result = if state.is_stale {
-            fetch_policy_rate(state.policy.as_ref(), state.policy_fetch_timeout).await
-        } else if let Some(stale_deadline) = state.last_success_at.checked_add(state.stale_after) {
-            tokio::select! {
-                result = fetch_policy_rate(state.policy.as_ref(), state.policy_fetch_timeout) => {
-                    result
-                }
-                () = sleep_until(stale_deadline) => {
-                    if state.mark_stale_if_needed(Instant::now()) {
-                        record_stale_transition(state);
+        let fetch_result = {
+            let fetch = fetch_policy_rate(state.policy.as_ref(), state.policy_fetch_timeout);
+            tokio::pin!(fetch);
+
+            if state.is_stale {
+                fetch.await
+            } else if let Some(stale_deadline) =
+                state.last_success_at.checked_add(state.stale_after)
+            {
+                tokio::select! {
+                    result = &mut fetch => {
+                        result
                     }
-                    return Ok(Response::Continue);
+                    () = sleep_until(stale_deadline) => {
+                        state.is_stale = true;
+                        record_stale_transition(state);
+                        fetch.await
+                    }
                 }
+            } else {
+                // The configured duration extends beyond Tokio's representable instant range,
+                // so it cannot become stale during this fetch.
+                fetch.await
             }
-        } else {
-            // The configured duration extends beyond Tokio's representable instant range,
-            // so it cannot become stale during this fetch.
-            fetch_policy_rate(state.policy.as_ref(), state.policy_fetch_timeout).await
         };
         let now = Instant::now();
 
@@ -208,15 +214,41 @@ fn log_update(update: &RateUpdate) {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::{
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
+        time::Duration,
+    };
 
-    use tokio::{task::yield_now, time::advance};
+    use async_trait::async_trait;
+    use tokio::{
+        task::yield_now,
+        time::{advance, sleep},
+    };
 
     use super::*;
     use crate::sequencer::da_fee_rate::{
+        policy::{DaFeeRatePolicy, DaFeeRatePolicyError},
         rate::PolicyRate,
-        test_support::{service_config, service_state_with_policy, PendingPolicy, ScriptedPolicy},
+        test_support::{service_config, service_state_with_policy, ScriptedPolicy},
     };
+
+    struct DelayedPolicy {
+        delay: Duration,
+        rate: PolicyRate,
+        calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl DaFeeRatePolicy for DelayedPolicy {
+        async fn fetch_rate(&self) -> Result<PolicyRate, DaFeeRatePolicyError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            sleep(self.delay).await;
+            Ok(self.rate)
+        }
+    }
 
     #[test]
     fn service_status_reports_current_rate_and_freshness() {
@@ -274,8 +306,14 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn pending_fetch_marks_the_rate_stale_at_its_deadline() {
-        let mut state = service_state_with_policy(PendingPolicy, service_config(), 10);
+    async fn stale_deadline_does_not_cancel_an_in_flight_fetch() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let policy = DelayedPolicy {
+            delay: Duration::from_secs(11),
+            rate: PolicyRate::new(23),
+            calls: calls.clone(),
+        };
+        let mut state = service_state_with_policy(policy, service_config(), 10);
         let stale_after = state.stale_after;
         let task = tokio::spawn(async move {
             let response = DaFeeRateService::process_input(&mut state, ()).await;
@@ -284,10 +322,16 @@ mod tests {
 
         yield_now().await;
         advance(stale_after).await;
+        yield_now().await;
+        assert!(!task.is_finished());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        advance(Duration::from_secs(1)).await;
         let (response, current_rate, is_stale) = task.await.unwrap();
 
         assert_eq!(response.unwrap(), Response::Continue);
-        assert_eq!(current_rate, 10);
-        assert!(is_stale);
+        assert_eq!(current_rate, 23);
+        assert!(!is_stale);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 }
