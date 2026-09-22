@@ -1,0 +1,18 @@
+[package]
+edition = "2021"
+name = "alpen-ee-da-l1-extraction"
+version = "0.3.0-alpha.1"
+
+[lints]
+workspace = true
+
+[dependencies]
+strata-btc-types.workspace = true
+strata-common = { workspace = true, features = ["async"] }
+strata-identifiers.workspace = true
+
+bitcoin.workspace = true
+bitcoind-async-client.workspace = true
+futures.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
