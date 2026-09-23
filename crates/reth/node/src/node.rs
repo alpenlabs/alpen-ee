@@ -77,8 +77,8 @@ impl AlpenNodeMode {
 }
 
 impl LiveDaFeeRateProvider for DaFeeRateHandle {
-    fn current_rate(&self) -> u64 {
-        Self::current_rate(self)
+    fn next_rate_ceiling(&self) -> u64 {
+        Self::next_rate_ceiling(self)
     }
 }
 
@@ -98,7 +98,7 @@ pub struct AlpenEthereumNode {
     /// version resolution across the node's fork-sensitive components.
     evm_spec: EvmSpec,
     mode: AlpenNodeMode,
-    /// Read-only DA rate source sampled once by each payload-build attempt.
+    /// Read-only DA rate policy shared by payload construction and fee estimation.
     da_fee_rate_handle: DaFeeRateHandle,
     /// Minimum EIP-1559 base fee from the chain params artifact.
     base_fee_floor: u64,

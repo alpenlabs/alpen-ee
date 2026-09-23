@@ -13,6 +13,7 @@ use std::sync::{
 #[derive(Clone, Debug)]
 pub struct DaFeeRateHandle {
     current_rate: Arc<AtomicU64>,
+    next_rate_ceiling: u64,
 }
 
 impl DaFeeRateHandle {
@@ -23,10 +24,20 @@ impl DaFeeRateHandle {
         self.current_rate.load(Ordering::Relaxed)
     }
 
+    /// Returns the highest policy-approved rate for the next payload.
+    ///
+    /// Fee estimates use this ceiling instead of the mutable current rate so a
+    /// source rebound between estimation and payload construction cannot outrun
+    /// the quote.
+    pub const fn next_rate_ceiling(&self) -> u64 {
+        self.next_rate_ceiling
+    }
+
     /// Creates a read-only handle whose rate never changes.
     pub fn fixed(rate_wei_per_byte: u64) -> Self {
         Self {
             current_rate: Arc::new(AtomicU64::new(rate_wei_per_byte)),
+            next_rate_ceiling: rate_wei_per_byte,
         }
     }
 }
@@ -48,13 +59,19 @@ impl DaFeeRateUpdater {
 }
 
 /// Creates the service's update capability and its read-only consumer handle.
-pub fn da_fee_rate_channel(initial_rate_wei_per_byte: u64) -> (DaFeeRateUpdater, DaFeeRateHandle) {
+pub fn da_fee_rate_channel(
+    initial_rate_wei_per_byte: u64,
+    next_rate_ceiling_wei_per_byte: u64,
+) -> (DaFeeRateUpdater, DaFeeRateHandle) {
     let current_rate = Arc::new(AtomicU64::new(initial_rate_wei_per_byte));
     (
         DaFeeRateUpdater {
             current_rate: current_rate.clone(),
         },
-        DaFeeRateHandle { current_rate },
+        DaFeeRateHandle {
+            current_rate,
+            next_rate_ceiling: next_rate_ceiling_wei_per_byte,
+        },
     )
 }
 
@@ -64,14 +81,15 @@ mod tests {
 
     #[test]
     fn channel_exposes_its_initial_rate() {
-        let (_, handle) = da_fee_rate_channel(17);
+        let (_, handle) = da_fee_rate_channel(17, 29);
 
         assert_eq!(handle.current_rate(), 17);
+        assert_eq!(handle.next_rate_ceiling(), 29);
     }
 
     #[test]
     fn published_rate_is_visible_to_handle_clones() {
-        let (updater, handle) = da_fee_rate_channel(17);
+        let (updater, handle) = da_fee_rate_channel(17, 29);
         let cloned_handle = handle.clone();
 
         assert_eq!(updater.publish(29), 17);
@@ -84,5 +102,6 @@ mod tests {
         let handle = DaFeeRateHandle::fixed(41);
 
         assert_eq!(handle.current_rate(), 41);
+        assert_eq!(handle.next_rate_ceiling(), 41);
     }
 }

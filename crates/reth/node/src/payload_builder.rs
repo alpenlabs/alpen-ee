@@ -587,7 +587,7 @@ mod tests {
             serde_json::from_str(r#"{"config":{"chainId":2892,"shanghaiTime":0}}"#)
                 .expect("genesis document parses");
         let evm_config = AlpenEvmConfig::new(&evm_spec, AlpenEvmFactory::default());
-        let (updater, handle) = da_fee_rate_channel(INITIAL_RATE);
+        let (updater, handle) = da_fee_rate_channel(INITIAL_RATE, u64::MAX);
         let builder = AlpenPayloadBuilder::new(
             NoopProvider::default(),
             NoopTransactionPool::default(),

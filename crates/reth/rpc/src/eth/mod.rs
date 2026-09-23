@@ -50,10 +50,10 @@ pub type EthApiNodeBackend<N, Rpc> = EthApiInner<N, Rpc>;
 pub trait StrataNodeCore: RpcNodeCore<Provider: BlockReader> {}
 impl<T> StrataNodeCore for T where T: RpcNodeCore<Provider: BlockReader> {}
 
-/// Supplies the sequencer's latest DA fee rate to mutable-state fee estimation.
+/// Supplies the sequencer's next-block DA rate ceiling to mutable-state fee estimation.
 pub trait LiveDaFeeRateProvider: fmt::Debug + Send + Sync + 'static {
-    /// Returns the rate a new payload build would currently sample.
-    fn current_rate(&self) -> u64;
+    /// Returns the highest policy-approved rate for the next payload.
+    fn next_rate_ceiling(&self) -> u64;
 }
 
 /// Strata Eth API implementation.
@@ -90,7 +90,7 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> AlpenEthApi<N, Rpc> {
         self.inner.sequencer_client()
     }
 
-    /// Samples the live sequencer rate for estimates targeting mutable chain state.
+    /// Samples the sequencer's next-rate ceiling for estimates targeting mutable chain state.
     pub(crate) fn live_da_fee_rate(&self, at: BlockId) -> Option<u64> {
         sample_live_da_fee_rate(self.inner.live_da_fee_rate_provider(), at)
     }
@@ -112,7 +112,7 @@ fn sample_live_da_fee_rate(
     at: BlockId,
 ) -> Option<u64> {
     uses_live_da_fee_rate(at)
-        .then(|| provider.map(LiveDaFeeRateProvider::current_rate))
+        .then(|| provider.map(LiveDaFeeRateProvider::next_rate_ceiling))
         .flatten()
 }
 
@@ -422,7 +422,7 @@ mod tests {
     struct FixedRate(u64);
 
     impl LiveDaFeeRateProvider for FixedRate {
-        fn current_rate(&self) -> u64 {
+        fn next_rate_ceiling(&self) -> u64 {
             self.0
         }
     }

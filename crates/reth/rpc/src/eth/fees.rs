@@ -100,8 +100,8 @@ where
     /// Simulates `request` once and returns its DA fee components.
     ///
     /// Measures both the gas consumed and the resulting state-diff (the DA footprint) with
-    /// the same `calc_diff_size` estimator the STF charge uses. `da_rate_override` carries a
-    /// live rate snapshot for mutable sequencer estimates; historical estimates read the
+    /// the same `calc_diff_size` estimator the STF charge uses. `da_rate_override` carries the
+    /// next-block policy ceiling for mutable sequencer estimates; historical estimates read the
     /// committed rate from the simulated block's header.
     pub(crate) async fn da_fee_quote(
         &self,

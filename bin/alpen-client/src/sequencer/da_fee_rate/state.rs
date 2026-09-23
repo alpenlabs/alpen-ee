@@ -121,7 +121,10 @@ impl DaFeeRateServiceState {
         let rate_bounds = config.rate_bounds();
         let positive_floor = rate_bounds.map_or(1, |(minimum, _)| minimum.max(1));
         let adjusted_rate = adjust_rate(adjustment, policy_rate, rate_bounds, positive_floor)?;
-        let (updater, handle) = da_fee_rate_channel(adjusted_rate.wei_per_byte());
+        let next_rate_ceiling =
+            rate_bounds.map_or(adjusted_rate.wei_per_byte(), |(_, maximum)| maximum);
+        let (updater, handle) =
+            da_fee_rate_channel(adjusted_rate.wei_per_byte(), next_rate_ceiling);
 
         Ok(Self {
             policy,
@@ -186,7 +189,7 @@ fn adjust_rate(
     zero_rate_fallback: u64,
 ) -> Result<AdjustedRate, RateResolutionError> {
     let adjusted_rate = adjustment.apply(policy_rate)?;
-    let rate = if adjusted_rate.wei_per_byte() == 0 {
+    let rate = if adjusted_rate.wei_per_byte() == 0 && rate_bounds.is_some() {
         warn!(
             policy_rate_wei_per_byte = policy_rate.wei_per_byte(),
             fallback_rate_wei_per_byte = zero_rate_fallback,
@@ -220,9 +223,12 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::sequencer::da_fee_rate::test_support::{
-        rate_config, service_config, service_state_with_policy, writer_backed_policy_config,
-        PendingPolicy, ScriptedPolicy,
+    use crate::{
+        config::DaFeeRatePolicyConfig,
+        sequencer::da_fee_rate::test_support::{
+            rate_config, service_config, service_state_with_policy, writer_backed_policy_config,
+            PendingPolicy, ScriptedPolicy,
+        },
     };
 
     #[tokio::test]
@@ -313,7 +319,30 @@ mod tests {
         assert!(!update.changed);
         assert_eq!(update.adjusted_rate.wei_per_byte(), 10);
         assert_eq!(state.handle.current_rate(), 10);
+        assert_eq!(state.handle.next_rate_ceiling(), 20);
         assert_eq!(state.last_success_at, refreshed_at);
+    }
+
+    #[test]
+    fn fixed_zero_rate_remains_disabled() {
+        let config = rate_config(
+            DaFeeRatePolicyConfig::Fixed {
+                rate_wei_per_byte: 0,
+            },
+            5,
+            10,
+            10_000,
+            0,
+        );
+        let state = DaFeeRateServiceState::new(
+            Box::new(ScriptedPolicy::new([])),
+            &config,
+            PolicyRate::new(0),
+        )
+        .unwrap();
+
+        assert_eq!(state.handle.current_rate(), 0);
+        assert_eq!(state.handle.next_rate_ceiling(), 0);
     }
 
     #[test]
