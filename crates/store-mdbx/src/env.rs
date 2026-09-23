@@ -20,9 +20,10 @@ use signet_libmdbx::{
 };
 
 use crate::{
-    codec::{KeyCodec, Schema, ValueCodec},
+    codec::{BoxError, KeyCodec, Schema, ValueCodec},
     config::{MdbxConfig, MdbxSyncMode},
     error::{DbError, DbResult},
+    version::{RawGet, UpgradeCtx},
 };
 
 /// Declares one table to pre-create when opening an [`MdbxEnv`].
@@ -32,17 +33,12 @@ use crate::{
 pub struct TableSpec {
     /// The sub-database name (matches [`Schema::NAME`]).
     pub name: &'static str,
-    /// Whether the table is opened with MDBX `DUP_SORT`.
-    pub dup_sort: bool,
 }
 
 impl TableSpec {
     /// Builds a [`TableSpec`] from a [`Schema`] type.
     pub fn of<S: Schema>() -> Self {
-        Self {
-            name: S::NAME,
-            dup_sort: S::DUP_SORT,
-        }
+        Self { name: S::NAME }
     }
 }
 
@@ -87,11 +83,7 @@ impl MdbxEnv {
 
         let txn = env.begin_rw_unsync()?;
         for table in tables {
-            let mut flags = DatabaseFlags::CREATE;
-            if table.dup_sort {
-                flags |= DatabaseFlags::DUP_SORT;
-            }
-            txn.create_db(Some(table.name), flags)?;
+            txn.create_db(Some(table.name), DatabaseFlags::CREATE)?;
         }
         txn.commit()?;
 
@@ -138,6 +130,18 @@ impl MdbxEnv {
 
 // --- Free typed helpers, shared by `Reader` and `Writer` -----------------
 
+// Untyped read access, so an up-converter can reach other tables through the
+// ambient transaction without `UpgradeCtx` carrying the transaction's kind.
+impl<K> RawGet for TxUnsync<K>
+where
+    K: TransactionKind + SyncKind<Access = PtrUnsync>,
+{
+    fn get_raw(&self, table: &'static str, key: &[u8]) -> Result<Option<Vec<u8>>, BoxError> {
+        let db = self.open_db(Some(table))?;
+        Ok(self.get::<Vec<u8>>(db.dbi(), key)?)
+    }
+}
+
 // The read helpers are generic over the unsynchronized transaction kind so
 // both `Reader` (read-only) and `Writer` (read-write) can share them; the
 // `Access = PtrUnsync` bound restricts `K` to the unsynchronized `Ro`/`Rw`
@@ -151,6 +155,7 @@ where
     match txn.get::<Vec<u8>>(db.dbi(), &key_bytes)? {
         Some(value_bytes) => Ok(Some(<S::Value as ValueCodec<S>>::decode_value(
             &value_bytes,
+            &UpgradeCtx::new(txn),
         )?)),
         None => Ok(None),
     }
@@ -162,9 +167,10 @@ where
 {
     let db = txn.open_db(Some(S::NAME))?;
     let mut cursor = txn.cursor(db)?;
+    let ctx = UpgradeCtx::new(txn);
     cursor
         .first::<Vec<u8>, Vec<u8>>()?
-        .map(decode_entry::<S>)
+        .map(|entry| decode_entry::<S>(entry, &ctx))
         .transpose()
 }
 
@@ -174,9 +180,10 @@ where
 {
     let db = txn.open_db(Some(S::NAME))?;
     let mut cursor = txn.cursor(db)?;
+    let ctx = UpgradeCtx::new(txn);
     cursor
         .last::<Vec<u8>, Vec<u8>>()?
-        .map(decode_entry::<S>)
+        .map(|entry| decode_entry::<S>(entry, &ctx))
         .transpose()
 }
 
@@ -189,10 +196,11 @@ where
 {
     let db = txn.open_db(Some(S::NAME))?;
     let mut cursor = txn.cursor(db)?;
+    let ctx = UpgradeCtx::new(txn);
     for entry in cursor.iter_start::<Vec<u8>, Vec<u8>>()? {
         let (key_bytes, value_bytes) = entry?;
         let key = <S::Key as KeyCodec<S>>::decode_key(&key_bytes)?;
-        let value = <S::Value as ValueCodec<S>>::decode_value(&value_bytes)?;
+        let value = <S::Value as ValueCodec<S>>::decode_value(&value_bytes, &ctx)?;
         f(key, value)?;
     }
     Ok(())
@@ -200,10 +208,11 @@ where
 
 fn decode_entry<S: Schema>(
     (key_bytes, value_bytes): (Vec<u8>, Vec<u8>),
+    ctx: &UpgradeCtx<'_>,
 ) -> DbResult<(S::Key, S::Value)> {
     Ok((
         <S::Key as KeyCodec<S>>::decode_key(&key_bytes)?,
-        <S::Value as ValueCodec<S>>::decode_value(&value_bytes)?,
+        <S::Value as ValueCodec<S>>::decode_value(&value_bytes, ctx)?,
     ))
 }
 
@@ -213,7 +222,16 @@ pub struct Reader<'txn> {
     txn: &'txn RoTxUnsync,
 }
 
-impl Reader<'_> {
+impl<'txn> Reader<'txn> {
+    /// The up-convert context for this transaction.
+    ///
+    /// Decoding loose bytes — a golden-fixture replay, a `db verify` pass —
+    /// through the same context the normal read path uses, so their
+    /// up-converters see the same snapshot.
+    pub fn upgrade_ctx(&self) -> UpgradeCtx<'txn> {
+        UpgradeCtx::new(self.txn)
+    }
+
     /// Fetches the value for `key`, if present.
     pub fn get<S: Schema>(&self, key: &S::Key) -> DbResult<Option<S::Value>> {
         get_in::<S, _>(self.txn, key)
@@ -244,7 +262,14 @@ pub struct Writer<'txn> {
     txn: &'txn RwTxUnsync,
 }
 
-impl Writer<'_> {
+impl<'txn> Writer<'txn> {
+    /// The up-convert context for this transaction.
+    ///
+    /// See [`Reader::upgrade_ctx`].
+    pub fn upgrade_ctx(&self) -> UpgradeCtx<'txn> {
+        UpgradeCtx::new(self.txn)
+    }
+
     /// Fetches the value for `key`, if present.
     pub fn get<S: Schema>(&self, key: &S::Key) -> DbResult<Option<S::Value>> {
         get_in::<S, _>(self.txn, key)
@@ -268,7 +293,7 @@ impl Writer<'_> {
         for_each_in::<S, _>(self.txn, f)
     }
 
-    /// Inserts or overwrites the value for `key`.
+    /// Inserts or overwrites the value for `key`, in the current format.
     pub fn put<S: Schema>(&self, key: &S::Key, value: &S::Value) -> DbResult<()> {
         let db = self.txn.open_db(Some(S::NAME))?;
         let key_bytes = key.encode_key()?;
@@ -290,5 +315,195 @@ impl Writer<'_> {
         let db = self.txn.open_db(Some(S::NAME))?;
         self.txn.clear_db(db)?;
         Ok(())
+    }
+}
+
+/// Behavioural tests for the environment and its typed accessors.
+#[cfg(test)]
+mod tests {
+    use tempfile::tempdir;
+
+    use crate::{
+        define_table, define_table_be_key, define_table_borsh, impl_be_key_codec,
+        impl_raw_value_codec, impl_unit_value_codec, tables, CodecError, DbError, DbResult,
+        MdbxConfig, MdbxEnv, Schema,
+    };
+
+    define_table_be_key! {
+        /// Big-endian u64 key so cursor order matches numeric order.
+        (Numbers) u64 => Vec<u8>
+    }
+
+    define_table_borsh! {
+        /// Content-addressed blob table.
+        (Blobs) [u8; 32] => u64
+    }
+
+    define_table! {
+        /// A presence set: membership is the whole record.
+        (Marks) u64 => ()
+    }
+    impl_be_key_codec!(Marks, u64);
+    impl_unit_value_codec!(Marks);
+
+    /// A raw view of the `Marks` sub-database, for inspecting the bytes a presence
+    /// marker actually occupies and for planting a value it should refuse.
+    struct MarksRaw;
+
+    impl Schema for MarksRaw {
+        const NAME: &'static str = "Marks";
+        type Key = u64;
+        type Value = Vec<u8>;
+    }
+    impl_be_key_codec!(MarksRaw, u64);
+    impl_raw_value_codec!(MarksRaw);
+
+    fn open() -> (tempfile::TempDir, MdbxEnv) {
+        let dir = tempdir().unwrap();
+        let env = MdbxEnv::open(
+            dir.path(),
+            &MdbxConfig::small(),
+            &tables![Numbers, Blobs, Marks],
+        )
+        .unwrap();
+        (dir, env)
+    }
+
+    #[test]
+    fn put_get_roundtrip_and_overwrite() {
+        let (_dir, env) = open();
+
+        env.update(|w| w.put::<Numbers>(&7, &vec![1, 2, 3]))
+            .unwrap();
+        assert_eq!(
+            env.view(|r| r.get::<Numbers>(&7)).unwrap(),
+            Some(vec![1, 2, 3])
+        );
+
+        // upsert overwrites
+        env.update(|w| w.put::<Numbers>(&7, &vec![9])).unwrap();
+        assert_eq!(env.view(|r| r.get::<Numbers>(&7)).unwrap(), Some(vec![9]));
+
+        // absent key
+        assert_eq!(env.view(|r| r.get::<Numbers>(&8)).unwrap(), None);
+    }
+
+    #[test]
+    fn delete_removes_key() {
+        let (_dir, env) = open();
+        env.update(|w| w.put::<Numbers>(&1, &vec![0])).unwrap();
+
+        let removed = env.update(|w| w.delete::<Numbers>(&1)).unwrap();
+        assert!(removed);
+        assert_eq!(env.view(|r| r.get::<Numbers>(&1)).unwrap(), None);
+
+        // deleting an absent key reports false
+        assert!(!env.update(|w| w.delete::<Numbers>(&1)).unwrap());
+    }
+
+    #[test]
+    fn cursor_order_is_numeric_via_big_endian_keys() {
+        let (_dir, env) = open();
+        env.update::<_, DbError>(|w| {
+            for k in [5u64, 1, 300, 3, 256] {
+                w.put::<Numbers>(&k, &vec![k as u8])?;
+            }
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(
+            env.view(|r| r.first::<Numbers>()).unwrap().map(|(k, _)| k),
+            Some(1)
+        );
+        assert_eq!(
+            env.view(|r| r.last::<Numbers>()).unwrap().map(|(k, _)| k),
+            Some(300)
+        );
+
+        let mut seen = Vec::new();
+        env.view(|r| {
+            r.for_each::<Numbers>(|k, _| {
+                seen.push(k);
+                Ok(())
+            })
+        })
+        .unwrap();
+        assert_eq!(seen, vec![1, 3, 5, 256, 300]);
+    }
+
+    #[test]
+    fn update_commits_all_tables_atomically() {
+        let (_dir, env) = open();
+        env.update::<_, DbError>(|w| {
+            w.put::<Numbers>(&42, &vec![42])?;
+            w.put::<Blobs>(&[7u8; 32], &99)?;
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(env.view(|r| r.get::<Numbers>(&42)).unwrap(), Some(vec![42]));
+        assert_eq!(env.view(|r| r.get::<Blobs>(&[7u8; 32])).unwrap(), Some(99));
+    }
+
+    #[test]
+    fn update_error_aborts_the_whole_transaction() {
+        let (_dir, env) = open();
+        env.update(|w| w.put::<Numbers>(&1, &vec![1])).unwrap();
+
+        // A closure that writes then fails must leave no trace of its writes.
+        let res: DbResult<()> = env.update(|w| {
+            w.put::<Numbers>(&2, &vec![2])?;
+            w.put::<Blobs>(&[1u8; 32], &7)?;
+            Err(DbError::Env("boom".into()))
+        });
+        assert!(res.is_err());
+
+        assert_eq!(env.view(|r| r.get::<Numbers>(&1)).unwrap(), Some(vec![1]));
+        assert_eq!(env.view(|r| r.get::<Numbers>(&2)).unwrap(), None);
+        assert_eq!(env.view(|r| r.get::<Blobs>(&[1u8; 32])).unwrap(), None);
+    }
+
+    #[test]
+    fn data_survives_reopen() {
+        let dir = tempdir().unwrap();
+        {
+            let env =
+                MdbxEnv::open(dir.path(), &MdbxConfig::small(), &tables![Numbers, Blobs]).unwrap();
+            env.update(|w| w.put::<Numbers>(&11, &vec![1, 1])).unwrap();
+        }
+        // reopen the same directory
+        let env =
+            MdbxEnv::open(dir.path(), &MdbxConfig::small(), &tables![Numbers, Blobs]).unwrap();
+        assert_eq!(
+            env.view(|r| r.get::<Numbers>(&11)).unwrap(),
+            Some(vec![1, 1])
+        );
+    }
+
+    #[test]
+    fn a_presence_marker_stores_the_key_and_no_value_bytes() {
+        let (_dir, env) = open();
+        env.update(|w| w.put::<Marks>(&7, &())).unwrap();
+
+        assert_eq!(env.view(|r| r.get::<Marks>(&7)).unwrap(), Some(()));
+        assert_eq!(env.view(|r| r.get::<Marks>(&8)).unwrap(), None);
+        assert_eq!(
+            env.view(|r| r.get::<MarksRaw>(&7)).unwrap(),
+            Some(Vec::new()),
+            "membership must cost no value bytes"
+        );
+    }
+
+    #[test]
+    fn a_presence_marker_refuses_a_value_it_did_not_write() {
+        let (_dir, env) = open();
+        env.update(|w| w.put::<MarksRaw>(&7, &vec![1])).unwrap();
+
+        let err = env.view(|r| r.get::<Marks>(&7)).unwrap_err();
+        assert!(
+            matches!(err, DbError::Codec(CodecError::Decode { .. })),
+            "expected a decode refusal, got {err:?}"
+        );
     }
 }

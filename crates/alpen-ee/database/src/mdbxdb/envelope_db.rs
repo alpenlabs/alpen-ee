@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use alpen_db_store_mdbx::MdbxEnv;
+use alpen_store_mdbx::MdbxEnv;
 use strata_db_types::{
     chunked_envelope::{ChunkedEnvelopeEntry, L1ChunkedEnvelopeDatabase},
     DbResult,
@@ -119,7 +119,7 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
     };
 
-    use alpen_db_store_mdbx::MdbxConfig;
+    use alpen_store_mdbx::MdbxConfig;
     use strata_db_tests::l1_chunked_envelope_db_tests;
 
     use super::*;

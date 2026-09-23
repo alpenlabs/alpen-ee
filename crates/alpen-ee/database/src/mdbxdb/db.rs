@@ -1,10 +1,10 @@
 use std::{path::Path, sync::Arc};
 
-use alpen_db_store_mdbx::{MdbxConfig, MdbxEnv};
 use alpen_ee_common::{
     AccessedStateRecord, Batch, BatchId, BatchStatus, Chunk, ChunkId, ChunkStatus,
     EeAccountStateAtEpoch, ExecBlockRecord,
 };
+use alpen_store_mdbx::{MdbxConfig, MdbxEnv};
 use strata_acct_types::Hash;
 use strata_ee_acct_types::EeAccountState;
 use strata_identifiers::{EpochCommitment, OLBlockId};
@@ -719,11 +719,11 @@ mod tests {
         },
     };
 
-    use alpen_db_store_mdbx::MdbxConfig;
     use alpen_ee_common::{
         batch_storage_tests, chunk_storage_tests, exec_block_storage_test_fns::create_exec_block,
         exec_block_storage_tests, storage_tests,
     };
+    use alpen_store_mdbx::MdbxConfig;
     use tokio::runtime::{Handle, Runtime};
 
     use super::*;
