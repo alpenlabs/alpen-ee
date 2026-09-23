@@ -38,6 +38,8 @@ class TestDaMultiChunkTest(BaseTest):
             AlpenClientEnv(
                 fullnode_count=0,
                 batch_sealing_block_count=self.BATCH_SEALING_BLOCK_COUNT,
+                # 1GB: intentionally large so DA-size sealing never splits the 20-block batch
+                batch_sealing_da_size_bytes=1024 * 1024 * 1024,
             )
         )
 
