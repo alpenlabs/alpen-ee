@@ -34,8 +34,8 @@ pub(crate) struct DaFeeRateStatus {
 pub(crate) struct DaFeeRateServiceHandle {
     rate_handle: DaFeeRateHandle,
     monitor: ServiceMonitor<DaFeeRateStatus>,
-    /// Keeps the periodic input alive for the lifetime of this handle.
-    _tick_handle: DumbTickHandle,
+    /// Stops periodic refreshes when the service handle is dropped.
+    _shutdown_guard: DumbTickHandle,
 }
 
 impl DaFeeRateServiceHandle {
@@ -81,7 +81,7 @@ pub(super) async fn launch(
     Ok(DaFeeRateServiceHandle {
         rate_handle,
         monitor,
-        _tick_handle: tick_handle,
+        _shutdown_guard: tick_handle,
     })
 }
 
