@@ -1660,6 +1660,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "alpen-l1-reconstruction"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alpen-batch-replay",
+ "alpen-da-types",
+ "alpen-reth-statediff",
+ "strata-snark-acct-types",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "alpen-mdbx"
 version = "0.3.0-alpha.1"
 dependencies = [
