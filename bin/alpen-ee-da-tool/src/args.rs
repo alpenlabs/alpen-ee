@@ -29,7 +29,7 @@ pub(crate) struct Args {
     #[arg(long)]
     pub(crate) end_height: L1Height,
 
-    /// Path to write the reconstruction snapshot.
+    /// Path to load and update the reconstruction and verification snapshot.
     #[arg(long, value_name = "PATH")]
     pub(crate) snapshot: Option<PathBuf>,
 }

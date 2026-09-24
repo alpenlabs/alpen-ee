@@ -16,7 +16,7 @@ mod test_utils;
 use clap::Parser;
 
 use crate::{
-    account_state::verify_account_state_from_genesis,
+    account_state::verify_account_state,
     args::{load_alpen_params, Args},
     bitcoin::{
         create_bitcoin_rpc_client, ensure_bitcoin_network, fetch_transaction_block_commitment,
@@ -27,7 +27,7 @@ use crate::{
     ol_rpc::RpcOLAccountUpdateSource,
     output::{emit, EeDaVerificationOutcome},
     progress::StageProgress,
-    snapshot::save_reconstruction_snapshot,
+    snapshot::{load_reconstruction_snapshot, save_reconstruction_snapshot},
 };
 
 #[tokio::main]
@@ -35,6 +35,16 @@ async fn main() -> eyre::Result<()> {
     let args = Args::parse();
     let params = load_alpen_params(&args.alpen_params)?;
     let config = EeDaToolConfig::from_path(&args.config)?;
+    let (replay_snapshot, initial_account_state) = match args.snapshot.as_deref() {
+        Some(path) => match load_reconstruction_snapshot(path)? {
+            Some(snapshot) => {
+                let (replay, account_state) = snapshot.into_parts();
+                (Some(replay), Some(account_state))
+            }
+            None => (None, None),
+        },
+        None => (None, None),
+    };
 
     let bitcoin_client = create_bitcoin_rpc_client(config.bitcoind())?;
     ensure_bitcoin_network(&bitcoin_client, config.bitcoind().network).await?;
@@ -49,7 +59,7 @@ async fn main() -> eyre::Result<()> {
     .await?;
 
     let reconstruction_progress = StageProgress::new("EVM state reconstruction");
-    let reconstruction_outcome = reconstruct_evm_state(&params, recovered_blobs)?;
+    let reconstruction_outcome = reconstruct_evm_state(&params, replay_snapshot, recovered_blobs)?;
     reconstruction_progress.finish();
 
     let Some(reconstruction_outcome) = reconstruction_outcome else {
@@ -58,10 +68,11 @@ async fn main() -> eyre::Result<()> {
     };
 
     let account_update_source = RpcOLAccountUpdateSource::try_new(config.ol_rpc_url())?;
-    let account_state_verification = verify_account_state_from_genesis(
+    let account_state_verification = verify_account_state(
         &params,
         reconstruction_outcome.batch_replay_outcome(),
         &account_update_source,
+        initial_account_state,
     )
     .await?;
 

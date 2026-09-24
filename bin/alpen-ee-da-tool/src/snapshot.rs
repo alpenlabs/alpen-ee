@@ -1,22 +1,126 @@
 //! Persists reconstruction snapshots for the standalone tool.
 
-use std::{fs::File, io::Write, path::Path};
+use std::{
+    fs::{self, File},
+    io::{ErrorKind, Write},
+    path::Path,
+};
 
-use alpen_ee_batch_replay::BatchReplayOutcome;
+use alpen_ee_batch_replay::{BatchReplayOutcome, BatchReplaySnapshot};
+use alpen_reth_statediff::EthereumStateExt;
 use eyre::{eyre, Context};
-use ssz::Encode;
-use strata_codec::{Codec, Encoder};
-use strata_evm_ee::encode_ethereum_state;
+use ssz::{Decode, Encode};
+use strata_codec::{BufDecoder, Codec, Decoder, Encoder};
+use strata_ee_acct_types::EeAccountState;
+use strata_evm_ee::{decode_ethereum_state, encode_ethereum_state};
+use strata_snark_acct_types::Seqno;
 use tempfile::NamedTempFile;
 use thiserror::Error;
 
 use crate::account_state::VerifiedAccountState;
 
+/// EVM replay and verified EE account state loaded from one snapshot.
+#[derive(Debug)]
+pub(crate) struct ReconstructionSnapshot {
+    replay: BatchReplaySnapshot,
+    verified_account_state: VerifiedAccountState,
+}
+
+impl ReconstructionSnapshot {
+    fn new(replay: BatchReplaySnapshot, verified_account_state: VerifiedAccountState) -> Self {
+        Self {
+            replay,
+            verified_account_state,
+        }
+    }
+
+    pub(crate) fn into_parts(self) -> (BatchReplaySnapshot, VerifiedAccountState) {
+        (self.replay, self.verified_account_state)
+    }
+}
+
 #[derive(Debug, Error)]
 enum SnapshotValidationError {
+    /// The encoded account state ends before its declared length.
+    #[error("snapshot account state is truncated (expected {expected} bytes, {remaining} remain)")]
+    TruncatedAccountState { expected: usize, remaining: usize },
+
+    /// The snapshot contains data after its account state.
+    #[error("snapshot contains {count} trailing bytes")]
+    TrailingBytes { count: usize },
+
     /// The replayed EVM state does not match the state recorded by the EE account.
     #[error("replayed EVM and EE account state roots do not match")]
     StateRootMismatch,
+}
+
+/// Loads a reconstruction snapshot, returning [`None`] when the path does not exist.
+pub(crate) fn load_reconstruction_snapshot(
+    path: &Path,
+) -> eyre::Result<Option<ReconstructionSnapshot>> {
+    let encoded = match fs::read(path) {
+        Ok(encoded) => encoded,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).wrap_err_with(|| {
+                format!(
+                    "failed to read reconstruction snapshot from {}",
+                    path.display()
+                )
+            })
+        }
+    };
+    let mut decoder = BufDecoder::new(encoded);
+    let next_update_seq_no =
+        u64::decode(&mut decoder).wrap_err_with(|| snapshot_decode_error(path))?;
+    let last_applied_block_num =
+        u64::decode(&mut decoder).wrap_err_with(|| snapshot_decode_error(path))?;
+    let ethereum_state =
+        decode_ethereum_state(&mut decoder).wrap_err_with(|| snapshot_decode_error(path))?;
+    let next_inbox_msg_idx =
+        u64::decode(&mut decoder).wrap_err_with(|| snapshot_decode_error(path))?;
+    let account_state_len =
+        u32::decode(&mut decoder).wrap_err_with(|| snapshot_decode_error(path))?;
+    let account_state_len =
+        usize::try_from(account_state_len).wrap_err_with(|| snapshot_decode_error(path))?;
+    if account_state_len > decoder.remaining() {
+        return Err(SnapshotValidationError::TruncatedAccountState {
+            expected: account_state_len,
+            remaining: decoder.remaining(),
+        }
+        .into());
+    }
+    let mut account_state_bytes = vec![0; account_state_len];
+    decoder
+        .read_buf(&mut account_state_bytes)
+        .wrap_err_with(|| snapshot_decode_error(path))?;
+    if decoder.remaining() != 0 {
+        return Err(SnapshotValidationError::TrailingBytes {
+            count: decoder.remaining(),
+        }
+        .into());
+    }
+    let account_state = EeAccountState::from_ssz_bytes(&account_state_bytes)
+        .wrap_err_with(|| snapshot_decode_error(path))?;
+
+    let replayed_state_root = ethereum_state.state_root_buf32();
+    let account_state_root = account_state.last_exec_state_root();
+    if account_state_root.0 != replayed_state_root.0 {
+        return Err(SnapshotValidationError::StateRootMismatch.into());
+    }
+
+    let replay = BatchReplaySnapshot::try_new(
+        Seqno::new(next_update_seq_no),
+        last_applied_block_num,
+        replayed_state_root,
+        ethereum_state,
+    )
+    .wrap_err_with(|| snapshot_decode_error(path))?;
+
+    Ok(Some(ReconstructionSnapshot::new(
+        replay,
+        VerifiedAccountState::new(account_state, next_inbox_msg_idx),
+    )))
 }
 
 /// Atomically writes the EVM and EE account state needed to continue reconstruction.
@@ -65,6 +169,13 @@ pub(crate) fn save_reconstruction_snapshot(
     replace_file(path, &encoded)
 }
 
+fn snapshot_decode_error(path: &Path) -> String {
+    format!(
+        "failed to decode reconstruction snapshot from {}",
+        path.display()
+    )
+}
+
 fn replace_file(path: &Path, bytes: &[u8]) -> eyre::Result<()> {
     let parent = snapshot_parent(path);
     let mut temp_file = NamedTempFile::new_in(parent).wrap_err_with(|| {
@@ -107,12 +218,8 @@ fn snapshot_parent(path: &Path) -> &Path {
 mod tests {
     use std::fs;
 
-    use alpen_reth_statediff::EthereumStateExt;
-    use ssz::Decode;
     use strata_acct_types::Hash;
-    use strata_codec::{BufDecoder, Decoder};
     use strata_ee_acct_types::EeAccountState;
-    use strata_evm_ee::decode_ethereum_state;
     use tempfile::tempdir;
 
     use super::*;
@@ -138,34 +245,29 @@ mod tests {
         let path = directory.path().join("reconstruction.snapshot");
         fs::write(&path, b"old snapshot").expect("old snapshot writes");
         let outcome = replay_empty_batch();
-        let verified_account_state = build_verified_account_state(&outcome);
+        let expected_account_state = build_verified_account_state(&outcome);
 
-        save_reconstruction_snapshot(&path, &outcome, &verified_account_state)
+        save_reconstruction_snapshot(&path, &outcome, &expected_account_state)
             .expect("snapshot saves");
 
-        let encoded = fs::read(path).expect("snapshot reads");
-        let mut decoder = BufDecoder::new(encoded);
-        let next_update_seq_no = u64::decode(&mut decoder).expect("sequence number decodes");
-        let last_applied_block_num = u64::decode(&mut decoder).expect("block number decodes");
-        let ethereum_state = decode_ethereum_state(&mut decoder).expect("state decodes");
-        let next_inbox_msg_idx = u64::decode(&mut decoder).expect("inbox cursor decodes");
-        let account_state_len = u32::decode(&mut decoder).expect("account state length decodes");
-        let mut account_state_bytes = vec![0; account_state_len as usize];
-        decoder
-            .read_buf(&mut account_state_bytes)
-            .expect("account state bytes decode");
-        let account_state =
-            EeAccountState::from_ssz_bytes(&account_state_bytes).expect("account state decodes");
-
-        assert_eq!(decoder.remaining(), 0);
-        assert_eq!(next_update_seq_no, 1);
-        assert_eq!(last_applied_block_num, 1);
+        let snapshot = load_reconstruction_snapshot(&path)
+            .expect("snapshot loads")
+            .expect("snapshot exists");
+        let (replay, verified_account_state) = snapshot.into_parts();
+        assert_eq!(replay.next_update_seq_no(), Seqno::new(1));
+        assert_eq!(replay.last_applied_block_num(), 1);
         assert_eq!(
-            ethereum_state.state_root_buf32(),
+            replay.ethereum_state().state_root_buf32(),
             outcome.final_state_root()
         );
-        assert_eq!(next_inbox_msg_idx, 9);
-        assert_eq!(account_state, *verified_account_state.state());
+        assert_eq!(
+            verified_account_state.next_inbox_msg_idx(),
+            expected_account_state.next_inbox_msg_idx()
+        );
+        assert_eq!(
+            verified_account_state.state(),
+            expected_account_state.state()
+        );
     }
 
     #[test]
@@ -190,5 +292,37 @@ mod tests {
             error.downcast_ref::<SnapshotValidationError>(),
             Some(SnapshotValidationError::StateRootMismatch)
         ));
+    }
+
+    #[test]
+    fn test_trailing_bytes_are_rejected() {
+        let directory = tempdir().expect("temporary directory builds");
+        let path = directory.path().join("reconstruction.snapshot");
+        let outcome = replay_empty_batch();
+        let verified_account_state = build_verified_account_state(&outcome);
+        save_reconstruction_snapshot(&path, &outcome, &verified_account_state)
+            .expect("snapshot saves");
+        fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .expect("snapshot opens")
+            .write_all(&[0xff])
+            .expect("trailing byte writes");
+
+        let error = load_reconstruction_snapshot(&path).expect_err("trailing bytes reject");
+        assert!(matches!(
+            error.downcast_ref::<SnapshotValidationError>(),
+            Some(SnapshotValidationError::TrailingBytes { count: 1 })
+        ));
+    }
+
+    #[test]
+    fn test_missing_snapshot_returns_none() {
+        let directory = tempdir().expect("temporary directory builds");
+        let path = directory.path().join("missing.snapshot");
+
+        assert!(load_reconstruction_snapshot(&path)
+            .expect("absence is valid")
+            .is_none());
     }
 }

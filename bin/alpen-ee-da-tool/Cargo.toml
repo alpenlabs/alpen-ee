@@ -17,6 +17,7 @@ alpen-ee-da-l1-extraction.workspace = true
 alpen-ee-genesis.workspace = true
 alpen-ee-l1-reconstruction.workspace = true
 alpen-ee-params.workspace = true
+alpen-reth-statediff.workspace = true
 strata-acct-types.workspace = true
 strata-btc-types.workspace = true
 strata-codec.workspace = true
@@ -52,4 +53,3 @@ toml.workspace = true
 
 [dev-dependencies]
 alpen-ee-da-types.workspace = true
-alpen-reth-statediff.workspace = true

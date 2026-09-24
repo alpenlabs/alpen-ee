@@ -95,7 +95,7 @@ impl EeDaVerificationOutcome {
                 evm_state_root: batch_replay_outcome.final_state_root(),
             },
             ee_account_state_verification: EeAccountStateVerificationSummary {
-                initial_next_inbox_msg_idx: 0,
+                initial_next_inbox_msg_idx: account_state_verification.initial_next_inbox_msg_idx(),
                 final_next_inbox_msg_idx: verified_state.next_inbox_msg_idx(),
                 expected_inner_state_root: Buf32::new(
                     account_state_verification.expected_inner_state_root().0,

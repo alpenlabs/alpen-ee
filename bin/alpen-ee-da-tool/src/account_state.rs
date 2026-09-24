@@ -75,18 +75,28 @@ impl VerifiedAccountState {
     pub(crate) fn next_inbox_msg_idx(&self) -> u64 {
         self.next_inbox_msg_idx
     }
+
+    fn into_parts(self) -> (EeAccountState, u64) {
+        (self.state, self.next_inbox_msg_idx)
+    }
 }
 
-/// Verified account state and the final OL root checked during this run.
+/// Verified account state and metadata describing one verification run.
 pub(crate) struct AccountStateVerification {
     verified_state: VerifiedAccountState,
+    initial_next_inbox_msg_idx: u64,
     expected_inner_state_root: Hash,
 }
 
 impl AccountStateVerification {
-    fn new(verified_state: VerifiedAccountState, expected_inner_state_root: Hash) -> Self {
+    fn new(
+        verified_state: VerifiedAccountState,
+        initial_next_inbox_msg_idx: u64,
+        expected_inner_state_root: Hash,
+    ) -> Self {
         Self {
             verified_state,
+            initial_next_inbox_msg_idx,
             expected_inner_state_root,
         }
     }
@@ -94,6 +104,11 @@ impl AccountStateVerification {
     /// Returns the verified account state after this run.
     pub(crate) fn verified_state(&self) -> &VerifiedAccountState {
         &self.verified_state
+    }
+
+    /// Returns the inbox cursor before this verification run.
+    pub(crate) fn initial_next_inbox_msg_idx(&self) -> u64 {
+        self.initial_next_inbox_msg_idx
     }
 
     /// Returns the final EE account inner-state root published by OL.
@@ -136,17 +151,25 @@ enum AccountStateVerificationError {
     },
 }
 
-/// Reconstructs EE account state from genesis and verifies each OL-published update.
-struct GenesisAccountVerifier {
+/// Reconstructs EE account state from genesis or saved state and verifies each OL update.
+struct AccountStateVerifier {
     state: EeAccountState,
     next_inbox_msg_idx: u64,
 }
 
-impl GenesisAccountVerifier {
-    fn new(params: &AlpenParams) -> Self {
+impl AccountStateVerifier {
+    fn from_genesis(params: &AlpenParams) -> Self {
         Self {
             state: build_genesis_ee_account_state(params),
             next_inbox_msg_idx: 0,
+        }
+    }
+
+    fn from_verified_state(verified_state: VerifiedAccountState) -> Self {
+        let (state, next_inbox_msg_idx) = verified_state.into_parts();
+        Self {
+            state,
+            next_inbox_msg_idx,
         }
     }
 
@@ -192,13 +215,20 @@ impl GenesisAccountVerifier {
     }
 }
 
-pub(crate) async fn verify_account_state_from_genesis(
+pub(crate) async fn verify_account_state(
     params: &AlpenParams,
     batch_replay_outcome: &BatchReplayOutcome,
     source: &impl OLAccountUpdateSource,
+    initial_state: Option<VerifiedAccountState>,
 ) -> eyre::Result<AccountStateVerification> {
     let account_id = params.strata_exec_account_id();
-    let mut verifier = GenesisAccountVerifier::new(params);
+    let initial_next_inbox_msg_idx = initial_state
+        .as_ref()
+        .map_or(0, VerifiedAccountState::next_inbox_msg_idx);
+    let mut verifier = match initial_state {
+        Some(verified_state) => AccountStateVerifier::from_verified_state(verified_state),
+        None => AccountStateVerifier::from_genesis(params),
+    };
     let progress = EeAccountVerificationProgress::new(batch_replay_outcome.applied_roots().len());
     let mut expected_inner_state_root = None;
 
@@ -219,6 +249,7 @@ pub(crate) async fn verify_account_state_from_genesis(
         expected_inner_state_root.expect("batch replay outcome contains at least one applied root");
     Ok(AccountStateVerification::new(
         verifier.into_verified_state(),
+        initial_next_inbox_msg_idx,
         expected_inner_state_root,
     ))
 }
@@ -226,6 +257,9 @@ pub(crate) async fn verify_account_state_from_genesis(
 #[cfg(test)]
 mod tests {
     use alpen_ee_acct_state::compute_ee_account_inner_root;
+    use alpen_ee_batch_replay::{replay_from_snapshot, BatchReplaySnapshot, EvmReplayBatch};
+    use alpen_ee_da_types::EvmHeaderSummary;
+    use alpen_reth_statediff::BatchStateDiff;
     use strata_ee_acct_types::UpdateExtraData;
 
     use super::*;
@@ -268,7 +302,7 @@ mod tests {
             compute_ee_account_inner_root(&expected_state),
             last_exec_blkid,
         );
-        let mut verifier = GenesisAccountVerifier::new(&params);
+        let mut verifier = AccountStateVerifier::from_genesis(&params);
 
         verifier
             .apply_update(applied_batch_root, &update)
@@ -284,7 +318,7 @@ mod tests {
         let params = AlpenParams::default();
         let batch_replay_outcome = replay_empty_batch();
         let update = build_account_update(Seqno::zero(), 1, Hash::zero(), Hash::new([7; 32]));
-        let mut verifier = GenesisAccountVerifier::new(&params);
+        let mut verifier = AccountStateVerifier::from_genesis(&params);
 
         let error = verifier
             .apply_update(&batch_replay_outcome.applied_roots()[0], &update)
@@ -307,7 +341,7 @@ mod tests {
         let params = AlpenParams::default();
         let batch_replay_outcome = replay_empty_batch();
         let update = build_account_update(Seqno::new(1), 0, Hash::zero(), Hash::new([7; 32]));
-        let mut verifier = GenesisAccountVerifier::new(&params);
+        let mut verifier = AccountStateVerifier::from_genesis(&params);
 
         let error = verifier
             .apply_update(&batch_replay_outcome.applied_roots()[0], &update)
@@ -327,7 +361,7 @@ mod tests {
         let params = AlpenParams::default();
         let batch_replay_outcome = replay_empty_batch();
         let update = build_account_update(Seqno::zero(), 0, Hash::zero(), Hash::new([7; 32]));
-        let mut verifier = GenesisAccountVerifier::new(&params);
+        let mut verifier = AccountStateVerifier::from_genesis(&params);
 
         let error = verifier
             .apply_update(&batch_replay_outcome.applied_roots()[0], &update)
@@ -342,5 +376,75 @@ mod tests {
         ));
         assert_eq!(verifier.state, build_genesis_ee_account_state(&params));
         assert_eq!(verifier.next_inbox_msg_idx, 0);
+    }
+
+    #[test]
+    fn test_snapshot_state_continues_verification() {
+        let params = AlpenParams::default();
+        let initial_replay = replay_empty_batch();
+        let initial_applied_batch_root = &initial_replay.applied_roots()[0];
+        let initial_block_id = Hash::new([7; 32]);
+        let initial_state = EeAccountState::new(
+            initial_block_id,
+            Hash::new(initial_applied_batch_root.post_state_root().0),
+            Vec::new(),
+            Vec::new(),
+        );
+        let initial_update = build_account_update(
+            Seqno::zero(),
+            0,
+            compute_ee_account_inner_root(&initial_state),
+            initial_block_id,
+        );
+        let mut verifier = AccountStateVerifier::from_genesis(&params);
+        verifier
+            .apply_update(initial_applied_batch_root, &initial_update)
+            .expect("initial manifest verifies");
+        let verified_state = verifier.into_verified_state();
+
+        let initial_state_root = initial_replay.final_state_root();
+        let replay_snapshot = BatchReplaySnapshot::try_new(
+            Seqno::new(1),
+            1,
+            initial_state_root,
+            initial_replay.into_final_state(),
+        )
+        .expect("replay snapshot builds");
+        let resumed_replay = replay_from_snapshot(
+            replay_snapshot,
+            [EvmReplayBatch::new(
+                Seqno::new(1),
+                EvmHeaderSummary {
+                    block_num: 2,
+                    timestamp: 2,
+                    base_fee: 1,
+                    gas_used: 0,
+                    gas_limit: 1,
+                },
+                BatchStateDiff::new(),
+            )],
+        )
+        .expect("snapshot replay succeeds");
+        let resumed_applied_batch_root = &resumed_replay.applied_roots()[0];
+        let resumed_block_id = Hash::new([8; 32]);
+        let expected_state = EeAccountState::new(
+            resumed_block_id,
+            Hash::new(resumed_applied_batch_root.post_state_root().0),
+            Vec::new(),
+            Vec::new(),
+        );
+        let resumed_update = build_account_update(
+            Seqno::new(1),
+            0,
+            compute_ee_account_inner_root(&expected_state),
+            resumed_block_id,
+        );
+        let mut verifier = AccountStateVerifier::from_verified_state(verified_state);
+
+        verifier
+            .apply_update(resumed_applied_batch_root, &resumed_update)
+            .expect("resumed manifest verifies");
+
+        assert_eq!(verifier.into_verified_state().state(), &expected_state);
     }
 }
