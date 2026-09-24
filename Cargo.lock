@@ -1147,6 +1147,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "alpen-acct-state"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alpen-acct-runtime",
+ "alpen-acct-types",
+ "strata-acct-types",
+ "strata-codec",
+ "strata-msg-fmt",
+ "strata-snark-acct-runtime",
+ "strata-snark-acct-types",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "alpen-acct-types"
 version = "0.3.0-alpha.1"
 dependencies = [

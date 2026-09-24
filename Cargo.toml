@@ -3,6 +3,7 @@ resolver = "2"
 
 members = [
   "crates/acct-runtime",
+  "crates/acct-state",
   "crates/acct-types",
   "crates/batch-replay",
   "crates/block-assembly",
@@ -72,6 +73,7 @@ rustdoc.all = "warn"
 
 [workspace.dependencies]
 alpen-acct-runtime = { path = "crates/acct-runtime" }
+alpen-acct-state = { path = "crates/acct-state" }
 alpen-acct-types = { path = "crates/acct-types" }
 alpen-batch-replay = { path = "crates/batch-replay" }
 alpen-block-assembly = { path = "crates/block-assembly" }
