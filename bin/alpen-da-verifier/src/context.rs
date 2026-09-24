@@ -1,7 +1,8 @@
 //! External capabilities used by the EE DA verifier service.
 
-use std::future::Future;
+use std::{future::Future, path::PathBuf};
 
+use alpen_batch_replay::BatchReplaySnapshot;
 use alpen_da_l1_extraction::{
     fetch_l1_block_range, FetchBlockError, FetchPolicy, FetchRangeError, L1BlockData,
     RecoveredDaBlob,
@@ -11,13 +12,17 @@ use async_trait::async_trait;
 use bitcoind_async_client::Client;
 use futures::Stream;
 use strata_acct_types::AccountId;
-use strata_identifiers::L1Height;
+use strata_identifiers::{L1BlockCommitment, L1Height};
 use strata_snark_acct_types::Seqno;
+use tokio::task::block_in_place;
 
 use crate::{
-    account_state::{OLAccountUpdate, OLAccountUpdateError, OLAccountUpdateSource},
+    account_state::{
+        OLAccountUpdate, OLAccountUpdateError, OLAccountUpdateSource, VerifiedAccountState,
+    },
     bitcoin::{fetch_bitcoin_tip_height, FetchBitcoinTipError},
     ol_rpc::RpcOLAccountUpdateSource,
+    snapshot::{save_reconstruction_snapshot, SnapshotSaveError},
 };
 
 /// Operations the verifier performs against external systems.
@@ -46,6 +51,21 @@ pub(crate) trait DaVerifierContext: OLAccountUpdateSource + Send + Sync + 'stati
         first_update_seq_no: u64,
         recovered_l1_frontier: L1Height,
     ) -> impl Future<Output = Result<Vec<RecoveredDaBlob>, RecoveredDaDbError>> + Send;
+
+    /// Removes recovered DA with sequence numbers below an exclusive boundary.
+    fn prune_recovered_da_before(
+        &self,
+        update_seq_no: u64,
+    ) -> impl Future<Output = Result<(), RecoveredDaDbError>> + Send;
+
+    /// Atomically persists one verified reconstruction snapshot.
+    fn save_reconstruction_snapshot(
+        &self,
+        replay_snapshot: &BatchReplaySnapshot,
+        verified_account_state: &VerifiedAccountState,
+        resume_l1_block: L1BlockCommitment,
+        completion_block: L1BlockCommitment,
+    ) -> Result<(), SnapshotSaveError>;
 }
 
 /// Production [`DaVerifierContext`], backed by Bitcoin RPC, the
@@ -55,6 +75,7 @@ pub(crate) struct DaVerifierContextImpl {
     l1_block_fetch_policy: FetchPolicy,
     recovered_da_db: RecoveredDaDbOps,
     account_update_source: RpcOLAccountUpdateSource,
+    snapshot_path: PathBuf,
 }
 
 impl DaVerifierContextImpl {
@@ -64,12 +85,14 @@ impl DaVerifierContextImpl {
         l1_block_fetch_policy: FetchPolicy,
         recovered_da_db: RecoveredDaDbOps,
         account_update_source: RpcOLAccountUpdateSource,
+        snapshot_path: PathBuf,
     ) -> Self {
         Self {
             bitcoin_client,
             l1_block_fetch_policy,
             recovered_da_db,
             account_update_source,
+            snapshot_path,
         }
     }
 }
@@ -108,6 +131,31 @@ impl DaVerifierContext for DaVerifierContextImpl {
         self.recovered_da_db
             .get_contiguous_from_async(first_update_seq_no, recovered_l1_frontier)
             .await
+    }
+
+    async fn prune_recovered_da_before(
+        &self,
+        update_seq_no: u64,
+    ) -> Result<(), RecoveredDaDbError> {
+        self.recovered_da_db.prune_before_async(update_seq_no).await
+    }
+
+    fn save_reconstruction_snapshot(
+        &self,
+        replay_snapshot: &BatchReplaySnapshot,
+        verified_account_state: &VerifiedAccountState,
+        resume_l1_block: L1BlockCommitment,
+        completion_block: L1BlockCommitment,
+    ) -> Result<(), SnapshotSaveError> {
+        block_in_place(|| {
+            save_reconstruction_snapshot(
+                &self.snapshot_path,
+                replay_snapshot,
+                verified_account_state,
+                resume_l1_block,
+                completion_block,
+            )
+        })
     }
 }
 

@@ -180,6 +180,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_network_validation_propagates_rpc_failure() {
+        let reader = MockNetworkReader::new(Err(ClientError::Timeout));
+
+        let error = ensure_bitcoin_network(&reader, Network::Regtest)
+            .await
+            .expect_err("network RPC failure should fail validation");
+
+        assert!(matches!(
+            error,
+            BitcoinNetworkCheckError::Rpc(ClientError::Timeout)
+        ));
+    }
+
+    #[tokio::test]
     async fn test_network_validation_rejects_mismatch() {
         let reader = MockNetworkReader::new(Ok(Network::Bitcoin));
 

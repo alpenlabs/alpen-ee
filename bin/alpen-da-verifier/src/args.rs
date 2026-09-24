@@ -45,6 +45,10 @@ pub(crate) struct Args {
     #[arg(long, value_name = "PATH")]
     pub(crate) datadir: PathBuf,
 
+    /// Path to the reconstruction snapshot file.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) snapshot: PathBuf,
+
     /// L1 height from which reconstruction starts when no snapshot is available.
     #[arg(long)]
     pub(crate) genesis_l1_height: L1Height,
