@@ -9,7 +9,7 @@ use super::{
     rate::PolicyRate,
     state::DaFeeRateServiceState,
 };
-use crate::config::{DaFeeRateConfig, DaFeeRatePolicyConfig};
+use crate::config::WriterBackedDaFeeRateConfig;
 
 pub(super) struct ScriptedPolicy {
     outcomes: Mutex<VecDeque<Result<PolicyRate, &'static str>>>,
@@ -46,50 +46,33 @@ impl DaFeeRatePolicy for PendingPolicy {
     }
 }
 
-pub(super) const fn writer_backed_policy_config() -> DaFeeRatePolicyConfig {
-    DaFeeRatePolicyConfig::WriterBacked {
-        min_rate_wei_per_byte: 0,
-        max_rate_wei_per_byte: i64::MAX as u64,
-    }
-}
-
 pub(super) fn rate_config(
-    policy: DaFeeRatePolicyConfig,
     refresh_interval_seconds: u64,
     stale_after_seconds: u64,
     multiplier_bps: u64,
     offset_wei_per_byte: u64,
-) -> DaFeeRateConfig {
-    let policy_fields = match policy {
-        DaFeeRatePolicyConfig::WriterBacked {
-            min_rate_wei_per_byte,
-            max_rate_wei_per_byte,
-        } => format!(
-            "policy = \"writer_backed\"\nmin_rate_wei_per_byte = {min_rate_wei_per_byte}\nmax_rate_wei_per_byte = {max_rate_wei_per_byte}"
-        ),
-        DaFeeRatePolicyConfig::Fixed { rate_wei_per_byte } => {
-            format!("policy = \"fixed\"\nfixed_rate_wei_per_byte = {rate_wei_per_byte}")
-        }
-    };
+) -> WriterBackedDaFeeRateConfig {
     toml::from_str(&format!(
         r#"
-        {policy_fields}
+        min_rate_wei_per_byte = 0
+        max_rate_wei_per_byte = {}
         refresh_interval_seconds = {refresh_interval_seconds}
         stale_after_seconds = {stale_after_seconds}
         multiplier_bps = {multiplier_bps}
         offset_wei_per_byte = {offset_wei_per_byte}
-        "#
+        "#,
+        i64::MAX
     ))
     .expect("test DA fee-rate config should be valid")
 }
 
-pub(super) fn service_config() -> DaFeeRateConfig {
-    rate_config(writer_backed_policy_config(), 5, 10, 10_000, 0)
+pub(super) fn service_config() -> WriterBackedDaFeeRateConfig {
+    rate_config(5, 10, 10_000, 0)
 }
 
 pub(super) fn service_state_with_policy(
     policy: impl DaFeeRatePolicy,
-    config: DaFeeRateConfig,
+    config: WriterBackedDaFeeRateConfig,
     initial_policy_rate: u64,
 ) -> DaFeeRateServiceState {
     DaFeeRateServiceState::new(

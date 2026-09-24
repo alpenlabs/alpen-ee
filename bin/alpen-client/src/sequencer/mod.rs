@@ -260,7 +260,7 @@ pub(crate) async fn run(
     let writer_config = Arc::new(writer_config);
     log_writer_config(&writer_config);
     let btc_client = da_pipeline::connect_bitcoin(&sequencer_config.bitcoind).await?;
-    let da_fee_rate_service = da_fee_rate::start(
+    let da_fee_rate_runtime = da_fee_rate::start(
         &sequencer_config.da_fee_rate,
         btc_client.clone(),
         sequencer_config.l1_fee_policy.clone(),
@@ -268,7 +268,7 @@ pub(crate) async fn run(
     )
     .await
     .map_err(|error| eyre::eyre!("failed to start DA fee-rate service: {error}"))?;
-    let da_fee_rate_handle = da_fee_rate_service.rate_handle();
+    let da_fee_rate_handle = da_fee_rate_runtime.rate_handle();
     let btcio = BtcioResources {
         client: btc_client,
         writer_config,

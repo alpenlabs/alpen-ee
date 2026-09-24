@@ -409,30 +409,29 @@ pub(crate) struct FullNodeConfig {
     pub(crate) sequencer_http_url: Option<String>,
 }
 
-/// Selects the source that recommends the sequencer's DA fee rate.
+/// Contents of `[sequencer.da_fee_rate]`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "policy", rename_all = "snake_case")]
-pub(crate) enum DaFeeRatePolicyConfig {
+pub(crate) enum DaFeeRateConfig {
     /// Reuses the Bitcoin writer's configured L1 fee policy.
     WriterBacked {
-        /// Rejects adjusted external rates below this operator-approved value.
-        min_rate_wei_per_byte: u64,
-        /// Rejects adjusted external rates above this operator-approved value.
-        max_rate_wei_per_byte: u64,
+        #[serde(flatten)]
+        config: WriterBackedDaFeeRateConfig,
     },
-    /// Returns one operator-configured rate without consulting Bitcoin.
+    /// Uses one final operator-configured rate without consulting Bitcoin.
     Fixed {
         #[serde(rename = "fixed_rate_wei_per_byte")]
         rate_wei_per_byte: u64,
     },
 }
 
-/// Contents of `[sequencer.da_fee_rate]`.
+/// Settings used only when the DA fee rate follows the Bitcoin writer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub(crate) struct DaFeeRateConfig {
-    /// Chooses the policy that supplies unadjusted rate recommendations.
-    #[serde(flatten)]
-    policy: DaFeeRatePolicyConfig,
+pub(crate) struct WriterBackedDaFeeRateConfig {
+    /// Rejects adjusted external rates below this operator-approved value.
+    min_rate_wei_per_byte: u64,
+    /// Rejects adjusted external rates above this operator-approved value.
+    max_rate_wei_per_byte: u64,
     /// Controls how often the selected policy is queried.
     refresh_interval_seconds: NonZeroU64,
     /// Marks a dynamic rate stale after this long without a successful fetch.
@@ -452,12 +451,7 @@ pub(crate) struct DaFeeRateConfig {
 }
 
 #[cfg(feature = "sequencer")]
-impl DaFeeRateConfig {
-    /// Returns the checked policy selection.
-    pub(crate) const fn policy(&self) -> DaFeeRatePolicyConfig {
-        self.policy
-    }
-
+impl WriterBackedDaFeeRateConfig {
     /// Returns the non-zero refresh interval in seconds.
     pub(crate) const fn refresh_interval_seconds(&self) -> NonZeroU64 {
         self.refresh_interval_seconds
@@ -495,14 +489,8 @@ impl DaFeeRateConfig {
     }
 
     /// Returns the inclusive bounds for an adjusted external rate.
-    pub(crate) const fn rate_bounds(&self) -> Option<(u64, u64)> {
-        match self.policy {
-            DaFeeRatePolicyConfig::WriterBacked {
-                min_rate_wei_per_byte,
-                max_rate_wei_per_byte,
-            } => Some((min_rate_wei_per_byte, max_rate_wei_per_byte)),
-            DaFeeRatePolicyConfig::Fixed { .. } => None,
-        }
+    pub(crate) const fn rate_bounds(&self) -> (u64, u64) {
+        (self.min_rate_wei_per_byte, self.max_rate_wei_per_byte)
     }
 
     /// Checks relationships between DA fee-rate settings.
@@ -511,13 +499,23 @@ impl DaFeeRateConfig {
             self.stale_after_seconds >= self.refresh_interval_seconds,
             "stale_after_seconds must be at least refresh_interval_seconds"
         );
-        if let Some((min, max)) = self.rate_bounds() {
-            eyre::ensure!(
-                min <= max,
-                "min_rate_wei_per_byte must not exceed max_rate_wei_per_byte"
-            );
-        }
+        let (min, max) = self.rate_bounds();
+        eyre::ensure!(
+            min <= max,
+            "min_rate_wei_per_byte must not exceed max_rate_wei_per_byte"
+        );
         Ok(())
+    }
+}
+
+#[cfg(feature = "sequencer")]
+impl DaFeeRateConfig {
+    /// Checks relationships between policy-specific DA fee-rate settings.
+    fn validate(&self) -> eyre::Result<()> {
+        match self {
+            Self::WriterBacked { config } => config.validate(),
+            Self::Fixed { .. } => Ok(()),
+        }
     }
 }
 
@@ -967,22 +965,21 @@ mod tests {
         assert_eq!(seq.config.blocktime_ms.get(), 5_000);
         assert_eq!(seq.config.batch_sealing_block_count, 100);
         assert_eq!(seq.config.chunk_sealing_block_count(), 100);
+        let DaFeeRateConfig::WriterBacked {
+            config: da_fee_rate,
+        } = seq.config.da_fee_rate
+        else {
+            panic!("expected writer-backed DA fee rate");
+        };
+        assert_eq!(da_fee_rate.multiplier_bps, 10_000);
+        assert_eq!(da_fee_rate.offset_wei_per_byte, 0);
         assert_eq!(
-            seq.config.da_fee_rate.policy,
-            DaFeeRatePolicyConfig::WriterBacked {
-                min_rate_wei_per_byte: 2_500_000_000,
-                max_rate_wei_per_byte: 2_500_000_000_000,
-            }
+            da_fee_rate.rate_bounds(),
+            (2_500_000_000, 2_500_000_000_000)
         );
-        assert_eq!(seq.config.da_fee_rate.multiplier_bps, 10_000);
-        assert_eq!(seq.config.da_fee_rate.offset_wei_per_byte, 0);
-        assert_eq!(
-            seq.config.da_fee_rate.rate_bounds(),
-            Some((2_500_000_000, 2_500_000_000_000))
-        );
-        assert_eq!(seq.config.da_fee_rate.explorer_timeout().as_secs(), 10);
-        assert_eq!(seq.config.da_fee_rate.bitcoind_timeout().as_secs(), 10);
-        assert_eq!(seq.config.da_fee_rate.policy_fetch_timeout().as_secs(), 20);
+        assert_eq!(da_fee_rate.explorer_timeout().as_secs(), 10);
+        assert_eq!(da_fee_rate.bitcoind_timeout().as_secs(), 10);
+        assert_eq!(da_fee_rate.policy_fetch_timeout().as_secs(), 20);
     }
 
     #[test]
@@ -991,30 +988,19 @@ mod tests {
             r#"
             policy = "fixed"
             fixed_rate_wei_per_byte = 17
-            refresh_interval_seconds = 5
-            stale_after_seconds = 10
             "#,
         )
         .unwrap();
         assert_eq!(
-            fixed.policy,
-            DaFeeRatePolicyConfig::Fixed {
+            fixed,
+            DaFeeRateConfig::Fixed {
                 rate_wei_per_byte: 17
             }
         );
-        #[cfg(feature = "sequencer")]
-        {
-            assert_eq!(fixed.explorer_timeout(), Duration::from_secs(10));
-            assert_eq!(fixed.bitcoind_timeout(), Duration::from_secs(10));
-            assert_eq!(fixed.policy_fetch_timeout(), Duration::from_secs(20));
-            assert_eq!(fixed.rate_bounds(), None);
-        }
 
         let missing_fixed_rate = toml::from_str::<DaFeeRateConfig>(
             r#"
             policy = "fixed"
-            refresh_interval_seconds = 5
-            stale_after_seconds = 10
             "#,
         )
         .unwrap_err();
@@ -1042,6 +1028,9 @@ mod tests {
         )
         .unwrap();
 
+        let DaFeeRateConfig::WriterBacked { config } = config else {
+            panic!("expected writer-backed DA fee rate");
+        };
         assert_eq!(config.explorer_timeout(), Duration::from_secs(4));
         assert_eq!(config.bitcoind_timeout(), Duration::from_secs(7));
         assert_eq!(config.policy_fetch_timeout(), Duration::from_secs(11));
@@ -1301,8 +1290,6 @@ mod tests {
                 [sequencer.da_fee_rate]
                 policy = "fixed"
                 fixed_rate_wei_per_byte = 0
-                refresh_interval_seconds = 60
-                stale_after_seconds = 300
             "#
             )
         }

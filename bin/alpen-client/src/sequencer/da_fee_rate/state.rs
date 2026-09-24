@@ -12,7 +12,7 @@ use super::{
     policy::{DaFeeRatePolicy, DaFeeRatePolicyError},
     rate::{AdjustedRate, AffineAdjustment, AffineAdjustmentError, PolicyRate},
 };
-use crate::config::DaFeeRateConfig;
+use crate::config::WriterBackedDaFeeRateConfig;
 
 /// Holds the mutable state owned by [`super::service::DaFeeRateService`].
 pub(super) struct DaFeeRateServiceState {
@@ -25,7 +25,7 @@ pub(super) struct DaFeeRateServiceState {
     /// Provides read-only access to the currently published rate.
     pub(super) handle: DaFeeRateHandle,
     /// Inclusive operator-approved bounds for adjusted external rates.
-    rate_bounds: Option<(u64, u64)>,
+    rate_bounds: (u64, u64),
     /// Bounds a complete policy fetch as a final watchdog.
     pub(super) policy_fetch_timeout: Duration,
     /// Controls how often the policy is queried.
@@ -104,7 +104,7 @@ impl DaFeeRateServiceState {
     /// Resolves an initial policy rate before creating the payload handle.
     pub(super) async fn initialize(
         policy: Box<dyn DaFeeRatePolicy>,
-        config: &DaFeeRateConfig,
+        config: &WriterBackedDaFeeRateConfig,
     ) -> Result<Self, RateResolutionError> {
         let policy_rate = fetch_policy_rate(policy.as_ref(), config.policy_fetch_timeout()).await?;
         Self::new(policy, config, policy_rate)
@@ -113,16 +113,15 @@ impl DaFeeRateServiceState {
     /// Builds initialized state from a policy rate that has already been resolved.
     pub(super) fn new(
         policy: Box<dyn DaFeeRatePolicy>,
-        config: &DaFeeRateConfig,
+        config: &WriterBackedDaFeeRateConfig,
         policy_rate: PolicyRate,
     ) -> Result<Self, RateResolutionError> {
         let adjustment =
             AffineAdjustment::new(config.multiplier_bps(), config.offset_wei_per_byte());
         let rate_bounds = config.rate_bounds();
-        let positive_floor = rate_bounds.map_or(1, |(minimum, _)| minimum.max(1));
+        let positive_floor = rate_bounds.0.max(1);
         let adjusted_rate = adjust_rate(adjustment, policy_rate, rate_bounds, positive_floor)?;
-        let next_rate_ceiling =
-            rate_bounds.map_or(adjusted_rate.wei_per_byte(), |(_, maximum)| maximum);
+        let next_rate_ceiling = rate_bounds.1;
         let (updater, handle) =
             da_fee_rate_channel(adjusted_rate.wei_per_byte(), next_rate_ceiling);
 
@@ -185,11 +184,11 @@ impl DaFeeRateServiceState {
 fn adjust_rate(
     adjustment: AffineAdjustment,
     policy_rate: PolicyRate,
-    rate_bounds: Option<(u64, u64)>,
+    rate_bounds: (u64, u64),
     zero_rate_fallback: u64,
 ) -> Result<AdjustedRate, RateResolutionError> {
     let adjusted_rate = adjustment.apply(policy_rate)?;
-    let rate = if adjusted_rate.wei_per_byte() == 0 && rate_bounds.is_some() {
+    let rate = if adjusted_rate.wei_per_byte() == 0 {
         warn!(
             policy_rate_wei_per_byte = policy_rate.wei_per_byte(),
             fallback_rate_wei_per_byte = zero_rate_fallback,
@@ -199,10 +198,9 @@ fn adjust_rate(
     } else {
         adjusted_rate.wei_per_byte()
     };
-    if let Some((min, max)) = rate_bounds {
-        if !(min..=max).contains(&rate) {
-            return Err(RateResolutionError::OutsideBounds { rate, min, max });
-        }
+    let (min, max) = rate_bounds;
+    if !(min..=max).contains(&rate) {
+        return Err(RateResolutionError::OutsideBounds { rate, min, max });
     }
     Ok(AdjustedRate::new(rate))
 }
@@ -223,12 +221,8 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::{
-        config::DaFeeRatePolicyConfig,
-        sequencer::da_fee_rate::test_support::{
-            rate_config, service_config, service_state_with_policy, writer_backed_policy_config,
-            PendingPolicy, ScriptedPolicy,
-        },
+    use crate::sequencer::da_fee_rate::test_support::{
+        rate_config, service_config, service_state_with_policy, PendingPolicy, ScriptedPolicy,
     };
 
     #[tokio::test]
@@ -254,7 +248,7 @@ mod tests {
 
     #[tokio::test]
     async fn initialization_rejects_an_adjusted_rate_that_overflows() {
-        let config = rate_config(writer_backed_policy_config(), 5, 10, 10_001, 0);
+        let config = rate_config(5, 10, 10_001, 0);
         let error = DaFeeRateServiceState::initialize(
             Box::new(ScriptedPolicy::new([Ok(PolicyRate::new(u64::MAX))])),
             &config,
@@ -267,9 +261,8 @@ mod tests {
 
     #[test]
     fn initialization_rejects_a_rate_below_the_configured_minimum() {
-        let config: DaFeeRateConfig = toml::from_str(
+        let config: WriterBackedDaFeeRateConfig = toml::from_str(
             r#"
-            policy = "writer_backed"
             refresh_interval_seconds = 5
             stale_after_seconds = 10
             min_rate_wei_per_byte = 10
@@ -293,9 +286,8 @@ mod tests {
 
     #[test]
     fn zero_rate_uses_the_positive_floor_and_retains_it_on_refresh() {
-        let config: DaFeeRateConfig = toml::from_str(
+        let config: WriterBackedDaFeeRateConfig = toml::from_str(
             r#"
-            policy = "writer_backed"
             refresh_interval_seconds = 5
             stale_after_seconds = 10
             min_rate_wei_per_byte = 10
@@ -324,30 +316,8 @@ mod tests {
     }
 
     #[test]
-    fn fixed_zero_rate_remains_disabled() {
-        let config = rate_config(
-            DaFeeRatePolicyConfig::Fixed {
-                rate_wei_per_byte: 0,
-            },
-            5,
-            10,
-            10_000,
-            0,
-        );
-        let state = DaFeeRateServiceState::new(
-            Box::new(ScriptedPolicy::new([])),
-            &config,
-            PolicyRate::new(0),
-        )
-        .unwrap();
-
-        assert_eq!(state.handle.current_rate(), 0);
-        assert_eq!(state.handle.next_rate_ceiling(), 0);
-    }
-
-    #[test]
     fn successful_fetch_publishes_only_the_fully_adjusted_rate() {
-        let config = rate_config(writer_backed_policy_config(), 5, 10, 15_000, 3);
+        let config = rate_config(5, 10, 15_000, 3);
         let mut state = service_state_with_policy(ScriptedPolicy::new([]), config, 5);
         let previous_success = state.last_success_at;
         let now = previous_success + Duration::from_secs(2);
@@ -380,7 +350,7 @@ mod tests {
 
     #[test]
     fn adjustment_failure_retains_the_current_rate_and_success_time() {
-        let config = rate_config(writer_backed_policy_config(), 5, 10, 10_001, 0);
+        let config = rate_config(5, 10, 10_001, 0);
         let mut state = service_state_with_policy(ScriptedPolicy::new([]), config, 1);
         let previous_success = state.last_success_at;
         let now = previous_success + Duration::from_secs(7);

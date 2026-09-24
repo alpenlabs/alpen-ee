@@ -57,12 +57,7 @@ pub(super) async fn launch(
     executor: &impl AsyncExecutor,
 ) -> anyhow::Result<DaFeeRateServiceHandle> {
     let rate_handle = state.handle.clone();
-    set_current_rate_metric(rate_handle.current_rate());
-    gauge!(STALE_METRIC).set(u8::from(state.is_stale));
-    info!(
-        initial_rate_wei_per_byte = rate_handle.current_rate(),
-        "DA fee-rate service initialized"
-    );
+    record_initialized_rate(&rate_handle);
 
     let (tick_handle, mut input) = DumbTickingInput::new(state.refresh_interval);
     // Tokio intervals emit once immediately. Initialization already fetched a
@@ -83,6 +78,16 @@ pub(super) async fn launch(
         monitor,
         _shutdown_guard: tick_handle,
     })
+}
+
+/// Records the initial fixed or writer-backed rate.
+pub(super) fn record_initialized_rate(rate_handle: &DaFeeRateHandle) {
+    set_current_rate_metric(rate_handle.current_rate());
+    gauge!(STALE_METRIC).set(0);
+    info!(
+        initial_rate_wei_per_byte = rate_handle.current_rate(),
+        "DA fee rate initialized"
+    );
 }
 
 impl ServiceState for DaFeeRateServiceState {

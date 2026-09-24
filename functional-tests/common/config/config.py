@@ -184,8 +184,17 @@ class AlpenDaFeeRateConfig:
         if self.policy == "writer_backed":
             config.pop("fixed_rate_wei_per_byte")
         elif self.policy == "fixed":
-            config.pop("min_rate_wei_per_byte")
-            config.pop("max_rate_wei_per_byte")
+            for field_name in (
+                "refresh_interval_seconds",
+                "stale_after_seconds",
+                "explorer_timeout_seconds",
+                "bitcoind_timeout_seconds",
+                "multiplier_bps",
+                "offset_wei_per_byte",
+                "min_rate_wei_per_byte",
+                "max_rate_wei_per_byte",
+            ):
+                config.pop(field_name)
         return config
 
 

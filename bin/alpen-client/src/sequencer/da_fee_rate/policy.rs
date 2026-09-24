@@ -29,28 +29,6 @@ pub(super) trait DaFeeRatePolicy: Send + Sync + 'static {
     async fn fetch_rate(&self) -> Result<PolicyRate, DaFeeRatePolicyError>;
 }
 
-/// Returns one configured policy rate without consulting an external source.
-#[derive(Clone, Copy, Debug)]
-pub(super) struct FixedDaFeeRatePolicy {
-    rate: PolicyRate,
-}
-
-impl FixedDaFeeRatePolicy {
-    /// Creates a fixed policy denominated in wei per DA byte.
-    pub(super) const fn new(rate_wei_per_byte: u64) -> Self {
-        Self {
-            rate: PolicyRate::new(rate_wei_per_byte),
-        }
-    }
-}
-
-#[async_trait]
-impl DaFeeRatePolicy for FixedDaFeeRatePolicy {
-    async fn fetch_rate(&self) -> Result<PolicyRate, DaFeeRatePolicyError> {
-        Ok(self.rate)
-    }
-}
-
 /// Resolves the Bitcoin writer's fee policy and converts it into DA pricing units.
 pub(super) struct WriterBackedDaFeeRatePolicy {
     client: Arc<BtcClient>,
@@ -114,13 +92,6 @@ mod tests {
             L1FeePolicyConfig::new(fee_policy),
             FeeRateResolutionTimeouts::new(Duration::from_secs(10), Duration::from_secs(10)),
         )
-    }
-
-    #[tokio::test]
-    async fn fixed_policy_returns_its_configured_rate() {
-        let policy = FixedDaFeeRatePolicy::new(73);
-
-        assert_eq!(policy.fetch_rate().await.unwrap().wei_per_byte(), 73);
     }
 
     #[tokio::test]
