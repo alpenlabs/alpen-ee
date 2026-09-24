@@ -1478,9 +1478,13 @@ dependencies = [
 name = "alpen-ee-l1-reconstruction"
 version = "0.3.0-alpha.1"
 dependencies = [
+ "alloy-primitives",
  "alpen-ee-batch-replay",
+ "alpen-ee-da-l1-extraction",
  "alpen-ee-da-types",
  "alpen-reth-statediff",
+ "bitcoin",
+ "strata-identifiers",
  "strata-snark-acct-types",
  "thiserror 2.0.18",
 ]

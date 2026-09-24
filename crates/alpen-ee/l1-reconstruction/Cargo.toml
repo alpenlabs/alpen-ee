@@ -8,10 +8,14 @@ workspace = true
 
 [dependencies]
 alpen-ee-batch-replay.workspace = true
+alpen-ee-da-l1-extraction.workspace = true
 alpen-ee-da-types.workspace = true
+alpen-reth-statediff.workspace = true
 strata-snark-acct-types.workspace = true
 
+alloy-primitives.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-alpen-reth-statediff.workspace = true
+bitcoin.workspace = true
+strata-identifiers.workspace = true

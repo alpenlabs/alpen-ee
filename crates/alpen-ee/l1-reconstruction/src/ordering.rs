@@ -86,24 +86,8 @@ fn validate_update_sequence(blobs: &[DaBlob]) -> Result<(), BatchSequenceError> 
 
 #[cfg(test)]
 mod tests {
-    use alpen_ee_da_types::EvmHeaderSummary;
-    use alpen_reth_statediff::BatchStateDiff;
-
     use super::*;
-
-    fn build_da_blob(update_seq_no: u64, block_num: u64) -> DaBlob {
-        DaBlob {
-            update_seq_no,
-            evm_header: EvmHeaderSummary {
-                block_num,
-                timestamp: 1_700_000_000 + block_num,
-                base_fee: 100,
-                gas_used: 21_000,
-                gas_limit: 36_000_000,
-            },
-            state_diff: BatchStateDiff::new(),
-        }
-    }
+    use crate::test_utils::build_da_blob;
 
     #[test]
     fn test_unordered_blobs_sorted() {
