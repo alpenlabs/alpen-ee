@@ -1472,6 +1472,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "alpen-da-verifier"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alpen-da-l1-extraction",
+ "alpen-da-provider",
+ "alpen-da-types",
+ "alpen-database",
+ "alpen-params",
+ "alpen-reth-statediff",
+ "anyhow",
+ "bitcoin",
+ "bitcoind-async-client",
+ "clap",
+ "futures",
+ "serde",
+ "serde_json",
+ "strata-common",
+ "strata-identifiers",
+ "strata-l1-envelope-fmt",
+ "strata-logging",
+ "strata-service",
+ "strata-tasks",
+ "thiserror 2.0.20",
+ "tokio",
+ "toml 0.5.11",
+ "tracing",
+]
+
+[[package]]
 name = "alpen-database"
 version = "0.3.0-alpha.1"
 dependencies = [
