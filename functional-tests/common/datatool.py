@@ -8,6 +8,8 @@ from common.config.config import BitcoindConfig
 from common.config.params import GenesisAccountData
 
 DEFAULT_OL_BLOCK_TIME_MS = 5_000
+PREDICATE_FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "predicates"
+CHECKPOINT_TEST_PREDICATE_FILE = PREDICATE_FIXTURES_DIR / "checkpoint-bip340-schnorr-test.predicate"
 
 # Matches DEFAULT_ALPEN_EE_ACCOUNT_ID in alpen-ee-params.
 ALPEN_EE_ACCOUNT_ID = "01" * 32
@@ -260,8 +262,8 @@ def generate_asm_params(
 
     args = [
         "gen-asm-params",
-        "--checkpoint-predicate",
-        "bip340-schnorr-test",
+        "--checkpoint-predicate-file",
+        str(CHECKPOINT_TEST_PREDICATE_FILE),
         "--name",
         "ALPN",
         "--genesis-l1-height",
