@@ -11,10 +11,10 @@ workspace = true
 test-utils = []
 
 [dependencies]
-alpen-store-mdbx.workspace = true
 alpen-ee-common.workspace = true
 alpen-ee-params.workspace = true
 alpen-reth-db.workspace = true
+alpen-store-mdbx.workspace = true
 bitcoin.workspace = true
 strata-acct-types.workspace = true
 strata-db-macros.workspace = true
