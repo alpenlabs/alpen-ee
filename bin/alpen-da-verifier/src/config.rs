@@ -74,6 +74,9 @@ pub(crate) struct DaVerifierConfig {
     block_fetch_concurrency: NonZeroUsize,
 
     /// Bitcoin RPC connection and retry configuration.
+    ///
+    /// The node must enable `txindex` so the verifier can resolve historical
+    /// EE DA commit transactions to their containing blocks.
     bitcoind: BitcoindConfig,
 
     /// URL of an OL sequencer RPC endpoint that retains EE account update manifests and

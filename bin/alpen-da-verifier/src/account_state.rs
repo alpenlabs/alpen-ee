@@ -90,7 +90,7 @@ impl OLAccountUpdateError {
 }
 
 /// Verified EE account state and metadata describing this verification run.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct VerifiedAccountState {
     state: EeAccountState,
     next_inbox_msg_idx: u64,
@@ -98,7 +98,7 @@ pub(crate) struct VerifiedAccountState {
 }
 
 impl VerifiedAccountState {
-    fn new(
+    pub(crate) fn new(
         state: EeAccountState,
         next_inbox_msg_idx: u64,
         expected_inner_state_root: Hash,
