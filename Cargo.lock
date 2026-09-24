@@ -1579,6 +1579,7 @@ dependencies = [
  "revm",
  "revm-primitives",
  "secp256k1 0.29.1",
+ "serde_json",
  "strata-bridge-params",
  "strata-crypto",
  "strata-identifiers",

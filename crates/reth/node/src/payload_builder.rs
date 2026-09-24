@@ -10,7 +10,7 @@ use std::{
 use alloy_consensus::{Header, Transaction};
 use alloy_eips::eip4895::Withdrawals;
 use alpen_reth_evm::{
-    base_fee::apply_base_fee_floor,
+    base_fee::next_floored_base_fee,
     constants::BRIDGEOUT_PRECOMPILE_ADDRESS,
     da_fee::{DA_COVERAGE_CAPPED, DA_COVERAGE_UNKNOWN},
     extract_withdrawal_intents,
@@ -54,8 +54,18 @@ use crate::{
 /// DA-inflated signed `gas_limit`; the precise per-tx fit is checked post-execution.
 const MIN_TX_GAS_LIMIT: u64 = 21_000;
 
+/// Fee inputs sampled by a payload build.
+///
+/// The DA rate is shared with the sequencer because it changes between payloads;
+/// the base-fee floor is fixed by the chain parameters.
+#[derive(Debug, Clone)]
+struct PayloadFeeConfig {
+    live_da_rate: Arc<AtomicU64>,
+    base_fee_floor: u64,
+}
+
 /// A custom payload service builder that supports the custom engine types
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct AlpenPayloadBuilderBuilder {
     /// Live DA rate (wei per byte), shared with the payload builder.
@@ -66,6 +76,17 @@ pub struct AlpenPayloadBuilderBuilder {
     /// once and freezes that value into the block, so a single relaxed load/store on
     /// an [`AtomicU64`] is all the synchronization the hand-off needs.
     pub live_da_rate: Arc<AtomicU64>,
+    /// Minimum EIP-1559 base fee from the chain params artifact.
+    pub base_fee_floor: u64,
+}
+
+impl Default for AlpenPayloadBuilderBuilder {
+    fn default() -> Self {
+        Self {
+            live_da_rate: Arc::new(AtomicU64::new(0)),
+            base_fee_floor: alpen_ee_params::DEFAULT_BASE_FEE_FLOOR,
+        }
+    }
 }
 
 impl<Node, Pool> PayloadBuilderBuilder<Node, Pool, AlpenEvmConfig> for AlpenPayloadBuilderBuilder
@@ -99,6 +120,7 @@ where
             evm_config,
             EthereumBuilderConfig::new().with_gas_limit(gas_limit),
             self.live_da_rate,
+            self.base_fee_floor,
         ))
     }
 }
@@ -116,8 +138,8 @@ pub struct AlpenPayloadBuilder<Pool, Client> {
     evm_config: AlpenEvmConfig,
     /// Payload builder configuration.
     builder_config: EthereumBuilderConfig,
-    /// Live DA rate (wei per byte) sampled and frozen per block.
-    live_da_rate: Arc<AtomicU64>,
+    /// Fee inputs used when building payloads.
+    fee_config: PayloadFeeConfig,
 }
 
 impl<Pool, Client> AlpenPayloadBuilder<Pool, Client> {
@@ -128,13 +150,17 @@ impl<Pool, Client> AlpenPayloadBuilder<Pool, Client> {
         evm_config: AlpenEvmConfig,
         builder_config: EthereumBuilderConfig,
         live_da_rate: Arc<AtomicU64>,
+        base_fee_floor: u64,
     ) -> Self {
         Self {
             client,
             pool,
             evm_config,
             builder_config,
-            live_da_rate,
+            fee_config: PayloadFeeConfig {
+                live_da_rate,
+                base_fee_floor,
+            },
         }
     }
 }
@@ -156,7 +182,7 @@ where
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
         try_build_payload(
             self.evm_config.clone(),
-            self.live_da_rate.clone(),
+            &self.fee_config,
             self.client.clone(),
             self.pool.clone(),
             self.builder_config.clone(),
@@ -179,7 +205,7 @@ where
         );
         try_build_payload(
             self.evm_config.clone(),
-            self.live_da_rate.clone(),
+            &self.fee_config,
             self.client.clone(),
             self.pool.clone(),
             self.builder_config.clone(),
@@ -206,7 +232,7 @@ type BestTransactionsIter<Pool> = Box<
 #[inline]
 fn try_build_payload<Pool, Client, F>(
     evm_config: AlpenEvmConfig,
-    live_da_rate: Arc<AtomicU64>,
+    fee_config: &PayloadFeeConfig,
     client: Client,
     _pool: Pool,
     builder_config: EthereumBuilderConfig,
@@ -228,7 +254,7 @@ where
     // NOTE: `live_da_rate` currently mirrors the sequencer's Bitcoin publication fee rate
     // (`btcio::writer::fees::resolve_fee_rate`, gossiped from the OL). It should later be
     // decoupled from the publication rate and smoothed/cached for the fee model.
-    let da_rate = live_da_rate.load(Ordering::Relaxed);
+    let da_rate = fee_config.live_da_rate.load(Ordering::Relaxed);
 
     let BuildArguments {
         mut cached_reads,
@@ -280,21 +306,31 @@ where
         slot_number: attributes.slot_number,
     };
 
-    // Build the next block's EVM env and apply the base-fee floor. `next_evm_env`
-    // computes the pure EIP-1559 base fee; clamp it to `max(BASE_FEE_FLOOR, .)`. The sealed
-    // header takes its base fee from this env, so flooring here keeps the header and the
-    // executed base fee consistent, and matches the host consensus + guest, which recompute
-    // the same floored value from the parent. This inlines `builder_for_next_block_with_version`
-    // so the floor can be inserted between `next_evm_env` and block-builder construction,
-    // keeping the floor logic in the builder rather than inside `AlpenEvmConfig`.
+    // Use the same next-block fee rule as host validation. Reth's `next_evm_env`
+    // defaults a missing parent base fee to zero, so clamping its result would
+    // build an invalid London-activation block when the configured floor is
+    // below the EIP-1559 initial base fee.
     //
     // The env comes from the version's inner config, but the builder is driven through the
     // outer version-aware config: that is what carries `spec_version` into the executor and
     // assembler, so the rules the block builds under are the rules its header claims.
+    let chain_spec = versioned_config.chain_spec().clone();
+    let next_number = parent_header
+        .number
+        .checked_add(1)
+        .ok_or_else(|| PayloadBuilderError::other(io::Error::other("block number overflow")))?;
     let mut evm_env = versioned_config
         .next_evm_env(&parent_header, &next_block_attrs)
         .map_err(PayloadBuilderError::other)?;
-    evm_env.block_env.basefee = apply_base_fee_floor(evm_env.block_env.basefee);
+    if let Some(base_fee) = next_floored_base_fee(
+        parent_header.header(),
+        chain_spec.as_ref(),
+        next_number,
+        attributes.timestamp,
+        fee_config.base_fee_floor,
+    ) {
+        evm_env.block_env.basefee = base_fee;
+    }
 
     let evm = evm_config.evm_with_env(&mut db, evm_env);
     let block_ctx = evm_config.context_for_next_block_with_version(
@@ -312,8 +348,6 @@ where
 
     // Fork queries must agree with the EVM env, so use the per-version spec
     // the block builds under, not the node's boot chain spec.
-    let chain_spec = versioned_config.chain_spec().clone();
-
     debug!(target: "payload_builder", id=%payload_id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
     let mut cumulative_gas_used = 0;
     let block_gas_limit: u64 = builder.evm_mut().block().gas_limit;
