@@ -51,6 +51,7 @@ use serde_json as _;
 pub mod batch;
 pub mod block;
 mod codec;
+pub mod da_sizing;
 mod reconstruct;
 #[cfg(feature = "serde")]
 mod serde_impl;
@@ -58,8 +59,11 @@ mod serde_impl;
 pub(crate) mod test_utils;
 
 // Re-export main types at crate level for convenience
-pub use batch::{AccountChange, AccountDiff, BatchBuilder, BatchStateDiff, StorageDiff};
+pub use batch::{
+    AccountChange, AccountDiff, BatchBuilder, BatchStateDiff, StorageDiff, TrackedState,
+};
 pub use block::{AccountSnapshot, BlockAccountChange, BlockStateChanges, BlockStorageDiff};
+pub use da_sizing::{estimate_da_size, DaEntry, DaSizable};
 #[cfg(feature = "chainspec")]
 pub use reconstruct::ethereum_state_from_chain_spec;
 pub use reconstruct::{

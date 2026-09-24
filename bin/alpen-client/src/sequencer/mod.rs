@@ -9,11 +9,11 @@
 //! builders.
 
 mod da_pipeline;
-mod gas_data_provider;
 mod header_summary;
 mod payload_builder;
 mod prover;
 mod provers;
+mod sealing_policy;
 mod services;
 
 use std::{
@@ -28,13 +28,12 @@ use alpen_ee_exec_chain::{init_exec_chain_state_from_storage, ExecChainState};
 use alpen_ee_genesis::{ensure_batch_genesis, ensure_finalized_exec_chain_genesis};
 use alpen_ee_rpc_server::{AlpenEeRpcServer, EeRpcServer};
 use alpen_ee_sequencer::{
-    block_builder_task, build_ol_chain_tracker, create_batch_builder, create_batch_lifecycle_task,
-    create_update_submitter_task, init_batch_builder_state, init_lifecycle_state,
-    init_ol_chain_tracker_state,
+    block_builder_task, build_ol_chain_tracker, compose_policy, create_batch_builder,
+    create_batch_lifecycle_task, create_update_submitter_task, init_batch_builder_state,
+    init_lifecycle_state, init_ol_chain_tracker_state, or_sealing,
     sealing_policy::{
-        block_count_policy::{BlockCountDataProvider, BlockCountPolicy, FixedBlockCountSealing},
-        gas_limit_policy::MaxGasSealing,
-        or_policy::{ComposedDataProvider, ComposedPolicy, OrSealing},
+        block_count_data_provider::BlockCountDataProvider,
+        max_value_policy::{MaxValueSealing, ValueAccumulatorPolicy},
         rotation_policy::{RotationDataProvider, RotationPolicy, SealOnRotation},
     },
     BatchBuilderEvent, BatchBuilderState, BatchLifecycleState, BlockBuilderConfig,
@@ -66,12 +65,15 @@ use strata_primitives::buf::Buf32;
 use tokio::sync::{mpsc, watch};
 use tracing::{error, info, info_span, Instrument};
 
-use self::{gas_data_provider::RethGasDataProvider, payload_builder::AlpenRethPayloadEngine};
+use self::{
+    payload_builder::AlpenRethPayloadEngine, sealing_policy::gas_data_provider::RethGasDataProvider,
+};
 use crate::{
     config::SequencerMode,
     gossip::GossipConfig,
     node::{LaunchedNode, NodeBootstrap},
     ol::OLClientKind,
+    sequencer::sealing_policy::da_size::{DaBatchSizePolicy, DaSizeProvider, MaxDaSizeSealing},
     service_executor::ServiceExecutor,
 };
 
@@ -89,9 +91,12 @@ pub(crate) struct BootstrapResources {
     pub(crate) genesis_epoch: EpochCommitment,
 }
 
+// Alias for readability
+type BlockCountPolicy = ValueAccumulatorPolicy;
+
 /// Batch sealing pairs the configured block-count cadence with the protocol
 /// rule that a predicate rotation ends its batch.
-type BatchPolicy = ComposedPolicy<BlockCountPolicy, RotationPolicy>;
+type BatchSealingPolicy = compose_policy![BlockCountPolicy, RotationPolicy, DaBatchSizePolicy];
 
 /// Startup state that only the EE sequencer needs: the OL chain tracker,
 /// exec chain, batch builder, and batch lifecycle states loaded from
@@ -99,7 +104,7 @@ type BatchPolicy = ComposedPolicy<BlockCountPolicy, RotationPolicy>;
 struct SequencerBootState {
     ol_chain_tracker: OLChainTrackerState,
     exec_chain: ExecChainState,
-    batch_builder: BatchBuilderState<BatchPolicy>,
+    batch_builder: BatchBuilderState<BatchSealingPolicy>,
     batch_lifecycle: BatchLifecycleState,
 }
 
@@ -491,14 +496,17 @@ where
     // A rotation-consuming block must end its batch, so the block-count
     // cadence is OR'd with the rotation rule rather than special-cased in the
     // batch builder.
-    let batch_sealing_policy = OrSealing::new(
-        FixedBlockCountSealing::new(sequencer_config.batch_sealing_block_count),
-        SealOnRotation,
-    );
-    let block_data_provider = Arc::new(ComposedDataProvider::new(
-        BlockCountDataProvider,
-        RotationDataProvider::new(storage.clone()),
-    ));
+    let (batch_sealing_policy, batch_sealing_data_provider) = or_sealing![
+        (
+            MaxValueSealing::new(sequencer_config.batch_sealing_block_count).named("block_count"),
+            BlockCountDataProvider
+        ),
+        (SealOnRotation, RotationDataProvider::new(storage.clone())),
+        (
+            MaxDaSizeSealing::new(sequencer_config.batch_sealing_da_size_bytes),
+            DaSizeProvider::new(sequencer_dbs.witness_db())
+        )
+    ];
 
     // Per-block proof witnesses are captured inline during payload
     // build and persisted by `AlpenRethPayloadEngine`, and the
@@ -515,7 +523,7 @@ where
         genesis_blocknumhash,
         batch_builder_state,
         preconf_rx.clone(),
-        block_data_provider,
+        Arc::new(batch_sealing_data_provider),
         batch_sealing_policy,
         storage.clone(),
         storage.clone(),
@@ -606,10 +614,16 @@ where
     // u64::MAX effectively disables the gas policy while keeping a
     // single monomorphic code path (no dyn / enum branching).
     let chunk_gas_limit = sequencer_config.chunk_sealing_gas_limit.unwrap_or(u64::MAX);
-    let chunk_sealing_policy = OrSealing::new(
-        FixedBlockCountSealing::new(chunk_block_count),
-        MaxGasSealing::new(chunk_gas_limit),
-    );
+    let (chunk_sealing_policy, chunk_sealing_data_provider) = or_sealing![
+        (
+            MaxValueSealing::new(chunk_block_count).named("block_count"),
+            BlockCountDataProvider
+        ),
+        (
+            MaxValueSealing::new(chunk_gas_limit).named("gas"),
+            RethGasDataProvider::new(node_provider.clone())
+        ),
+    ];
 
     services::chunk_builder::start_chunk_builder_service(
         genesis_blocknumhash,
@@ -617,7 +631,7 @@ where
         storage.clone(),
         storage.clone(),
         chunk_sealing_policy,
-        RethGasDataProvider::new(node_provider.clone()),
+        Arc::new(chunk_sealing_data_provider),
         batch_event_rx,
         service_executor,
     )

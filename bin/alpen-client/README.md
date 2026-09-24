@@ -764,6 +764,7 @@ client_url = "ws://strata:8432"
 [sequencer]
 ol_submit_url = "ws://strata:8435"
 batch_sealing_block_count = 100
+batch_sealing_da_size_bytes = 204800   # 200 KiB
 beneficiary_address = "0x5400000000000000000000000000000000000010"
 blocktime_ms = 5000
 

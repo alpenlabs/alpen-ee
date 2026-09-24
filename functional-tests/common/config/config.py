@@ -192,6 +192,7 @@ class AlpenSequencerConfig:
     batch_sealing_block_count: int = field(default=100)
     chunk_sealing_block_count: int | None = field(default=None)
     chunk_sealing_gas_limit: int | None = field(default=None)
+    batch_sealing_da_size_bytes: int | None = field(default=None)
     l1_fee_policy: AlpenL1FeePolicyConfig = field(default_factory=AlpenL1FeePolicyConfig)
     broadcaster: BroadcasterConfig = field(default_factory=BroadcasterConfig)
 
