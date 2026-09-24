@@ -14,7 +14,7 @@ use eyre::Context;
 use ssz::{Decode, Encode};
 use strata_acct_types::Hash;
 use strata_codec::{BufDecoder, Codec, Decoder, Encoder};
-use strata_identifiers::{Buf32, L1BlockCommitment};
+use strata_identifiers::{Buf32, L1BlockCommitment, L1Height};
 use strata_snark_acct_types::Seqno;
 use tempfile::NamedTempFile;
 use thiserror::Error;
@@ -22,17 +22,9 @@ use thiserror::Error;
 use crate::account_state::VerifiedAccountState;
 
 const SNAPSHOT_VERSION: u16 = 1;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used by the following snapshot resume commit")
-)]
 const INNER_STATE_ROOT_LEN: usize = 32;
 
 /// EVM replay and verified EE account state loaded from one snapshot.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used by the following snapshot resume commit")
-)]
 pub(crate) struct ReconstructionSnapshot {
     replay: BatchReplaySnapshot,
     verified_account_state: VerifiedAccountState,
@@ -40,23 +32,22 @@ pub(crate) struct ReconstructionSnapshot {
     completion_block: L1BlockCommitment,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used by the following snapshot resume commit")
-)]
 impl ReconstructionSnapshot {
-    fn new(
+    /// Creates a reconstruction snapshot after validating both state anchors.
+    pub(crate) fn try_new(
         replay: BatchReplaySnapshot,
         verified_account_state: VerifiedAccountState,
         resume_l1_block: L1BlockCommitment,
         completion_block: L1BlockCommitment,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, SnapshotValidationError> {
+        validate_snapshot(replay.state_root(), &verified_account_state)?;
+        validate_snapshot_boundaries(resume_l1_block, completion_block)?;
+        Ok(Self {
             replay,
             verified_account_state,
             resume_l1_block,
             completion_block,
-        }
+        })
     }
 
     /// Returns the inclusive L1 block from which DA recovery resumes.
@@ -79,17 +70,14 @@ impl ReconstructionSnapshot {
 #[derive(Debug, Error)]
 pub(crate) enum SnapshotValidationError {
     /// The snapshot uses a format version unsupported by this binary.
-    #[cfg_attr(not(test), expect(dead_code, reason = "used by the snapshot reader"))]
     #[error("unsupported snapshot version (expected {expected}, got {actual})")]
     UnsupportedVersion { expected: u16, actual: u16 },
 
     /// The encoded account state ends before its declared length.
-    #[cfg_attr(not(test), expect(dead_code, reason = "used by the snapshot reader"))]
     #[error("snapshot account state is truncated (expected {expected} bytes, {remaining} remain)")]
     TruncatedAccountState { expected: usize, remaining: usize },
 
     /// The snapshot contains data after its account state.
-    #[cfg_attr(not(test), expect(dead_code, reason = "used by the snapshot reader"))]
     #[error("snapshot contains {count} trailing bytes")]
     TrailingBytes { count: usize },
 
@@ -100,6 +88,66 @@ pub(crate) enum SnapshotValidationError {
     /// The EE account state does not match the root previously verified against OL.
     #[error("EE account state does not match the OL-published inner state root")]
     InnerStateRootMismatch,
+
+    /// The recovery point follows data the snapshot claims to cover.
+    #[error(
+        "snapshot resume L1 height {resume_l1_height} exceeds completion L1 height {completion_l1_height}"
+    )]
+    ResumeAfterCompletion {
+        resume_l1_height: L1Height,
+        completion_l1_height: L1Height,
+    },
+}
+
+/// Loading a reconstruction snapshot failed.
+#[derive(Debug, Error)]
+pub(crate) enum SnapshotLoadError {
+    /// Reading the snapshot file failed.
+    #[error("failed to read reconstruction snapshot from {path}: {source}")]
+    Io {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
+    /// Decoding the snapshot file failed.
+    #[error("failed to decode reconstruction snapshot from {path}: {source}")]
+    Decode {
+        path: PathBuf,
+        #[source]
+        source: eyre::Report,
+    },
+
+    /// The decoded snapshot violates an internal invariant.
+    #[error(transparent)]
+    Validation(#[from] SnapshotValidationError),
+}
+
+impl SnapshotLoadError {
+    /// Returns whether loading can be retried without changing verifier state.
+    pub(crate) fn is_recoverable(&self) -> bool {
+        matches!(self, Self::Io { .. })
+    }
+}
+
+/// Deleting a reconstruction snapshot failed.
+#[derive(Debug, Error)]
+pub(crate) enum SnapshotDeleteError {
+    /// Removing the snapshot file or synchronizing its directory failed.
+    #[error("failed to {operation} at {path}: {source}")]
+    Io {
+        operation: &'static str,
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+}
+
+impl SnapshotDeleteError {
+    /// Returns whether deletion can be retried without changing verifier state.
+    pub(crate) fn is_recoverable(&self) -> bool {
+        true
+    }
 }
 
 /// Saving a reconstruction snapshot failed.
@@ -131,27 +179,22 @@ impl SnapshotSaveError {
 }
 
 /// Loads a reconstruction snapshot, returning [`None`] when the path does not exist.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used by the following snapshot resume commit")
-)]
 pub(crate) fn load_reconstruction_snapshot(
     path: &Path,
-) -> eyre::Result<Option<ReconstructionSnapshot>> {
+) -> Result<Option<ReconstructionSnapshot>, SnapshotLoadError> {
     let encoded = match fs::read(path) {
         Ok(encoded) => encoded,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
-        Err(error) => {
-            return Err(error).wrap_err_with(|| {
-                format!(
-                    "failed to read reconstruction snapshot from {}",
-                    path.display()
-                )
+        Err(source) => {
+            return Err(SnapshotLoadError::Io {
+                path: path.to_path_buf(),
+                source,
             })
         }
     };
     let mut decoder = BufDecoder::new(encoded);
-    let version = u16::decode(&mut decoder).wrap_err_with(|| snapshot_decode_error(path))?;
+    let version =
+        u16::decode(&mut decoder).map_err(|source| snapshot_decode_error(path, source))?;
     if version != SNAPSHOT_VERSION {
         return Err(SnapshotValidationError::UnsupportedVersion {
             expected: SNAPSHOT_VERSION,
@@ -160,30 +203,30 @@ pub(crate) fn load_reconstruction_snapshot(
         .into());
     }
 
-    let resume_l1_block =
-        L1BlockCommitment::decode(&mut decoder).wrap_err_with(|| snapshot_decode_error(path))?;
-    let completion_block =
-        L1BlockCommitment::decode(&mut decoder).wrap_err_with(|| snapshot_decode_error(path))?;
+    let resume_l1_block = L1BlockCommitment::decode(&mut decoder)
+        .map_err(|source| snapshot_decode_error(path, source))?;
+    let completion_block = L1BlockCommitment::decode(&mut decoder)
+        .map_err(|source| snapshot_decode_error(path, source))?;
     let next_update_seq_no =
-        u64::decode(&mut decoder).wrap_err_with(|| snapshot_decode_error(path))?;
+        u64::decode(&mut decoder).map_err(|source| snapshot_decode_error(path, source))?;
     let last_applied_block_num =
-        u64::decode(&mut decoder).wrap_err_with(|| snapshot_decode_error(path))?;
-    let ethereum_state =
-        decode_ethereum_state(&mut decoder).wrap_err_with(|| snapshot_decode_error(path))?;
+        u64::decode(&mut decoder).map_err(|source| snapshot_decode_error(path, source))?;
+    let ethereum_state = decode_ethereum_state(&mut decoder)
+        .map_err(|source| snapshot_decode_error(path, source))?;
     let next_inbox_msg_idx =
-        u64::decode(&mut decoder).wrap_err_with(|| snapshot_decode_error(path))?;
+        u64::decode(&mut decoder).map_err(|source| snapshot_decode_error(path, source))?;
 
     let mut expected_inner_state_root_bytes = [0; INNER_STATE_ROOT_LEN];
     decoder
         .read_buf(&mut expected_inner_state_root_bytes)
-        .wrap_err_with(|| snapshot_decode_error(path))?;
+        .map_err(|source| snapshot_decode_error(path, source))?;
     let expected_inner_state_root = Hash::from_ssz_bytes(&expected_inner_state_root_bytes)
-        .wrap_err_with(|| snapshot_decode_error(path))?;
+        .map_err(|source| snapshot_decode_error(path, source))?;
 
     let account_state_len =
-        u32::decode(&mut decoder).wrap_err_with(|| snapshot_decode_error(path))?;
+        u32::decode(&mut decoder).map_err(|source| snapshot_decode_error(path, source))?;
     let account_state_len =
-        usize::try_from(account_state_len).wrap_err_with(|| snapshot_decode_error(path))?;
+        usize::try_from(account_state_len).map_err(|source| snapshot_decode_error(path, source))?;
     // Validate the declared length before allocating, so a corrupt snapshot cannot request
     // more account-state memory than its remaining payload can supply.
     if account_state_len > decoder.remaining() {
@@ -196,7 +239,7 @@ pub(crate) fn load_reconstruction_snapshot(
     let mut account_state_bytes = vec![0; account_state_len];
     decoder
         .read_buf(&mut account_state_bytes)
-        .wrap_err_with(|| snapshot_decode_error(path))?;
+        .map_err(|source| snapshot_decode_error(path, source))?;
     if decoder.remaining() != 0 {
         return Err(SnapshotValidationError::TrailingBytes {
             count: decoder.remaining(),
@@ -204,7 +247,7 @@ pub(crate) fn load_reconstruction_snapshot(
         .into());
     }
     let account_state = EeAccountState::from_ssz_bytes(&account_state_bytes)
-        .wrap_err_with(|| snapshot_decode_error(path))?;
+        .map_err(|source| snapshot_decode_error(path, source))?;
     let verified_account_state =
         VerifiedAccountState::new(account_state, next_inbox_msg_idx, expected_inner_state_root);
     let replay = BatchReplaySnapshot::new(
@@ -212,14 +255,35 @@ pub(crate) fn load_reconstruction_snapshot(
         last_applied_block_num,
         ethereum_state,
     );
-    validate_snapshot(replay.state_root(), &verified_account_state)?;
-
-    Ok(Some(ReconstructionSnapshot::new(
+    Ok(Some(ReconstructionSnapshot::try_new(
         replay,
         verified_account_state,
         resume_l1_block,
         completion_block,
-    )))
+    )?))
+}
+
+/// Removes a reconstruction snapshot and durably records its absence.
+pub(crate) fn delete_reconstruction_snapshot(path: &Path) -> Result<(), SnapshotDeleteError> {
+    match fs::remove_file(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(source) => {
+            return Err(snapshot_delete_io_error(
+                "remove reconstruction snapshot",
+                path,
+                source,
+            ))
+        }
+    }
+
+    let parent = snapshot_parent(path);
+    let directory = File::open(parent)
+        .map_err(|source| snapshot_delete_io_error("open snapshot directory", parent, source))?;
+    directory
+        .sync_all()
+        .map_err(|source| snapshot_delete_io_error("sync snapshot directory", parent, source))?;
+    Ok(())
 }
 
 /// Atomically writes one verified replay and account-state anchor.
@@ -231,6 +295,7 @@ pub(crate) fn save_reconstruction_snapshot(
     completion_block: L1BlockCommitment,
 ) -> Result<(), SnapshotSaveError> {
     validate_snapshot(replay_snapshot.state_root(), verified_account_state)?;
+    validate_snapshot_boundaries(resume_l1_block, completion_block)?;
 
     let encoded = encode_snapshot(
         replay_snapshot,
@@ -312,12 +377,24 @@ fn validate_snapshot(
     Ok(())
 }
 
-#[cfg_attr(not(test), expect(dead_code, reason = "used by the snapshot reader"))]
-fn snapshot_decode_error(path: &Path) -> String {
-    format!(
-        "failed to decode reconstruction snapshot from {}",
-        path.display()
-    )
+fn validate_snapshot_boundaries(
+    resume_l1_block: L1BlockCommitment,
+    completion_block: L1BlockCommitment,
+) -> Result<(), SnapshotValidationError> {
+    if resume_l1_block.height() > completion_block.height() {
+        return Err(SnapshotValidationError::ResumeAfterCompletion {
+            resume_l1_height: resume_l1_block.height(),
+            completion_l1_height: completion_block.height(),
+        });
+    }
+    Ok(())
+}
+
+fn snapshot_decode_error(path: &Path, source: impl Into<eyre::Report>) -> SnapshotLoadError {
+    SnapshotLoadError::Decode {
+        path: path.to_path_buf(),
+        source: source.into(),
+    }
 }
 
 fn replace_file(path: &Path, bytes: &[u8]) -> Result<(), SnapshotSaveError> {
@@ -350,6 +427,18 @@ fn snapshot_io_error(operation: &'static str, path: &Path, source: io::Error) ->
     }
 }
 
+fn snapshot_delete_io_error(
+    operation: &'static str,
+    path: &Path,
+    source: io::Error,
+) -> SnapshotDeleteError {
+    SnapshotDeleteError::Io {
+        operation,
+        path: path.to_path_buf(),
+        source,
+    }
+}
+
 fn snapshot_parent(path: &Path) -> &Path {
     path.parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -369,7 +458,7 @@ mod tests {
         storage_change, value,
     };
     use bitcoin::hashes::{sha256, Hash as _};
-    use eyre::{eyre, Report};
+    use eyre::eyre;
     use strata_acct_types::{BitcoinAmount, Hash, SubjectId};
     use strata_identifiers::{L1BlockId, L1Height};
     use strata_predicate::PredicateKey;
@@ -547,14 +636,14 @@ mod tests {
         .expect("test snapshot encodes")
     }
 
-    fn load_snapshot_error(path: &Path) -> Report {
+    fn load_snapshot_error(path: &Path) -> SnapshotLoadError {
         load_reconstruction_snapshot(path)
             .err()
             .expect("snapshot load must fail")
     }
 
     #[test]
-    fn test_snapshot_io_failure_is_recoverable() {
+    fn test_snapshot_save_io_failure_is_recoverable() {
         let error = SnapshotSaveError::Io {
             operation: "test snapshot operation",
             path: PathBuf::from("snapshot"),
@@ -565,15 +654,53 @@ mod tests {
     }
 
     #[test]
-    fn test_snapshot_validation_failure_is_fatal() {
+    fn test_snapshot_save_validation_failure_is_fatal() {
         let error = SnapshotSaveError::Validation(SnapshotValidationError::StateRootMismatch);
 
         assert!(!error.is_recoverable());
     }
 
     #[test]
-    fn test_snapshot_encoding_failure_is_fatal() {
+    fn test_snapshot_save_encoding_failure_is_fatal() {
         let error = SnapshotSaveError::Encoding(eyre!("test encoding failure"));
+
+        assert!(!error.is_recoverable());
+    }
+
+    #[test]
+    fn test_snapshot_delete_io_failure_is_recoverable() {
+        let error = SnapshotDeleteError::Io {
+            operation: "test snapshot operation",
+            path: PathBuf::from("snapshot"),
+            source: io::Error::other("test IO failure"),
+        };
+
+        assert!(error.is_recoverable());
+    }
+
+    #[test]
+    fn test_snapshot_load_io_failure_is_recoverable() {
+        let error = SnapshotLoadError::Io {
+            path: PathBuf::from("snapshot"),
+            source: io::Error::from_raw_os_error(5),
+        };
+
+        assert!(error.is_recoverable());
+    }
+
+    #[test]
+    fn test_snapshot_load_decode_failure_is_fatal() {
+        let error = SnapshotLoadError::Decode {
+            path: PathBuf::from("snapshot"),
+            source: eyre!("test decoding failure"),
+        };
+
+        assert!(!error.is_recoverable());
+    }
+
+    #[test]
+    fn test_snapshot_load_validation_failure_is_fatal() {
+        let error = SnapshotLoadError::Validation(SnapshotValidationError::InnerStateRootMismatch);
 
         assert!(!error.is_recoverable());
     }
@@ -607,6 +734,41 @@ mod tests {
         let (loaded_replay_snapshot, loaded_account_state) = loaded.into_state_parts();
         assert_eq!(loaded_replay_snapshot, replay_snapshot);
         assert_eq!(loaded_account_state, verified_account_state);
+    }
+
+    #[test]
+    fn test_resume_after_completion_is_rejected_on_save() {
+        // 1. Keep an existing file and build otherwise valid snapshot state whose resume block
+        // follows its claimed highest completion block.
+        let directory = tempdir().expect("temporary directory builds");
+        let path = directory.path().join("reconstruction.snapshot");
+        fs::write(&path, EXISTING_SNAPSHOT_BYTES).expect("existing snapshot writes");
+        let (replay_snapshot, verified_account_state) = build_snapshot_state();
+        let resume_l1_block = build_l1_commitment(43, 1);
+        let completion_block = build_l1_commitment(42, 2);
+
+        // 2. Attempt to save the incoherent L1 boundaries.
+        let error = save_reconstruction_snapshot(
+            &path,
+            &replay_snapshot,
+            &verified_account_state,
+            resume_l1_block,
+            completion_block,
+        )
+        .expect_err("resume after completion must fail");
+
+        // 3. Confirm validation reports both heights without replacing the existing file.
+        assert!(matches!(
+            error,
+            SnapshotSaveError::Validation(SnapshotValidationError::ResumeAfterCompletion {
+                resume_l1_height: 43,
+                completion_l1_height: 42,
+            })
+        ));
+        assert_eq!(
+            fs::read(&path).expect("existing snapshot remains readable"),
+            EXISTING_SNAPSHOT_BYTES
+        );
     }
 
     #[test]
@@ -734,6 +896,38 @@ mod tests {
     }
 
     #[test]
+    fn test_snapshot_delete_removes_existing_file() {
+        // 1. Write a snapshot file at the configured path.
+        let directory = tempdir().expect("temporary directory builds");
+        let path = directory.path().join("reconstruction.snapshot");
+        fs::write(&path, encode_valid_snapshot()).expect("snapshot writes");
+
+        // 2. Delete the snapshot and confirm subsequent loading observes its absence.
+        delete_reconstruction_snapshot(&path).expect("snapshot deletion succeeds");
+        let loaded =
+            load_reconstruction_snapshot(&path).expect("deleted snapshot path remains readable");
+        assert!(loaded.is_none());
+    }
+
+    #[test]
+    fn test_missing_snapshot_delete_succeeds() {
+        let directory = tempdir().expect("temporary directory builds");
+        let path = directory.path().join("missing.snapshot");
+
+        delete_reconstruction_snapshot(&path).expect("missing snapshot is already deleted");
+    }
+
+    #[test]
+    fn test_snapshot_delete_io_error_is_propagated() {
+        let directory = tempdir().expect("temporary directory builds");
+
+        let error = delete_reconstruction_snapshot(directory.path())
+            .expect_err("deleting a directory as a snapshot must fail");
+
+        assert!(matches!(error, SnapshotDeleteError::Io { .. }));
+    }
+
+    #[test]
     fn test_missing_snapshot_returns_none() {
         let directory = tempdir().expect("temporary directory builds");
         let path = directory.path().join("reconstruction.snapshot");
@@ -750,10 +944,22 @@ mod tests {
 
         let error = load_snapshot_error(directory.path());
 
-        let io_error = error
-            .downcast_ref::<io::Error>()
-            .expect("snapshot read failure retains its IO source");
-        assert_ne!(io_error.kind(), ErrorKind::NotFound);
+        assert!(matches!(
+            error,
+            SnapshotLoadError::Io { source, .. } if source.kind() != ErrorKind::NotFound
+        ));
+    }
+
+    #[test]
+    fn test_truncated_snapshot_version_is_decode_error() {
+        // 1. Write only one byte of the two-byte snapshot version field.
+        let directory = tempdir().expect("temporary directory builds");
+        let path = directory.path().join("reconstruction.snapshot");
+        fs::write(&path, [0]).expect("truncated snapshot version writes");
+
+        // 2. Confirm loading fails at the codec boundary rather than validation.
+        let error = load_snapshot_error(&path);
+        assert!(matches!(error, SnapshotLoadError::Decode { .. }));
     }
 
     #[test]
@@ -773,11 +979,11 @@ mod tests {
 
         // 3. Confirm the error reports both the supported and encoded versions.
         assert!(matches!(
-            error.downcast_ref::<SnapshotValidationError>(),
-            Some(SnapshotValidationError::UnsupportedVersion {
+            error,
+            SnapshotLoadError::Validation(SnapshotValidationError::UnsupportedVersion {
                 expected: SNAPSHOT_VERSION,
                 actual,
-            }) if *actual == unsupported_version
+            }) if actual == unsupported_version
         ));
     }
 
@@ -796,11 +1002,11 @@ mod tests {
 
         // 3. Confirm the payload is exactly one byte shorter than its declared length.
         assert!(matches!(
-            error.downcast_ref::<SnapshotValidationError>(),
-            Some(SnapshotValidationError::TruncatedAccountState {
+            error,
+            SnapshotLoadError::Validation(SnapshotValidationError::TruncatedAccountState {
                 expected,
                 remaining,
-            }) if *remaining + 1 == *expected
+            }) if remaining + 1 == expected
         ));
     }
 
@@ -818,8 +1024,36 @@ mod tests {
 
         // 3. Confirm the decoder reports exactly the appended byte.
         assert!(matches!(
-            error.downcast_ref::<SnapshotValidationError>(),
-            Some(SnapshotValidationError::TrailingBytes { count: 1 })
+            error,
+            SnapshotLoadError::Validation(SnapshotValidationError::TrailingBytes { count: 1 })
+        ));
+    }
+
+    #[test]
+    fn test_resume_after_completion_is_rejected_on_load() {
+        // 1. Encode otherwise valid state with a resume block after its claimed completion block.
+        let directory = tempdir().expect("temporary directory builds");
+        let path = directory.path().join("reconstruction.snapshot");
+        let (replay_snapshot, verified_account_state) = build_snapshot_state();
+        let encoded = encode_snapshot(
+            &replay_snapshot,
+            &verified_account_state,
+            build_l1_commitment(43, 1),
+            build_l1_commitment(42, 2),
+        )
+        .expect("incoherent boundaries still have a valid encoding");
+        fs::write(&path, encoded).expect("snapshot writes");
+
+        // 2. Load the encoded snapshot through the production reader.
+        let error = load_snapshot_error(&path);
+
+        // 3. Confirm construction rejects the incoherent boundary heights.
+        assert!(matches!(
+            error,
+            SnapshotLoadError::Validation(SnapshotValidationError::ResumeAfterCompletion {
+                resume_l1_height: 43,
+                completion_l1_height: 42,
+            })
         ));
     }
 }

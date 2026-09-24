@@ -17,16 +17,28 @@ use crate::{
     account_state::{
         verify_account_state, OLAccountUpdate, VerifiedAccountState, VerifyAccountStateError,
     },
-    bitcoin::{FetchBitcoinTipError, FetchCommitBlockError},
+    bitcoin::{CheckL1BlockError, FetchBitcoinTipError, FetchCommitBlockError},
     context::DaVerifierContext,
     da_extraction::{DaRecoveryDriver, DaRecoveryError},
     evm_state::reconstruct_evm_state,
-    snapshot::SnapshotSaveError,
+    snapshot::{ReconstructionSnapshot, SnapshotDeleteError, SnapshotLoadError, SnapshotSaveError},
 };
 
 /// Failure to complete one EE DA verification cycle.
 #[derive(Debug, Error)]
 pub(crate) enum DaVerifierError {
+    /// Loading the persisted reconstruction snapshot failed.
+    #[error(transparent)]
+    LoadSnapshot(#[from] SnapshotLoadError),
+
+    /// Deleting a stale reconstruction snapshot failed.
+    #[error(transparent)]
+    DeleteSnapshot(#[from] SnapshotDeleteError),
+
+    /// Checking whether a snapshot's L1 anchor remains canonical failed.
+    #[error(transparent)]
+    CheckL1Block(#[from] CheckL1BlockError),
+
     /// Fetching the current Bitcoin tip failed.
     #[error(transparent)]
     FetchBitcoinTip(#[from] FetchBitcoinTipError),
@@ -71,6 +83,9 @@ impl DaVerifierError {
     /// Returns whether a later verification cycle may succeed without intervention.
     pub(crate) fn is_recoverable(&self) -> bool {
         match self {
+            Self::LoadSnapshot(error) => error.is_recoverable(),
+            Self::DeleteSnapshot(error) => error.is_recoverable(),
+            Self::CheckL1Block(error) => error.is_recoverable(),
             Self::FetchBitcoinTip(error) => error.is_recoverable(),
             Self::FetchCommitBlock(error) => error.is_recoverable(),
             Self::DaRecovery(error) => error.is_recoverable(),
@@ -89,7 +104,10 @@ impl DaVerifierError {
             Self::RecoveredDaDb(_) => true,
             Self::FetchBitcoinTip(_)
             | Self::FetchCommitBlock(_)
+            | Self::CheckL1Block(_)
             | Self::SaveSnapshot(_)
+            | Self::LoadSnapshot(_)
+            | Self::DeleteSnapshot(_)
             | Self::Reconstruct(_)
             | Self::VerifyAccountState(_)
             | Self::LaggingFinalizedOLFrontier { .. } => false,
@@ -127,6 +145,7 @@ enum DaRecoveryResolution {
 pub(crate) struct DaRecoveryState {
     l1_reorg_safe_depth: u32,
     max_l1_scan_window_size: NonZeroU32,
+    genesis_l1_height: L1Height,
     driver: DaRecoveryDriver,
 
     /// Highest L1 height fully processed by recovery, or [`None`] before the first block.
@@ -147,6 +166,7 @@ impl DaRecoveryState {
         Self {
             l1_reorg_safe_depth,
             max_l1_scan_window_size,
+            genesis_l1_height,
             driver: DaRecoveryDriver::new(extractor, genesis_l1_height),
             recovered_l1_frontier: None,
             reorg_safe_tip: None,
@@ -218,12 +238,22 @@ struct CompletedDaRecoveryRange {
 struct VerifiedStateAnchor {
     replay_snapshot: BatchReplaySnapshot,
     account_state: VerifiedAccountState,
-    last_batch_l1_ref: DaL1Ref,
+    pending_snapshot_l1_ref: Option<DaL1Ref>,
     completion_block: L1BlockCommitment,
-    snapshot_pending: bool,
 }
 
 impl VerifiedStateAnchor {
+    fn from_snapshot(snapshot: ReconstructionSnapshot) -> Self {
+        let completion_block = snapshot.completion_block();
+        let (replay_snapshot, account_state) = snapshot.into_state_parts();
+        Self {
+            replay_snapshot,
+            account_state,
+            pending_snapshot_l1_ref: None,
+            completion_block,
+        }
+    }
+
     fn next_update_seq_no(&self) -> u64 {
         *self.replay_snapshot.next_update_seq_no().inner()
     }
@@ -244,6 +274,10 @@ impl DaVerificationState {
             params,
             verified_state_anchor: None,
         }
+    }
+
+    fn restore_snapshot(&mut self, snapshot: ReconstructionSnapshot) {
+        self.verified_state_anchor = Some(VerifiedStateAnchor::from_snapshot(snapshot));
     }
 
     /// Returns the next EE update sequence number verification expects.
@@ -329,16 +363,15 @@ impl DaVerificationState {
         &mut self,
         context: &impl DaVerifierContext,
     ) -> Result<(), DaVerifierError> {
-        let Some(anchor) = self
-            .verified_state_anchor
-            .as_ref()
-            .filter(|anchor| anchor.snapshot_pending)
-        else {
+        let Some(anchor) = self.verified_state_anchor.as_ref() else {
+            return Ok(());
+        };
+        let Some(pending_snapshot_l1_ref) = anchor.pending_snapshot_l1_ref else {
             return Ok(());
         };
 
         let resume_l1_block = context
-            .fetch_commit_block(anchor.last_batch_l1_ref.commit_txid())
+            .fetch_commit_block(pending_snapshot_l1_ref.commit_txid())
             .await?;
         context.save_reconstruction_snapshot(
             &anchor.replay_snapshot,
@@ -358,7 +391,7 @@ impl DaVerificationState {
         self.verified_state_anchor
             .as_mut()
             .expect("verified state anchor remains installed after saving")
-            .snapshot_pending = false;
+            .pending_snapshot_l1_ref = None;
         info!(next_update_seq_no, "saved verified EE state snapshot");
         Ok(())
     }
@@ -469,12 +502,18 @@ impl DaVerificationState {
         self.verified_state_anchor = Some(VerifiedStateAnchor {
             replay_snapshot,
             account_state: verified_account_state,
-            last_batch_l1_ref,
+            pending_snapshot_l1_ref: Some(last_batch_l1_ref),
             completion_block,
-            snapshot_pending: true,
         });
         Ok(())
     }
+}
+
+/// Tracks whether persisted verifier state has been resolved for this process.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SnapshotInitializationState {
+    Pending,
+    Complete,
 }
 
 /// Owns the verifier context and per-phase mutable state.
@@ -485,6 +524,8 @@ pub(crate) struct DaVerifierServiceState<C> {
 
     /// Records that the next tick must retry verification before scanning another L1 window.
     retry_verification_before_scan: bool,
+    /// Remains pending across ticks until persisted verifier state is initialized successfully.
+    snapshot_initialization: SnapshotInitializationState,
 }
 
 impl<C: DaVerifierContext> DaVerifierServiceState<C> {
@@ -499,32 +540,103 @@ impl<C: DaVerifierContext> DaVerifierServiceState<C> {
             recovery_state,
             verification_state,
             retry_verification_before_scan: false,
+            snapshot_initialization: SnapshotInitializationState::Pending,
         }
+    }
+
+    /// Resolves persisted verifier progress once before recovery begins.
+    async fn initialize_from_snapshot(&mut self) -> Result<(), DaVerifierError> {
+        if self.snapshot_initialization == SnapshotInitializationState::Complete {
+            return Ok(());
+        }
+
+        let Some(snapshot) = self.context.as_ref().load_reconstruction_snapshot()? else {
+            self.context.as_ref().clear_recovered_da().await?;
+            self.snapshot_initialization = SnapshotInitializationState::Complete;
+            return Ok(());
+        };
+
+        let resume_l1_block = snapshot.resume_l1_block();
+        let completion_block = snapshot.completion_block();
+        if resume_l1_block.height() < self.recovery_state.genesis_l1_height {
+            warn!(
+                snapshot_resume_l1_height = resume_l1_block.height(),
+                configured_genesis_l1_height = self.recovery_state.genesis_l1_height,
+                "snapshot predates configured genesis; restarting EE DA verification from genesis"
+            );
+            return self.discard_snapshot_and_restart_from_genesis().await;
+        }
+        if !self
+            .context
+            .as_ref()
+            .is_l1_block_canonical(resume_l1_block)
+            .await?
+        {
+            warn!(
+                %resume_l1_block,
+                "snapshot scan cursor block is no longer canonical; restarting EE DA verification from genesis"
+            );
+            return self.discard_snapshot_and_restart_from_genesis().await;
+        }
+        if !self
+            .context
+            .as_ref()
+            .is_l1_block_canonical(completion_block)
+            .await?
+        {
+            warn!(
+                %completion_block,
+                "snapshot's highest DA completion block is no longer canonical; restarting EE DA verification from genesis"
+            );
+            return self.discard_snapshot_and_restart_from_genesis().await;
+        }
+
+        self.recovery_state
+            .driver
+            .set_next_l1_height(resume_l1_block.height());
+        self.verification_state.restore_snapshot(snapshot);
+        self.snapshot_initialization = SnapshotInitializationState::Complete;
+        info!(
+            resume_l1_height = resume_l1_block.height(),
+            completion_l1_height = completion_block.height(),
+            "restored canonical EE DA verification snapshot"
+        );
+        Ok(())
+    }
+
+    async fn discard_snapshot_and_restart_from_genesis(&mut self) -> Result<(), DaVerifierError> {
+        self.context.as_ref().delete_reconstruction_snapshot()?;
+        self.context.as_ref().clear_recovered_da().await?;
+        self.snapshot_initialization = SnapshotInitializationState::Complete;
+        Ok(())
     }
 
     /// Advances DA recovery and state verification as far as the current frontiers allow.
     pub(crate) async fn handle_tick(&mut self) -> Result<(), DaVerifierError> {
-        // 1. Persist a verified anchor left pending by an earlier failed save.
+        // 1. Restore a usable snapshot or discard stale persisted state before recovery.
+        self.initialize_from_snapshot().await?;
+
+        // 2. Persist a verified anchor left pending by an earlier failed save.
         self.verification_state
             .save_verified_state_snapshot(self.context.as_ref())
             .await?;
 
-        // 2. Decide whether this tick needs to scan reorg-safe L1 blocks.
+        // 3. Decide whether this tick needs to scan reorg-safe L1 blocks.
         let recovery_resolution = self.resolve_da_recovery().await?;
 
         match recovery_resolution {
             DaRecoveryResolution::RecoverThrough { reorg_safe_tip } => {
-                // 3. Recover DA through the safe tip and verify each reconstructed prefix.
+                // 4. Recover DA through the safe tip and verify each reconstructed prefix.
                 self.recover_da_and_verify_state(reorg_safe_tip).await?;
             }
             DaRecoveryResolution::VerifyRecoveredDa => {
-                // 3. Even without new L1 data, verify DA already persisted by an earlier tick.
+                // 4. Even without new L1 data, verify DA already persisted by an earlier tick.
                 self.reconstruct_and_verify_state_without_da_recovery()
                     .await?;
             }
         }
 
-        // 4. Report the durable recovery and verified-state frontiers reached by this tick.
+        // 5. Report the durable recovery and verified-state frontiers reached by this tick.
         self.log_completed_tick();
         Ok(())
     }
@@ -866,6 +978,37 @@ mod tests {
     fn test_recoverable_bitcoin_tip_failure_is_forwarded() {
         let error =
             DaVerifierError::FetchBitcoinTip(FetchBitcoinTipError::Rpc(ClientError::Timeout));
+
+        assert!(error.is_recoverable());
+    }
+
+    #[test]
+    fn test_recoverable_snapshot_load_failure_is_forwarded() {
+        let error = DaVerifierError::LoadSnapshot(SnapshotLoadError::Io {
+            path: PathBuf::from("snapshot"),
+            source: io::Error::other("test snapshot read failure"),
+        });
+
+        assert!(error.is_recoverable());
+    }
+
+    #[test]
+    fn test_recoverable_snapshot_delete_failure_is_forwarded() {
+        let error = DaVerifierError::DeleteSnapshot(SnapshotDeleteError::Io {
+            operation: "remove reconstruction snapshot",
+            path: PathBuf::from("snapshot"),
+            source: io::Error::other("test snapshot delete failure"),
+        });
+
+        assert!(error.is_recoverable());
+    }
+
+    #[test]
+    fn test_recoverable_snapshot_canonicality_failure_is_forwarded() {
+        let error = DaVerifierError::CheckL1Block(CheckL1BlockError::FetchBlockHash {
+            expected: L1BlockCommitment::default(),
+            source: ClientError::Timeout,
+        });
 
         assert!(error.is_recoverable());
     }

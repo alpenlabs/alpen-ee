@@ -47,12 +47,15 @@ use crate::{
         AccountStateVerificationError, OLAccountUpdate, OLAccountUpdateError,
         OLAccountUpdateSource, VerifiedAccountState, VerifyAccountStateError,
     },
-    bitcoin::{FetchBitcoinTipError, FetchCommitBlockError},
+    bitcoin::{CheckL1BlockError, FetchBitcoinTipError, FetchCommitBlockError},
     context::DaVerifierContext,
     da_extraction::{DaRecoveryDriver, DaRecoveryError},
     evm_state::reconstruct_evm_state,
     service::DaVerifierService,
-    snapshot::{SnapshotSaveError, SnapshotValidationError},
+    snapshot::{
+        ReconstructionSnapshot, SnapshotDeleteError, SnapshotLoadError, SnapshotSaveError,
+        SnapshotValidationError,
+    },
     state::{DaRecoveryState, DaVerificationState, DaVerifierError, DaVerifierServiceState},
 };
 
@@ -511,6 +514,37 @@ impl MockBitcoinChain {
             .copied()
             .ok_or(FetchCommitBlockError::Unconfirmed { txid: commit_txid })
     }
+
+    fn is_l1_block_canonical(&self, expected: L1BlockCommitment) -> bool {
+        self.blocks
+            .get(&expected.height())
+            .is_some_and(|block| block.block_id() == *expected.blkid())
+    }
+
+    fn replace_block(&mut self, height: L1Height, block_discriminator: u32) -> L1BlockCommitment {
+        let transactions = self
+            .blocks
+            .get(&height)
+            .unwrap_or_else(|| panic!("test block {height} is not mined"))
+            .block()
+            .txdata
+            .iter()
+            .skip(1)
+            .cloned()
+            .collect::<Vec<_>>();
+        let replacement = build_l1_block_data(height, block_discriminator, transactions);
+        let commitment = L1BlockCommitment::new(height, replacement.block_id());
+        for transaction in &replacement.block().txdata {
+            if let Some(confirmed_in) = self
+                .confirmed_transactions
+                .get_mut(&transaction.compute_txid())
+            {
+                *confirmed_in = commitment;
+            }
+        }
+        self.blocks.insert(height, replacement);
+        commitment
+    }
 }
 
 #[derive(Default)]
@@ -594,6 +628,10 @@ impl InMemoryRecoveredDaStore {
     fn prune_before(&mut self, update_seq_no: u64) {
         self.blobs
             .retain(|(sequence, _), _| *sequence >= update_seq_no);
+    }
+
+    fn clear(&mut self) {
+        self.blobs.clear();
     }
 }
 
@@ -697,6 +735,22 @@ impl InMemorySnapshotStore {
     fn snapshot(&self) -> Option<&StoredReconstructionSnapshot> {
         self.snapshot.as_ref()
     }
+
+    fn load(&self) -> Option<ReconstructionSnapshot> {
+        self.snapshot.as_ref().map(|snapshot| {
+            ReconstructionSnapshot::try_new(
+                snapshot.replay_snapshot.clone(),
+                snapshot.verified_account_state.clone(),
+                snapshot.resume_l1_block,
+                snapshot.completion_block,
+            )
+            .expect("the in-memory snapshot store only contains validated state")
+        })
+    }
+
+    fn delete(&mut self) {
+        self.snapshot = None;
+    }
 }
 
 #[derive(Default)]
@@ -707,9 +761,13 @@ struct InjectedContextBehavior {
     recovered_da_write_failures: VecDeque<RecoveredDaDbError>,
     recovered_da_read_failures: VecDeque<RecoveredDaDbError>,
     recovered_da_prune_failures: VecDeque<RecoveredDaDbError>,
+    recovered_da_clear_failures: VecDeque<RecoveredDaDbError>,
     finalized_frontier_results: VecDeque<Result<Seqno, OLAccountUpdateError>>,
     ol_update_failures: BTreeMap<u64, OLAccountUpdateError>,
     commit_block_lookup_failures: VecDeque<FetchCommitBlockError>,
+    l1_block_canonicality_failures: VecDeque<CheckL1BlockError>,
+    snapshot_load_failures: VecDeque<SnapshotLoadError>,
+    snapshot_delete_failures: VecDeque<SnapshotDeleteError>,
     snapshot_save_failures: VecDeque<SnapshotSaveError>,
 }
 
@@ -767,6 +825,14 @@ impl InjectedContextBehavior {
         self.recovered_da_prune_failures.pop_front()
     }
 
+    fn fail_next_recovered_da_clear(&mut self, error: RecoveredDaDbError) {
+        self.recovered_da_clear_failures.push_back(error);
+    }
+
+    fn take_next_recovered_da_clear_failure(&mut self) -> Option<RecoveredDaDbError> {
+        self.recovered_da_clear_failures.pop_front()
+    }
+
     fn fail_ol_update_at(&mut self, update_seq_no: Seqno, error: OLAccountUpdateError) {
         assert!(
             self.ol_update_failures
@@ -797,6 +863,30 @@ impl InjectedContextBehavior {
 
     fn take_next_commit_block_lookup_failure(&mut self) -> Option<FetchCommitBlockError> {
         self.commit_block_lookup_failures.pop_front()
+    }
+
+    fn fail_next_l1_block_canonicality_check(&mut self, error: CheckL1BlockError) {
+        self.l1_block_canonicality_failures.push_back(error);
+    }
+
+    fn take_next_l1_block_canonicality_failure(&mut self) -> Option<CheckL1BlockError> {
+        self.l1_block_canonicality_failures.pop_front()
+    }
+
+    fn fail_next_snapshot_load(&mut self, error: SnapshotLoadError) {
+        self.snapshot_load_failures.push_back(error);
+    }
+
+    fn take_next_snapshot_load_failure(&mut self) -> Option<SnapshotLoadError> {
+        self.snapshot_load_failures.pop_front()
+    }
+
+    fn fail_next_snapshot_delete(&mut self, error: SnapshotDeleteError) {
+        self.snapshot_delete_failures.push_back(error);
+    }
+
+    fn take_next_snapshot_delete_failure(&mut self) -> Option<SnapshotDeleteError> {
+        self.snapshot_delete_failures.pop_front()
     }
 
     fn fail_next_snapshot_save(&mut self, error: SnapshotSaveError) {
@@ -833,6 +923,10 @@ impl InjectedContextBehavior {
             "unconsumed recovered-DA prune failures"
         );
         assert!(
+            self.recovered_da_clear_failures.is_empty(),
+            "unconsumed recovered-DA clear failures"
+        );
+        assert!(
             self.finalized_frontier_results.is_empty(),
             "unconsumed finalized OL sequence results"
         );
@@ -845,6 +939,18 @@ impl InjectedContextBehavior {
             "unconsumed commit-block lookup failures"
         );
         assert!(
+            self.l1_block_canonicality_failures.is_empty(),
+            "unconsumed L1 block canonicality failures"
+        );
+        assert!(
+            self.snapshot_load_failures.is_empty(),
+            "unconsumed snapshot-load failures"
+        );
+        assert!(
+            self.snapshot_delete_failures.is_empty(),
+            "unconsumed snapshot-delete failures"
+        );
+        assert!(
             self.snapshot_save_failures.is_empty(),
             "unconsumed snapshot-save failures"
         );
@@ -853,6 +959,11 @@ impl InjectedContextBehavior {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ContextOperation {
+    LoadSnapshot,
+    DeleteSnapshot,
+    CheckL1BlockCanonicality {
+        commitment: L1BlockCommitment,
+    },
     FetchBitcoinTip,
     FetchL1BlockRange {
         start_height: L1Height,
@@ -866,6 +977,7 @@ enum ContextOperation {
     PruneRecoveredDa {
         update_seq_no: u64,
     },
+    ClearRecoveredDa,
     FetchFinalizedAccountState {
         account_id: AccountId,
     },
@@ -928,6 +1040,11 @@ impl SnapshotSaveAttempt {
 
 #[derive(Clone, Debug)]
 enum ContextEvent {
+    LoadSnapshot,
+    DeleteSnapshot,
+    CheckL1BlockCanonicality {
+        commitment: L1BlockCommitment,
+    },
     FetchBitcoinTip,
     FetchL1BlockRange {
         start_height: L1Height,
@@ -941,6 +1058,7 @@ enum ContextEvent {
     PruneRecoveredDa {
         update_seq_no: u64,
     },
+    ClearRecoveredDa,
     FetchFinalizedAccountState {
         account_id: AccountId,
     },
@@ -957,6 +1075,13 @@ enum ContextEvent {
 impl ContextEvent {
     fn operation(&self) -> ContextOperation {
         match self {
+            Self::LoadSnapshot => ContextOperation::LoadSnapshot,
+            Self::DeleteSnapshot => ContextOperation::DeleteSnapshot,
+            Self::CheckL1BlockCanonicality { commitment } => {
+                ContextOperation::CheckL1BlockCanonicality {
+                    commitment: *commitment,
+                }
+            }
             Self::FetchBitcoinTip => ContextOperation::FetchBitcoinTip,
             Self::FetchL1BlockRange {
                 start_height,
@@ -976,6 +1101,7 @@ impl ContextEvent {
             Self::PruneRecoveredDa { update_seq_no } => ContextOperation::PruneRecoveredDa {
                 update_seq_no: *update_seq_no,
             },
+            Self::ClearRecoveredDa => ContextOperation::ClearRecoveredDa,
             Self::FetchFinalizedAccountState { account_id } => {
                 ContextOperation::FetchFinalizedAccountState {
                     account_id: *account_id,
@@ -1007,19 +1133,27 @@ impl ContextEventLog {
         self.0.push(event);
     }
 
+    fn operations(&self) -> Vec<ContextOperation> {
+        self.0.iter().map(ContextEvent::operation).collect()
+    }
+
     fn recovered_da_write_attempts(&self) -> Vec<RecoveredDaWriteAttempt> {
         self.0
             .iter()
             .filter_map(|event| match event {
                 ContextEvent::PutRecoveredDa(attempt) => Some(attempt.clone()),
-                ContextEvent::FetchBitcoinTip
+                ContextEvent::LoadSnapshot
+                | ContextEvent::DeleteSnapshot
+                | ContextEvent::CheckL1BlockCanonicality { .. }
+                | ContextEvent::FetchBitcoinTip
                 | ContextEvent::FetchL1BlockRange { .. }
                 | ContextEvent::GetContiguousRecoveredDa { .. }
                 | ContextEvent::FetchFinalizedAccountState { .. }
                 | ContextEvent::FetchAccountUpdate { .. }
                 | ContextEvent::FetchCommitBlock { .. }
                 | ContextEvent::SaveSnapshot(_)
-                | ContextEvent::PruneRecoveredDa { .. } => None,
+                | ContextEvent::PruneRecoveredDa { .. }
+                | ContextEvent::ClearRecoveredDa => None,
             })
             .collect()
     }
@@ -1031,12 +1165,16 @@ impl ContextEventLog {
                 ContextEvent::FetchBitcoinTip
                 | ContextEvent::FetchL1BlockRange { .. }
                 | ContextEvent::PutRecoveredDa(_) => Some(event.operation()),
-                ContextEvent::GetContiguousRecoveredDa { .. }
+                ContextEvent::LoadSnapshot
+                | ContextEvent::DeleteSnapshot
+                | ContextEvent::CheckL1BlockCanonicality { .. }
+                | ContextEvent::GetContiguousRecoveredDa { .. }
                 | ContextEvent::FetchFinalizedAccountState { .. }
                 | ContextEvent::FetchAccountUpdate { .. }
                 | ContextEvent::FetchCommitBlock { .. }
                 | ContextEvent::SaveSnapshot(_)
-                | ContextEvent::PruneRecoveredDa { .. } => None,
+                | ContextEvent::PruneRecoveredDa { .. }
+                | ContextEvent::ClearRecoveredDa => None,
             })
             .collect()
     }
@@ -1067,10 +1205,6 @@ impl ContextEventLog {
             .collect()
     }
 
-    fn operations(&self) -> Vec<ContextOperation> {
-        self.0.iter().map(ContextEvent::operation).collect()
-    }
-
     fn commit_block_lookups(&self) -> Vec<Txid> {
         self.0
             .iter()
@@ -1086,6 +1220,23 @@ impl ContextEventLog {
             .iter()
             .filter_map(|event| match event {
                 ContextEvent::SaveSnapshot(attempt) => Some(attempt.as_ref().clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn snapshot_load_count(&self) -> usize {
+        self.0
+            .iter()
+            .filter(|event| matches!(event, ContextEvent::LoadSnapshot))
+            .count()
+    }
+
+    fn l1_block_canonicality_checks(&self) -> Vec<L1BlockCommitment> {
+        self.0
+            .iter()
+            .filter_map(|event| match event {
+                ContextEvent::CheckL1BlockCanonicality { commitment } => Some(*commitment),
                 _ => None,
             })
             .collect()
@@ -1235,6 +1386,19 @@ impl DaVerifierContext for MockDaVerifierContext {
         Ok(())
     }
 
+    async fn clear_recovered_da(&self) -> Result<(), RecoveredDaDbError> {
+        let mut state = self.state();
+        state.events.record(ContextEvent::ClearRecoveredDa);
+        if let Some(error) = state
+            .injected_behavior
+            .take_next_recovered_da_clear_failure()
+        {
+            return Err(error);
+        }
+        state.recovered_da.clear();
+        Ok(())
+    }
+
     async fn fetch_commit_block(
         &self,
         commit_txid: Txid,
@@ -1250,6 +1414,44 @@ impl DaVerifierContext for MockDaVerifierContext {
             return Err(error);
         }
         state.bitcoin.fetch_commit_block(commit_txid)
+    }
+
+    async fn is_l1_block_canonical(
+        &self,
+        expected: L1BlockCommitment,
+    ) -> Result<bool, CheckL1BlockError> {
+        let mut state = self.state();
+        state.events.record(ContextEvent::CheckL1BlockCanonicality {
+            commitment: expected,
+        });
+        if let Some(error) = state
+            .injected_behavior
+            .take_next_l1_block_canonicality_failure()
+        {
+            return Err(error);
+        }
+        Ok(state.bitcoin.is_l1_block_canonical(expected))
+    }
+
+    fn load_reconstruction_snapshot(
+        &self,
+    ) -> Result<Option<ReconstructionSnapshot>, SnapshotLoadError> {
+        let mut state = self.state();
+        state.events.record(ContextEvent::LoadSnapshot);
+        if let Some(error) = state.injected_behavior.take_next_snapshot_load_failure() {
+            return Err(error);
+        }
+        Ok(state.snapshots.load())
+    }
+
+    fn delete_reconstruction_snapshot(&self) -> Result<(), SnapshotDeleteError> {
+        let mut state = self.state();
+        state.events.record(ContextEvent::DeleteSnapshot);
+        if let Some(error) = state.injected_behavior.take_next_snapshot_delete_failure() {
+            return Err(error);
+        }
+        state.snapshots.delete();
+        Ok(())
     }
 
     fn save_reconstruction_snapshot(
@@ -1366,6 +1568,17 @@ impl DaVerifierFixture {
         self.context.state().bitcoin.set_tip_height(tip_height);
     }
 
+    fn replace_bitcoin_block(
+        &self,
+        height: L1Height,
+        block_discriminator: u32,
+    ) -> L1BlockCommitment {
+        self.context
+            .state()
+            .bitcoin
+            .replace_block(height, block_discriminator)
+    }
+
     /// Account whose EE updates this verifier follows.
     fn account_id(&self) -> AccountId {
         self.params.strata_exec_account_id()
@@ -1428,6 +1641,11 @@ impl DaVerifierFixture {
         )
     }
 
+    /// Builds fresh in-memory service state over the existing external test world.
+    fn restart_verifier_service_state(&self) -> DaVerifierServiceState<MockDaVerifierContext> {
+        self.build_verifier_service_state()
+    }
+
     fn fail_next_bitcoin_tip(&self, error: FetchBitcoinTipError) {
         self.context
             .state()
@@ -1470,6 +1688,13 @@ impl DaVerifierFixture {
             .fail_next_recovered_da_prune(error);
     }
 
+    fn fail_next_recovered_da_clear(&self, error: RecoveredDaDbError) {
+        self.context
+            .state()
+            .injected_behavior
+            .fail_next_recovered_da_clear(error);
+    }
+
     fn fail_ol_update_at(&self, update_seq_no: Seqno, error: OLAccountUpdateError) {
         self.context
             .state()
@@ -1491,6 +1716,27 @@ impl DaVerifierFixture {
             .fail_next_commit_block_lookup(error);
     }
 
+    fn fail_next_l1_block_canonicality_check(&self, error: CheckL1BlockError) {
+        self.context
+            .state()
+            .injected_behavior
+            .fail_next_l1_block_canonicality_check(error);
+    }
+
+    fn fail_next_snapshot_load(&self, error: SnapshotLoadError) {
+        self.context
+            .state()
+            .injected_behavior
+            .fail_next_snapshot_load(error);
+    }
+
+    fn fail_next_snapshot_delete(&self, error: SnapshotDeleteError) {
+        self.context
+            .state()
+            .injected_behavior
+            .fail_next_snapshot_delete(error);
+    }
+
     fn fail_next_snapshot_save(&self, error: SnapshotSaveError) {
         self.context
             .state()
@@ -1504,6 +1750,15 @@ impl DaVerifierFixture {
             .recovered_da
             .put(recovered_blobs)
             .expect("test recovered DA should seed the store");
+    }
+
+    /// Stores valid snapshot data without exercising the current process's save path.
+    ///
+    /// Restart tests use this to model a snapshot file written by another process or runtime
+    /// configuration, such as one whose recovery boundary predates the current genesis height.
+    /// Snapshot-internal invariants must still hold because the mock load path validates them.
+    fn store_snapshot_for_restart(&self, snapshot: StoredReconstructionSnapshot) {
+        self.context.state().snapshots.save(snapshot);
     }
 
     /// Confirms one update on L1 and seeds its recovered candidate without its OL update.
@@ -1565,6 +1820,14 @@ impl DaVerifierFixture {
 
     fn snapshot_save_attempts(&self) -> Vec<SnapshotSaveAttempt> {
         self.context.state().events.snapshot_save_attempts()
+    }
+
+    fn snapshot_load_count(&self) -> usize {
+        self.context.state().events.snapshot_load_count()
+    }
+
+    fn l1_block_canonicality_checks(&self) -> Vec<L1BlockCommitment> {
+        self.context.state().events.l1_block_canonicality_checks()
     }
 
     fn saved_snapshot(&self) -> Option<StoredReconstructionSnapshot> {
@@ -1831,13 +2094,82 @@ async fn run_multi_tick_da_scenario_first_tick() -> (
 fn make_multi_tick_update_9_available_for_second_tick(
     fixture: &DaVerifierFixture,
     scenario: &MultiTickDaScenario,
-) {
-    fixture.mine_block(
+) -> L1BlockCommitment {
+    let completion_block = fixture.mine_block(
         MULTI_TICK_UPDATE_9_COMPLETION_HEIGHT,
         [&scenario.updates[9].reveal_transactions()[1]],
     );
     fixture.process_sau(&scenario.updates[9]);
     fixture.set_bitcoin_tip_height(MULTI_TICK_SECOND_TICK_TIP);
+    completion_block
+}
+
+/// Builds a fixture whose saved snapshot has distinct resume and completion blocks.
+///
+/// Update 1 is the final update in sequence order, so its earlier commit is the resume block.
+/// Update 0 completes later, so its completion is the snapshot's highest covered L1 block.
+async fn build_fixture_with_distinct_snapshot_boundaries() -> DaVerifierFixture {
+    let mut fixture = DaVerifierFixture::new(
+        AlpenParams::default(),
+        TEST_GENESIS_L1_HEIGHT,
+        TEST_L1_REORG_SAFE_DEPTH,
+    );
+    let updates = produce_test_updates(&mut fixture, 2);
+    for update in &updates {
+        fixture.publish_da(update);
+    }
+
+    fixture.mine_block(TEST_GENESIS_L1_HEIGHT, [updates[1].commit_transaction()]);
+    fixture.mine_block(
+        TEST_GENESIS_L1_HEIGHT + 1,
+        [updates[0].commit_transaction()],
+    );
+    fixture.mine_block(TEST_GENESIS_L1_HEIGHT + 2, updates[1].reveal_transactions());
+    let completion_block =
+        fixture.mine_block(TEST_GENESIS_L1_HEIGHT + 3, updates[0].reveal_transactions());
+    fixture.set_bitcoin_tip_height(completion_block.height() + TEST_L1_REORG_SAFE_DEPTH);
+    for update in &updates {
+        fixture.process_sau(update);
+    }
+
+    let mut state = fixture.build_verifier_service_state();
+    state.handle_tick().await.expect("tick processing succeeds");
+    fixture
+}
+
+/// Processes a fresh service state's first tick with an injected snapshot-load failure.
+async fn run_first_tick_with_snapshot_load_failure(
+    load_error: SnapshotLoadError,
+) -> (
+    DaVerifierFixture,
+    DaVerifierServiceState<MockDaVerifierContext>,
+    DaVerifierError,
+) {
+    let fixture = DaVerifierFixture::new(
+        AlpenParams::default(),
+        TEST_GENESIS_L1_HEIGHT,
+        TEST_L1_REORG_SAFE_DEPTH,
+    );
+    fixture.fail_next_snapshot_load(load_error);
+    let mut state = fixture.build_verifier_service_state();
+    let error = state
+        .handle_tick()
+        .await
+        .expect_err("tick processing reports the injected snapshot load failure");
+
+    (fixture, state, error)
+}
+
+/// Asserts that snapshot initialization has not changed either service frontier.
+#[track_caller]
+fn assert_service_uninitialized(
+    state: &DaVerifierServiceState<MockDaVerifierContext>,
+    genesis_l1_height: L1Height,
+) {
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(state);
+    assert_eq!(status.next_l1_height, genesis_l1_height);
+    assert_eq!(status.reorg_safe_tip, None);
+    assert_eq!(status.next_update_seq_no, 0);
 }
 
 #[tokio::test]
@@ -1861,15 +2193,14 @@ async fn test_da_recovery_waits_below_reorg_safe_depth() {
 }
 
 #[tokio::test]
-async fn test_waiting_for_reorg_safe_tip_does_not_read_unscanned_da() {
-    // 1. Seed candidate 0, but keep Bitcoin below the configured reorg-safe
-    // depth so recovery has not processed any L1 block.
+async fn test_genesis_start_clears_recovered_da() {
+    // 1. Seed a stale candidate without a snapshot and expose one reorg-safe block.
     let mut fixture = DaVerifierFixture::new(
         AlpenParams::default(),
         TEST_GENESIS_L1_HEIGHT,
         TEST_L1_REORG_SAFE_DEPTH,
     )
-    .with_bitcoin_tip_height(L1Height::from(TEST_L1_REORG_SAFE_DEPTH - 1));
+    .with_bitcoin_tip_height(TEST_ONE_BLOCK_SCAN_BITCOIN_TIP);
     let update = fixture.produce_update(build_test_state_diff(1));
     fixture.seed_recovered_da(&[RecoveredDaBlob::new(
         DaL1Ref::new(update.commit_txid(), make_test_l1_commitment(1)),
@@ -1877,19 +2208,74 @@ async fn test_waiting_for_reorg_safe_tip_does_not_read_unscanned_da() {
     )]);
     let mut state = fixture.build_verifier_service_state();
 
-    // 2. Process one tick while recovery has no reorg-safe L1 range to scan.
+    // 2. Process the first tick from genesis.
     state.handle_tick().await.expect("tick processing succeeds");
 
-    // 3. Show the tick only reads the Bitcoin tip. Candidate 0 is not eligible
-    // until recovery has actually processed its completion block.
+    // 3. Show initialization clears stale DA before recovery requests its first L1 range.
     let status = DaVerifierService::<MockDaVerifierContext>::get_status(&state);
-    assert_eq!(status.next_l1_height, TEST_GENESIS_L1_HEIGHT);
-    assert_eq!(status.reorg_safe_tip, None);
+    assert_eq!(status.next_l1_height, TEST_GENESIS_L1_HEIGHT + 1);
+    assert_eq!(status.reorg_safe_tip, Some(TEST_GENESIS_L1_HEIGHT));
     assert_eq!(status.next_update_seq_no, 0);
+    assert!(fixture.recovered_da_blobs().is_empty());
     assert_eq!(
         fixture.context_operations(),
-        [ContextOperation::FetchBitcoinTip]
+        [
+            ContextOperation::LoadSnapshot,
+            ContextOperation::ClearRecoveredDa,
+            ContextOperation::FetchBitcoinTip,
+            ContextOperation::FetchL1BlockRange {
+                start_height: TEST_GENESIS_L1_HEIGHT,
+                end_height: TEST_GENESIS_L1_HEIGHT,
+            },
+            ContextOperation::GetContiguousRecoveredDa {
+                first_update_seq_no: 0,
+                recovered_l1_frontier: TEST_GENESIS_L1_HEIGHT,
+            },
+        ]
     );
+}
+
+#[tokio::test]
+async fn test_failed_clear_stops_initialization() {
+    // 1. Seed retained DA without a snapshot and make the initialization clear fail.
+    let mut fixture = DaVerifierFixture::new(
+        AlpenParams::default(),
+        TEST_GENESIS_L1_HEIGHT,
+        TEST_L1_REORG_SAFE_DEPTH,
+    );
+    let update = fixture.produce_update(build_test_state_diff(1));
+    fixture.seed_recovered_da(&[RecoveredDaBlob::new(
+        DaL1Ref::new(update.commit_txid(), make_test_l1_commitment(1)),
+        update.blob().clone(),
+    )]);
+    fixture.fail_next_recovered_da_clear(RecoveredDaDbError::WorkerCancelled);
+    let mut state = fixture.build_verifier_service_state();
+
+    // 2. Process the first tick and show the clear failure is returned before recovery starts.
+    let error = state
+        .handle_tick()
+        .await
+        .expect_err("tick processing reports the recovered-DA clear failure");
+    assert!(matches!(
+        error,
+        DaVerifierError::RecoveredDaDb(RecoveredDaDbError::WorkerCancelled)
+    ));
+
+    // 3. Show initialization remains pending and retained DA stays intact for a retry.
+    assert_service_uninitialized(&state, TEST_GENESIS_L1_HEIGHT);
+    assert_one_recovered_blob(
+        &fixture.recovered_da_blobs(),
+        &update,
+        make_test_l1_commitment(1),
+    );
+    assert_eq!(
+        fixture.context_operations(),
+        [
+            ContextOperation::LoadSnapshot,
+            ContextOperation::ClearRecoveredDa,
+        ]
+    );
+    fixture.assert_injected_behavior_consumed();
 }
 
 #[tokio::test]
@@ -2063,6 +2449,8 @@ async fn test_recoverable_window_failure_verifies_stored_da_before_ending_tick()
     assert_eq!(
         fixture.context_operations(),
         [
+            ContextOperation::LoadSnapshot,
+            ContextOperation::ClearRecoveredDa,
             ContextOperation::FetchBitcoinTip,
             ContextOperation::FetchL1BlockRange {
                 start_height: TEST_GENESIS_L1_HEIGHT,
@@ -2397,6 +2785,8 @@ async fn test_tick_verifies_recovered_da_before_scanning_next_l1_window() {
     assert_eq!(
         fixture.context_operations(),
         [
+            ContextOperation::LoadSnapshot,
+            ContextOperation::ClearRecoveredDa,
             ContextOperation::FetchBitcoinTip,
             ContextOperation::FetchL1BlockRange {
                 start_height: TEST_GENESIS_L1_HEIGHT,
@@ -3333,13 +3723,19 @@ async fn test_ol_transport_failure_after_available_update_leaves_anchor_unchange
 
 #[tokio::test]
 async fn test_duplicate_candidates_fail_without_advancing_anchor() {
-    // 1. Seed two recovered candidates that both claim seqno 0.
+    // 1. Complete no-snapshot initialization before retaining candidates in the store.
     let mut fixture = DaVerifierFixture::new(
         AlpenParams::default(),
         TEST_GENESIS_L1_HEIGHT,
         TEST_L1_REORG_SAFE_DEPTH,
-    )
-    .with_bitcoin_tip_height(TEST_ONE_BLOCK_SCAN_BITCOIN_TIP);
+    );
+    let mut state = fixture.build_verifier_service_state();
+    state
+        .handle_tick()
+        .await
+        .expect("genesis initialization succeeds");
+
+    // 2. Seed two recovered candidates that both claim seqno 0.
     let update = fixture.produce_update(build_test_state_diff(1));
     let completion_block = make_test_l1_commitment(1);
     fixture.seed_recovered_da(&[RecoveredDaBlob::new(
@@ -3355,9 +3751,9 @@ async fn test_duplicate_candidates_fail_without_advancing_anchor() {
     );
     fixture.seed_recovered_da(&[duplicate]);
     fixture.process_sau(&update);
-    let mut state = fixture.build_verifier_service_state();
+    fixture.set_bitcoin_tip_height(TEST_ONE_BLOCK_SCAN_BITCOIN_TIP);
 
-    // 2. Process a tick and show reconstruction rejects both candidates after
+    // 3. Process a tick and show reconstruction rejects both candidates after
     // fetching their one shared OL update.
     let error = state
         .handle_tick()
@@ -3380,13 +3776,19 @@ async fn test_duplicate_candidates_fail_without_advancing_anchor() {
 
 #[tokio::test]
 async fn test_state_root_divergence_is_fatal_and_leaves_anchor_unchanged() {
-    // 1. Process the OL update for one state diff and seed candidate 0 with another.
+    // 1. Complete no-snapshot initialization before retaining a candidate in the store.
     let mut fixture = DaVerifierFixture::new(
         AlpenParams::default(),
         TEST_GENESIS_L1_HEIGHT,
         TEST_L1_REORG_SAFE_DEPTH,
-    )
-    .with_bitcoin_tip_height(TEST_ONE_BLOCK_SCAN_BITCOIN_TIP);
+    );
+    let mut state = fixture.build_verifier_service_state();
+    state
+        .handle_tick()
+        .await
+        .expect("genesis initialization succeeds");
+
+    // 2. Process the OL update for one state diff and seed candidate 0 with another.
     let update = fixture.produce_update(build_test_state_diff(1));
     fixture.process_sau(&update);
     let mut divergent_blob = update.blob().clone();
@@ -3395,9 +3797,9 @@ async fn test_state_root_divergence_is_fatal_and_leaves_anchor_unchanged() {
         DaL1Ref::new(update.commit_txid(), make_test_l1_commitment(1)),
         divergent_blob,
     )]);
-    let mut state = fixture.build_verifier_service_state();
+    fixture.set_bitcoin_tip_height(TEST_ONE_BLOCK_SCAN_BITCOIN_TIP);
 
-    // 2. Process a tick and show local verification detects the root mismatch.
+    // 3. Process a tick and show local verification detects the root mismatch.
     let error = state
         .handle_tick()
         .await
@@ -3562,6 +3964,8 @@ async fn test_catch_up_saves_snapshot_before_scanning_next_l1_window() {
     assert_eq!(attempts[0].outcome(), SnapshotSaveOutcome::Succeeded);
 
     let expected_operations = [
+        ContextOperation::LoadSnapshot,
+        ContextOperation::ClearRecoveredDa,
         ContextOperation::FetchBitcoinTip,
         ContextOperation::FetchL1BlockRange {
             start_height: TEST_GENESIS_L1_HEIGHT,
@@ -4012,6 +4416,715 @@ async fn test_fatal_snapshot_failure_does_not_replace_snapshot() {
         previous_snapshot,
     );
     fixture.assert_injected_behavior_consumed();
+}
+
+#[tokio::test]
+async fn test_missing_snapshot_initializes_without_canonicality_checks() {
+    // 1. Leave the snapshot store empty and expose a reorg-safe range beginning at genesis.
+    let fixture = DaVerifierFixture::new(
+        AlpenParams::default(),
+        TEST_GENESIS_L1_HEIGHT,
+        TEST_L1_REORG_SAFE_DEPTH,
+    )
+    .with_bitcoin_tip_height(TEST_REORG_SAFE_TIP + TEST_L1_REORG_SAFE_DEPTH);
+    let mut state = fixture.build_verifier_service_state();
+
+    // 2. Process the first tick without persisted verification progress.
+    state.handle_tick().await.expect("tick processing succeeds");
+
+    // 3. Show initialization loads once, performs no canonicality checks, and scans from genesis.
+    assert_eq!(fixture.snapshot_load_count(), 1);
+    assert!(fixture.l1_block_canonicality_checks().is_empty());
+    assert_eq!(
+        fixture.recovery_operations(),
+        [
+            ContextOperation::FetchBitcoinTip,
+            ContextOperation::FetchL1BlockRange {
+                start_height: TEST_GENESIS_L1_HEIGHT,
+                end_height: TEST_REORG_SAFE_TIP,
+            },
+        ]
+    );
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&state);
+    assert_eq!(status.next_l1_height, TEST_REORG_SAFE_TIP + 1);
+    assert_eq!(status.reorg_safe_tip, Some(TEST_REORG_SAFE_TIP));
+    assert_eq!(status.next_update_seq_no, 0);
+}
+
+#[tokio::test]
+async fn test_restart_resumes_from_snapshot_boundary() {
+    // 1. Run tick 1 to verify and save through update 8, record the observations so far, then
+    // drop the service state. The fixture keeps Bitcoin, candidates, OL updates, and the
+    // snapshot, so the restart below sees exactly what a restarted process would.
+    let (fixture, _scenario, state) = run_multi_tick_da_scenario_first_tick().await;
+    let snapshot = fixture
+        .saved_snapshot()
+        .expect("the first tick saves verified progress");
+    let recovery_operations_after_setup = fixture.recovery_operations();
+    let recovered_da_reads_after_setup = fixture.recovered_da_read_requests();
+    let snapshot_loads_after_setup = fixture.snapshot_load_count();
+    drop(state);
+
+    // 2. Restart over the same stores and process the first resumed tick.
+    let mut restarted_state = fixture.restart_verifier_service_state();
+    restarted_state
+        .handle_tick()
+        .await
+        .expect("resumed tick processing succeeds");
+
+    // 3. Show the restored frontier drives an inclusive rescan and verification at seqno 9.
+    assert_eq!(
+        fixture.snapshot_load_count() - snapshot_loads_after_setup,
+        1
+    );
+    let recovery_operations = fixture.recovery_operations();
+    assert_eq!(
+        &recovery_operations[recovery_operations_after_setup.len()..],
+        [
+            ContextOperation::FetchBitcoinTip,
+            ContextOperation::FetchL1BlockRange {
+                start_height: snapshot.resume_l1_block.height(),
+                end_height: MULTI_TICK_FIRST_TICK_SAFE_TIP,
+            },
+            ContextOperation::PutRecoveredDa,
+        ]
+    );
+    let recovered_da_reads = fixture.recovered_da_read_requests();
+    assert_eq!(
+        &recovered_da_reads[recovered_da_reads_after_setup.len()..],
+        [(9, MULTI_TICK_FIRST_TICK_SAFE_TIP)]
+    );
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&restarted_state);
+    assert_eq!(status.next_l1_height, MULTI_TICK_FIRST_TICK_SAFE_TIP + 1);
+    assert_eq!(status.next_update_seq_no, 9);
+}
+
+#[tokio::test]
+async fn test_snapshot_resume_preserves_recovered_da() {
+    // 1. Save through update 8, then retain completed update 9 above the saved L1 frontier.
+    let (fixture, scenario, state) = run_multi_tick_da_scenario_first_tick().await;
+    let completion_block = fixture.mine_block(
+        MULTI_TICK_UPDATE_9_COMPLETION_HEIGHT,
+        [&scenario.updates[9].reveal_transactions()[1]],
+    );
+    fixture.seed_recovered_da(&[RecoveredDaBlob::new(
+        DaL1Ref::new(scenario.updates[9].commit_txid(), completion_block),
+        scenario.updates[9].blob().clone(),
+    )]);
+    let operations_after_setup = fixture.context_operations();
+    drop(state);
+
+    // 2. Restart from the valid snapshot without making update 9 available on OL.
+    let mut restarted_state = fixture.restart_verifier_service_state();
+    restarted_state
+        .handle_tick()
+        .await
+        .expect("resumed tick processing succeeds");
+
+    // 3. Show initialization did not clear the candidate retained above the snapshot boundary.
+    assert!(fixture
+        .context_operations()
+        .iter()
+        .skip(operations_after_setup.len())
+        .all(|operation| !matches!(operation, ContextOperation::ClearRecoveredDa)));
+    assert!(fixture.recovered_da_blobs().iter().any(|recovered_blob| {
+        recovered_blob.blob().update_seq_no == scenario.updates[9].blob().update_seq_no
+            && recovered_blob.l1_ref().completion_block() == completion_block
+    }));
+}
+
+#[tokio::test]
+async fn test_restart_after_interrupted_catch_up_resumes_from_latest_verified_commit() {
+    // 1. Put update 0 in the first scan window, then fail recovery at the start of the second.
+    let failed_height = TEST_GENESIS_L1_HEIGHT + 3;
+    let mut fixture = DaVerifierFixture::new(
+        AlpenParams::default(),
+        TEST_GENESIS_L1_HEIGHT,
+        TEST_L1_REORG_SAFE_DEPTH,
+    )
+    .with_max_l1_scan_window_size(TEST_THREE_BLOCK_L1_SCAN_WINDOW_SIZE);
+    let updates = produce_test_updates(&mut fixture, 2);
+    let update = &updates[0];
+    fixture.publish_da(update);
+    let commit_block =
+        fixture.mine_block(TEST_GENESIS_L1_HEIGHT + 1, [update.commit_transaction()]);
+    fixture.mine_block(TEST_GENESIS_L1_HEIGHT + 2, update.reveal_transactions());
+    // Keep OL one update ahead so catch-up reaches the injected second-window failure.
+    for update in &updates {
+        fixture.process_sau(update);
+    }
+    let reorg_safe_tip = TEST_GENESIS_L1_HEIGHT + 5;
+    fixture.set_bitcoin_tip_height(reorg_safe_tip + TEST_L1_REORG_SAFE_DEPTH);
+    fixture.fail_block_fetch_at(
+        failed_height,
+        FetchBlockError::RetriesExhausted {
+            height: failed_height,
+            max_retries: 3,
+            source: ClientError::Timeout,
+        },
+    );
+    let mut state = fixture.build_verifier_service_state();
+
+    // 2. Catch up until the failure and retain the snapshot saved after the first window.
+    state
+        .handle_tick()
+        .await
+        .expect("recoverable second-window failure ends the tick successfully");
+    let snapshot = fixture
+        .saved_snapshot()
+        .expect("the verified first window saves a snapshot");
+    assert_eq!(snapshot.resume_l1_block, commit_block);
+    assert_eq!(state.next_l1_height(), failed_height);
+    fixture.assert_injected_behavior_consumed();
+    let operations_after_interrupted_tick = fixture.context_operations();
+    drop(state);
+
+    // 3. Restart and show recovery begins inclusively at the durable commit boundary.
+    let mut restarted_state = fixture.restart_verifier_service_state();
+    restarted_state
+        .handle_tick()
+        .await
+        .expect("resumed catch-up succeeds");
+    let operations = fixture.context_operations();
+    let first_resumed_range = operations[operations_after_interrupted_tick.len()..]
+        .iter()
+        .find_map(|operation| match operation {
+            ContextOperation::FetchL1BlockRange {
+                start_height,
+                end_height,
+            } => Some((*start_height, *end_height)),
+            _ => None,
+        })
+        .expect("resumed tick requests an L1 range");
+    assert_eq!(first_resumed_range.0, snapshot.resume_l1_block.height());
+    assert_ne!(first_resumed_range.0, TEST_GENESIS_L1_HEIGHT);
+    assert_ne!(first_resumed_range.0, failed_height);
+}
+
+#[tokio::test]
+async fn test_snapshot_initialization_checks_both_l1_boundaries_before_bitcoin_da_scan() {
+    // 1. Save a real snapshot whose resume and highest completion blocks differ.
+    let fixture = build_fixture_with_distinct_snapshot_boundaries().await;
+    let snapshot = fixture
+        .saved_snapshot()
+        .expect("the setup saves a distinct-boundary snapshot");
+    assert_ne!(snapshot.resume_l1_block, snapshot.completion_block);
+    let operations_after_setup = fixture.context_operations();
+
+    // 2. Restart over the same world and process the first resumed tick.
+    let mut state = fixture.restart_verifier_service_state();
+    state
+        .handle_tick()
+        .await
+        .expect("resumed tick processing succeeds");
+
+    // 3. Show both exact boundaries are checked before the Bitcoin DA scan fetches the tip.
+    // Boundary-check order is deliberately irrelevant; both checks must precede the tip fetch.
+    let operations = fixture.context_operations();
+    let resumed_operations = &operations[operations_after_setup.len()..];
+    let initialization_operations = resumed_operations
+        .iter()
+        .take(4)
+        .copied()
+        .collect::<Vec<_>>();
+    assert_eq!(
+        initialization_operations.len(),
+        4,
+        "initialization operations: {initialization_operations:?}"
+    );
+    assert_eq!(initialization_operations[0], ContextOperation::LoadSnapshot);
+    assert_eq!(
+        initialization_operations[3],
+        ContextOperation::FetchBitcoinTip
+    );
+    let mut checked_boundaries = initialization_operations[1..3]
+        .iter()
+        .filter_map(|operation| match operation {
+            ContextOperation::CheckL1BlockCanonicality { commitment } => Some(*commitment),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    checked_boundaries.sort_by_key(L1BlockCommitment::height);
+    let mut expected_boundaries = vec![snapshot.resume_l1_block, snapshot.completion_block];
+    expected_boundaries.sort_by_key(L1BlockCommitment::height);
+    assert_eq!(checked_boundaries, expected_boundaries);
+}
+
+#[tokio::test]
+async fn test_recoverable_canonicality_failure_retries_snapshot_initialization() {
+    // 1. Save updates 0..=8, restart, and fail the first resume-block canonicality check.
+    let (fixture, _scenario, state) = run_multi_tick_da_scenario_first_tick().await;
+    let snapshot = fixture
+        .saved_snapshot()
+        .expect("the first tick saves verified progress");
+    let snapshot_loads_after_setup = fixture.snapshot_load_count();
+    let canonicality_checks_after_setup = fixture.l1_block_canonicality_checks();
+    let operations_after_setup = fixture.context_operations();
+    drop(state);
+    fixture.fail_next_l1_block_canonicality_check(CheckL1BlockError::FetchBlockHash {
+        expected: snapshot.resume_l1_block,
+        source: ClientError::Timeout,
+    });
+    let mut restarted_state = fixture.restart_verifier_service_state();
+
+    // 2. Process one tick and show the recoverable failure installs no snapshot state.
+    let error = restarted_state
+        .handle_tick()
+        .await
+        .expect_err("tick processing reports the canonicality lookup failure");
+    assert!(error.is_recoverable());
+    assert!(matches!(
+        error,
+        DaVerifierError::CheckL1Block(CheckL1BlockError::FetchBlockHash {
+            expected,
+            source: ClientError::Timeout,
+        }) if expected == snapshot.resume_l1_block
+    ));
+    assert_service_uninitialized(&restarted_state, MULTI_TICK_GENESIS_L1_HEIGHT);
+    let operations = fixture.context_operations();
+    assert_eq!(
+        &operations[operations_after_setup.len()..],
+        [
+            ContextOperation::LoadSnapshot,
+            ContextOperation::CheckL1BlockCanonicality {
+                commitment: snapshot.resume_l1_block,
+            },
+        ]
+    );
+
+    // 3. Process the next tick and show initialization reloads the snapshot and repeats boundary
+    // validation from the resume block.
+    restarted_state
+        .handle_tick()
+        .await
+        .expect("retried tick processing succeeds");
+    assert_eq!(
+        fixture.snapshot_load_count() - snapshot_loads_after_setup,
+        2
+    );
+    let canonicality_checks = fixture.l1_block_canonicality_checks();
+    assert_eq!(
+        &canonicality_checks[canonicality_checks_after_setup.len()..],
+        [
+            snapshot.resume_l1_block,
+            snapshot.resume_l1_block,
+            snapshot.completion_block,
+        ]
+    );
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&restarted_state);
+    assert_eq!(status.next_l1_height, MULTI_TICK_FIRST_TICK_SAFE_TIP + 1);
+    assert_eq!(status.next_update_seq_no, 9);
+    fixture.assert_injected_behavior_consumed();
+}
+
+#[tokio::test]
+async fn test_snapshot_initialization_runs_once() {
+    // 1. Save updates 0..=8, discard service state, and capture initialization observations.
+    let (fixture, _scenario, state) = run_multi_tick_da_scenario_first_tick().await;
+    let snapshot = fixture
+        .saved_snapshot()
+        .expect("the first tick saves verified progress");
+    let snapshot_loads_after_setup = fixture.snapshot_load_count();
+    let canonicality_checks_after_setup = fixture.l1_block_canonicality_checks();
+    let operations_after_setup = fixture.context_operations();
+    drop(state);
+
+    // 2. Restart and process two ticks without adding Bitcoin or OL data between them.
+    let mut restarted_state = fixture.restart_verifier_service_state();
+    restarted_state
+        .handle_tick()
+        .await
+        .expect("first resumed tick processing succeeds");
+    restarted_state
+        .handle_tick()
+        .await
+        .expect("second resumed tick processing succeeds");
+
+    // 3. Show snapshot loading and boundary validation happened only on the first tick.
+    assert_eq!(
+        fixture.snapshot_load_count() - snapshot_loads_after_setup,
+        1
+    );
+    let canonicality_checks = fixture.l1_block_canonicality_checks();
+    // The resume and completion roles happen to reference block 140 in this scenario; retaining
+    // both entries proves initialization checked each role once.
+    assert_eq!(
+        &canonicality_checks[canonicality_checks_after_setup.len()..],
+        [snapshot.resume_l1_block, snapshot.completion_block]
+    );
+    let operations = fixture.context_operations();
+    let resumed_operations = &operations[operations_after_setup.len()..];
+    assert_eq!(
+        resumed_operations
+            .iter()
+            .filter(|operation| matches!(operation, ContextOperation::FetchBitcoinTip))
+            .count(),
+        2,
+        "both resumed ticks must reach Bitcoin tip retrieval"
+    );
+}
+
+#[tokio::test]
+async fn test_snapshot_decode_failure_leaves_service_uninitialized() {
+    // 1. Process a fresh service state's first tick with a typed snapshot decode failure.
+    let (fixture, state, error) =
+        run_first_tick_with_snapshot_load_failure(SnapshotLoadError::Decode {
+            path: PathBuf::from("reconstruction.snapshot"),
+            source: eyre::eyre!("invalid snapshot bytes"),
+        })
+        .await;
+
+    // 2. Confirm initialization reports the exact fatal load error.
+    assert!(!error.is_recoverable());
+    assert!(matches!(
+        error,
+        DaVerifierError::LoadSnapshot(SnapshotLoadError::Decode { .. })
+    ));
+
+    // 3. Show the service remains uninitialized and performs no work after snapshot loading.
+    assert_service_uninitialized(&state, TEST_GENESIS_L1_HEIGHT);
+    assert_eq!(
+        fixture.context_operations(),
+        [ContextOperation::LoadSnapshot]
+    );
+    fixture.assert_injected_behavior_consumed();
+}
+
+#[tokio::test]
+async fn test_snapshot_validation_failure_leaves_service_uninitialized() {
+    // 1. Process a fresh service state's first tick with a typed snapshot validation failure.
+    let (fixture, state, error) = run_first_tick_with_snapshot_load_failure(
+        SnapshotLoadError::Validation(SnapshotValidationError::InnerStateRootMismatch),
+    )
+    .await;
+
+    // 2. Confirm initialization reports the exact fatal load error.
+    assert!(!error.is_recoverable());
+    assert!(matches!(
+        error,
+        DaVerifierError::LoadSnapshot(SnapshotLoadError::Validation(
+            SnapshotValidationError::InnerStateRootMismatch
+        ))
+    ));
+
+    // 3. Show the service remains uninitialized and performs no work after snapshot loading.
+    assert_service_uninitialized(&state, TEST_GENESIS_L1_HEIGHT);
+    assert_eq!(
+        fixture.context_operations(),
+        [ContextOperation::LoadSnapshot]
+    );
+    fixture.assert_injected_behavior_consumed();
+}
+
+#[tokio::test]
+async fn test_snapshot_before_genesis_restarts_from_genesis() {
+    // 1. Save valid progress, retain stale DA, then move the snapshot resume below genesis.
+    let (mut fixture, _scenario, state) = run_multi_tick_da_scenario_first_tick().await;
+    let mut snapshot = fixture
+        .saved_snapshot()
+        .expect("the first tick saves verified progress");
+    snapshot.resume_l1_block = L1BlockCommitment::new(
+        MULTI_TICK_GENESIS_L1_HEIGHT - 1,
+        L1BlockId::from(Buf32::from([0xA5; 32])),
+    );
+    fixture.store_snapshot_for_restart(snapshot.clone());
+    let retained_update = fixture.produce_update(build_test_state_diff(3));
+    let retained_completion_block = L1BlockCommitment::new(
+        snapshot.completion_block.height() + 1,
+        L1BlockId::from(Buf32::from([0xA6; 32])),
+    );
+    fixture.seed_recovered_da(&[RecoveredDaBlob::new(
+        DaL1Ref::new(retained_update.commit_txid(), retained_completion_block),
+        retained_update.blob().clone(),
+    )]);
+    let operations_after_setup = fixture.context_operations();
+    fixture.fail_next_bitcoin_tip(FetchBitcoinTipError::Rpc(ClientError::Timeout));
+    drop(state);
+
+    // 2. Restart and let initialization discard the incompatible state before recovery continues.
+    let mut state = fixture.restart_verifier_service_state();
+    state
+        .handle_tick()
+        .await
+        .expect("snapshot below genesis restarts verification from genesis");
+
+    // 3. Show no canonicality check runs and stale state is removed before the Bitcoin tip read.
+    let operations = fixture.context_operations();
+    assert_eq!(
+        &operations[operations_after_setup.len()..],
+        [
+            ContextOperation::LoadSnapshot,
+            ContextOperation::DeleteSnapshot,
+            ContextOperation::ClearRecoveredDa,
+            ContextOperation::FetchBitcoinTip,
+        ]
+    );
+    assert!(fixture.recovered_da_blobs().is_empty());
+    assert_eq!(fixture.saved_snapshot(), None);
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&state);
+    assert_eq!(status.next_l1_height, MULTI_TICK_GENESIS_L1_HEIGHT);
+    assert_eq!(status.next_update_seq_no, 0);
+    fixture.assert_injected_behavior_consumed();
+}
+
+#[tokio::test]
+async fn test_snapshot_delete_failure_stops_reorg_reset() {
+    // 1. Save a snapshot, reorg its resume block, and make stale-snapshot deletion fail.
+    let fixture = build_fixture_with_distinct_snapshot_boundaries().await;
+    let snapshot = fixture
+        .saved_snapshot()
+        .expect("the setup saves a distinct-boundary snapshot");
+    let operations_after_setup = fixture.context_operations();
+    fixture.replace_bitcoin_block(snapshot.resume_l1_block.height(), 1);
+    fixture.fail_next_snapshot_delete(SnapshotDeleteError::Io {
+        operation: "remove reconstruction snapshot",
+        path: PathBuf::from("snapshot"),
+        source: io::Error::other("test snapshot delete failure"),
+    });
+
+    // 2. Restart and show deletion fails before recovered DA is cleared.
+    let mut state = fixture.restart_verifier_service_state();
+    let error = state
+        .handle_tick()
+        .await
+        .expect_err("tick processing reports the snapshot delete failure");
+    assert!(error.is_recoverable());
+    assert!(matches!(error, DaVerifierError::DeleteSnapshot(_)));
+
+    // 3. Show initialization remains pending and the stale snapshot remains available to retry.
+    assert_service_uninitialized(&state, TEST_GENESIS_L1_HEIGHT);
+    let operations = fixture.context_operations();
+    assert_eq!(
+        &operations[operations_after_setup.len()..],
+        [
+            ContextOperation::LoadSnapshot,
+            ContextOperation::CheckL1BlockCanonicality {
+                commitment: snapshot.resume_l1_block,
+            },
+            ContextOperation::DeleteSnapshot,
+        ]
+    );
+    assert_eq!(fixture.saved_snapshot(), Some(snapshot));
+    fixture.assert_injected_behavior_consumed();
+}
+
+#[tokio::test]
+async fn test_noncanonical_resume_block_restarts_from_genesis() {
+    // 1. Save a distinct-boundary snapshot, retain stale DA, then reorg its resume block.
+    let mut fixture = build_fixture_with_distinct_snapshot_boundaries().await;
+    let snapshot = fixture
+        .saved_snapshot()
+        .expect("the setup saves a distinct-boundary snapshot");
+    let retained_update = fixture.produce_update(build_test_state_diff(3));
+    let retained_completion_block = L1BlockCommitment::new(
+        snapshot.completion_block.height() + 1,
+        L1BlockId::from(Buf32::from([0xA6; 32])),
+    );
+    fixture.seed_recovered_da(&[RecoveredDaBlob::new(
+        DaL1Ref::new(retained_update.commit_txid(), retained_completion_block),
+        retained_update.blob().clone(),
+    )]);
+    let operations_after_setup = fixture.context_operations();
+    fixture.replace_bitcoin_block(snapshot.resume_l1_block.height(), 1);
+    fixture.fail_next_bitcoin_tip(FetchBitcoinTipError::Rpc(ClientError::Timeout));
+
+    // 2. Restart and let initialization discard the stale state before recovery continues.
+    let mut state = fixture.restart_verifier_service_state();
+    state
+        .handle_tick()
+        .await
+        .expect("confirmed snapshot reorg restarts from genesis");
+
+    // 3. Show the snapshot is deleted and candidates are cleared before the Bitcoin tip read.
+    let operations = fixture.context_operations();
+    assert_eq!(
+        &operations[operations_after_setup.len()..],
+        [
+            ContextOperation::LoadSnapshot,
+            ContextOperation::CheckL1BlockCanonicality {
+                commitment: snapshot.resume_l1_block,
+            },
+            ContextOperation::DeleteSnapshot,
+            ContextOperation::ClearRecoveredDa,
+            ContextOperation::FetchBitcoinTip,
+        ]
+    );
+    assert!(fixture.recovered_da_blobs().is_empty());
+    assert_eq!(fixture.saved_snapshot(), None);
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&state);
+    assert_eq!(status.next_l1_height, TEST_GENESIS_L1_HEIGHT);
+    assert_eq!(status.next_update_seq_no, 0);
+    fixture.assert_injected_behavior_consumed();
+}
+
+#[tokio::test]
+async fn test_noncanonical_completion_block_restarts_from_genesis() {
+    // 1. Save a distinct-boundary snapshot, retain stale DA, then reorg its completion block.
+    let mut fixture = build_fixture_with_distinct_snapshot_boundaries().await;
+    let snapshot = fixture
+        .saved_snapshot()
+        .expect("the setup saves a distinct-boundary snapshot");
+    let retained_update = fixture.produce_update(build_test_state_diff(3));
+    let retained_completion_block = L1BlockCommitment::new(
+        snapshot.completion_block.height() + 1,
+        L1BlockId::from(Buf32::from([0xA6; 32])),
+    );
+    fixture.seed_recovered_da(&[RecoveredDaBlob::new(
+        DaL1Ref::new(retained_update.commit_txid(), retained_completion_block),
+        retained_update.blob().clone(),
+    )]);
+    let operations_after_setup = fixture.context_operations();
+    fixture.replace_bitcoin_block(snapshot.completion_block.height(), 1);
+    fixture.fail_next_bitcoin_tip(FetchBitcoinTipError::Rpc(ClientError::Timeout));
+
+    // 2. Restart and let initialization discard the stale state before recovery continues.
+    let mut state = fixture.restart_verifier_service_state();
+    state
+        .handle_tick()
+        .await
+        .expect("confirmed snapshot reorg restarts from genesis");
+
+    // 3. Show both boundaries are checked before the stale state is deleted and cleared.
+    let operations = fixture.context_operations();
+    assert_eq!(
+        &operations[operations_after_setup.len()..],
+        [
+            ContextOperation::LoadSnapshot,
+            ContextOperation::CheckL1BlockCanonicality {
+                commitment: snapshot.resume_l1_block,
+            },
+            ContextOperation::CheckL1BlockCanonicality {
+                commitment: snapshot.completion_block,
+            },
+            ContextOperation::DeleteSnapshot,
+            ContextOperation::ClearRecoveredDa,
+            ContextOperation::FetchBitcoinTip,
+        ]
+    );
+    assert!(fixture.recovered_da_blobs().is_empty());
+    assert_eq!(fixture.saved_snapshot(), None);
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&state);
+    assert_eq!(status.next_l1_height, TEST_GENESIS_L1_HEIGHT);
+    assert_eq!(status.next_update_seq_no, 0);
+    fixture.assert_injected_behavior_consumed();
+}
+
+#[tokio::test]
+async fn test_restart_reprocesses_resume_block_idempotently() {
+    // 1. Save updates 0..=8, which prunes their candidates, then restart from update 8's block.
+    let (fixture, scenario, state) = run_multi_tick_da_scenario_first_tick().await;
+    assert!(fixture.recovered_da_blobs().is_empty());
+    let writes_after_setup = fixture.recovered_da_write_attempts();
+    let snapshot_before_restart = fixture
+        .saved_snapshot()
+        .expect("the first tick saves verified progress");
+    drop(state);
+    let mut restarted_state = fixture.restart_verifier_service_state();
+
+    // 2. Process the first resumed tick. The inclusive scan covers update 8's completion and
+    // update 9's commit, but the incomplete update 9 envelope emits no blob, so only update 8 is
+    // written again.
+    restarted_state
+        .handle_tick()
+        .await
+        .expect("resumed tick processing succeeds");
+
+    // 3. Show inclusive recovery emits and restores update 8's pruned candidate.
+    let writes = fixture.recovered_da_write_attempts();
+    let writes_after_restart = &writes[writes_after_setup.len()..];
+    assert_eq!(writes_after_restart.len(), 1);
+    assert_eq!(
+        writes_after_restart[0].outcome(),
+        RecoveredDaWriteOutcome::Succeeded
+    );
+    assert_one_recovered_blob(
+        writes_after_restart[0].blobs(),
+        &scenario.updates[8],
+        scenario.first_tick_completion_blocks.update_8,
+    );
+    assert_one_recovered_blob(
+        &fixture.recovered_da_blobs(),
+        &scenario.updates[8],
+        scenario.first_tick_completion_blocks.update_8,
+    );
+    assert_eq!(fixture.saved_snapshot(), Some(snapshot_before_restart));
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&restarted_state);
+    assert_eq!(status.next_update_seq_no, 9);
+}
+
+#[tokio::test]
+async fn test_restart_rebuilds_cross_block_da_extraction() {
+    // 1. Save updates 0..=8 while update 9's commit and first reveal are reorg-safe, then restart.
+    let (fixture, scenario, state) = run_multi_tick_da_scenario_first_tick().await;
+    let previous_snapshot = fixture
+        .saved_snapshot()
+        .expect("the first tick saves verified progress");
+    let saves_after_setup = fixture.snapshot_save_attempts();
+    drop(state);
+    let mut restarted_state = fixture.restart_verifier_service_state();
+
+    // 2. Process the first resumed tick so inclusive recovery rebuilds update 9's partial envelope.
+    restarted_state
+        .handle_tick()
+        .await
+        .expect("resumed tick processing succeeds");
+    assert_one_recovered_blob(
+        &fixture.recovered_da_blobs(),
+        &scenario.updates[8],
+        scenario.first_tick_completion_blocks.update_8,
+    );
+    assert_eq!(fixture.saved_snapshot(), Some(previous_snapshot.clone()));
+
+    let writes_before_final_reveal = fixture.recovered_da_write_attempts();
+
+    // 3. Mine update 9's final reveal, make its OL account update available, and process again.
+    let update_9_completion =
+        make_multi_tick_update_9_available_for_second_tick(&fixture, &scenario);
+    restarted_state
+        .handle_tick()
+        .await
+        .expect("tick processing succeeds after the final reveal");
+
+    // 4. Show the final reveal completes update 9 from extractor state rebuilt before this scan,
+    // then verify and snapshot it from the restored account-state anchor.
+    let writes = fixture.recovered_da_write_attempts();
+    let writes_after_final_reveal = &writes[writes_before_final_reveal.len()..];
+    assert_eq!(writes_after_final_reveal.len(), 1);
+    // This tick scans from height 146 and sees only the final reveal, so producing the blob
+    // requires the commit and first reveal reconstructed by the preceding resumed tick.
+    assert_one_recovered_blob(
+        writes_after_final_reveal[0].blobs(),
+        &scenario.updates[9],
+        update_9_completion,
+    );
+    assert!(fixture.recovered_da_blobs().is_empty());
+    // Advancing from saved seqno 9 to 10 proves update 9 was applied to the account state restored
+    // through update 8, rather than to a fresh account state.
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&restarted_state);
+    assert_eq!(status.next_update_seq_no, 10);
+    let saves = fixture.snapshot_save_attempts();
+    let saves_after_restart = &saves[saves_after_setup.len()..];
+    assert_eq!(saves_after_restart.len(), 1);
+    assert_eq!(
+        saves_after_restart[0].outcome(),
+        SnapshotSaveOutcome::Succeeded
+    );
+    assert_eq!(
+        saves_after_restart[0]
+            .snapshot()
+            .replay_snapshot
+            .next_update_seq_no(),
+        Seqno::new(10)
+    );
+    assert_eq!(
+        saves_after_restart[0].snapshot().resume_l1_block.height(),
+        MULTI_TICK_UPDATE_9_COMMIT_HEIGHT
+    );
+    assert_eq!(
+        saves_after_restart[0].snapshot().completion_block,
+        update_9_completion
+    );
+    assert_ne!(saves_after_restart[0].snapshot(), &previous_snapshot);
 }
 
 #[tokio::test]
