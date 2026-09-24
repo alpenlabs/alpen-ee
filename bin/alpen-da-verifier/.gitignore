@@ -1,0 +1,8 @@
+# Local run configuration.
+example-config.toml
+
+# Local network parameters.
+alpen-params.json
+
+# Verifier state written at runtime.
+snapshots/
