@@ -4,11 +4,11 @@ use std::{num::NonZeroU32, sync::Arc};
 
 use alpen_acct_state::compute_ee_account_inner_root;
 use alpen_batch_replay::BatchReplaySnapshot;
-use alpen_da_l1_extraction::{DaExtractor, RecoveredDaBlob};
+use alpen_da_l1_extraction::{DaExtractor, DaL1Ref, RecoveredDaBlob};
 use alpen_database::RecoveredDaDbError;
 use alpen_l1_reconstruction::{L1ReconstructionError, L1ReconstructionOutcome};
 use alpen_params::AlpenParams;
-use strata_identifiers::L1Height;
+use strata_identifiers::{L1BlockCommitment, L1Height};
 use strata_snark_acct_types::Seqno;
 use thiserror::Error;
 use tracing::{debug, info, warn};
@@ -17,10 +17,11 @@ use crate::{
     account_state::{
         verify_account_state, OLAccountUpdate, VerifiedAccountState, VerifyAccountStateError,
     },
-    bitcoin::FetchBitcoinTipError,
+    bitcoin::{FetchBitcoinTipError, FetchCommitBlockError},
     context::DaVerifierContext,
     da_extraction::{DaRecoveryDriver, DaRecoveryError},
     evm_state::reconstruct_evm_state,
+    snapshot::SnapshotSaveError,
 };
 
 /// Failure to complete one EE DA verification cycle.
@@ -29,6 +30,10 @@ pub(crate) enum DaVerifierError {
     /// Fetching the current Bitcoin tip failed.
     #[error(transparent)]
     FetchBitcoinTip(#[from] FetchBitcoinTipError),
+
+    /// Looking up the block containing the last applied DA commit failed.
+    #[error(transparent)]
+    FetchCommitBlock(#[from] FetchCommitBlockError),
 
     /// Recovering or persisting EE DA failed.
     #[error(transparent)]
@@ -56,6 +61,10 @@ pub(crate) enum DaVerifierError {
         anchor_next_update_seq_no: Seqno,
         finalized_next_update_seq_no: Seqno,
     },
+
+    /// Persisting the verified state snapshot failed.
+    #[error(transparent)]
+    SaveSnapshot(#[from] SnapshotSaveError),
 }
 
 impl DaVerifierError {
@@ -63,10 +72,12 @@ impl DaVerifierError {
     pub(crate) fn is_recoverable(&self) -> bool {
         match self {
             Self::FetchBitcoinTip(error) => error.is_recoverable(),
+            Self::FetchCommitBlock(error) => error.is_recoverable(),
             Self::DaRecovery(error) => error.is_recoverable(),
             Self::RecoveredDaDb(error) => error.is_recoverable(),
             Self::VerifyAccountState(error) => error.is_recoverable(),
             Self::LaggingFinalizedOLFrontier { .. } => true,
+            Self::SaveSnapshot(error) => error.is_recoverable(),
             Self::Reconstruct(_) => false,
         }
     }
@@ -77,6 +88,8 @@ impl DaVerifierError {
             Self::DaRecovery(error) => error.is_database_failure(),
             Self::RecoveredDaDb(_) => true,
             Self::FetchBitcoinTip(_)
+            | Self::FetchCommitBlock(_)
+            | Self::SaveSnapshot(_)
             | Self::Reconstruct(_)
             | Self::VerifyAccountState(_)
             | Self::LaggingFinalizedOLFrontier { .. } => false,
@@ -205,6 +218,9 @@ struct CompletedDaRecoveryRange {
 struct VerifiedStateAnchor {
     replay_snapshot: BatchReplaySnapshot,
     account_state: VerifiedAccountState,
+    last_batch_l1_ref: DaL1Ref,
+    completion_block: L1BlockCommitment,
+    snapshot_pending: bool,
 }
 
 impl VerifiedStateAnchor {
@@ -270,6 +286,15 @@ impl DaVerificationState {
         if recovered_blobs.is_empty() {
             return Ok(());
         }
+        let completion_block = compute_highest_completion_block(
+            self.verified_state_anchor
+                .as_ref()
+                .map(|anchor| anchor.completion_block),
+            recovered_blobs
+                .iter()
+                .map(|recovered| recovered.l1_ref().completion_block()),
+        )
+        .expect("an OL-attested DA prefix contains at least one recovered blob");
 
         let replay_snapshot = self
             .verified_state_anchor
@@ -292,8 +317,49 @@ impl DaVerificationState {
             initial_account_state,
         )?;
 
-        self.advance_verified_state_anchor(l1_reconstruction_outcome, verified_account_state)?;
+        self.advance_verified_state_anchor(
+            l1_reconstruction_outcome,
+            verified_account_state,
+            completion_block,
+        )?;
+        Ok(())
+    }
 
+    async fn save_verified_state_snapshot(
+        &mut self,
+        context: &impl DaVerifierContext,
+    ) -> Result<(), DaVerifierError> {
+        let Some(anchor) = self
+            .verified_state_anchor
+            .as_ref()
+            .filter(|anchor| anchor.snapshot_pending)
+        else {
+            return Ok(());
+        };
+
+        let resume_l1_block = context
+            .fetch_commit_block(anchor.last_batch_l1_ref.commit_txid())
+            .await?;
+        context.save_reconstruction_snapshot(
+            &anchor.replay_snapshot,
+            &anchor.account_state,
+            resume_l1_block,
+            anchor.completion_block,
+        )?;
+
+        let next_update_seq_no = anchor.next_update_seq_no();
+        if let Err(error) = context.prune_recovered_da_before(next_update_seq_no).await {
+            warn!(
+                %error,
+                next_update_seq_no,
+                "failed to prune recovered EE DA below the saved snapshot boundary"
+            );
+        }
+        self.verified_state_anchor
+            .as_mut()
+            .expect("verified state anchor remains installed after saving")
+            .snapshot_pending = false;
+        info!(next_update_seq_no, "saved verified EE state snapshot");
         Ok(())
     }
 
@@ -369,7 +435,9 @@ impl DaVerificationState {
         &mut self,
         l1_reconstruction_outcome: L1ReconstructionOutcome,
         verified_account_state: VerifiedAccountState,
+        completion_block: L1BlockCommitment,
     ) -> Result<(), DaVerifierError> {
+        let last_batch_l1_ref = l1_reconstruction_outcome.last_batch_l1_ref();
         let batch_replay_outcome = l1_reconstruction_outcome.batch_replay_outcome();
         let last_update_seq_no = batch_replay_outcome.applied_range().last_update_seq_no();
         let next_update_seq_no = last_update_seq_no
@@ -401,6 +469,9 @@ impl DaVerificationState {
         self.verified_state_anchor = Some(VerifiedStateAnchor {
             replay_snapshot,
             account_state: verified_account_state,
+            last_batch_l1_ref,
+            completion_block,
+            snapshot_pending: true,
         });
         Ok(())
     }
@@ -433,12 +504,17 @@ impl<C: DaVerifierContext> DaVerifierServiceState<C> {
 
     /// Advances DA recovery and state verification as far as the current frontiers allow.
     pub(crate) async fn handle_tick(&mut self) -> Result<(), DaVerifierError> {
-        // 1. Decide whether this tick needs to scan reorg-safe L1 blocks.
+        // 1. Persist a verified anchor left pending by an earlier failed save.
+        self.verification_state
+            .save_verified_state_snapshot(self.context.as_ref())
+            .await?;
+
+        // 2. Decide whether this tick needs to scan reorg-safe L1 blocks.
         let recovery_resolution = self.resolve_da_recovery().await?;
 
         match recovery_resolution {
             DaRecoveryResolution::RecoverThrough { reorg_safe_tip } => {
-                // 2. Recover DA through the safe tip and verify each reconstructed prefix.
+                // 3. Recover DA through the safe tip and verify each reconstructed prefix.
                 self.recover_da_and_verify_state(reorg_safe_tip).await?;
             }
             DaRecoveryResolution::VerifyRecoveredDa => {
@@ -589,6 +665,9 @@ impl<C: DaVerifierContext> DaVerifierServiceState<C> {
                 self.verification_state
                     .verification_reached_finalized_ol(frontier)
             });
+        self.verification_state
+            .save_verified_state_snapshot(self.context.as_ref())
+            .await?;
         Ok(())
     }
 
@@ -664,11 +743,24 @@ fn l1_scan_window_end(
         .min(target_height)
 }
 
+/// Computes the highest DA completion block covered by prior and current verified state.
+fn compute_highest_completion_block(
+    previous: Option<L1BlockCommitment>,
+    current: impl IntoIterator<Item = L1BlockCommitment>,
+) -> Option<L1BlockCommitment> {
+    current
+        .into_iter()
+        .chain(previous)
+        .max_by_key(|block| block.height())
+}
+
 #[cfg(test)]
 mod tests {
-    use std::io;
+    use std::{io, path::PathBuf};
 
+    use bitcoin::{hashes::Hash as _, Txid};
     use bitcoind_async_client::error::ClientError;
+    use strata_identifiers::{Buf32, L1BlockId};
 
     use super::*;
     use crate::account_state::OLAccountUpdateError;
@@ -677,6 +769,10 @@ mod tests {
     const TIP: L1Height = 100;
     const SAFE_TIP: L1Height = TIP - SAFE_DEPTH;
     const TEST_SCAN_WINDOW_SIZE: NonZeroU32 = NonZeroU32::new(3).expect("3 is nonzero");
+
+    fn build_l1_commitment(height: L1Height, block_id_byte: u8) -> L1BlockCommitment {
+        L1BlockCommitment::new(height, L1BlockId::from(Buf32::from([block_id_byte; 32])))
+    }
 
     #[test]
     fn test_recovery_waits_when_chain_has_no_reorg_safe_tip() {
@@ -734,7 +830,40 @@ mod tests {
     }
 
     #[test]
-    fn test_bitcoin_tip_recoverability_is_forwarded() {
+    fn test_highest_completion_block_uses_current_window_maximum() {
+        let expected = build_l1_commitment(12, 2);
+
+        let actual = compute_highest_completion_block(
+            Some(build_l1_commitment(10, 0)),
+            [build_l1_commitment(11, 1), expected],
+        );
+
+        assert_eq!(actual, Some(expected));
+    }
+
+    #[test]
+    fn test_highest_completion_block_uses_current_window_without_previous_anchor() {
+        let expected = build_l1_commitment(12, 2);
+
+        let actual = compute_highest_completion_block(None, [build_l1_commitment(11, 1), expected]);
+
+        assert_eq!(actual, Some(expected));
+    }
+
+    #[test]
+    fn test_highest_completion_block_preserves_previous_maximum() {
+        let previous = build_l1_commitment(12, 2);
+
+        let actual = compute_highest_completion_block(
+            Some(previous),
+            [build_l1_commitment(10, 0), build_l1_commitment(11, 1)],
+        );
+
+        assert_eq!(actual, Some(previous));
+    }
+
+    #[test]
+    fn test_recoverable_bitcoin_tip_failure_is_forwarded() {
         let error =
             DaVerifierError::FetchBitcoinTip(FetchBitcoinTipError::Rpc(ClientError::Timeout));
 
@@ -804,12 +933,32 @@ mod tests {
     }
 
     #[test]
-    fn test_deterministic_recovery_failure_is_fatal() {
+    fn test_fatal_recovery_failure_is_forwarded() {
         let error = DaVerifierError::DaRecovery(DaRecoveryError::NonContiguousBlocks {
             expected: 42,
             actual: 43,
         });
 
         assert!(!error.is_recoverable());
+    }
+
+    #[test]
+    fn test_recoverable_snapshot_save_failure_is_forwarded() {
+        let error = DaVerifierError::SaveSnapshot(SnapshotSaveError::Io {
+            operation: "test snapshot operation",
+            path: PathBuf::from("snapshot"),
+            source: io::Error::from_raw_os_error(28),
+        });
+
+        assert!(error.is_recoverable());
+    }
+
+    #[test]
+    fn test_recoverable_commit_block_failure_is_forwarded() {
+        let error = DaVerifierError::FetchCommitBlock(FetchCommitBlockError::Unconfirmed {
+            txid: Txid::all_zeros(),
+        });
+
+        assert!(error.is_recoverable());
     }
 }

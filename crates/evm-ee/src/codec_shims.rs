@@ -87,7 +87,7 @@ pub(crate) fn decode_bytes_with_length(
 /// Bincode is used here as an implementation detail because `MptNode` and
 /// `MptNodeData` are not publicly accessible from `rsp_mpt` (private module),
 /// preventing a custom recursive strata-codec encoding.
-pub(crate) fn encode_ethereum_state(
+pub fn encode_ethereum_state(
     state: &EthereumState,
     enc: &mut impl strata_codec::Encoder,
 ) -> Result<(), CodecError> {
@@ -111,8 +111,10 @@ pub(crate) fn encode_ethereum_state(
     Ok(())
 }
 
-/// Decodes EthereumState.
-pub(crate) fn decode_ethereum_state(
+/// Decodes an [`EthereumState`] using a [`strata_codec::Decoder`].
+///
+/// The caller owns outer framing and any exact-input check.
+pub fn decode_ethereum_state(
     dec: &mut impl strata_codec::Decoder,
 ) -> Result<EthereumState, CodecError> {
     let state_trie_bytes = decode_bytes_with_length(dec)?;

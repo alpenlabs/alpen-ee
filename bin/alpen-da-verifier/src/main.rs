@@ -10,6 +10,7 @@ mod da_extraction;
 mod evm_state;
 mod ol_rpc;
 mod service;
+mod snapshot;
 mod state;
 #[cfg(test)]
 mod tests;
@@ -77,6 +78,7 @@ fn run(args: Args, handle: &Handle) -> anyhow::Result<()> {
             params,
             config,
             args.genesis_l1_height,
+            args.snapshot,
             bitcoin_client,
             recovered_da_db,
             account_update_source,
