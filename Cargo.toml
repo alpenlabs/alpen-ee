@@ -368,6 +368,8 @@ shrex = { version = "1", features = ["serde"] }
 shrex_macros = "1"
 signal-hook = "0.3.18"
 signet-libmdbx = "0.8.3"
+# Read only by `alpen-ee migrate-sled`; the node never opens a sled store.
+sled = "0.34.7"
 tempfile = "3.27.0"
 terrors = "0.3.0"
 thiserror = "2.0.11"
