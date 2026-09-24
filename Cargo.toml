@@ -43,6 +43,7 @@ members = [
 
   # binaries listed separately
   "bin/alpen-client",
+  "bin/alpen-ee-da-tool",
   "bin/prover-perf",
 ]
 

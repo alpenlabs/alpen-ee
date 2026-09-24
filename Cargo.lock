@@ -1372,6 +1372,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "alpen-ee-da-tool"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alpen-ee-da-l1-extraction",
+ "alpen-ee-l1-reconstruction",
+ "alpen-ee-params",
+ "bitcoin",
+ "bitcoind-async-client",
+ "clap",
+ "eyre",
+ "futures",
+ "serde",
+ "serde_json",
+ "strata-btc-types",
+ "strata-common",
+ "strata-config",
+ "strata-identifiers",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml 0.5.11",
+]
+
+[[package]]
 name = "alpen-ee-da-types"
 version = "0.3.0-alpha.1"
 dependencies = [

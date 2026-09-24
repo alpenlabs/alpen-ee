@@ -1,0 +1,36 @@
+[package]
+edition = "2021"
+name = "alpen-ee-da-tool"
+version = "0.3.0-alpha.1"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "alpen-ee-da-tool"
+path = "src/main.rs"
+
+[dependencies]
+alpen-ee-da-l1-extraction.workspace = true
+alpen-ee-l1-reconstruction.workspace = true
+alpen-ee-params.workspace = true
+strata-btc-types.workspace = true
+strata-common = { workspace = true, features = ["async"] }
+strata-config.workspace = true
+strata-identifiers.workspace = true
+
+bitcoin.workspace = true
+bitcoind-async-client.workspace = true
+clap = { workspace = true, features = [
+  "error-context",
+  "help",
+  "std",
+  "usage",
+] }
+eyre.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+toml.workspace = true
