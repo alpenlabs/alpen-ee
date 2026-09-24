@@ -1,6 +1,6 @@
 //! Assembles and launches the EE DA verifier service.
 
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use alpen_da_l1_extraction::{DaExtractor, FetchPolicy, FetchRetryPolicy};
 use alpen_database::RecoveredDaDbOps;
@@ -33,6 +33,7 @@ pub(crate) struct DaVerifierBuilder {
     params: AlpenParams,
     config: DaVerifierConfig,
     genesis_l1_height: L1Height,
+    snapshot_path: PathBuf,
     bitcoin_client: Client,
     recovered_da_db: RecoveredDaDbOps,
     account_update_source: RpcOLAccountUpdateSource,
@@ -44,6 +45,7 @@ impl DaVerifierBuilder {
         params: AlpenParams,
         config: DaVerifierConfig,
         genesis_l1_height: L1Height,
+        snapshot_path: PathBuf,
         bitcoin_client: Client,
         recovered_da_db: RecoveredDaDbOps,
         account_update_source: RpcOLAccountUpdateSource,
@@ -52,6 +54,7 @@ impl DaVerifierBuilder {
             params,
             config,
             genesis_l1_height,
+            snapshot_path,
             bitcoin_client,
             recovered_da_db,
             account_update_source,
@@ -122,6 +125,7 @@ impl DaVerifierBuilder {
             l1_block_fetch_policy,
             self.recovered_da_db,
             self.account_update_source,
+            self.snapshot_path,
         ));
 
         let da_extractor = DaExtractor::new(
