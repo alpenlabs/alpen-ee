@@ -46,6 +46,7 @@ members = [
 
   # binaries listed separately
   "bin/alpen-client",
+  "bin/alpen-da-verifier",
   "bin/dbconsole",
   "bin/openrpc-spec",
   "bin/prover-perf",
@@ -165,6 +166,7 @@ strata-predicate = { git = "https://github.com/alpenlabs/strata-common", feature
 strata-retry = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.6.0" }
 strata-service = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.6.0" }
 strata-ssz-tests = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.6.0" }
+strata-tasks = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.6.0" }
 
 # strata-common-services, pinned by commit. The services shared between the
 # stacks live here; their closure (strata-prover-core, strata-service,
