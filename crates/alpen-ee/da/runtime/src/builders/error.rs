@@ -1,7 +1,6 @@
 //! Error raised while building a DA witness on the host.
 
-use alpen_ee_da_types::DaParseError;
-use strata_codec::CodecError;
+use crate::DaBlobRecoveryError;
 
 /// Error raised while building a [`DaWitness`](alpen_ee_da_types::DaWitness).
 ///
@@ -38,12 +37,9 @@ pub enum DaWitnessBuildError {
         wtxid: String,
         block: String,
     },
-    /// Commit/reveal extraction from the witnessed transactions failed.
-    #[error("extract DA chunks ({0})")]
-    Parse(#[from] DaParseError),
-    /// Decoding the reassembled chunk payloads into a `DaBlob` failed.
-    #[error("reassemble DA blob ({0})")]
-    Reassembly(CodecError),
+    /// Recovering the EE DA blob from its L1 transactions failed.
+    #[error("recover DA blob ({0})")]
+    Recovery(#[from] DaBlobRecoveryError),
     /// The state-diff provider failed to read a block's diff.
     #[error("state-diff read failed for block {block} ({error})")]
     StateDiffProvider { block: String, error: String },

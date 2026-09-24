@@ -1329,6 +1329,7 @@ dependencies = [
  "ssz",
  "strata-acct-types",
  "strata-codec",
+ "strata-codec-utils 0.1.0 (git+https://github.com/alpenlabs/strata-common?tag=v0.4.0-rc.3)",
  "strata-ee-acct-runtime",
  "strata-ee-chain-types",
  "strata-evm-ee",
@@ -1349,8 +1350,6 @@ dependencies = [
  "rkyv_impl 0.2.2",
  "strata-codec",
  "strata-crypto",
- "strata-l1-envelope-fmt",
- "thiserror 2.0.18",
 ]
 
 [[package]]

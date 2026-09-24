@@ -10,9 +10,7 @@ workspace = true
 alpen-reth-statediff.workspace = true
 strata-codec.workspace = true
 strata-crypto.workspace = true
-strata-l1-envelope-fmt.workspace = true
 
 bitcoin.workspace = true
 rkyv.workspace = true
 rkyv_impl.workspace = true
-thiserror.workspace = true
