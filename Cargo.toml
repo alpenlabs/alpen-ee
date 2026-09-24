@@ -13,6 +13,7 @@ members = [
   "crates/alpen-ee/database",
   "crates/alpen-ee/engine",
   "crates/alpen-ee/genesis",
+  "crates/alpen-ee/l1-reconstruction",
   "crates/alpen-ee/ol-tracker",
   "crates/alpen-ee/params",
   "crates/alpen-ee/rpc/api",
@@ -76,6 +77,7 @@ alpen-ee-database = { path = "crates/alpen-ee/database", default-features = fals
 alpen-ee-engine = { path = "crates/alpen-ee/engine" }
 alpen-ee-exec-chain = { path = "crates/alpen-ee/exec-chain" }
 alpen-ee-genesis = { path = "crates/alpen-ee/genesis" }
+alpen-ee-l1-reconstruction = { path = "crates/alpen-ee/l1-reconstruction" }
 alpen-ee-ol-tracker = { path = "crates/alpen-ee/ol-tracker" }
 alpen-ee-params = { path = "crates/alpen-ee/params" }
 alpen-ee-rpc-api = { path = "crates/alpen-ee/rpc/api" }

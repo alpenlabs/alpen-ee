@@ -1475,6 +1475,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "alpen-ee-l1-reconstruction"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alpen-ee-batch-replay",
+ "alpen-ee-da-types",
+ "alpen-reth-statediff",
+ "strata-snark-acct-types",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "alpen-ee-ol-tracker"
 version = "0.3.0-alpha.1"
 dependencies = [
