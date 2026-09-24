@@ -22,7 +22,10 @@ use std::sync::Arc;
 
 use alloy_consensus::BlockHeader as _;
 use alpen_ee_params::{header_spec_version, AlpenSpecId, EvmSpec, HeaderExtra, HeaderExtraError};
-use alpen_reth_evm::base_fee::expected_floored_base_fee;
+use alpen_reth_evm::{
+    base_fee::expected_floored_base_fee,
+    da_fee::{stamped_da_rate_from_extra_data, validate_da_rate_against_parent},
+};
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, FullConsensus, HeaderValidator, ReceiptRootBloom};
 use reth_consensus_common::validation::{
@@ -217,6 +220,14 @@ impl HeaderValidator for AlpenConsensus {
                 "alpen spec version regressed from {parent_version:?} to {version:?}"
             )));
         }
+        let next_rate = HeaderExtra::decode(&header.extra_data)
+            .map_err(consensus_error)?
+            .da_rate();
+        validate_da_rate_against_parent(
+            stamped_da_rate_from_extra_data(&parent.extra_data),
+            next_rate,
+        )
+        .map_err(ConsensusError::other)?;
         version_indexed(&self.inners, version).validate_header_against_parent(header, parent)
     }
 }
@@ -352,6 +363,33 @@ mod tests {
             .expect_err("regressing from v1 to v0 is structurally invalid");
         assert!(
             matches!(&err, ConsensusError::Other(msg) if msg.to_string().contains("regressed")),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn da_rate_increase_above_quote_margin_is_refused() {
+        let consensus = test_consensus();
+        let parent = SealedHeader::seal_slow(valid_header(
+            1,
+            HeaderExtra::new(AlpenSpecId::V1, 1_000).encode().into(),
+        ));
+        let child = |rate| {
+            SealedHeader::seal_slow(Header {
+                parent_hash: parent.hash(),
+                timestamp: 1,
+                ..valid_header(2, HeaderExtra::new(AlpenSpecId::V1, rate).encode().into())
+            })
+        };
+
+        assert!(consensus
+            .validate_header_against_parent(&child(1_100), &parent)
+            .is_ok());
+        let err = consensus
+            .validate_header_against_parent(&child(1_101), &parent)
+            .expect_err("DA rate increases above the quote margin must be invalid");
+        assert!(
+            matches!(&err, ConsensusError::Other(msg) if msg.to_string().contains("exceeds maximum")),
             "{err:?}"
         );
     }

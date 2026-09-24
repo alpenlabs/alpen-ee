@@ -29,6 +29,17 @@ const BPS_DENOMINATOR: u64 = 10_000;
 /// Safety margin used by fee quotes and as the maximum next-block DA-rate increase.
 pub const DA_RATE_SAFETY_MARGIN_BPS: u64 = 1_000;
 
+/// Reports a committed DA rate that exceeds the per-block increase bound.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+#[error(
+    "DA fee rate {next_rate} exceeds maximum {maximum_rate} allowed by parent rate {parent_rate}"
+)]
+pub struct DaRateIncreaseError {
+    parent_rate: u64,
+    next_rate: u64,
+    maximum_rate: u64,
+}
+
 // The constants below are deliberate **upper bounds** on the DA-encoded size of each
 // field (`statediff` `AccountDiff` / `StorageDiff` and their codecs). The DA charge must
 // never *underestimate* the bytes a transaction pushes to L1 — undercharging means the
@@ -208,6 +219,28 @@ pub fn constrain_next_da_rate(parent_rate: Option<u64>, candidate_rate: u64) -> 
     .max(1);
     let maximum_rate = u128::from(parent_rate) + maximum_increase;
     candidate_rate.min(u64::try_from(maximum_rate).unwrap_or(u64::MAX))
+}
+
+/// Validates a committed DA rate against the per-block increase bound.
+///
+/// An unstamped parent is the activation boundary and imposes no bound. Rate decreases are
+/// always valid.
+pub fn validate_da_rate_against_parent(
+    parent_rate: Option<u64>,
+    next_rate: u64,
+) -> Result<(), DaRateIncreaseError> {
+    let Some(parent_rate) = parent_rate else {
+        return Ok(());
+    };
+    let maximum_rate = constrain_next_da_rate(Some(parent_rate), u64::MAX);
+    if next_rate > maximum_rate {
+        return Err(DaRateIncreaseError {
+            parent_rate,
+            next_rate,
+            maximum_rate,
+        });
+    }
+    Ok(())
 }
 
 /// Computes the DA fee to charge, bounded by the caller's unused authorized gas value.

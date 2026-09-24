@@ -14793,6 +14793,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-debug",
  "alpen-ee-da-types",
+ "alpen-ee-params",
  "alpen-reth-evm",
  "alpen-reth-primitives",
  "bincode",
