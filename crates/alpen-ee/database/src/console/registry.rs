@@ -57,6 +57,9 @@ pub enum Range {
     Prefix(String),
 }
 
+/// A visitor over a table's raw entries: encoded key, encoded value.
+pub type RawVisitor<'a> = dyn FnMut(&[u8], &[u8]) -> eyre::Result<()> + 'a;
+
 /// Static description of a table, shown by `.tables` and `.schema`.
 #[derive(Clone, Copy, Debug)]
 pub struct TableInfo {
@@ -113,6 +116,10 @@ pub trait TableReflect: fmt::Debug + Send + Sync {
         limit: Option<usize>,
         visit: &mut dyn FnMut(&str) -> eyre::Result<bool>,
     ) -> eyre::Result<usize>;
+
+    /// Walks the table's raw entries in key order, handing over the encoded
+    /// key and value, for an export that must not decode.
+    fn walk_raw(&self, reader: &Reader<'_>, visit: &mut RawVisitor<'_>) -> eyre::Result<()>;
 
     /// Parses a key as typed and renders it back in its one canonical form.
     ///
@@ -232,6 +239,23 @@ where
             let key = <S::Key as KeyCodec<S>>::decode_key(key)?;
             visit(&key.render())
         })
+    }
+
+    fn walk_raw(&self, reader: &Reader<'_>, visit: &mut RawVisitor<'_>) -> eyre::Result<()> {
+        let mut failed: Option<eyre::Error> = None;
+        reader.walk::<S>(None, Direction::Forward, |key, value| {
+            match visit(key, value) {
+                Ok(()) => Ok(ControlFlow::Continue(())),
+                Err(err) => {
+                    failed = Some(err);
+                    Ok(ControlFlow::Break(()))
+                }
+            }
+        })?;
+        match failed {
+            Some(err) => Err(err),
+            None => Ok(()),
+        }
     }
 
     fn canonical_key(&self, key: &str) -> eyre::Result<String> {
