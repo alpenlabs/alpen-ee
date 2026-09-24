@@ -113,6 +113,15 @@ impl DaRecoveryDriver {
         }
     }
 
+    /// Sets the next L1 height to scan before recovery begins.
+    ///
+    /// Only valid while no write is pending and the extractor is empty, which
+    /// holds during snapshot initialization.
+    pub(crate) fn set_next_l1_height(&mut self, next_l1_height: L1Height) {
+        assert!(self.pending_recovered_da.is_none());
+        self.next_l1_height = next_l1_height;
+    }
+
     /// Returns the next L1 height to process.
     pub(crate) fn next_l1_height(&self) -> L1Height {
         self.next_l1_height

@@ -20,9 +20,14 @@ use crate::{
     account_state::{
         OLAccountUpdate, OLAccountUpdateError, OLAccountUpdateSource, VerifiedAccountState,
     },
-    bitcoin::{fetch_bitcoin_tip_height, FetchBitcoinTipError},
+    bitcoin::{
+        fetch_bitcoin_tip_height, is_l1_block_canonical, CheckL1BlockError, FetchBitcoinTipError,
+    },
     ol_rpc::RpcOLAccountUpdateSource,
-    snapshot::{save_reconstruction_snapshot, SnapshotSaveError},
+    snapshot::{
+        delete_reconstruction_snapshot, load_reconstruction_snapshot, save_reconstruction_snapshot,
+        ReconstructionSnapshot, SnapshotDeleteError, SnapshotLoadError, SnapshotSaveError,
+    },
 };
 
 /// Operations the verifier performs against external systems.
@@ -58,6 +63,9 @@ pub(crate) trait DaVerifierContext: OLAccountUpdateSource + Send + Sync + 'stati
         update_seq_no: u64,
     ) -> impl Future<Output = Result<(), RecoveredDaDbError>> + Send;
 
+    /// Removes all recovered DA.
+    fn clear_recovered_da(&self) -> impl Future<Output = Result<(), RecoveredDaDbError>> + Send;
+
     /// Atomically persists one verified reconstruction snapshot.
     fn save_reconstruction_snapshot(
         &self,
@@ -66,6 +74,20 @@ pub(crate) trait DaVerifierContext: OLAccountUpdateSource + Send + Sync + 'stati
         resume_l1_block: L1BlockCommitment,
         completion_block: L1BlockCommitment,
     ) -> Result<(), SnapshotSaveError>;
+
+    /// Returns whether an L1 block commitment is canonical at its recorded height.
+    fn is_l1_block_canonical(
+        &self,
+        expected: L1BlockCommitment,
+    ) -> impl Future<Output = Result<bool, CheckL1BlockError>> + Send;
+
+    /// Loads the reconstruction snapshot, returning [`None`] when it does not exist.
+    fn load_reconstruction_snapshot(
+        &self,
+    ) -> Result<Option<ReconstructionSnapshot>, SnapshotLoadError>;
+
+    /// Deletes the reconstruction snapshot.
+    fn delete_reconstruction_snapshot(&self) -> Result<(), SnapshotDeleteError>;
 }
 
 /// Production [`DaVerifierContext`], backed by Bitcoin RPC, the
@@ -138,6 +160,27 @@ impl DaVerifierContext for DaVerifierContextImpl {
         update_seq_no: u64,
     ) -> Result<(), RecoveredDaDbError> {
         self.recovered_da_db.prune_before_async(update_seq_no).await
+    }
+
+    async fn clear_recovered_da(&self) -> Result<(), RecoveredDaDbError> {
+        self.recovered_da_db.clear_async().await
+    }
+
+    async fn is_l1_block_canonical(
+        &self,
+        expected: L1BlockCommitment,
+    ) -> Result<bool, CheckL1BlockError> {
+        is_l1_block_canonical(&self.bitcoin_client, expected).await
+    }
+
+    fn load_reconstruction_snapshot(
+        &self,
+    ) -> Result<Option<ReconstructionSnapshot>, SnapshotLoadError> {
+        block_in_place(|| load_reconstruction_snapshot(&self.snapshot_path))
+    }
+
+    fn delete_reconstruction_snapshot(&self) -> Result<(), SnapshotDeleteError> {
+        block_in_place(|| delete_reconstruction_snapshot(&self.snapshot_path))
     }
 
     fn save_reconstruction_snapshot(

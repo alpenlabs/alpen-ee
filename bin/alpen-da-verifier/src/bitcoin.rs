@@ -7,13 +7,16 @@ use bitcoin::Network;
 use bitcoind_async_client::{
     client::Auth, error::ClientError, traits::Reader, Client, ClientResult,
 };
-use strata_identifiers::L1Height;
+use strata_btc_types::BlockHashExt;
+use strata_identifiers::{L1BlockCommitment, L1Height};
 use thiserror::Error;
 
 use crate::{args::BitcoinRpcCredentials, config::BitcoindConfig};
 
 /// Bitcoind RPC error code returned while the node is warming up.
 const BITCOIND_RPC_WARMUP: i32 = -28;
+/// Bitcoind RPC error code returned when `getblockhash` is above the current tip.
+const BITCOIND_RPC_INVALID_PARAMETER: i32 = -8;
 
 /// Failure to fetch the current Bitcoin chain tip.
 #[derive(Debug, Error)]
@@ -51,6 +54,33 @@ pub(crate) enum BitcoinNetworkCheckError {
     /// The RPC server belongs to a different Bitcoin network.
     #[error("configured Bitcoin network {expected} does not match RPC network {actual}")]
     NetworkMismatch { expected: Network, actual: Network },
+}
+
+/// Failure to compare a saved L1 commitment with Bitcoin's canonical chain.
+#[derive(Debug, Error)]
+pub(crate) enum CheckL1BlockError {
+    /// Fetching the canonical block hash failed.
+    #[error("failed to fetch canonical L1 block at height {}: {source}", .expected.height())]
+    FetchBlockHash {
+        expected: L1BlockCommitment,
+        #[source]
+        source: ClientError,
+    },
+}
+
+impl CheckL1BlockError {
+    /// Returns whether a later canonicality check may succeed without intervention.
+    pub(crate) fn is_recoverable(&self) -> bool {
+        match self {
+            Self::FetchBlockHash { source, .. } => {
+                is_recoverable_rpc_error(source)
+                    || matches!(
+                        source,
+                        ClientError::Server(BITCOIND_RPC_INVALID_PARAMETER, _)
+                    )
+            }
+        }
+    }
 }
 
 /// Creates a Bitcoin RPC client from the supplied configuration.
@@ -123,6 +153,17 @@ fn is_recoverable_rpc_error(error: &ClientError) -> bool {
     error.is_retriable() || matches!(error, ClientError::Server(BITCOIND_RPC_WARMUP, _))
 }
 
+/// Returns whether `expected` is canonical at its recorded L1 height.
+pub(crate) async fn is_l1_block_canonical(
+    client: &Client,
+    expected: L1BlockCommitment,
+) -> Result<bool, CheckL1BlockError> {
+    let actual_hash = client
+        .get_block_hash(u64::from(expected.height()))
+        .await
+        .map_err(|source| CheckL1BlockError::FetchBlockHash { expected, source })?;
+    Ok(actual_hash.to_l1_block_id() == *expected.blkid())
+}
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
@@ -208,5 +249,28 @@ mod tests {
                 actual: Network::Bitcoin,
             }
         ));
+    }
+    #[test]
+    fn test_canonicality_failures_follow_rpc_classification() {
+        let expected = L1BlockCommitment::default();
+
+        assert!(CheckL1BlockError::FetchBlockHash {
+            expected,
+            source: ClientError::Timeout,
+        }
+        .is_recoverable());
+        assert!(CheckL1BlockError::FetchBlockHash {
+            expected,
+            source: ClientError::Server(
+                BITCOIND_RPC_INVALID_PARAMETER,
+                "Block height out of range".to_owned(),
+            ),
+        }
+        .is_recoverable());
+        assert!(!CheckL1BlockError::FetchBlockHash {
+            expected,
+            source: ClientError::MissingUserPassword,
+        }
+        .is_recoverable());
     }
 }

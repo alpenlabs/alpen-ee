@@ -1516,6 +1516,7 @@ dependencies = [
  "serde_json",
  "ssz",
  "strata-acct-types",
+ "strata-btc-types",
  "strata-codec",
  "strata-identifiers",
  "strata-l1-envelope-fmt",

@@ -23,6 +23,7 @@ alpen-l1-reconstruction.workspace = true
 alpen-params.workspace = true
 alpen-storage-store.workspace = true
 strata-acct-types.workspace = true
+strata-btc-types.workspace = true
 strata-codec.workspace = true
 strata-identifiers.workspace = true
 strata-logging.workspace = true
