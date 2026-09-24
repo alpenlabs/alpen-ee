@@ -20,6 +20,8 @@ use alpen_ee_ol_tracker::EpochTrackingMode;
 use alpen_ee_params::AlpenParams;
 use alpen_ee_params::AlpenSpecId;
 use serde::{de::Error as DeError, Deserialize, Deserializer, Serialize};
+#[cfg(feature = "sequencer")]
+use strata_config::btcio::FeePolicy;
 use strata_config::{
     btcio::{BroadcasterConfig, L1FeePolicyConfig},
     BitcoindConfig,
@@ -451,6 +453,23 @@ impl SequencerConfig {
             .unwrap_or(self.batch_sealing_block_count)
     }
 
+    /// Checks that the L1 fee policy stays within the broadcaster guardrail.
+    fn validate_l1_fee_config(&self) -> eyre::Result<()> {
+        self.broadcaster
+            .validate()
+            .map_err(|error| eyre::eyre!("invalid sequencer.broadcaster config: {error}"))?;
+
+        if let FeePolicy::Fixed { fee_rate } = self.l1_fee_policy.fee_policy() {
+            eyre::ensure!(
+                *fee_rate <= self.broadcaster.max_fee_rate(),
+                "sequencer.l1_fee_policy.fixed_fee_rate must not exceed \
+                 sequencer.broadcaster.max_fee_rate_sat_vb"
+            );
+        }
+
+        Ok(())
+    }
+
     /// Checks `chunk_sealing_gas_limit` against the genesis block gas limit.
     ///
     /// A chunk has to fit at least one block, so the configured budget must
@@ -518,9 +537,7 @@ impl TryFrom<AlpenClientConfigFile> for AlpenClientConfig {
                         eyre::eyre!("[sequencer] table required when mode = \"sequencer\"")
                     })?;
                     seq.prover.validate()?;
-                    seq.broadcaster.validate().map_err(|error| {
-                        eyre::eyre!("invalid sequencer.broadcaster config: {error}")
-                    })?;
+                    seq.validate_l1_fee_config()?;
                     NodeMode::Sequencer(SequencerMode {
                         config: seq,
                         l1_reorg_safe_depth: raw.l1_reorg_safe_depth,
@@ -810,6 +827,27 @@ mod tests {
         };
 
         assert_eq!(seq.config.broadcaster.max_fee_rate_sat_vb.get(), 250);
+    }
+
+    #[cfg(feature = "sequencer")]
+    #[test]
+    fn sequencer_rejects_fixed_fee_rate_above_broadcast_guardrail() {
+        let toml = SEQUENCER_TOML.replace("fixed_fee_rate = 1.0", "fixed_fee_rate = 1001.0");
+        let err = AlpenClientConfig::from_toml_str(&toml).unwrap_err();
+
+        assert!(err.to_string().contains(
+            "sequencer.l1_fee_policy.fixed_fee_rate must not exceed \
+             sequencer.broadcaster.max_fee_rate_sat_vb"
+        ));
+    }
+
+    #[cfg(feature = "sequencer")]
+    #[test]
+    fn sequencer_accepts_fixed_fee_rate_at_broadcast_guardrail() {
+        let toml = SEQUENCER_TOML.replace("fixed_fee_rate = 1.0", "fixed_fee_rate = 1000.0");
+
+        AlpenClientConfig::from_toml_str(&toml)
+            .expect("fixed fee rate at the broadcast guardrail should be accepted");
     }
 
     /// Each backend names only its own fields, so serde rejects a config
