@@ -45,6 +45,7 @@ members = [
 
   # binaries listed separately
   "bin/alpen-client",
+  "bin/alpen-da-verifier",
   "bin/dbconsole",
   "bin/openrpc-spec",
   "bin/prover-perf",
@@ -156,6 +157,7 @@ strata-predicate = { git = "https://github.com/alpenlabs/strata-common", feature
 ], tag = "v0.4.0" }
 strata-retry = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.4.0" }
 strata-service = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.4.0" }
+strata-tasks = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.4.0" }
 
 # zkaleido
 zkaleido = { git = "https://github.com/alpenlabs/zkaleido", features = [
