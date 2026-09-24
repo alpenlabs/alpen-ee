@@ -21,7 +21,8 @@ pub use dedup::{DaDedupResolver, DedupWitnessResolver};
 pub use error::DaWitnessBuildError;
 use strata_acct_types::Hash;
 
-use self::inclusion::{collect_l1_inclusion_blocks, reassemble_da_blob_from_txs};
+use self::inclusion::collect_l1_inclusion_blocks;
+use crate::payload::recover_ee_da_blob;
 
 /// Builds the DA witness for a batch: the generic L1 tx-inclusion proofs plus the
 /// supplementary dedup witness produced by `resolver`.
@@ -36,9 +37,9 @@ pub async fn build_da_witness(
     btc: &(impl Reader + Sync),
     resolver: &(impl DedupWitnessResolver + Sync),
 ) -> Result<DaWitness, DaWitnessBuildError> {
-    let (blocks, included_txs) = collect_l1_inclusion_blocks(da_refs, btc).await?;
+    let (blocks, included_blocks) = collect_l1_inclusion_blocks(da_refs, btc).await?;
 
-    let blob = reassemble_da_blob_from_txs(&included_txs)?;
+    let blob = recover_ee_da_blob(included_blocks)?;
 
     let block_hashes: Vec<B256> = batch_block_hashes.iter().map(|h| B256::from(h.0)).collect();
     let dedup_da_witness = resolver.resolve_dedup_witness(&blob, &block_hashes).await?;
