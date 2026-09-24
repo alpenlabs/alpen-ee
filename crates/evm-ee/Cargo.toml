@@ -28,7 +28,7 @@ reth-errors.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-evm.workspace = true
 reth-primitives-traits.workspace = true
-reth-trie.workspace = true              # Used for HashedPostState in EvmWriteBatch
+reth-trie.workspace = true                # Used for HashedPostState in EvmWriteBatch
 
 # REVM
 revm.workspace = true
