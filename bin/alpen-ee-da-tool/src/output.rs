@@ -7,7 +7,7 @@ use bitcoin::Txid;
 use serde::Serialize;
 use strata_identifiers::{Buf32, L1BlockCommitment};
 
-use crate::account_state::VerifiedAccountState;
+use crate::account_state::AccountStateVerification;
 
 /// Identifies an applied EVM update and its L1 provenance.
 #[derive(Serialize)]
@@ -70,14 +70,14 @@ impl EeDaVerificationOutcome {
     /// Creates output for successfully reconstructed and verified EE state.
     pub(crate) fn verified(
         reconstruction_outcome: &L1ReconstructionOutcome,
-        verified_account_state: &VerifiedAccountState,
+        account_state_verification: &AccountStateVerification,
         first_commit_block: L1BlockCommitment,
         last_commit_block: L1BlockCommitment,
     ) -> Self {
         let batch_replay_outcome = reconstruction_outcome.batch_replay_outcome();
         let applied_range = batch_replay_outcome.applied_range();
-        let reconstructed_inner_state_root =
-            compute_ee_account_inner_root(verified_account_state.state());
+        let verified_state = account_state_verification.verified_state();
+        let reconstructed_inner_state_root = compute_ee_account_inner_root(verified_state.state());
         Self::Verified(Box::new(EeDaVerificationSummary {
             evm_state_reconstruction: EvmStateReconstructionSummary {
                 first_update: AppliedUpdateRef::new(
@@ -96,9 +96,9 @@ impl EeDaVerificationOutcome {
             },
             ee_account_state_verification: EeAccountStateVerificationSummary {
                 initial_next_inbox_msg_idx: 0,
-                final_next_inbox_msg_idx: verified_account_state.next_inbox_msg_idx(),
+                final_next_inbox_msg_idx: verified_state.next_inbox_msg_idx(),
                 expected_inner_state_root: Buf32::new(
-                    verified_account_state.expected_inner_state_root().0,
+                    account_state_verification.expected_inner_state_root().0,
                 ),
                 reconstructed_inner_state_root: Buf32::new(reconstructed_inner_state_root.0),
             },

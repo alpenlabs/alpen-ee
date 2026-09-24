@@ -28,6 +28,10 @@ pub(crate) struct Args {
     /// Last Bitcoin block height to scan, inclusive.
     #[arg(long)]
     pub(crate) end_height: L1Height,
+
+    /// Path to write the reconstruction snapshot.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) snapshot: Option<PathBuf>,
 }
 
 pub(crate) fn load_alpen_params(path: impl AsRef<Path>) -> eyre::Result<AlpenParams> {

@@ -50,23 +50,19 @@ pub(crate) trait OLAccountUpdateSource: Send + Sync {
     ) -> eyre::Result<OLAccountUpdate>;
 }
 
-/// Verified EE account state and metadata describing this verification run.
+/// Verified EE account state and the inbox cursor needed to continue verification.
+#[derive(Debug)]
 pub(crate) struct VerifiedAccountState {
     state: EeAccountState,
     next_inbox_msg_idx: u64,
-    expected_inner_state_root: Hash,
 }
 
 impl VerifiedAccountState {
-    fn new(
-        state: EeAccountState,
-        next_inbox_msg_idx: u64,
-        expected_inner_state_root: Hash,
-    ) -> Self {
+    /// Creates verified account state at the supplied inbox cursor.
+    pub(crate) fn new(state: EeAccountState, next_inbox_msg_idx: u64) -> Self {
         Self {
             state,
             next_inbox_msg_idx,
-            expected_inner_state_root,
         }
     }
 
@@ -75,9 +71,29 @@ impl VerifiedAccountState {
         &self.state
     }
 
-    /// Returns the inbox cursor after this verification run.
+    /// Returns the next inbox message index.
     pub(crate) fn next_inbox_msg_idx(&self) -> u64 {
         self.next_inbox_msg_idx
+    }
+}
+
+/// Verified account state and the final OL root checked during this run.
+pub(crate) struct AccountStateVerification {
+    verified_state: VerifiedAccountState,
+    expected_inner_state_root: Hash,
+}
+
+impl AccountStateVerification {
+    fn new(verified_state: VerifiedAccountState, expected_inner_state_root: Hash) -> Self {
+        Self {
+            verified_state,
+            expected_inner_state_root,
+        }
+    }
+
+    /// Returns the verified account state after this run.
+    pub(crate) fn verified_state(&self) -> &VerifiedAccountState {
+        &self.verified_state
     }
 
     /// Returns the final EE account inner-state root published by OL.
@@ -124,7 +140,6 @@ enum AccountStateVerificationError {
 struct GenesisAccountVerifier {
     state: EeAccountState,
     next_inbox_msg_idx: u64,
-    expected_inner_state_root: Option<Hash>,
 }
 
 impl GenesisAccountVerifier {
@@ -132,7 +147,6 @@ impl GenesisAccountVerifier {
         Self {
             state: build_genesis_ee_account_state(params),
             next_inbox_msg_idx: 0,
-            expected_inner_state_root: None,
         }
     }
 
@@ -170,19 +184,11 @@ impl GenesisAccountVerifier {
         })?;
 
         self.next_inbox_msg_idx = manifest.new_next_msg_idx();
-        self.expected_inner_state_root = Some(manifest.expected_inner_state_root());
         Ok(())
     }
 
     fn into_verified_state(self) -> VerifiedAccountState {
-        let expected_inner_state_root = self
-            .expected_inner_state_root
-            .expect("batch replay outcome contains at least one applied root");
-        VerifiedAccountState::new(
-            self.state,
-            self.next_inbox_msg_idx,
-            expected_inner_state_root,
-        )
+        VerifiedAccountState::new(self.state, self.next_inbox_msg_idx)
     }
 }
 
@@ -190,10 +196,11 @@ pub(crate) async fn verify_account_state_from_genesis(
     params: &AlpenParams,
     batch_replay_outcome: &BatchReplayOutcome,
     source: &impl OLAccountUpdateSource,
-) -> eyre::Result<VerifiedAccountState> {
+) -> eyre::Result<AccountStateVerification> {
     let account_id = params.strata_exec_account_id();
     let mut verifier = GenesisAccountVerifier::new(params);
     let progress = EeAccountVerificationProgress::new(batch_replay_outcome.applied_roots().len());
+    let mut expected_inner_state_root = None;
 
     for applied_batch_root in batch_replay_outcome.applied_roots() {
         let update_seq_no = applied_batch_root.update_seq_no();
@@ -203,40 +210,26 @@ pub(crate) async fn verify_account_state_from_genesis(
             .await?;
         progress.verifying_update(update_seq_no);
         verifier.apply_update(applied_batch_root, &update)?;
+        expected_inner_state_root = Some(update.manifest().expected_inner_state_root());
         progress.update_verified(update_seq_no);
     }
 
     progress.finish();
-    Ok(verifier.into_verified_state())
+    let expected_inner_state_root =
+        expected_inner_state_root.expect("batch replay outcome contains at least one applied root");
+    Ok(AccountStateVerification::new(
+        verifier.into_verified_state(),
+        expected_inner_state_root,
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use alpen_ee_acct_state::compute_ee_account_inner_root;
-    use alpen_ee_batch_replay::{replay_from_genesis, EvmReplayBatch};
-    use alpen_ee_da_types::EvmHeaderSummary;
-    use alpen_reth_statediff::BatchStateDiff;
     use strata_ee_acct_types::UpdateExtraData;
 
     use super::*;
-
-    fn replay_empty_batch() -> BatchReplayOutcome {
-        replay_from_genesis(
-            [],
-            [EvmReplayBatch::new(
-                Seqno::zero(),
-                EvmHeaderSummary {
-                    block_num: 1,
-                    timestamp: 1,
-                    base_fee: 1,
-                    gas_used: 0,
-                    gas_limit: 1,
-                },
-                BatchStateDiff::new(),
-            )],
-        )
-        .expect("batch replays")
-    }
+    use crate::test_utils::replay_empty_batch;
 
     fn build_account_update(
         update_seq_no: Seqno,
@@ -284,10 +277,6 @@ mod tests {
         let verified_state = verifier.into_verified_state();
         assert_eq!(verified_state.state(), &expected_state);
         assert_eq!(verified_state.next_inbox_msg_idx(), 0);
-        assert_eq!(
-            verified_state.expected_inner_state_root(),
-            compute_ee_account_inner_root(&expected_state)
-        );
     }
 
     #[test]

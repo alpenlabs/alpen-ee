@@ -9,6 +9,9 @@ mod evm_state;
 mod ol_rpc;
 mod output;
 mod progress;
+mod snapshot;
+#[cfg(test)]
+mod test_utils;
 
 use clap::Parser;
 
@@ -24,6 +27,7 @@ use crate::{
     ol_rpc::RpcOLAccountUpdateSource,
     output::{emit, EeDaVerificationOutcome},
     progress::StageProgress,
+    snapshot::save_reconstruction_snapshot,
 };
 
 #[tokio::main]
@@ -54,7 +58,7 @@ async fn main() -> eyre::Result<()> {
     };
 
     let account_update_source = RpcOLAccountUpdateSource::try_new(config.ol_rpc_url())?;
-    let verified_account_state = verify_account_state_from_genesis(
+    let account_state_verification = verify_account_state_from_genesis(
         &params,
         reconstruction_outcome.batch_replay_outcome(),
         &account_update_source,
@@ -71,9 +75,16 @@ async fn main() -> eyre::Result<()> {
     } else {
         fetch_transaction_block_commitment(&bitcoin_client, last_batch_l1_ref.commit_txid()).await?
     };
+    if let Some(snapshot_path) = args.snapshot.as_deref() {
+        save_reconstruction_snapshot(
+            snapshot_path,
+            reconstruction_outcome.batch_replay_outcome(),
+            account_state_verification.verified_state(),
+        )?;
+    }
     let output = EeDaVerificationOutcome::verified(
         &reconstruction_outcome,
-        &verified_account_state,
+        &account_state_verification,
         first_commit_block,
         last_commit_block,
     );
