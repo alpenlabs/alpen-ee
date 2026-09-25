@@ -2,8 +2,8 @@
 //!
 //! Three managers, all wrapping the shared [`EeProverDbMdbx`]:
 //!
-//! - [`EeProverTaskDbManager`] — impls `paas::TaskStore`. Shared across chunk + acct provers via
-//!   the kind-tagged task-key encoding (see `CHUNK_TASK_KEY_TAG` / `BATCH_TASK_KEY_TAG`).
+//! - [`EeTaskStore`] — impls `paas::TaskStore` over one task table for one resident spec version.
+//!   The chunk prover gets an [`EeChunkTaskStore`], the acct prover an [`EeAcctTaskStore`].
 //! - [`EeChunkReceiptStore`] — impls `paas::ReceiptStore`. The chunk prover writes here; the acct
 //!   `fetch_input` reads from here.
 //! - [`EeBatchProofDbManager`] — typed API keyed by [`BatchId`]; the outer (acct) prover writes
@@ -20,12 +20,12 @@
 //! so calls from async contexts don't block meaningfully. No threadpool
 //! layer for now — add one if this shows up in profiling.
 
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 
-use alpen_ee_common::{BatchId, Proof, ProofId};
-use alpen_ee_database::EeProverDbMdbx;
+use alpen_ee_common::{decode_chunk_task_key, BatchId, Proof, ProofId};
+use alpen_ee_database::{BatchTaskKey, ChunkTaskKey, EeProverDbMdbx, ProverTaskKey};
 use alpen_ee_params::AlpenSpecId;
-use strata_db_types::{errors::DbError, prover_task::ProverTaskDatabase};
+use strata_db_types::errors::DbError;
 use strata_paas::{
     ProverError, ProverResult, ReceiptStore, TaskRecord, TaskRecordData, TaskStatus, TaskStore,
 };
@@ -38,48 +38,87 @@ fn db_err(e: DbError) -> ProverError {
     }
 }
 
-/// MDBX-backed shared prover task store.
+/// Task store of one prover kind for one resident spec version.
 ///
-/// Both chunk and acct provers hold an `Arc<Self>` and pass it to
-/// `ProverBuilder::task_store(...)`. Task keys carry a single-byte
-/// kind tag (`b'c'` / `b'a'`) inside their `Task::into()` encoding,
-/// so entries from the two provers don't collide in the shared tree.
-#[derive(Debug, Clone)]
-pub(crate) struct EeProverTaskDbManager {
+/// paas hands over the bare task bytes its `Task::into()` produced; this
+/// store adds the version to select the row, so `tick`/`recover` in
+/// `strata-paas`, which re-spawn work by listing the store, only ever see
+/// the tasks this version's prover submitted. Without that scoping, one
+/// resident version's poll loop could claim and sign a task meant for
+/// another, proving it with the wrong VK. `K` selects the table, so a chunk
+/// store never lists acct tasks and vice versa.
+#[derive(Debug)]
+pub(crate) struct EeTaskStore<K> {
     db: Arc<EeProverDbMdbx>,
+    spec_version: AlpenSpecId,
+    _key: PhantomData<K>,
 }
 
-impl EeProverTaskDbManager {
-    pub(crate) fn new(db: Arc<EeProverDbMdbx>) -> Self {
-        Self { db }
+/// The chunk prover's task store.
+pub(crate) type EeChunkTaskStore = EeTaskStore<ChunkTaskKey>;
+
+/// The acct prover's task store.
+pub(crate) type EeAcctTaskStore = EeTaskStore<BatchTaskKey>;
+
+impl<K> Clone for EeTaskStore<K> {
+    fn clone(&self) -> Self {
+        Self {
+            db: self.db.clone(),
+            spec_version: self.spec_version,
+            _key: PhantomData,
+        }
+    }
+}
+
+impl<K: ProverTaskKey> EeTaskStore<K> {
+    pub(crate) fn new(db: Arc<EeProverDbMdbx>, spec_version: AlpenSpecId) -> Self {
+        Self {
+            db,
+            spec_version,
+            _key: PhantomData,
+        }
     }
 
-    fn modify<F>(&self, key: &[u8], f: F) -> ProverResult<()>
+    fn key(&self, bytes: &[u8]) -> ProverResult<K> {
+        K::from_task_bytes(self.spec_version, bytes)
+            .map_err(|e| ProverError::Storage(format!("task key {bytes:?}: {e}")))
+    }
+
+    fn record(key: K, data: TaskRecordData) -> TaskRecord {
+        TaskRecord::from_parts(key.task_bytes(), data)
+    }
+
+    fn modify<F>(&self, bytes: &[u8], f: F) -> ProverResult<()>
     where
         F: FnOnce(&mut TaskRecordData),
     {
+        let key = self.key(bytes)?;
         let mut data = self
             .db
-            .get_task(key.to_vec())
+            .get_task(&key)
             .map_err(db_err)?
-            .ok_or_else(|| ProverError::TaskNotFound(format!("{:?}", key)))?;
+            .ok_or_else(|| ProverError::TaskNotFound(format!("{bytes:?}")))?;
         f(&mut data);
-        self.db.put_task(key.to_vec(), data).map_err(db_err)
+        self.db.put_task(&key, data).map_err(db_err)
     }
 }
 
-impl TaskStore for EeProverTaskDbManager {
+impl<K: ProverTaskKey> TaskStore for EeTaskStore<K> {
     fn get(&self, key: &[u8]) -> ProverResult<Option<TaskRecord>> {
-        let stored = self.db.get_task(key.to_vec()).map_err(db_err)?;
+        let stored = self.db.get_task(&self.key(key)?).map_err(db_err)?;
         Ok(stored.map(|data| TaskRecord::from_parts(key.to_vec(), data)))
     }
 
     fn insert(&self, record: TaskRecord) -> ProverResult<()> {
-        let (key, data) = (record.key().to_vec(), record.data().clone());
-        self.db.insert_task(key.clone(), data).map_err(|e| match e {
-            DbError::EntryAlreadyExists => ProverError::TaskAlreadyExists(format!("{:?}", key)),
-            other => ProverError::Storage(other.to_string()),
-        })
+        let key = self.key(record.key())?;
+        self.db
+            .insert_task(&key, record.data().clone())
+            .map_err(|e| match e {
+                DbError::EntryAlreadyExists => {
+                    ProverError::TaskAlreadyExists(format!("{:?}", record.key()))
+                }
+                other => ProverError::Storage(other.to_string()),
+            })
     }
 
     fn update_status(&self, key: &[u8], status: TaskStatus) -> ProverResult<()> {
@@ -99,125 +138,23 @@ impl TaskStore for EeProverTaskDbManager {
     }
 
     fn list_retriable(&self, now_secs: u64) -> ProverResult<Vec<TaskRecord>> {
-        let items = self.db.list_retriable(now_secs).map_err(db_err)?;
-        Ok(items
-            .into_iter()
-            .map(|(k, d)| TaskRecord::from_parts(k, d))
-            .collect())
+        let items = self
+            .db
+            .list_retriable_tasks::<K>(self.spec_version, now_secs)
+            .map_err(db_err)?;
+        Ok(items.into_iter().map(|(k, d)| Self::record(k, d)).collect())
     }
 
     fn list_unfinished(&self) -> ProverResult<Vec<TaskRecord>> {
-        let items = self.db.list_unfinished().map_err(db_err)?;
-        Ok(items
-            .into_iter()
-            .map(|(k, d)| TaskRecord::from_parts(k, d))
-            .collect())
+        let items = self
+            .db
+            .list_unfinished_tasks::<K>(self.spec_version)
+            .map_err(db_err)?;
+        Ok(items.into_iter().map(|(k, d)| Self::record(k, d)).collect())
     }
 
     fn count(&self) -> ProverResult<usize> {
-        self.db.count_tasks().map_err(db_err)
-    }
-}
-
-/// Scopes a shared [`TaskStore`] to the tasks submitted for one resident
-/// spec version.
-///
-/// Chunk and acct tasks for every resident `--prover-program` candidate
-/// share one physical MDBX table ([`EeProverTaskDbManager`]'s doc comment).
-/// That's fine for `get`/`insert`/`update_status`, which are always called
-/// with a specific key. But `Prover::tick`/`recover` (in `strata-paas`)
-/// re-spawn work by scanning the *entire* task store for retriable/
-/// unfinished records, with no notion of which resident version's `Prover`
-/// submitted a given task. If two versions' `Prover<H>` instances shared
-/// that store directly, either one's background poll loop could claim and
-/// sign a task meant for the other -- proving it with the wrong VK. This
-/// wrapper prefixes every physical key with the version's discriminant
-/// before touching the shared store, and strips the prefix back off before
-/// handing records to paas, so `decode_task_key::<H>` still sees exactly
-/// the bytes `H::Task::into()` produced: each version's `tick`/`recover`
-/// only ever observes its own tasks.
-#[derive(Clone)]
-pub(crate) struct VersionedTaskStore {
-    inner: Arc<dyn TaskStore>,
-    prefix: [u8; 2],
-}
-
-impl VersionedTaskStore {
-    pub(crate) fn new(inner: Arc<dyn TaskStore>, version: AlpenSpecId) -> Self {
-        Self {
-            inner,
-            prefix: u16::from(version).to_be_bytes(),
-        }
-    }
-
-    fn prefixed(&self, key: &[u8]) -> Vec<u8> {
-        let mut prefixed = Vec::with_capacity(self.prefix.len() + key.len());
-        prefixed.extend_from_slice(&self.prefix);
-        prefixed.extend_from_slice(key);
-        prefixed
-    }
-
-    /// Strips this instance's prefix off a record fetched from the shared
-    /// store, or `None` if the record belongs to a different version.
-    fn strip_prefix(&self, record: TaskRecord) -> Option<TaskRecord> {
-        let stripped = record.key().strip_prefix(self.prefix.as_slice())?.to_vec();
-        Some(TaskRecord::from_parts(stripped, record.data().clone()))
-    }
-}
-
-impl TaskStore for VersionedTaskStore {
-    fn get(&self, key: &[u8]) -> ProverResult<Option<TaskRecord>> {
-        Ok(self
-            .inner
-            .get(&self.prefixed(key))?
-            .map(|record| TaskRecord::from_parts(key.to_vec(), record.data().clone())))
-    }
-
-    fn insert(&self, record: TaskRecord) -> ProverResult<()> {
-        let prefixed_key = self.prefixed(record.key());
-        self.inner
-            .insert(TaskRecord::from_parts(prefixed_key, record.data().clone()))
-    }
-
-    fn update_status(&self, key: &[u8], status: TaskStatus) -> ProverResult<()> {
-        self.inner.update_status(&self.prefixed(key), status)
-    }
-
-    fn set_retry_after(&self, key: &[u8], when_secs: u64) -> ProverResult<()> {
-        self.inner.set_retry_after(&self.prefixed(key), when_secs)
-    }
-
-    fn set_metadata(&self, key: &[u8], data: Vec<u8>) -> ProverResult<()> {
-        self.inner.set_metadata(&self.prefixed(key), data)
-    }
-
-    fn clear_metadata(&self, key: &[u8]) -> ProverResult<()> {
-        self.inner.clear_metadata(&self.prefixed(key))
-    }
-
-    fn list_retriable(&self, now_secs: u64) -> ProverResult<Vec<TaskRecord>> {
-        Ok(self
-            .inner
-            .list_retriable(now_secs)?
-            .into_iter()
-            .filter_map(|record| self.strip_prefix(record))
-            .collect())
-    }
-
-    fn list_unfinished(&self) -> ProverResult<Vec<TaskRecord>> {
-        Ok(self
-            .inner
-            .list_unfinished()?
-            .into_iter()
-            .filter_map(|record| self.strip_prefix(record))
-            .collect())
-    }
-
-    /// Approximate: counts only this version's *unfinished* tasks, since the
-    /// shared store exposes no prefix-scoped total count. Diagnostic-only
-    /// today (nothing in this codebase calls `TaskStore::count`).
-    fn count(&self) -> ProverResult<usize> {
-        Ok(self.list_unfinished()?.len())
+        self.db.count_tasks::<K>(self.spec_version).map_err(db_err)
     }
 }
 
@@ -239,13 +176,17 @@ impl EeChunkReceiptStore {
 
 impl ReceiptStore for EeChunkReceiptStore {
     fn put(&self, key: &[u8], receipt: &ProofReceiptWithMetadata) -> ProverResult<()> {
+        let chunk_id = decode_chunk_task_key(key)
+            .map_err(|e| ProverError::Storage(format!("chunk receipt key {key:?}: {e}")))?;
         self.db
-            .put_chunk_receipt(key.to_vec(), receipt.clone())
+            .put_chunk_receipt(chunk_id, receipt.clone())
             .map_err(db_err)
     }
 
     fn get(&self, key: &[u8]) -> ProverResult<Option<ProofReceiptWithMetadata>> {
-        self.db.get_chunk_receipt(key).map_err(db_err)
+        let chunk_id = decode_chunk_task_key(key)
+            .map_err(|e| ProverError::Storage(format!("chunk receipt key {key:?}: {e}")))?;
+        self.db.get_chunk_receipt(chunk_id).map_err(db_err)
     }
 }
 
