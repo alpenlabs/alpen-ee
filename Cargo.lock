@@ -1390,6 +1390,8 @@ dependencies = [
  "serde",
  "serde_bytes",
  "ssz",
+ "ssz_derive",
+ "ssz_types",
  "strata-acct-types",
  "strata-db-macros",
  "strata-db-tests",

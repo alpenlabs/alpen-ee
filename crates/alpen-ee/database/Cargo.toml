@@ -9,7 +9,12 @@ workspace = true
 [features]
 # Exposes the operator-console core (table registry, row reflection, class
 # model) consumed by the `dbconsole` binary.
-console = ["dep:alloy-primitives"]
+console = [
+  "dep:alloy-primitives",
+  "dep:ssz_derive",
+  "dep:ssz_types",
+  "dep:strata-l1-txfmt",
+]
 # Exposes helpers for constructing and seeding EE stores in downstream tests.
 test-utils = [
   "dep:alloy-primitives",
@@ -47,6 +52,8 @@ borsh.workspace = true
 ciborium.workspace = true
 eyre.workspace = true
 ssz.workspace = true
+ssz_derive = { workspace = true, optional = true }
+ssz_types = { workspace = true, optional = true }
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

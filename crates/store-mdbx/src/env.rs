@@ -508,6 +508,16 @@ impl<'txn> Writer<'txn> {
         Ok(())
     }
 
+    /// Writes an already-encoded entry into the table named `table`.
+    ///
+    /// For a bulk import carrying bytes from another store that are known to
+    /// be this table's encoding; nothing here decodes or checks them.
+    pub fn put_raw(&self, table: &str, key: &[u8], value: &[u8]) -> DbResult<()> {
+        let db = self.txn.open_db(Some(table))?;
+        self.txn.put(db, key, value, WriteFlags::UPSERT)?;
+        Ok(())
+    }
+
     /// Deletes `key`. Returns whether a value was removed.
     pub fn delete<S: Schema>(&self, key: &S::Key) -> DbResult<bool> {
         let db = self.txn.open_db(Some(S::NAME))?;
