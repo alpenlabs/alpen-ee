@@ -18,10 +18,10 @@
 //! encoded witness — has framing owned by whatever produced it rather than by
 //! this store.
 
-use alpen_ee_common::AccessedStateRecord;
+use alpen_ee_common::{AccessedStateRecord, BatchId, ChunkId};
 use alpen_store_mdbx::{
     define_table, define_table_be_key, define_table_borsh, define_table_versioned,
-    define_table_versioned_be_key, impl_be_key_codec, impl_raw_key_codec, impl_unit_value_codec,
+    define_table_versioned_be_key, impl_be_key_codec, impl_unit_value_codec,
     impl_versioned_value_codec, tables, CodecError, KeyCodec, Schema, TableSpec,
 };
 use strata_acct_types::Hash;
@@ -34,6 +34,7 @@ use strata_identifiers::Buf32;
 use strata_paas::TaskRecordData;
 use zkaleido::ProofReceiptWithMetadata;
 
+use super::task_key::{decode_versioned_range, encode_versioned_range, BatchTaskKey, ChunkTaskKey};
 use crate::serialization_types::{
     DBAccountStateAtEpoch, DBBatchId, DBBatchWithStatus, DBChunkId, DBChunkWithStatus,
     DBExecBlockRecord, DBOLBlockId,
@@ -157,21 +158,67 @@ define_table_borsh! {
     (BlockWitnessSchema) Hash => Vec<u8>
 }
 
-// --- Prover-side tables (shared task store + proof receipts) ---
+// --- Prover-side tables (per-kind task stores + proof receipts) ---
 
 define_table! {
-    /// Shared prover task store, keyed by tag-prefixed `ProofSpec::Task` bytes.
+    /// Chunk prover tasks, keyed by [`ChunkTaskKey`]: the resident spec version
+    /// that owns the task, then the chunk's block range.
     ///
-    /// The key is stored verbatim so the documented kind-tag prefixes sort as
-    /// written; the record is serde-only, hence the CBOR payload.
-    (ProverTaskSchema) Vec<u8> => TaskRecordData
+    /// The record is serde-only, hence the CBOR payload.
+    (ChunkProverTaskSchema) ChunkTaskKey => TaskRecordData
 }
-impl_raw_key_codec!(ProverTaskSchema);
-impl_versioned_value_codec!(ProverTaskSchema { 1 => TaskRecordData as cbor });
+impl_versioned_value_codec!(ChunkProverTaskSchema { 1 => TaskRecordData as cbor });
+
+define_table! {
+    /// Acct prover tasks, keyed by [`BatchTaskKey`]: the resident spec version
+    /// that owns the task, then the batch's block range.
+    ///
+    /// The record is serde-only, hence the CBOR payload.
+    (AcctProverTaskSchema) BatchTaskKey => TaskRecordData
+}
+impl_versioned_value_codec!(AcctProverTaskSchema { 1 => TaskRecordData as cbor });
+
+impl KeyCodec<ChunkProverTaskSchema> for ChunkTaskKey {
+    fn encode_key(&self) -> Result<Vec<u8>, CodecError> {
+        Ok(encode_versioned_range(
+            self.spec_version(),
+            self.chunk_id().prev_block(),
+            self.chunk_id().last_block(),
+        ))
+    }
+
+    fn decode_key(bytes: &[u8]) -> Result<Self, CodecError> {
+        let (spec_version, prev_block, last_block) =
+            decode_versioned_range(<ChunkProverTaskSchema as Schema>::NAME, bytes)?;
+        Ok(Self::new(
+            spec_version,
+            ChunkId::from_parts(prev_block, last_block),
+        ))
+    }
+}
+
+impl KeyCodec<AcctProverTaskSchema> for BatchTaskKey {
+    fn encode_key(&self) -> Result<Vec<u8>, CodecError> {
+        Ok(encode_versioned_range(
+            self.spec_version(),
+            self.batch_id().prev_block(),
+            self.batch_id().last_block(),
+        ))
+    }
+
+    fn decode_key(bytes: &[u8]) -> Result<Self, CodecError> {
+        let (spec_version, prev_block, last_block) =
+            decode_versioned_range(<AcctProverTaskSchema as Schema>::NAME, bytes)?;
+        Ok(Self::new(
+            spec_version,
+            BatchId::from_parts(prev_block, last_block),
+        ))
+    }
+}
 
 define_table_versioned! {
-    /// Chunk proof receipts, keyed by chunk task bytes.
-    (ChunkProofReceiptSchema) Vec<u8> => {
+    /// Chunk proof receipts keyed by [`DBChunkId`].
+    (ChunkProofReceiptSchema) DBChunkId => {
         1 => ProofReceiptWithMetadata as borsh,
     }
 }
@@ -253,7 +300,8 @@ pub(crate) fn node_tables() -> Vec<TableSpec> {
 /// The full set of tables backing the EE prover database.
 pub(crate) fn prover_tables() -> Vec<TableSpec> {
     tables![
-        ProverTaskSchema,
+        ChunkProverTaskSchema,
+        AcctProverTaskSchema,
         ChunkProofReceiptSchema,
         AcctProofReceiptSchema,
         AcctProofIdIndexSchema,
@@ -287,7 +335,8 @@ mod tests {
             $check::<BatchByIdxSchema>();
             $check::<ChunkByIdxSchema>();
             $check::<BlockAccessedStateSchema>();
-            $check::<ProverTaskSchema>();
+            $check::<ChunkProverTaskSchema>();
+            $check::<AcctProverTaskSchema>();
             $check::<ChunkProofReceiptSchema>();
             $check::<AcctProofReceiptSchema>();
             $check::<L1BroadcastTxSchema>();

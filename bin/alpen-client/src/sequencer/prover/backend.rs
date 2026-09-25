@@ -45,8 +45,8 @@ const DEFAULT_SP1_DEADLINE_SECS: u64 = 4 * 60 * 60;
 /// one resident spec version. A `ProverBuilder` is single-use
 /// (`.native(host)`/`.remote(host)` consume it), but every resident
 /// candidate needs its own, so the caller hands over factories instead of
-/// pre-built builders. Each factory must give its builder a
-/// [`VersionedTaskStore`](super::VersionedTaskStore) scoped to the passed
+/// pre-built builders. Each factory must give its builder an
+/// [`EeTaskStore`](super::storage::EeTaskStore) scoped to the passed
 /// `AlpenSpecId` — see that type's doc comment for why sharing one task
 /// store across simultaneously-live versions would be unsafe.
 pub(crate) struct EeProverBuilders {
