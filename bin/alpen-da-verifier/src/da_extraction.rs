@@ -46,13 +46,25 @@ pub(crate) enum DaRecoveryError {
 }
 
 impl DaRecoveryError {
-    /// Returns whether a later verification cycle may succeed without intervention.
+    /// Returns whether a later recovery attempt may succeed without intervention.
     pub(crate) fn is_recoverable(&self) -> bool {
         match self {
             Self::FetchBlock(FetchBlockError::RetriesExhausted { .. }) => true,
             Self::Database(error) => error.is_recoverable(),
             Self::FetchRange(_)
             | Self::FetchBlock(FetchBlockError::Client { .. })
+            | Self::NonContiguousBlocks { .. }
+            | Self::IncompleteBlockRange { .. }
+            | Self::TerminalHeight { .. } => false,
+        }
+    }
+
+    /// Returns whether the failure originated from recovered-DA storage.
+    pub(crate) fn is_database_failure(&self) -> bool {
+        match self {
+            Self::Database(_) => true,
+            Self::FetchRange(_)
+            | Self::FetchBlock(_)
             | Self::NonContiguousBlocks { .. }
             | Self::IncompleteBlockRange { .. }
             | Self::TerminalHeight { .. } => false,
@@ -211,6 +223,7 @@ mod tests {
         });
 
         assert!(error.is_recoverable());
+        assert!(!error.is_database_failure());
     }
 
     #[test]
@@ -228,6 +241,7 @@ mod tests {
         let error = DaRecoveryError::Database(RecoveredDaDbError::WorkerCancelled);
 
         assert!(error.is_recoverable());
+        assert!(error.is_database_failure());
     }
 
     #[test]
