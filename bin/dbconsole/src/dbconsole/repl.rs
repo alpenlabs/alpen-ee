@@ -391,7 +391,7 @@ const ROWS_SHOWN: usize = 100;
 
 /// Renders a rhai value for the prompt: maps as `{ k: v, ... }`, arrays with a
 /// row count and at most [`ROWS_SHOWN`] rows, blobs as hex.
-fn render(value: &Dynamic) -> String {
+pub(crate) fn render(value: &Dynamic) -> String {
     if value.is_array() {
         let array = value.clone().cast::<Array>();
         let mut out = format!("[{} rows]", array.len());

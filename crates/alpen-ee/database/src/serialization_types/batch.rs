@@ -10,7 +10,7 @@ use alpen_ee_common::{
 };
 use alpen_ee_params::AlpenSpecId;
 use bitcoin::{hashes::Hash as _, Txid, Wtxid};
-use borsh::{BorshDeserialize, BorshSerialize};
+use borsh::{io, BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 use strata_acct_types::Hash;
 use strata_identifiers::{Buf32, L1BlockCommitment, WtxidsRoot};
@@ -371,5 +371,64 @@ impl DBChunkWithStatus {
         let chunk = self.chunk.into();
         let status = self.status.into();
         (chunk, status)
+    }
+}
+
+/// The batch as the sled binary (alpen 0.3.0) stored it: every field of
+/// [`DBBatch`] except `spec_version`, which did not exist.
+#[cfg(feature = "console")]
+#[derive(BorshSerialize, BorshDeserialize)]
+struct SledEraBatch {
+    idx: u64,
+    prev_block: [u8; 32],
+    last_block: [u8; 32],
+    last_blocknum: u64,
+    inner_blocks: Vec<[u8; 32]>,
+}
+
+/// [`DBBatchWithStatus`] in the sled binary's layout; the status is unchanged.
+#[cfg(feature = "console")]
+#[derive(BorshSerialize, BorshDeserialize)]
+struct SledEraBatchWithStatus {
+    batch: SledEraBatch,
+    status: DBBatchStatus,
+}
+
+#[cfg(feature = "console")]
+impl DBBatchWithStatus {
+    /// Decodes the sled binary's layout, giving the batch the spec version in
+    /// force when it was written, [`AlpenSpecId::V0`].
+    pub(crate) fn from_sled_era(bytes: &[u8]) -> io::Result<Self> {
+        let old = SledEraBatchWithStatus::try_from_slice(bytes)?;
+        Ok(Self {
+            batch: DBBatch {
+                idx: old.batch.idx,
+                prev_block: old.batch.prev_block,
+                last_block: old.batch.last_block,
+                last_blocknum: old.batch.last_blocknum,
+                inner_blocks: old.batch.inner_blocks,
+                spec_version: u16::from(AlpenSpecId::V0),
+            },
+            status: old.status,
+        })
+    }
+
+    /// Encodes in the sled binary's layout; `None` when the batch carries a
+    /// spec version that layout could not express.
+    pub(crate) fn to_sled_era(&self) -> Option<Vec<u8>> {
+        if self.batch.spec_version != u16::from(AlpenSpecId::V0) {
+            return None;
+        }
+        let old = SledEraBatchWithStatus {
+            batch: SledEraBatch {
+                idx: self.batch.idx,
+                prev_block: self.batch.prev_block,
+                last_block: self.batch.last_block,
+                last_blocknum: self.batch.last_blocknum,
+                inner_blocks: self.batch.inner_blocks.clone(),
+            },
+            status: self.status.clone(),
+        };
+        borsh::to_vec(&old).ok()
     }
 }

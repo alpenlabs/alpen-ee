@@ -9,7 +9,7 @@ workspace = true
 [features]
 # Exposes the operator-console core (table registry, row reflection, class
 # model) consumed by the `dbconsole` binary.
-console = ["dep:alloy-primitives"]
+console = ["dep:alloy-primitives", "dep:strata-l1-txfmt"]
 # Exposes helpers for constructing and seeding EE stores in downstream tests.
 test-utils = [
   "dep:alloy-primitives",
