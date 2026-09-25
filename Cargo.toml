@@ -303,6 +303,7 @@ toml = "0.5"
 tower = "0.5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+url = { version = "2.5", features = ["serde"] }
 
 ssz = { git = "https://github.com/alpenlabs/ssz-gen", tag = "v0.17.0" }
 ssz_codegen = { git = "https://github.com/alpenlabs/ssz-gen", tag = "v0.17.0" }
