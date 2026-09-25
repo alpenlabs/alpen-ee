@@ -52,8 +52,7 @@ pub use types::{
     prover::{Proof, ProofId},
     prover_task_key::{
         decode_batch_task_key, decode_chunk_task_key, encode_batch_task_key, encode_chunk_task_key,
-        ProverTaskKeyDecodeError, ProverTaskKeyKind, BATCH_TASK_KEY_TAG, CHUNK_TASK_KEY_TAG,
-        RANGE_TASK_KEY_BYTES,
+        ProverTaskKeyDecodeError, ProverTaskKeyKind, RANGE_TASK_KEY_BYTES,
     },
 };
 pub use utils::{
