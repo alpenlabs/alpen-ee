@@ -2,15 +2,25 @@
 
 use std::{num::NonZeroU32, sync::Arc};
 
-use alpen_da_l1_extraction::DaExtractor;
+use alpen_acct_state::compute_ee_account_inner_root;
+use alpen_batch_replay::BatchReplaySnapshot;
+use alpen_da_l1_extraction::{DaExtractor, RecoveredDaBlob};
+use alpen_database::RecoveredDaDbError;
+use alpen_l1_reconstruction::{L1ReconstructionError, L1ReconstructionOutcome};
+use alpen_params::AlpenParams;
 use strata_identifiers::L1Height;
+use strata_snark_acct_types::Seqno;
 use thiserror::Error;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::{
+    account_state::{
+        verify_account_state, OLAccountUpdate, VerifiedAccountState, VerifyAccountStateError,
+    },
     bitcoin::FetchBitcoinTipError,
     context::DaVerifierContext,
     da_extraction::{DaRecoveryDriver, DaRecoveryError},
+    evm_state::reconstruct_evm_state,
 };
 
 /// Failure to complete one EE DA verification cycle.
@@ -23,6 +33,29 @@ pub(crate) enum DaVerifierError {
     /// Recovering or persisting EE DA failed.
     #[error(transparent)]
     DaRecovery(#[from] DaRecoveryError),
+
+    /// Reading recovered EE DA from storage failed.
+    #[error(transparent)]
+    RecoveredDaDb(#[from] RecoveredDaDbError),
+
+    /// Reconstructing EVM state failed.
+    #[error(transparent)]
+    Reconstruct(#[from] L1ReconstructionError),
+
+    /// Reconstructing or verifying the EE account state failed.
+    #[error(transparent)]
+    VerifyAccountState(#[from] VerifyAccountStateError),
+
+    /// Finalized OL state has not reached the verifier's tracked anchor.
+    #[error(
+        "finalized OL account next sequence {} is behind verifier's tracked next sequence {}",
+        .finalized_next_update_seq_no.inner(),
+        .anchor_next_update_seq_no.inner()
+    )]
+    LaggingFinalizedOLFrontier {
+        anchor_next_update_seq_no: Seqno,
+        finalized_next_update_seq_no: Seqno,
+    },
 }
 
 impl DaVerifierError {
@@ -31,10 +64,27 @@ impl DaVerifierError {
         match self {
             Self::FetchBitcoinTip(error) => error.is_recoverable(),
             Self::DaRecovery(error) => error.is_recoverable(),
+            Self::RecoveredDaDb(error) => error.is_recoverable(),
+            Self::VerifyAccountState(error) => error.is_recoverable(),
+            Self::LaggingFinalizedOLFrontier { .. } => true,
+            Self::Reconstruct(_) => false,
+        }
+    }
+
+    /// Returns whether the failure originated from recovered-DA storage.
+    fn is_database_failure(&self) -> bool {
+        match self {
+            Self::DaRecovery(error) => error.is_database_failure(),
+            Self::RecoveredDaDb(_) => true,
+            Self::FetchBitcoinTip(_)
+            | Self::Reconstruct(_)
+            | Self::VerifyAccountState(_)
+            | Self::LaggingFinalizedOLFrontier { .. } => false,
         }
     }
 }
 
+/// Describes the DA recovery action implied by the current L1 frontier and recovery cursor.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DaRecoveryAction {
     WaitForReorgSafeTip,
@@ -53,11 +103,21 @@ impl DaRecoveryAction {
     }
 }
 
+/// Describes whether the current verifier tick recovers new DA or verifies persisted DA.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DaRecoveryResolution {
+    RecoverThrough { reorg_safe_tip: L1Height },
+    VerifyRecoveredDa,
+}
+
 /// Policy and mutable progress for recovering and persisting EE DA.
 pub(crate) struct DaRecoveryState {
     l1_reorg_safe_depth: u32,
     max_l1_scan_window_size: NonZeroU32,
     driver: DaRecoveryDriver,
+
+    /// Highest L1 height fully processed by recovery, or [`None`] before the first block.
+    recovered_l1_frontier: Option<L1Height>,
 
     /// Published for status only; recomputed from the Bitcoin tip each cycle.
     reorg_safe_tip: Option<L1Height>,
@@ -75,16 +135,19 @@ impl DaRecoveryState {
             l1_reorg_safe_depth,
             max_l1_scan_window_size,
             driver: DaRecoveryDriver::new(extractor, genesis_l1_height),
+            recovered_l1_frontier: None,
             reorg_safe_tip: None,
         }
     }
 
-    /// Recovers EE DA through the current reorg-safe L1 tip.
-    async fn recover_da_to_safe_tip(
+    /// Freezes the reorg-safe L1 target for the current tick.
+    async fn recovery_action(
         &mut self,
         context: &impl DaVerifierContext,
-    ) -> Result<(), DaVerifierError> {
+    ) -> Result<DaRecoveryAction, DaVerifierError> {
+        let previous_next_l1_height = self.driver.next_l1_height();
         self.driver.flush_pending(context).await?;
+        self.update_recovered_l1_frontier(previous_next_l1_height);
 
         let tip_height = context.fetch_bitcoin_tip_height().await?;
         let action = decide_da_recovery_action(
@@ -93,48 +156,252 @@ impl DaRecoveryState {
             self.driver.next_l1_height(),
         );
         self.reorg_safe_tip = action.reorg_safe_tip();
-
-        match action {
-            DaRecoveryAction::WaitForReorgSafeTip => {
-                debug!(
-                    tip_height,
-                    reorg_safe_depth = self.l1_reorg_safe_depth,
-                    "Bitcoin chain has not reached the EE DA recovery depth"
-                );
-                Ok(())
-            }
-            DaRecoveryAction::CaughtUp { reorg_safe_tip } => {
-                debug!(
-                    next_l1_height = self.driver.next_l1_height(),
-                    reorg_safe_tip, "no reorg-safe L1 blocks require EE DA recovery"
-                );
-                Ok(())
-            }
-            DaRecoveryAction::RecoverThrough { reorg_safe_tip } => {
-                self.recover_windows_through(context, reorg_safe_tip).await
-            }
-        }
+        Ok(action)
     }
 
-    async fn recover_windows_through(
+    async fn scan_next_l1_window_and_persist_recovered_da(
         &mut self,
         context: &impl DaVerifierContext,
         reorg_safe_tip: L1Height,
-    ) -> Result<(), DaVerifierError> {
-        while self.driver.next_l1_height() <= reorg_safe_tip {
-            let start_height = self.driver.next_l1_height();
-            let end_height =
-                l1_scan_window_end(start_height, self.max_l1_scan_window_size, reorg_safe_tip);
-            self.driver.recover_through(context, end_height).await?;
+    ) -> Result<CompletedDaRecoveryRange, DaVerifierError> {
+        let start_l1_height = self.driver.next_l1_height();
+        let recovered_l1_frontier = l1_scan_window_end(
+            start_l1_height,
+            self.max_l1_scan_window_size,
+            reorg_safe_tip,
+        );
+        let recovery_result = self
+            .driver
+            .recover_through(context, recovered_l1_frontier)
+            .await;
+        self.update_recovered_l1_frontier(start_l1_height);
+        recovery_result?;
 
-            info!(
-                start_height,
-                end_height,
-                reorg_safe_tip,
-                next_l1_height = self.driver.next_l1_height(),
-                "completed L1 scan window for EE DA recovery"
-            );
+        Ok(CompletedDaRecoveryRange {
+            start_l1_height,
+            recovered_l1_frontier,
+        })
+    }
+
+    fn recovered_l1_frontier(&self) -> Option<L1Height> {
+        self.recovered_l1_frontier
+    }
+
+    fn update_recovered_l1_frontier(&mut self, previous_next_l1_height: L1Height) {
+        let next_l1_height = self.driver.next_l1_height();
+        if next_l1_height > previous_next_l1_height {
+            self.recovered_l1_frontier = next_l1_height.checked_sub(1);
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CompletedDaRecoveryRange {
+    start_l1_height: L1Height,
+    recovered_l1_frontier: L1Height,
+}
+
+/// EVM and account-state anchors tracked after successful OL verification.
+struct VerifiedStateAnchor {
+    replay_snapshot: BatchReplaySnapshot,
+    account_state: VerifiedAccountState,
+}
+
+impl VerifiedStateAnchor {
+    fn next_update_seq_no(&self) -> u64 {
+        *self.replay_snapshot.next_update_seq_no().inner()
+    }
+}
+
+/// Policy and mutable progress for reconstructing and verifying EE state.
+pub(crate) struct DaVerificationState {
+    params: AlpenParams,
+
+    /// Replay and account state at the last OL-verified update, if any.
+    verified_state_anchor: Option<VerifiedStateAnchor>,
+}
+
+impl DaVerificationState {
+    /// Creates verification state that begins replay from genesis.
+    pub(crate) fn new(params: AlpenParams) -> Self {
+        Self {
+            params,
+            verified_state_anchor: None,
+        }
+    }
+
+    /// Returns the next EE update sequence number verification expects.
+    fn next_update_seq_no(&self) -> u64 {
+        self.verified_state_anchor
+            .as_ref()
+            .map_or(0, VerifiedStateAnchor::next_update_seq_no)
+    }
+
+    /// Returns whether verification has reached the finalized OL account frontier.
+    fn verification_reached_finalized_ol(&self, finalized_next_update_seq_no: Seqno) -> bool {
+        self.next_update_seq_no() >= *finalized_next_update_seq_no.inner()
+    }
+
+    /// Reconstructs and verifies the contiguous recovered prefix eligible at an L1 frontier.
+    async fn reconstruct_and_verify_state_from_recovered_da(
+        &mut self,
+        context: &impl DaVerifierContext,
+        recovered_l1_frontier: L1Height,
+        first_unfinalized_update_seq_no_cache: &mut Option<Seqno>,
+    ) -> Result<(), DaVerifierError> {
+        let recovered_blobs = self
+            .load_contiguous_da_prefix(context, recovered_l1_frontier)
+            .await?;
+        if recovered_blobs.is_empty() {
+            debug!(
+                recovered_l1_frontier,
+                "no contiguous EE DA sequence is available for reconstruction"
+            );
+            return Ok(());
+        }
+
+        let (recovered_blobs, account_updates) = self
+            .fetch_finalized_ol_prefix(
+                context,
+                recovered_blobs,
+                first_unfinalized_update_seq_no_cache,
+            )
+            .await?;
+        if recovered_blobs.is_empty() {
+            return Ok(());
+        }
+
+        let replay_snapshot = self
+            .verified_state_anchor
+            .as_ref()
+            .map(|anchor| anchor.replay_snapshot.clone());
+        let initial_account_state = self
+            .verified_state_anchor
+            .as_ref()
+            .map(|anchor| anchor.account_state.clone());
+        let Some(l1_reconstruction_outcome) =
+            reconstruct_evm_state(&self.params, replay_snapshot, recovered_blobs)?
+        else {
+            return Ok(());
+        };
+        let batch_replay_outcome = l1_reconstruction_outcome.batch_replay_outcome();
+        let verified_account_state = verify_account_state(
+            &self.params,
+            batch_replay_outcome,
+            &account_updates,
+            initial_account_state,
+        )?;
+
+        self.advance_verified_state_anchor(l1_reconstruction_outcome, verified_account_state)?;
+
+        Ok(())
+    }
+
+    async fn fetch_finalized_ol_prefix(
+        &self,
+        context: &impl DaVerifierContext,
+        mut recovered_blobs: Vec<RecoveredDaBlob>,
+        first_unfinalized_update_seq_no_cache: &mut Option<Seqno>,
+    ) -> Result<(Vec<RecoveredDaBlob>, Vec<OLAccountUpdate>), DaVerifierError> {
+        let account_id = self.params.strata_exec_account_id();
+        let anchor_next_update_seq_no = Seqno::new(self.next_update_seq_no());
+        let finalized_next_update_seq_no = match *first_unfinalized_update_seq_no_cache {
+            Some(sequence) => sequence,
+            None => {
+                let sequence = context
+                    .fetch_finalized_next_update_seq_no(account_id)
+                    .await
+                    .map_err(
+                        |source| VerifyAccountStateError::FetchFinalizedAccountState { source },
+                    )?;
+                *first_unfinalized_update_seq_no_cache = Some(sequence);
+                sequence
+            }
+        };
+        if finalized_next_update_seq_no < anchor_next_update_seq_no {
+            return Err(DaVerifierError::LaggingFinalizedOLFrontier {
+                anchor_next_update_seq_no,
+                finalized_next_update_seq_no,
+            });
+        }
+
+        let finalized_sequence = *finalized_next_update_seq_no.inner();
+        let available_candidate_count = recovered_blobs
+            .iter()
+            .position(|recovered_blob| recovered_blob.blob().update_seq_no >= finalized_sequence)
+            .unwrap_or(recovered_blobs.len());
+        recovered_blobs.truncate(available_candidate_count);
+
+        let mut account_updates = Vec::new();
+        let mut previous_update_seq_no = None;
+        for recovered_blob in &recovered_blobs {
+            let update_seq_no = Seqno::new(recovered_blob.blob().update_seq_no);
+            if previous_update_seq_no == Some(update_seq_no) {
+                continue;
+            }
+            let update = context
+                .fetch_account_update(account_id, update_seq_no)
+                .await
+                .map_err(|source| VerifyAccountStateError::FetchAccountUpdate {
+                    update_seq_no,
+                    source,
+                })?;
+            account_updates.push(update);
+            previous_update_seq_no = Some(update_seq_no);
+        }
+
+        Ok((recovered_blobs, account_updates))
+    }
+
+    async fn load_contiguous_da_prefix(
+        &self,
+        context: &impl DaVerifierContext,
+        recovered_l1_frontier: L1Height,
+    ) -> Result<Vec<RecoveredDaBlob>, DaVerifierError> {
+        let next_update_seq_no = self.next_update_seq_no();
+        context
+            .get_contiguous_recovered_da(next_update_seq_no, recovered_l1_frontier)
+            .await
+            .map_err(Into::into)
+    }
+
+    fn advance_verified_state_anchor(
+        &mut self,
+        l1_reconstruction_outcome: L1ReconstructionOutcome,
+        verified_account_state: VerifiedAccountState,
+    ) -> Result<(), DaVerifierError> {
+        let batch_replay_outcome = l1_reconstruction_outcome.batch_replay_outcome();
+        let last_update_seq_no = batch_replay_outcome.applied_range().last_update_seq_no();
+        let next_update_seq_no = last_update_seq_no
+            .inner()
+            .checked_add(1)
+            .expect("batch replay rejects terminal update sequence numbers");
+        let last_block_num = batch_replay_outcome.applied_range().last_block_num();
+        let reconstructed_state_root = batch_replay_outcome.final_state_root();
+        let reconstructed_inner_state_root =
+            compute_ee_account_inner_root(verified_account_state.state());
+        info!(
+            last_update_seq_no = *last_update_seq_no.inner(),
+            last_block_num,
+            next_inbox_msg_idx = verified_account_state.next_inbox_msg_idx(),
+            reconstructed_state_root = %reconstructed_state_root,
+            ?reconstructed_inner_state_root,
+            expected_inner_state_root = ?verified_account_state.expected_inner_state_root(),
+            "verified reconstructed EE state against OL"
+        );
+
+        let batch_replay_outcome = l1_reconstruction_outcome.into_batch_replay_outcome();
+        let replay_snapshot = BatchReplaySnapshot::try_new(
+            Seqno::new(next_update_seq_no),
+            last_block_num,
+            reconstructed_state_root,
+            batch_replay_outcome.into_final_state(),
+        )
+        .map_err(L1ReconstructionError::from)?;
+        self.verified_state_anchor = Some(VerifiedStateAnchor {
+            replay_snapshot,
+            account_state: verified_account_state,
+        });
         Ok(())
     }
 }
@@ -143,22 +410,215 @@ impl DaRecoveryState {
 pub(crate) struct DaVerifierServiceState<C> {
     context: Arc<C>,
     recovery_state: DaRecoveryState,
+    verification_state: DaVerificationState,
+
+    /// Records that the next tick must retry verification before scanning another L1 window.
+    retry_verification_before_scan: bool,
 }
 
 impl<C: DaVerifierContext> DaVerifierServiceState<C> {
-    /// Creates verifier state from its DA recovery state.
-    pub(crate) fn new(context: Arc<C>, recovery_state: DaRecoveryState) -> Self {
+    /// Creates verifier state from its recovery and verification components.
+    pub(crate) fn new(
+        context: Arc<C>,
+        recovery_state: DaRecoveryState,
+        verification_state: DaVerificationState,
+    ) -> Self {
         Self {
             context,
             recovery_state,
+            verification_state,
+            retry_verification_before_scan: false,
         }
     }
 
-    /// Advances recovery for one service tick.
+    /// Advances DA recovery and state verification as far as the current frontiers allow.
     pub(crate) async fn handle_tick(&mut self) -> Result<(), DaVerifierError> {
-        self.recovery_state
-            .recover_da_to_safe_tip(self.context.as_ref())
+        // 1. Decide whether this tick needs to scan reorg-safe L1 blocks.
+        let recovery_resolution = self.resolve_da_recovery().await?;
+
+        match recovery_resolution {
+            DaRecoveryResolution::RecoverThrough { reorg_safe_tip } => {
+                // 2. Recover DA through the safe tip and verify each reconstructed prefix.
+                self.recover_da_and_verify_state(reorg_safe_tip).await?;
+            }
+            DaRecoveryResolution::VerifyRecoveredDa => {
+                // 3. Even without new L1 data, verify DA already persisted by an earlier tick.
+                self.reconstruct_and_verify_state_without_da_recovery()
+                    .await?;
+            }
+        }
+
+        // 4. Report the durable recovery and verified-state frontiers reached by this tick.
+        self.log_completed_tick();
+        Ok(())
+    }
+
+    async fn resolve_da_recovery(&mut self) -> Result<DaRecoveryResolution, DaVerifierError> {
+        match self
+            .recovery_state
+            .recovery_action(self.context.as_ref())
             .await
+        {
+            Ok(DaRecoveryAction::RecoverThrough { reorg_safe_tip }) => {
+                Ok(DaRecoveryResolution::RecoverThrough { reorg_safe_tip })
+            }
+            Ok(DaRecoveryAction::WaitForReorgSafeTip) => {
+                debug!(
+                    reorg_safe_depth = self.recovery_state.l1_reorg_safe_depth,
+                    "Bitcoin chain has not reached the EE DA recovery depth"
+                );
+                Ok(DaRecoveryResolution::VerifyRecoveredDa)
+            }
+            Ok(DaRecoveryAction::CaughtUp { reorg_safe_tip }) => {
+                debug!(
+                    next_l1_height = self.recovery_state.driver.next_l1_height(),
+                    reorg_safe_tip, "no reorg-safe L1 blocks require EE DA recovery"
+                );
+                Ok(DaRecoveryResolution::VerifyRecoveredDa)
+            }
+            Err(error) if error.is_recoverable() && !error.is_database_failure() => {
+                warn!(%error, "EE DA recovery failed; verifying already recovered EE DA anyway");
+                Ok(DaRecoveryResolution::VerifyRecoveredDa)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Recovers DA through a frozen L1 tip and verifies every durable recovered prefix.
+    async fn recover_da_and_verify_state(
+        &mut self,
+        reorg_safe_tip: L1Height,
+    ) -> Result<(), DaVerifierError> {
+        // Keep one finalized OL boundary for every reconstruction in this tick.
+        let mut first_unfinalized_update_seq_no_cache = None;
+
+        // OL may have bounded the previous tick. Retry persisted DA before scanning more L1.
+        if self.retry_verification_before_scan {
+            self.reconstruct_and_verify_state_through_current_recovered_l1_frontier(
+                &mut first_unfinalized_update_seq_no_cache,
+            )
+            .await?;
+
+            // Still bounded by OL after the retry, so scanning more L1 cannot help.
+            if self.retry_verification_before_scan {
+                return Ok(());
+            }
+        }
+
+        while self.recovery_state.driver.next_l1_height() <= reorg_safe_tip {
+            let completed_recovery = match self
+                .recovery_state
+                .scan_next_l1_window_and_persist_recovered_da(self.context.as_ref(), reorg_safe_tip)
+                .await
+            {
+                Ok(completed_recovery) => completed_recovery,
+                Err(error) if error.is_recoverable() && !error.is_database_failure() => {
+                    warn!(%error, "EE DA recovery failed; verifying already recovered EE DA before ending the current tick");
+                    self.reconstruct_and_verify_state_through_current_recovered_l1_frontier(
+                        &mut first_unfinalized_update_seq_no_cache,
+                    )
+                    .await?;
+                    break;
+                }
+                Err(error) => return Err(error),
+            };
+
+            self.reconstruct_and_verify_state_through_l1_frontier(
+                completed_recovery.recovered_l1_frontier,
+                &mut first_unfinalized_update_seq_no_cache,
+            )
+            .await?;
+            self.log_completed_da_recovery_range(
+                completed_recovery,
+                reorg_safe_tip,
+                first_unfinalized_update_seq_no_cache,
+            );
+
+            if self.retry_verification_before_scan {
+                break;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn reconstruct_and_verify_state_without_da_recovery(
+        &mut self,
+    ) -> Result<(), DaVerifierError> {
+        let Some(recovered_l1_frontier) = self.recovery_state.recovered_l1_frontier() else {
+            return Ok(());
+        };
+
+        let mut first_unfinalized_update_seq_no_cache = None;
+        self.reconstruct_and_verify_state_through_l1_frontier(
+            recovered_l1_frontier,
+            &mut first_unfinalized_update_seq_no_cache,
+        )
+        .await
+    }
+
+    async fn reconstruct_and_verify_state_through_current_recovered_l1_frontier(
+        &mut self,
+        first_unfinalized_update_seq_no_cache: &mut Option<Seqno>,
+    ) -> Result<(), DaVerifierError> {
+        let Some(recovered_l1_frontier) = self.recovery_state.recovered_l1_frontier() else {
+            return Ok(());
+        };
+
+        self.reconstruct_and_verify_state_through_l1_frontier(
+            recovered_l1_frontier,
+            first_unfinalized_update_seq_no_cache,
+        )
+        .await
+    }
+
+    async fn reconstruct_and_verify_state_through_l1_frontier(
+        &mut self,
+        recovered_l1_frontier: L1Height,
+        first_unfinalized_update_seq_no_cache: &mut Option<Seqno>,
+    ) -> Result<(), DaVerifierError> {
+        self.verification_state
+            .reconstruct_and_verify_state_from_recovered_da(
+                self.context.as_ref(),
+                recovered_l1_frontier,
+                first_unfinalized_update_seq_no_cache,
+            )
+            .await?;
+        self.retry_verification_before_scan =
+            first_unfinalized_update_seq_no_cache.is_some_and(|frontier| {
+                self.verification_state
+                    .verification_reached_finalized_ol(frontier)
+            });
+        Ok(())
+    }
+
+    fn log_completed_da_recovery_range(
+        &self,
+        completed_recovery: CompletedDaRecoveryRange,
+        reorg_safe_tip: L1Height,
+        first_unfinalized_update_seq_no: Option<Seqno>,
+    ) {
+        let first_unfinalized_update_seq_no = first_unfinalized_update_seq_no
+            .filter(|_| self.retry_verification_before_scan)
+            .map(|sequence| *sequence.inner());
+        info!(
+            start_height = completed_recovery.start_l1_height,
+            end_height = completed_recovery.recovered_l1_frontier,
+            reorg_safe_tip,
+            next_l1_height = self.recovery_state.driver.next_l1_height(),
+            next_update_seq_no = self.verification_state.next_update_seq_no(),
+            ?first_unfinalized_update_seq_no,
+            "completed L1 range for EE DA recovery"
+        );
+    }
+
+    fn log_completed_tick(&self) {
+        info!(
+            next_l1_height = self.recovery_state.driver.next_l1_height(),
+            reorg_safe_tip = ?self.recovery_state.reorg_safe_tip,
+            next_update_seq_no = self.verification_state.next_update_seq_no(),
+            "completed EE DA verifier tick"
+        );
     }
 
     /// Returns the next L1 height to process.
@@ -169,6 +629,11 @@ impl<C: DaVerifierContext> DaVerifierServiceState<C> {
     /// Returns the latest reorg-safe L1 tip observed by recovery.
     pub(crate) fn reorg_safe_tip(&self) -> Option<L1Height> {
         self.recovery_state.reorg_safe_tip
+    }
+
+    /// Returns the next EE update sequence number verification expects.
+    pub(crate) fn next_update_seq_no(&self) -> u64 {
+        self.verification_state.next_update_seq_no()
     }
 }
 
@@ -201,9 +666,12 @@ fn l1_scan_window_end(
 
 #[cfg(test)]
 mod tests {
+    use std::io;
+
     use bitcoind_async_client::error::ClientError;
 
     use super::*;
+    use crate::account_state::OLAccountUpdateError;
 
     const SAFE_DEPTH: u32 = 6;
     const TIP: L1Height = 100;
@@ -266,7 +734,7 @@ mod tests {
     }
 
     #[test]
-    fn test_transient_verifier_error_is_recoverable() {
+    fn test_bitcoin_tip_recoverability_is_forwarded() {
         let error =
             DaVerifierError::FetchBitcoinTip(FetchBitcoinTipError::Rpc(ClientError::Timeout));
 
@@ -274,7 +742,69 @@ mod tests {
     }
 
     #[test]
-    fn test_deterministic_verifier_error_is_fatal() {
+    fn test_recoverable_database_failure_is_forwarded() {
+        let error = DaVerifierError::RecoveredDaDb(RecoveredDaDbError::WorkerCancelled);
+
+        assert!(error.is_recoverable());
+    }
+
+    #[test]
+    fn test_fatal_database_failure_is_forwarded() {
+        let error =
+            DaVerifierError::RecoveredDaDb(RecoveredDaDbError::WorkerPanicked("panic".to_owned()));
+
+        assert!(!error.is_recoverable());
+    }
+
+    fn account_update_failure(recoverable: bool) -> DaVerifierError {
+        DaVerifierError::VerifyAccountState(VerifyAccountStateError::FetchAccountUpdate {
+            update_seq_no: Seqno::zero(),
+            source: OLAccountUpdateError::new(
+                io::Error::other("test account update failure"),
+                recoverable,
+            ),
+        })
+    }
+
+    fn finalized_account_state_failure(recoverable: bool) -> DaVerifierError {
+        DaVerifierError::VerifyAccountState(VerifyAccountStateError::FetchFinalizedAccountState {
+            source: OLAccountUpdateError::new(
+                io::Error::other("test finalized account state failure"),
+                recoverable,
+            ),
+        })
+    }
+
+    #[test]
+    fn test_recoverable_account_update_failure_is_forwarded() {
+        let error = account_update_failure(true);
+
+        assert!(error.is_recoverable());
+    }
+
+    #[test]
+    fn test_fatal_account_update_failure_is_forwarded() {
+        let error = account_update_failure(false);
+
+        assert!(!error.is_recoverable());
+    }
+
+    #[test]
+    fn test_recoverable_finalized_account_state_failure_is_forwarded() {
+        let error = finalized_account_state_failure(true);
+
+        assert!(error.is_recoverable());
+    }
+
+    #[test]
+    fn test_fatal_finalized_account_state_failure_is_forwarded() {
+        let error = finalized_account_state_failure(false);
+
+        assert!(!error.is_recoverable());
+    }
+
+    #[test]
+    fn test_deterministic_recovery_failure_is_fatal() {
         let error = DaVerifierError::DaRecovery(DaRecoveryError::NonContiguousBlocks {
             expected: 42,
             actual: 43,
