@@ -1,24 +1,32 @@
 use std::{
     any::Any,
     collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
-    iter,
+    io, iter,
     num::NonZeroU32,
     panic::AssertUnwindSafe,
     sync::{Arc, Mutex, MutexGuard},
 };
 
+use alpen_acct_state::{
+    compute_ee_account_inner_root, EeAccountReconstructionError, EeAccountUpdateManifest,
+};
+use alpen_acct_types::{EeAccountState, UpdateExtraData};
+use alpen_batch_replay::BatchReplaySnapshot;
 use alpen_da_l1_extraction::{
     DaExtractor, DaL1Ref, FetchBlockError, FetchRangeError, L1BlockData, RecoveredDaBlob,
 };
 use alpen_da_provider::prepare_da_chunks;
 use alpen_da_types::{da_blob_version, decode_da_blob, DaBlob, EvmHeaderSummary};
 use alpen_database::RecoveredDaDbError;
+use alpen_genesis::build_genesis_ee_account_state;
+use alpen_l1_reconstruction::{BatchSequenceError, L1ReconstructionError};
 use alpen_params::{AlpenParams, AlpenSpecId};
 use alpen_reth_statediff::{test_utils as statediff_fixtures, BatchStateDiff};
+use async_trait::async_trait;
 use bitcoin::{
     absolute::LockTime,
     block::{self, Header},
-    hashes::Hash,
+    hashes::Hash as _,
     pow::CompactTarget,
     script::Builder,
     secp256k1::XOnlyPublicKey,
@@ -27,16 +35,23 @@ use bitcoin::{
 };
 use bitcoind_async_client::error::ClientError;
 use futures::{stream, FutureExt, Stream};
-use strata_identifiers::{L1BlockCommitment, L1Height};
+use strata_acct_types::{AccountId, Hash};
+use strata_identifiers::{Buf32, L1BlockCommitment, L1BlockId, L1Height};
 use strata_l1_envelope_fmt::{test_utils as commit_reveal_fixtures, MAX_ENVELOPE_PAYLOAD_SIZE};
 use strata_service::{AsyncService, Response, Service};
+use strata_snark_acct_types::Seqno;
 
 use crate::{
+    account_state::{
+        AccountStateVerificationError, OLAccountUpdate, OLAccountUpdateError,
+        OLAccountUpdateSource, VerifyAccountStateError,
+    },
     bitcoin::FetchBitcoinTipError,
     context::DaVerifierContext,
     da_extraction::{DaRecoveryDriver, DaRecoveryError},
+    evm_state::reconstruct_evm_state,
     service::DaVerifierService,
-    state::{DaRecoveryState, DaVerifierError, DaVerifierServiceState},
+    state::{DaRecoveryState, DaVerificationState, DaVerifierError, DaVerifierServiceState},
 };
 
 type L1BlockResults = Vec<Result<L1BlockData, FetchBlockError>>;
@@ -46,12 +61,14 @@ const SEQUENCER_KEY_SEED: u8 = 7;
 const TEST_L1_REORG_SAFE_DEPTH: u32 = 6;
 const TEST_MAX_L1_SCAN_WINDOW_SIZE: NonZeroU32 = NonZeroU32::new(500).expect("500 is nonzero");
 
-// Short-chain recovery scenarios.
+// Short-chain recovery and verification scenarios.
 const TEST_GENESIS_L1_HEIGHT: L1Height = 10;
 /// Completion height when a commit at genesis has every reveal in the next block.
 const TEST_TWO_BLOCK_DA_COMPLETION_HEIGHT: L1Height = TEST_GENESIS_L1_HEIGHT + 1;
 /// Last height a scan may reach, leaving a three-block window from genesis.
 const TEST_REORG_SAFE_TIP: L1Height = TEST_GENESIS_L1_HEIGHT + 2;
+/// Bitcoin tip whose reorg-safe tip is verifier genesis, so recovery scans one block.
+const TEST_ONE_BLOCK_SCAN_BITCOIN_TIP: L1Height = TEST_GENESIS_L1_HEIGHT + TEST_L1_REORG_SAFE_DEPTH;
 
 // Bounded L1 scan-window scenarios.
 const TEST_THREE_BLOCK_L1_SCAN_WINDOW_SIZE: NonZeroU32 = NonZeroU32::new(3).expect("3 is nonzero");
@@ -86,6 +103,7 @@ const MULTI_TICK_UPDATE_9_COMPLETION_HEIGHT: L1Height = MULTI_TICK_UPDATE_9_COMM
 #[derive(Clone)]
 struct TestEeUpdate {
     blob: DaBlob,
+    account_update: OLAccountUpdate,
     commit_txid: Txid,
     commit: Transaction,
     reveals: Vec<Transaction>,
@@ -100,6 +118,10 @@ impl TestEeUpdate {
         self.commit_txid
     }
 
+    fn account_update(&self) -> &OLAccountUpdate {
+        &self.account_update
+    }
+
     fn commit_transaction(&self) -> &Transaction {
         &self.commit
     }
@@ -112,13 +134,17 @@ impl TestEeUpdate {
 struct TestEeSequencer {
     key_seed: u8,
     next_update_seq_no: u64,
+    replay_snapshot: Option<BatchReplaySnapshot>,
+    account_state: EeAccountState,
 }
 
 impl TestEeSequencer {
-    fn new(key_seed: u8) -> Self {
+    fn new(key_seed: u8, params: &AlpenParams) -> Self {
         Self {
             key_seed,
             next_update_seq_no: 0,
+            replay_snapshot: None,
+            account_state: build_genesis_ee_account_state(params),
         }
     }
 
@@ -193,12 +219,71 @@ impl TestEeSequencer {
             reveal.input[0].previous_output.txid = commit_txid;
         }
 
+        let account_update = self.build_matching_account_update(params, &blob, commit_txid);
+
         TestEeUpdate {
             blob,
+            account_update,
             commit_txid,
             commit: transactions.commit,
             reveals: transactions.reveals,
         }
+    }
+
+    fn build_matching_account_update(
+        &mut self,
+        params: &AlpenParams,
+        blob: &DaBlob,
+        commit_txid: Txid,
+    ) -> OLAccountUpdate {
+        let recovered_blob = RecoveredDaBlob::new(
+            DaL1Ref::new(commit_txid, L1BlockCommitment::new(0, Default::default())),
+            blob.clone(),
+        );
+        let reconstruction =
+            reconstruct_evm_state(params, self.replay_snapshot.take(), vec![recovered_blob])
+                .expect("test update should reconstruct")
+                .expect("test update should produce replay output");
+        let replay_outcome = reconstruction.batch_replay_outcome();
+        let applied_root = replay_outcome
+            .applied_roots()
+            .first()
+            .expect("one test update produces one applied root");
+        let update_seq_no = applied_root.update_seq_no();
+        let tip_seed = u8::try_from(update_seq_no.inner() + 1)
+            .expect("test sequence should fit in an execution tip seed");
+        let new_tip_blkid = Hash::new([tip_seed; 32]);
+        let evm_state_root = Hash::new(applied_root.post_state_root().0);
+        self.account_state.set_last_exec_blkid(new_tip_blkid);
+        self.account_state.set_last_exec_state_root(evm_state_root);
+        let manifest = EeAccountUpdateManifest::try_new(
+            update_seq_no,
+            compute_ee_account_inner_root(&self.account_state),
+            0,
+            0,
+            UpdateExtraData::new(new_tip_blkid, evm_state_root, 0, 0),
+        )
+        .expect("test manifest should have valid inbox cursors");
+
+        let last_block_num = replay_outcome.applied_range().last_block_num();
+        let state_root = replay_outcome.final_state_root();
+        let replay_outcome = reconstruction.into_batch_replay_outcome();
+        self.replay_snapshot = Some(
+            BatchReplaySnapshot::try_new(
+                Seqno::new(
+                    update_seq_no
+                        .inner()
+                        .checked_add(1)
+                        .expect("test update sequence should advance"),
+                ),
+                last_block_num,
+                state_root,
+                replay_outcome.into_final_state(),
+            )
+            .expect("test replay snapshot should be valid"),
+        );
+
+        OLAccountUpdate::new(manifest, Vec::new())
     }
 }
 
@@ -255,10 +340,10 @@ fn build_coinbase_tx(height: L1Height) -> Transaction {
 /// Recovery never interprets the diff, but real content is what makes chunk
 /// reassembly observable: a dropped, duplicated or reordered chunk changes the
 /// encoded blob instead of only its header.
-fn build_test_state_diff() -> BatchStateDiff {
+fn build_test_state_diff(seed: u8) -> BatchStateDiff {
     let mut block = statediff_fixtures::block_diff();
-    let account = statediff_fixtures::addr(1);
-    let code_hash = statediff_fixtures::hash(2);
+    let account = statediff_fixtures::addr(seed);
+    let code_hash = statediff_fixtures::hash(seed.wrapping_add(64));
     statediff_fixtures::account_change(
         &mut block,
         account,
@@ -453,15 +538,54 @@ impl InMemoryRecoveredDaStore {
     }
 
     fn blobs(&self) -> Vec<RecoveredDaBlob> {
-        self.blobs
-            .iter()
-            .map(|(&(_, commit_txid), stored)| {
-                let blob = decode_da_blob(&stored.payload_bytes, stored.spec_version)
-                    .expect("mock store contains only encoded DA blobs");
-                RecoveredDaBlob::new(DaL1Ref::new(commit_txid, stored.completion_block), blob)
-            })
-            .collect()
+        self.blobs.iter().map(decode_stored_recovered_da).collect()
     }
+
+    fn get_contiguous_from(
+        &self,
+        first_update_seq_no: u64,
+        recovered_l1_frontier: L1Height,
+    ) -> Vec<RecoveredDaBlob> {
+        let mut expected_update_seq_no = first_update_seq_no;
+        let mut found_eligible_candidate = false;
+        let mut recovered_blobs = Vec::new();
+
+        for (key @ (update_seq_no, _), stored) in self
+            .blobs
+            .iter()
+            .filter(|((sequence, _), _)| *sequence >= first_update_seq_no)
+        {
+            if *update_seq_no > expected_update_seq_no {
+                if !found_eligible_candidate {
+                    break;
+                }
+                let Some(next_expected_update_seq_no) = expected_update_seq_no.checked_add(1)
+                else {
+                    break;
+                };
+                expected_update_seq_no = next_expected_update_seq_no;
+                found_eligible_candidate = false;
+                if *update_seq_no != expected_update_seq_no {
+                    break;
+                }
+            }
+
+            if stored.completion_block.height() <= recovered_l1_frontier {
+                found_eligible_candidate = true;
+                recovered_blobs.push(decode_stored_recovered_da((key, stored)));
+            }
+        }
+
+        recovered_blobs
+    }
+}
+
+fn decode_stored_recovered_da(
+    (&(_, commit_txid), stored): (&RecoveredDaCandidateKey, &StoredRecoveredDaValue),
+) -> RecoveredDaBlob {
+    let blob = decode_da_blob(&stored.payload_bytes, stored.spec_version)
+        .expect("mock store contains only encoded DA blobs");
+    RecoveredDaBlob::new(DaL1Ref::new(commit_txid, stored.completion_block), blob)
 }
 
 fn encode_recovered_da_blob(
@@ -478,12 +602,72 @@ fn encode_recovered_da_blob(
     ))
 }
 
+struct MockOLAccountUpdateSource {
+    account_id: AccountId,
+    updates: BTreeMap<u64, OLAccountUpdate>,
+}
+
+impl MockOLAccountUpdateSource {
+    fn new(account_id: AccountId) -> Self {
+        Self {
+            account_id,
+            updates: BTreeMap::new(),
+        }
+    }
+
+    fn process_sau(&mut self, update: &TestEeUpdate) {
+        let sequence = *update.account_update().manifest().update_seq_no().inner();
+        assert_eq!(
+            sequence,
+            self.updates.len() as u64,
+            "mock OL account processes SAUs in sequence"
+        );
+        assert!(
+            self.updates
+                .insert(sequence, update.account_update().clone())
+                .is_none(),
+            "mock OL account update {sequence} was already processed"
+        );
+    }
+
+    fn next_update_seq_no(&self, account_id: AccountId) -> Seqno {
+        assert_eq!(account_id, self.account_id, "unexpected OL account id");
+        Seqno::new(self.updates.len() as u64)
+    }
+
+    fn fetch_update(
+        &self,
+        account_id: AccountId,
+        update_seq_no: Seqno,
+    ) -> Result<OLAccountUpdate, OLAccountUpdateError> {
+        assert_eq!(account_id, self.account_id, "unexpected OL account id");
+        self.updates
+            .get(update_seq_no.inner())
+            .cloned()
+            .ok_or_else(|| {
+                OLAccountUpdateError::new(
+                    io::Error::new(
+                        io::ErrorKind::NotFound,
+                        format!(
+                            "OL account update {} is not yet available",
+                            update_seq_no.inner()
+                        ),
+                    ),
+                    true,
+                )
+            })
+    }
+}
+
 #[derive(Default)]
 struct InjectedContextBehavior {
     bitcoin_tip_failures: VecDeque<FetchBitcoinTipError>,
     block_fetch_failures: BTreeMap<L1Height, FetchBlockError>,
     l1_block_range_overrides: VecDeque<Result<L1BlockResults, FetchRangeError>>,
     recovered_da_write_failures: VecDeque<RecoveredDaDbError>,
+    recovered_da_read_failures: VecDeque<RecoveredDaDbError>,
+    finalized_frontier_results: VecDeque<Result<Seqno, OLAccountUpdateError>>,
+    ol_update_failures: BTreeMap<u64, OLAccountUpdateError>,
 }
 
 impl InjectedContextBehavior {
@@ -524,6 +708,38 @@ impl InjectedContextBehavior {
         self.recovered_da_write_failures.pop_front()
     }
 
+    fn fail_next_recovered_da_read(&mut self, error: RecoveredDaDbError) {
+        self.recovered_da_read_failures.push_back(error);
+    }
+
+    fn take_next_recovered_da_read_failure(&mut self) -> Option<RecoveredDaDbError> {
+        self.recovered_da_read_failures.pop_front()
+    }
+
+    fn fail_ol_update_at(&mut self, update_seq_no: Seqno, error: OLAccountUpdateError) {
+        assert!(
+            self.ol_update_failures
+                .insert(*update_seq_no.inner(), error)
+                .is_none(),
+            "OL update failure already injected at sequence {}",
+            update_seq_no.inner()
+        );
+    }
+
+    fn override_next_finalized_frontier(&mut self, result: Result<Seqno, OLAccountUpdateError>) {
+        self.finalized_frontier_results.push_back(result);
+    }
+
+    fn take_next_finalized_frontier_override(
+        &mut self,
+    ) -> Option<Result<Seqno, OLAccountUpdateError>> {
+        self.finalized_frontier_results.pop_front()
+    }
+
+    fn take_ol_update_failure(&mut self, update_seq_no: Seqno) -> Option<OLAccountUpdateError> {
+        self.ol_update_failures.remove(update_seq_no.inner())
+    }
+
     fn assert_consumed(&self) {
         assert!(
             self.bitcoin_tip_failures.is_empty(),
@@ -541,6 +757,18 @@ impl InjectedContextBehavior {
             self.recovered_da_write_failures.is_empty(),
             "unconsumed recovered-DA write failures"
         );
+        assert!(
+            self.recovered_da_read_failures.is_empty(),
+            "unconsumed recovered-DA read failures"
+        );
+        assert!(
+            self.finalized_frontier_results.is_empty(),
+            "unconsumed finalized OL sequence results"
+        );
+        assert!(
+            self.ol_update_failures.is_empty(),
+            "unconsumed OL update failures"
+        );
     }
 }
 
@@ -552,6 +780,17 @@ enum ContextOperation {
         end_height: L1Height,
     },
     PutRecoveredDa,
+    GetContiguousRecoveredDa {
+        first_update_seq_no: u64,
+        recovered_l1_frontier: L1Height,
+    },
+    FetchFinalizedAccountState {
+        account_id: AccountId,
+    },
+    FetchAccountUpdate {
+        account_id: AccountId,
+        update_seq_no: Seqno,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -584,6 +823,17 @@ enum ContextEvent {
         end_height: L1Height,
     },
     PutRecoveredDa(RecoveredDaWriteAttempt),
+    GetContiguousRecoveredDa {
+        first_update_seq_no: u64,
+        recovered_l1_frontier: L1Height,
+    },
+    FetchFinalizedAccountState {
+        account_id: AccountId,
+    },
+    FetchAccountUpdate {
+        account_id: AccountId,
+        update_seq_no: Seqno,
+    },
 }
 
 impl ContextEvent {
@@ -598,6 +848,25 @@ impl ContextEvent {
                 end_height: *end_height,
             },
             Self::PutRecoveredDa(_) => ContextOperation::PutRecoveredDa,
+            Self::GetContiguousRecoveredDa {
+                first_update_seq_no,
+                recovered_l1_frontier,
+            } => ContextOperation::GetContiguousRecoveredDa {
+                first_update_seq_no: *first_update_seq_no,
+                recovered_l1_frontier: *recovered_l1_frontier,
+            },
+            Self::FetchFinalizedAccountState { account_id } => {
+                ContextOperation::FetchFinalizedAccountState {
+                    account_id: *account_id,
+                }
+            }
+            Self::FetchAccountUpdate {
+                account_id,
+                update_seq_no,
+            } => ContextOperation::FetchAccountUpdate {
+                account_id: *account_id,
+                update_seq_no: *update_seq_no,
+            },
         }
     }
 }
@@ -610,28 +879,84 @@ impl ContextEventLog {
         self.0.push(event);
     }
 
-    fn operations(&self) -> Vec<ContextOperation> {
-        self.0.iter().map(ContextEvent::operation).collect()
-    }
-
     fn recovered_da_write_attempts(&self) -> Vec<RecoveredDaWriteAttempt> {
         self.0
             .iter()
             .filter_map(|event| match event {
                 ContextEvent::PutRecoveredDa(attempt) => Some(attempt.clone()),
-                ContextEvent::FetchBitcoinTip | ContextEvent::FetchL1BlockRange { .. } => None,
+                ContextEvent::FetchBitcoinTip
+                | ContextEvent::FetchL1BlockRange { .. }
+                | ContextEvent::GetContiguousRecoveredDa { .. }
+                | ContextEvent::FetchFinalizedAccountState { .. }
+                | ContextEvent::FetchAccountUpdate { .. } => None,
             })
             .collect()
     }
+
+    fn recovery_operations(&self) -> Vec<ContextOperation> {
+        self.0
+            .iter()
+            .filter_map(|event| match event {
+                ContextEvent::FetchBitcoinTip
+                | ContextEvent::FetchL1BlockRange { .. }
+                | ContextEvent::PutRecoveredDa(_) => Some(event.operation()),
+                ContextEvent::GetContiguousRecoveredDa { .. }
+                | ContextEvent::FetchFinalizedAccountState { .. }
+                | ContextEvent::FetchAccountUpdate { .. } => None,
+            })
+            .collect()
+    }
+
+    fn recovered_da_read_requests(&self) -> Vec<(u64, L1Height)> {
+        self.0
+            .iter()
+            .filter_map(|event| match event {
+                ContextEvent::GetContiguousRecoveredDa {
+                    first_update_seq_no,
+                    recovered_l1_frontier,
+                } => Some((*first_update_seq_no, *recovered_l1_frontier)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn account_update_requests(&self) -> Vec<(AccountId, Seqno)> {
+        self.0
+            .iter()
+            .filter_map(|event| match event {
+                ContextEvent::FetchAccountUpdate {
+                    account_id,
+                    update_seq_no,
+                } => Some((*account_id, *update_seq_no)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn operations(&self) -> Vec<ContextOperation> {
+        self.0.iter().map(ContextEvent::operation).collect()
+    }
 }
 
-#[derive(Default)]
 struct MockDaVerifierContextState {
     bitcoin: MockBitcoinChain,
     recovered_da: InMemoryRecoveredDaStore,
+    account_update_source: MockOLAccountUpdateSource,
     injected_behavior: InjectedContextBehavior,
     // A unified log preserves ordering across all external capabilities.
     events: ContextEventLog,
+}
+
+impl MockDaVerifierContextState {
+    fn new(account_id: AccountId) -> Self {
+        Self {
+            bitcoin: MockBitcoinChain::default(),
+            recovered_da: InMemoryRecoveredDaStore::default(),
+            account_update_source: MockOLAccountUpdateSource::new(account_id),
+            injected_behavior: InjectedContextBehavior::default(),
+            events: ContextEventLog::default(),
+        }
+    }
 }
 
 struct MockDaVerifierContext {
@@ -639,9 +964,9 @@ struct MockDaVerifierContext {
 }
 
 impl MockDaVerifierContext {
-    fn new() -> Arc<Self> {
+    fn new(account_id: AccountId) -> Arc<Self> {
         Arc::new(Self {
-            state: Mutex::new(MockDaVerifierContextState::default()),
+            state: Mutex::new(MockDaVerifierContextState::new(account_id)),
         })
     }
 
@@ -714,6 +1039,68 @@ impl DaVerifierContext for MockDaVerifierContext {
 
         result
     }
+
+    async fn get_contiguous_recovered_da(
+        &self,
+        first_update_seq_no: u64,
+        recovered_l1_frontier: L1Height,
+    ) -> Result<Vec<RecoveredDaBlob>, RecoveredDaDbError> {
+        let mut state = self.state();
+        state.events.record(ContextEvent::GetContiguousRecoveredDa {
+            first_update_seq_no,
+            recovered_l1_frontier,
+        });
+        if let Some(error) = state
+            .injected_behavior
+            .take_next_recovered_da_read_failure()
+        {
+            return Err(error);
+        }
+        Ok(state
+            .recovered_da
+            .get_contiguous_from(first_update_seq_no, recovered_l1_frontier))
+    }
+}
+
+#[async_trait]
+impl OLAccountUpdateSource for MockDaVerifierContext {
+    async fn fetch_finalized_next_update_seq_no(
+        &self,
+        account_id: AccountId,
+    ) -> Result<Seqno, OLAccountUpdateError> {
+        let mut state = self.state();
+        state
+            .events
+            .record(ContextEvent::FetchFinalizedAccountState { account_id });
+        if let Some(result) = state
+            .injected_behavior
+            .take_next_finalized_frontier_override()
+        {
+            return result;
+        }
+        Ok(state.account_update_source.next_update_seq_no(account_id))
+    }
+
+    async fn fetch_account_update(
+        &self,
+        account_id: AccountId,
+        update_seq_no: Seqno,
+    ) -> Result<OLAccountUpdate, OLAccountUpdateError> {
+        let mut state = self.state();
+        state.events.record(ContextEvent::FetchAccountUpdate {
+            account_id,
+            update_seq_no,
+        });
+        if let Some(error) = state
+            .injected_behavior
+            .take_ol_update_failure(update_seq_no)
+        {
+            return Err(error);
+        }
+        state
+            .account_update_source
+            .fetch_update(account_id, update_seq_no)
+    }
 }
 
 struct DaVerifierFixture {
@@ -727,13 +1114,15 @@ struct DaVerifierFixture {
 
 impl DaVerifierFixture {
     fn new(params: AlpenParams, genesis_l1_height: L1Height, l1_reorg_safe_depth: u32) -> Self {
+        let account_id = params.strata_exec_account_id();
+        let sequencer = TestEeSequencer::new(SEQUENCER_KEY_SEED, &params);
         Self {
             params,
             genesis_l1_height,
             l1_reorg_safe_depth,
             max_l1_scan_window_size: TEST_MAX_L1_SCAN_WINDOW_SIZE,
-            context: MockDaVerifierContext::new(),
-            sequencer: TestEeSequencer::new(SEQUENCER_KEY_SEED),
+            context: MockDaVerifierContext::new(account_id),
+            sequencer,
         }
     }
 
@@ -751,6 +1140,11 @@ impl DaVerifierFixture {
         self.context.state().bitcoin.set_tip_height(tip_height);
     }
 
+    /// Account whose EE updates this verifier follows.
+    fn account_id(&self) -> AccountId {
+        self.params.strata_exec_account_id()
+    }
+
     fn produce_update(&mut self, state_diff: BatchStateDiff) -> TestEeUpdate {
         self.sequencer.produce_update(&self.params, state_diff)
     }
@@ -762,6 +1156,13 @@ impl DaVerifierFixture {
 
     fn publish_da(&self, update: &TestEeUpdate) {
         self.context.state().bitcoin.publish_da(update);
+    }
+
+    fn process_sau(&self, update: &TestEeUpdate) {
+        self.context
+            .state()
+            .account_update_source
+            .process_sau(update);
     }
 
     fn mine_block<'a>(
@@ -793,7 +1194,12 @@ impl DaVerifierFixture {
             self.build_da_extractor(),
             self.genesis_l1_height,
         );
-        DaVerifierServiceState::new(Arc::clone(&self.context), recovery_state)
+        let verification_state = DaVerificationState::new(self.params.clone());
+        DaVerifierServiceState::new(
+            Arc::clone(&self.context),
+            recovery_state,
+            verification_state,
+        )
     }
 
     fn fail_next_bitcoin_tip(&self, error: FetchBitcoinTipError) {
@@ -822,6 +1228,62 @@ impl DaVerifierFixture {
             .state()
             .injected_behavior
             .fail_next_recovered_da_write(error);
+    }
+
+    fn fail_next_recovered_da_read(&self, error: RecoveredDaDbError) {
+        self.context
+            .state()
+            .injected_behavior
+            .fail_next_recovered_da_read(error);
+    }
+
+    fn fail_ol_update_at(&self, update_seq_no: Seqno, error: OLAccountUpdateError) {
+        self.context
+            .state()
+            .injected_behavior
+            .fail_ol_update_at(update_seq_no, error);
+    }
+
+    fn override_next_finalized_frontier(&self, result: Result<Seqno, OLAccountUpdateError>) {
+        self.context
+            .state()
+            .injected_behavior
+            .override_next_finalized_frontier(result);
+    }
+
+    fn seed_recovered_da(&self, recovered_blobs: &[RecoveredDaBlob]) {
+        self.context
+            .state()
+            .recovered_da
+            .put(recovered_blobs)
+            .expect("test recovered DA should seed the store");
+    }
+
+    fn seed_ol_updates_and_recovered_da_candidates(&self, updates: &[TestEeUpdate]) {
+        for (index, update) in updates.iter().enumerate() {
+            self.process_sau(update);
+            self.seed_recovered_da(&[RecoveredDaBlob::new(
+                DaL1Ref::new(
+                    update.commit_txid(),
+                    make_test_l1_commitment(
+                        u8::try_from(index + 1).expect("test index fits in u8"),
+                    ),
+                ),
+                update.blob().clone(),
+            )]);
+        }
+    }
+
+    fn recovery_operations(&self) -> Vec<ContextOperation> {
+        self.context.state().events.recovery_operations()
+    }
+
+    fn recovered_da_read_requests(&self) -> Vec<(u64, L1Height)> {
+        self.context.state().events.recovered_da_read_requests()
+    }
+
+    fn account_update_requests(&self) -> Vec<(AccountId, Seqno)> {
+        self.context.state().events.account_update_requests()
     }
 
     fn context_operations(&self) -> Vec<ContextOperation> {
@@ -902,7 +1364,20 @@ fn assert_one_recovered_blob(
     assert_recovered_blobs(blobs, &[(update, completion_block)]);
 }
 
-/// Bitcoin data for the multi-tick recovery scenario.
+fn make_test_l1_commitment(seed: u8) -> L1BlockCommitment {
+    L1BlockCommitment::new(
+        TEST_GENESIS_L1_HEIGHT,
+        L1BlockId::from(Buf32::from([seed; 32])),
+    )
+}
+
+fn produce_test_updates(fixture: &mut DaVerifierFixture, count: u8) -> Vec<TestEeUpdate> {
+    (1..=count)
+        .map(|seed| fixture.produce_update(build_test_state_diff(seed)))
+        .collect()
+}
+
+/// Bitcoin and OL data for the multi-tick verifier scenario.
 struct MultiTickDaScenario {
     updates: [TestEeUpdate; 10],
     first_tick_completion_blocks: FirstTickCompletionBlocks,
@@ -920,22 +1395,22 @@ struct FirstTickCompletionBlocks {
     update_8: L1BlockCommitment,
 }
 
-/// Builds the ten-update Bitcoin layout for the multi-tick recovery scenario.
+/// Builds the ten-update Bitcoin and OL layout for the multi-tick verifier scenario.
 ///
-/// Updates 0 through 8 are complete. Update 9 has its commit and first reveal mined but remains
-/// incomplete. The completed updates include same-block commit/reveal, cross-block reveals,
-/// shared completion blocks, and reverse completion order.
+/// Updates 0 through 8 are complete and processed on OL. Update 9 has its commit and first reveal
+/// mined but remains incomplete and absent from OL. The completed updates include same-block
+/// commit/reveal, cross-block reveals, shared completion blocks, and reverse completion order.
 fn build_multi_tick_da_scenario(fixture: &mut DaVerifierFixture) -> MultiTickDaScenario {
-    let update_0 = fixture.produce_update(build_test_state_diff());
-    let update_1 = fixture.produce_update(build_test_state_diff());
-    let update_2 = fixture.produce_update(build_test_state_diff());
-    let update_3 = fixture.produce_update(build_test_state_diff());
-    let update_4 = fixture.produce_two_reveal_update(build_test_state_diff());
-    let update_5 = fixture.produce_update(build_test_state_diff());
-    let update_6 = fixture.produce_update(build_test_state_diff());
-    let update_7 = fixture.produce_two_reveal_update(build_test_state_diff());
-    let update_8 = fixture.produce_update(build_test_state_diff());
-    let update_9 = fixture.produce_two_reveal_update(build_test_state_diff());
+    let update_0 = fixture.produce_update(build_test_state_diff(1));
+    let update_1 = fixture.produce_update(build_test_state_diff(2));
+    let update_2 = fixture.produce_update(build_test_state_diff(3));
+    let update_3 = fixture.produce_update(build_test_state_diff(4));
+    let update_4 = fixture.produce_two_reveal_update(build_test_state_diff(5));
+    let update_5 = fixture.produce_update(build_test_state_diff(6));
+    let update_6 = fixture.produce_update(build_test_state_diff(7));
+    let update_7 = fixture.produce_two_reveal_update(build_test_state_diff(8));
+    let update_8 = fixture.produce_update(build_test_state_diff(9));
+    let update_9 = fixture.produce_two_reveal_update(build_test_state_diff(10));
     let updates = [
         update_0, update_1, update_2, update_3, update_4, update_5, update_6, update_7, update_8,
         update_9,
@@ -943,6 +1418,9 @@ fn build_multi_tick_da_scenario(fixture: &mut DaVerifierFixture) -> MultiTickDaS
 
     for update in &updates {
         fixture.publish_da(update);
+    }
+    for update in &updates[..9] {
+        fixture.process_sau(update);
     }
     for &index in &[0, 1, 2, 3, 5, 6, 8] {
         assert_eq!(
@@ -1053,8 +1531,89 @@ async fn test_da_recovery_waits_below_reorg_safe_depth() {
     assert_eq!(status.next_l1_height, 0);
     assert_eq!(status.reorg_safe_tip, None);
     assert_eq!(
+        fixture.recovery_operations(),
+        [ContextOperation::FetchBitcoinTip]
+    );
+}
+
+#[tokio::test]
+async fn test_waiting_for_reorg_safe_tip_does_not_read_unscanned_da() {
+    // 1. Seed candidate 0, but keep Bitcoin below the configured reorg-safe
+    // depth so recovery has not processed any L1 block.
+    let mut fixture = DaVerifierFixture::new(
+        AlpenParams::default(),
+        TEST_GENESIS_L1_HEIGHT,
+        TEST_L1_REORG_SAFE_DEPTH,
+    )
+    .with_bitcoin_tip_height(L1Height::from(TEST_L1_REORG_SAFE_DEPTH - 1));
+    let update = fixture.produce_update(build_test_state_diff(1));
+    fixture.seed_recovered_da(&[RecoveredDaBlob::new(
+        DaL1Ref::new(update.commit_txid(), make_test_l1_commitment(1)),
+        update.blob().clone(),
+    )]);
+    let mut state = fixture.build_verifier_service_state();
+
+    // 2. Process one tick while recovery has no reorg-safe L1 range to scan.
+    state.handle_tick().await.expect("tick processing succeeds");
+
+    // 3. Show the tick only reads the Bitcoin tip. Candidate 0 is not eligible
+    // until recovery has actually processed its completion block.
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&state);
+    assert_eq!(status.next_l1_height, TEST_GENESIS_L1_HEIGHT);
+    assert_eq!(status.reorg_safe_tip, None);
+    assert_eq!(status.next_update_seq_no, 0);
+    assert_eq!(
         fixture.context_operations(),
         [ContextOperation::FetchBitcoinTip]
+    );
+}
+
+#[tokio::test]
+async fn test_waiting_for_reorg_safe_tip_verifies_da_through_previous_frontier() {
+    // 1. Scan the genesis block, then retain its recovered frontier while the
+    // mocked Bitcoin tip falls below the configured reorg-safe depth.
+    let mut fixture = DaVerifierFixture::new(
+        AlpenParams::default(),
+        TEST_GENESIS_L1_HEIGHT,
+        TEST_L1_REORG_SAFE_DEPTH,
+    )
+    .with_bitcoin_tip_height(TEST_ONE_BLOCK_SCAN_BITCOIN_TIP);
+    let mut state = fixture.build_verifier_service_state();
+    state.handle_tick().await.expect("tick processing succeeds");
+    let initial_scan_operations = fixture.context_operations();
+    fixture.set_bitcoin_tip_height(L1Height::from(TEST_L1_REORG_SAFE_DEPTH - 1));
+
+    // 2. Seed candidate 0 at the previously recovered frontier with its
+    // finalized OL update, then process a tick with no L1 range to scan.
+    let update = fixture.produce_update(build_test_state_diff(1));
+    fixture.process_sau(&update);
+    fixture.seed_recovered_da(&[RecoveredDaBlob::new(
+        DaL1Ref::new(update.commit_txid(), make_test_l1_commitment(1)),
+        update.blob().clone(),
+    )]);
+    state.handle_tick().await.expect("tick processing succeeds");
+
+    // 3. Show the tick verifies through the retained frontier without
+    // requesting another L1 block range.
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&state);
+    assert_eq!(status.next_update_seq_no, 1);
+    let operations = fixture.context_operations();
+    assert_eq!(
+        &operations[initial_scan_operations.len()..],
+        [
+            ContextOperation::FetchBitcoinTip,
+            ContextOperation::GetContiguousRecoveredDa {
+                first_update_seq_no: 0,
+                recovered_l1_frontier: TEST_GENESIS_L1_HEIGHT,
+            },
+            ContextOperation::FetchFinalizedAccountState {
+                account_id: fixture.account_id(),
+            },
+            ContextOperation::FetchAccountUpdate {
+                account_id: fixture.account_id(),
+                update_seq_no: Seqno::zero(),
+            },
+        ]
     );
 }
 
@@ -1077,7 +1636,7 @@ async fn test_tick_scans_successive_windows_until_reorg_safe_tip() {
     // frozen safe tip.
     assert_eq!(state.next_l1_height(), TEST_WINDOWED_REORG_SAFE_TIP + 1);
     assert_eq!(
-        fixture.context_operations(),
+        fixture.recovery_operations(),
         [
             ContextOperation::FetchBitcoinTip,
             ContextOperation::FetchL1BlockRange {
@@ -1107,11 +1666,17 @@ async fn test_da_recovery_preserves_extractor_state_across_windows() {
     )
     .with_max_l1_scan_window_size(TEST_THREE_BLOCK_L1_SCAN_WINDOW_SIZE)
     .with_bitcoin_tip_height(TEST_WINDOWED_BITCOIN_TIP);
-    let update = fixture.produce_update(build_test_state_diff());
-    fixture.publish_da(&update);
+    let updates = produce_test_updates(&mut fixture, 2);
+    let update = &updates[0];
+    fixture.publish_da(update);
     fixture.mine_block(TEST_GENESIS_L1_HEIGHT + 2, [update.commit_transaction()]);
     let completion_block =
         fixture.mine_block(TEST_GENESIS_L1_HEIGHT + 3, update.reveal_transactions());
+    // Keep finalized OL one update ahead so reaching update 1 does not stop the scan loop
+    // before the final L1 window. Recovery across the window boundary is what this test asserts.
+    for update in &updates {
+        fixture.process_sau(update);
+    }
     let mut state = fixture.build_verifier_service_state();
 
     // 2. Process one tick across all three scan windows.
@@ -1121,21 +1686,28 @@ async fn test_da_recovery_preserves_extractor_state_across_windows() {
     let writes = fixture.recovered_da_write_attempts();
     assert_eq!(writes.len(), 1);
     assert_eq!(writes[0].outcome(), RecoveredDaWriteOutcome::Succeeded);
-    assert_one_recovered_blob(writes[0].blobs(), &update, completion_block);
+    assert_one_recovered_blob(writes[0].blobs(), update, completion_block);
     assert_eq!(state.next_l1_height(), TEST_WINDOWED_REORG_SAFE_TIP + 1);
 }
 
 #[tokio::test]
-async fn test_recoverable_failure_stops_l1_window_loop() {
-    // 1. Fail the second block fetch in the first of three scan windows.
+async fn test_recoverable_window_failure_verifies_stored_da_before_ending_tick() {
+    // 1. Seed candidate 0 and its finalized OL update, then fail the second
+    // block fetch in the first of three scan windows.
     let failed_height = TEST_GENESIS_L1_HEIGHT + 1;
-    let fixture = DaVerifierFixture::new(
+    let mut fixture = DaVerifierFixture::new(
         AlpenParams::default(),
         TEST_GENESIS_L1_HEIGHT,
         TEST_L1_REORG_SAFE_DEPTH,
     )
     .with_max_l1_scan_window_size(TEST_THREE_BLOCK_L1_SCAN_WINDOW_SIZE)
     .with_bitcoin_tip_height(TEST_WINDOWED_BITCOIN_TIP);
+    let update = fixture.produce_update(build_test_state_diff(1));
+    fixture.process_sau(&update);
+    fixture.seed_recovered_da(&[RecoveredDaBlob::new(
+        DaL1Ref::new(update.commit_txid(), make_test_l1_commitment(1)),
+        update.blob().clone(),
+    )]);
     fixture.fail_block_fetch_at(
         failed_height,
         FetchBlockError::RetriesExhausted {
@@ -1147,21 +1719,16 @@ async fn test_recoverable_failure_stops_l1_window_loop() {
     let mut state = fixture.build_verifier_service_state();
 
     // 2. Process one tick through the recoverable fetch failure.
-    let error = state
+    state
         .handle_tick()
         .await
-        .expect_err("tick processing reports the L1 block fetch failure");
+        .expect("a recoverable fetch failure does not fail the tick");
 
-    // 3. Show the cursor retains progress through the preceding block and no later scan window
-    // is requested.
-    assert!(matches!(
-        &error,
-        DaVerifierError::DaRecovery(DaRecoveryError::FetchBlock(
-            FetchBlockError::RetriesExhausted { height, .. }
-        )) if *height == failed_height
-    ));
-    assert!(error.is_recoverable());
+    // 3. Show the cursor retains progress through the preceding block, candidate
+    // 0 verifies at that frontier, and no later scan window is requested.
     assert_eq!(state.next_l1_height(), failed_height);
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&state);
+    assert_eq!(status.next_update_seq_no, 1);
     assert_eq!(
         fixture.context_operations(),
         [
@@ -1169,6 +1736,17 @@ async fn test_recoverable_failure_stops_l1_window_loop() {
             ContextOperation::FetchL1BlockRange {
                 start_height: TEST_GENESIS_L1_HEIGHT,
                 end_height: TEST_GENESIS_L1_HEIGHT + 2,
+            },
+            ContextOperation::GetContiguousRecoveredDa {
+                first_update_seq_no: 0,
+                recovered_l1_frontier: TEST_GENESIS_L1_HEIGHT,
+            },
+            ContextOperation::FetchFinalizedAccountState {
+                account_id: fixture.account_id(),
+            },
+            ContextOperation::FetchAccountUpdate {
+                account_id: fixture.account_id(),
+                update_seq_no: Seqno::zero(),
             },
         ]
     );
@@ -1236,7 +1814,7 @@ async fn test_da_recovery_persists_each_batch_at_its_completion_block() {
         ContextOperation::PutRecoveredDa,
         expected_tick_one_writes.len(),
     ));
-    let tick_one_operations = fixture.context_operations();
+    let tick_one_operations = fixture.recovery_operations();
     assert_eq!(tick_one_operations, expected_tick_one_operations);
 
     // 4. Complete update 9 above tick 1's safe tip, advance the tip, and process tick 2.
@@ -1247,7 +1825,8 @@ async fn test_da_recovery_persists_each_batch_at_its_completion_block() {
     fixture.set_bitcoin_tip_height(MULTI_TICK_SECOND_TICK_TIP);
     state.handle_tick().await.expect("tick processing succeeds");
 
-    // 5. Show extractor state retained from tick 1 completes and persists update 9 exactly once.
+    // 5. Show extractor state retained from tick 1 completes and persists update 9 exactly once,
+    // while the finalized OL frontier leaves verification waiting at seqno 9.
     assert_eq!(state.next_l1_height(), MULTI_TICK_SECOND_TICK_SAFE_TIP + 1);
     let tick_two_writes = fixture.recovered_da_write_attempts();
     assert_eq!(tick_two_writes.len(), 9);
@@ -1257,15 +1836,21 @@ async fn test_da_recovery_persists_each_batch_at_its_completion_block() {
         update_9_completion,
     );
     assert_eq!(fixture.recovered_da_blobs().len(), 10);
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&state);
+    assert_eq!(status.next_update_seq_no, 9);
 
-    // 6. Without adding Bitcoin data, process tick 3 after recovery has passed the safe tip.
+    // 6. Make update 9's OL account update available, then process tick 3 without adding
+    // Bitcoin data after recovery has passed the safe tip.
+    fixture.process_sau(&scenario.updates[9]);
     state.handle_tick().await.expect("tick processing succeeds");
 
-    // 7. Show caught-up recovery still publishes the safe tip but requests no block range.
+    // 7. Show caught-up recovery requests no block range and verification advances through
+    // update 9.
     let status = DaVerifierService::<MockDaVerifierContext>::get_status(&state);
     assert_eq!(status.next_l1_height, MULTI_TICK_SECOND_TICK_SAFE_TIP + 1);
     assert_eq!(status.reorg_safe_tip, Some(MULTI_TICK_SECOND_TICK_SAFE_TIP));
-    let all_operations = fixture.context_operations();
+    assert_eq!(status.next_update_seq_no, 10);
+    let all_operations = fixture.recovery_operations();
     assert_eq!(
         &all_operations[tick_one_operations.len()..],
         [
@@ -1313,6 +1898,235 @@ async fn test_da_recovery_rejects_non_contiguous_blocks() {
     ));
     assert_eq!(state.next_l1_height(), TEST_GENESIS_L1_HEIGHT + 1);
     fixture.assert_injected_behavior_consumed();
+}
+
+#[tokio::test]
+async fn test_ol_lag_stops_before_next_l1_scan_window() {
+    // 1. Put candidate 0 in the first of two three-block scan windows, but
+    // leave finalized OL state at seqno 0.
+    let mut fixture = DaVerifierFixture::new(
+        AlpenParams::default(),
+        TEST_GENESIS_L1_HEIGHT,
+        TEST_L1_REORG_SAFE_DEPTH,
+    )
+    .with_max_l1_scan_window_size(TEST_THREE_BLOCK_L1_SCAN_WINDOW_SIZE);
+    let update = fixture.produce_update(build_test_state_diff(1));
+    fixture.publish_da(&update);
+    fixture.mine_block(TEST_GENESIS_L1_HEIGHT, [update.commit_transaction()]);
+    fixture.mine_block(TEST_GENESIS_L1_HEIGHT + 1, update.reveal_transactions());
+    let reorg_safe_tip = TEST_GENESIS_L1_HEIGHT + 5;
+    fixture.set_bitcoin_tip_height(reorg_safe_tip + L1Height::from(TEST_L1_REORG_SAFE_DEPTH));
+    let mut state = fixture.build_verifier_service_state();
+
+    // 2. Process one tick and show OL lag stops catch-up after the first window.
+    state.handle_tick().await.expect("tick processing succeeds");
+
+    assert_eq!(state.next_l1_height(), TEST_GENESIS_L1_HEIGHT + 3);
+    assert_eq!(
+        fixture.recovery_operations(),
+        [
+            ContextOperation::FetchBitcoinTip,
+            ContextOperation::FetchL1BlockRange {
+                start_height: TEST_GENESIS_L1_HEIGHT,
+                end_height: TEST_GENESIS_L1_HEIGHT + 2,
+            },
+            ContextOperation::PutRecoveredDa,
+        ]
+    );
+    let operations_after_first_tick = fixture.context_operations().len();
+
+    // 3. Finalize OL update 0 and process another tick. The retained candidate
+    // verifies, reaches the frozen finalized frontier, and ends the tick before recovery.
+    fixture.process_sau(&update);
+    state.handle_tick().await.expect("tick processing succeeds");
+
+    assert_eq!(state.next_l1_height(), TEST_GENESIS_L1_HEIGHT + 3);
+    let operations = fixture.context_operations();
+    assert_eq!(
+        &operations[operations_after_first_tick..],
+        [
+            ContextOperation::FetchBitcoinTip,
+            ContextOperation::GetContiguousRecoveredDa {
+                first_update_seq_no: 0,
+                recovered_l1_frontier: TEST_GENESIS_L1_HEIGHT + 2,
+            },
+            ContextOperation::FetchFinalizedAccountState {
+                account_id: fixture.account_id(),
+            },
+            ContextOperation::FetchAccountUpdate {
+                account_id: fixture.account_id(),
+                update_seq_no: Seqno::zero(),
+            },
+        ]
+    );
+    let operations_after_second_tick = operations.len();
+
+    // 4. Process a third tick without adding data. The retained-candidate check is now empty,
+    // so recovery resumes with the second L1 window.
+    state.handle_tick().await.expect("tick processing succeeds");
+
+    assert_eq!(state.next_l1_height(), reorg_safe_tip + 1);
+    let operations = fixture.context_operations();
+    assert_eq!(
+        &operations[operations_after_second_tick..],
+        [
+            ContextOperation::FetchBitcoinTip,
+            ContextOperation::GetContiguousRecoveredDa {
+                first_update_seq_no: 1,
+                recovered_l1_frontier: TEST_GENESIS_L1_HEIGHT + 2,
+            },
+            ContextOperation::FetchL1BlockRange {
+                start_height: TEST_GENESIS_L1_HEIGHT + 3,
+                end_height: reorg_safe_tip,
+            },
+            ContextOperation::GetContiguousRecoveredDa {
+                first_update_seq_no: 1,
+                recovered_l1_frontier: reorg_safe_tip,
+            },
+        ]
+    );
+    assert_eq!(
+        fixture.recovery_operations(),
+        [
+            ContextOperation::FetchBitcoinTip,
+            ContextOperation::FetchL1BlockRange {
+                start_height: TEST_GENESIS_L1_HEIGHT,
+                end_height: TEST_GENESIS_L1_HEIGHT + 2,
+            },
+            ContextOperation::PutRecoveredDa,
+            ContextOperation::FetchBitcoinTip,
+            ContextOperation::FetchBitcoinTip,
+            ContextOperation::FetchL1BlockRange {
+                start_height: TEST_GENESIS_L1_HEIGHT + 3,
+                end_height: reorg_safe_tip,
+            },
+        ]
+    );
+}
+
+#[tokio::test]
+async fn test_tick_verifies_recovered_da_before_scanning_next_l1_window() {
+    // 1. Put one DA candidate in each of two three-block L1 scan windows and
+    // finalize both matching OL updates.
+    let mut fixture = DaVerifierFixture::new(
+        AlpenParams::default(),
+        TEST_GENESIS_L1_HEIGHT,
+        TEST_L1_REORG_SAFE_DEPTH,
+    )
+    .with_max_l1_scan_window_size(TEST_THREE_BLOCK_L1_SCAN_WINDOW_SIZE);
+    let updates = produce_test_updates(&mut fixture, 2);
+    for update in &updates {
+        fixture.publish_da(update);
+    }
+    fixture.mine_block(TEST_GENESIS_L1_HEIGHT, [updates[0].commit_transaction()]);
+    fixture.mine_block(TEST_GENESIS_L1_HEIGHT + 1, updates[0].reveal_transactions());
+    fixture.mine_block(
+        TEST_GENESIS_L1_HEIGHT + 3,
+        [updates[1].commit_transaction()],
+    );
+    fixture.mine_block(TEST_GENESIS_L1_HEIGHT + 4, updates[1].reveal_transactions());
+    for update in &updates {
+        fixture.process_sau(update);
+    }
+    let reorg_safe_tip = TEST_GENESIS_L1_HEIGHT + 5;
+    fixture.set_bitcoin_tip_height(reorg_safe_tip + L1Height::from(TEST_L1_REORG_SAFE_DEPTH));
+    let mut state = fixture.build_verifier_service_state();
+
+    // 2. Process one tick across both windows.
+    state.handle_tick().await.expect("tick processing succeeds");
+
+    // 3. Show update 0 is loaded and verified before recovery requests the second window.
+    assert_eq!(
+        fixture.context_operations(),
+        [
+            ContextOperation::FetchBitcoinTip,
+            ContextOperation::FetchL1BlockRange {
+                start_height: TEST_GENESIS_L1_HEIGHT,
+                end_height: TEST_GENESIS_L1_HEIGHT + 2,
+            },
+            ContextOperation::PutRecoveredDa,
+            ContextOperation::GetContiguousRecoveredDa {
+                first_update_seq_no: 0,
+                recovered_l1_frontier: TEST_GENESIS_L1_HEIGHT + 2,
+            },
+            ContextOperation::FetchFinalizedAccountState {
+                account_id: fixture.account_id(),
+            },
+            ContextOperation::FetchAccountUpdate {
+                account_id: fixture.account_id(),
+                update_seq_no: Seqno::zero(),
+            },
+            ContextOperation::FetchL1BlockRange {
+                start_height: TEST_GENESIS_L1_HEIGHT + 3,
+                end_height: reorg_safe_tip,
+            },
+            ContextOperation::PutRecoveredDa,
+            ContextOperation::GetContiguousRecoveredDa {
+                first_update_seq_no: 1,
+                recovered_l1_frontier: reorg_safe_tip,
+            },
+            ContextOperation::FetchAccountUpdate {
+                account_id: fixture.account_id(),
+                update_seq_no: Seqno::new(1),
+            },
+        ]
+    );
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&state);
+    assert_eq!(status.next_update_seq_no, 2);
+}
+
+#[tokio::test]
+async fn test_finalized_ol_frontier_is_fetched_once_per_tick() {
+    // 1. Put one OL-attested candidate in each of two three-block scan windows.
+    let mut fixture = DaVerifierFixture::new(
+        AlpenParams::default(),
+        TEST_GENESIS_L1_HEIGHT,
+        TEST_L1_REORG_SAFE_DEPTH,
+    )
+    .with_max_l1_scan_window_size(TEST_THREE_BLOCK_L1_SCAN_WINDOW_SIZE);
+    let updates = produce_test_updates(&mut fixture, 2);
+    for update in &updates {
+        fixture.publish_da(update);
+    }
+    fixture.mine_block(TEST_GENESIS_L1_HEIGHT, [updates[0].commit_transaction()]);
+    fixture.mine_block(TEST_GENESIS_L1_HEIGHT + 1, updates[0].reveal_transactions());
+    fixture.mine_block(
+        TEST_GENESIS_L1_HEIGHT + 3,
+        [updates[1].commit_transaction()],
+    );
+    fixture.mine_block(TEST_GENESIS_L1_HEIGHT + 4, updates[1].reveal_transactions());
+    for update in &updates {
+        fixture.process_sau(update);
+    }
+    let reorg_safe_tip = TEST_GENESIS_L1_HEIGHT + 5;
+    fixture.set_bitcoin_tip_height(reorg_safe_tip + L1Height::from(TEST_L1_REORG_SAFE_DEPTH));
+    let mut state = fixture.build_verifier_service_state();
+
+    // 2. Process one tick across both windows.
+    state.handle_tick().await.expect("tick processing succeeds");
+
+    // 3. Show both candidates verify against one frozen finalized OL frontier.
+    let finalized_frontier_reads = fixture
+        .context_operations()
+        .into_iter()
+        .filter(|operation| {
+            matches!(
+                operation,
+                ContextOperation::FetchFinalizedAccountState { .. }
+            )
+        })
+        .count();
+    assert_eq!(finalized_frontier_reads, 1);
+    assert_eq!(fixture.recovered_da_read_requests(), [(0, 12), (1, 15)]);
+    assert_eq!(
+        fixture.account_update_requests(),
+        [
+            (fixture.account_id(), Seqno::zero()),
+            (fixture.account_id(), Seqno::new(1)),
+        ]
+    );
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&state);
+    assert_eq!(status.next_update_seq_no, 2);
 }
 
 #[tokio::test]
@@ -1370,22 +2184,11 @@ async fn test_da_recovery_records_progress_before_fetch_failure() {
     );
     let mut state = fixture.build_verifier_service_state();
 
-    // 2. Process one tick through the mid-stream fetch failure.
-    let error = state
-        .handle_tick()
-        .await
-        .expect_err("midstream fetch failure must be returned");
+    // 2. Process one tick; the recoverable Bitcoin failure still permits verification of stored
+    // candidates, so the empty candidate store lets tick processing finish successfully.
+    state.handle_tick().await.expect("tick processing succeeds");
 
-    // 3. Show the exact fetch error is returned after retaining progress through prior blocks.
-    assert!(matches!(
-        error,
-        DaVerifierError::DaRecovery(DaRecoveryError::FetchBlock(
-            FetchBlockError::RetriesExhausted {
-                height: TEST_REORG_SAFE_TIP,
-                ..
-            }
-        ))
-    ));
+    // 3. Show recovery retained progress through the blocks preceding the failed height.
     assert_eq!(state.next_l1_height(), TEST_REORG_SAFE_TIP);
     fixture.assert_injected_behavior_consumed();
 }
@@ -1399,7 +2202,8 @@ async fn test_recoverable_da_persistence_failure_retries_pending_write() {
         TEST_L1_REORG_SAFE_DEPTH,
     )
     .with_bitcoin_tip_height(TEST_TWO_BLOCK_DA_COMPLETION_HEIGHT + TEST_L1_REORG_SAFE_DEPTH);
-    let update = fixture.produce_update(build_test_state_diff());
+    let update = fixture.produce_update(build_test_state_diff(1));
+    fixture.process_sau(&update);
     fixture.publish_da(&update);
     fixture.mine_block(TEST_GENESIS_L1_HEIGHT, [update.commit_transaction()]);
     let completion_block = fixture.mine_block(
@@ -1432,14 +2236,14 @@ async fn test_recoverable_da_persistence_failure_retries_pending_write() {
         .await
         .expect("tick processing succeeds after retrying the pending write");
 
-    // 4. Show the same blob was retried successfully before the next tip fetch, with no second
-    // block-range request.
+    // 4. Show the same blob was retried successfully before the next tip fetch,
+    // became eligible at its completion height, and required no second block-range request.
     assert_eq!(
         service_state.next_l1_height(),
         TEST_TWO_BLOCK_DA_COMPLETION_HEIGHT + 1
     );
     assert_eq!(
-        fixture.context_operations(),
+        fixture.recovery_operations(),
         [
             ContextOperation::FetchBitcoinTip,
             ContextOperation::FetchL1BlockRange {
@@ -1468,6 +2272,12 @@ async fn test_recoverable_da_persistence_failure_retries_pending_write() {
         ]
     );
     assert_one_recovered_blob(&fixture.recovered_da_blobs(), &update, completion_block);
+    assert_eq!(
+        fixture.recovered_da_read_requests(),
+        [(0, TEST_TWO_BLOCK_DA_COMPLETION_HEIGHT)]
+    );
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&service_state);
+    assert_eq!(status.next_update_seq_no, 1);
     fixture.assert_injected_behavior_consumed();
 }
 
@@ -1479,7 +2289,8 @@ async fn test_fatal_da_persistence_failure_retains_pending_write() {
         TEST_GENESIS_L1_HEIGHT,
         TEST_L1_REORG_SAFE_DEPTH,
     );
-    let update = fixture.produce_update(build_test_state_diff());
+    let update = fixture.produce_update(build_test_state_diff(1));
+    fixture.process_sau(&update);
     fixture.publish_da(&update);
     fixture.mine_block(TEST_GENESIS_L1_HEIGHT, [update.commit_transaction()]);
     let completion_block = fixture.mine_block(
@@ -1520,7 +2331,7 @@ async fn test_fatal_da_persistence_failure_retains_pending_write() {
         TEST_TWO_BLOCK_DA_COMPLETION_HEIGHT + 1
     );
     assert_eq!(
-        fixture.context_operations(),
+        fixture.recovery_operations(),
         [
             ContextOperation::FetchBitcoinTip,
             ContextOperation::FetchL1BlockRange {
@@ -1547,7 +2358,7 @@ async fn test_da_recovery_driver_rejects_blocks_while_write_pending() {
         TEST_GENESIS_L1_HEIGHT,
         TEST_L1_REORG_SAFE_DEPTH,
     );
-    let update = fixture.produce_update(build_test_state_diff());
+    let update = fixture.produce_update(build_test_state_diff(1));
     fixture.publish_da(&update);
     fixture.mine_block(TEST_GENESIS_L1_HEIGHT, [update.commit_transaction()]);
     fixture.mine_block(
@@ -1580,13 +2391,643 @@ async fn test_da_recovery_driver_rejects_blocks_while_write_pending() {
 }
 
 #[tokio::test]
+async fn test_recoverable_bitcoin_failure_allows_stored_da_verification() {
+    // 1. Scan the genesis block so the service has a real recovered L1 frontier.
+    let mut fixture = DaVerifierFixture::new(
+        AlpenParams::default(),
+        TEST_GENESIS_L1_HEIGHT,
+        TEST_L1_REORG_SAFE_DEPTH,
+    )
+    .with_bitcoin_tip_height(TEST_ONE_BLOCK_SCAN_BITCOIN_TIP);
+    let mut state = fixture.build_verifier_service_state();
+    state.handle_tick().await.expect("tick processing succeeds");
+
+    // 2. Seed candidate 0 and its matching OL update, then make the next
+    // Bitcoin tip lookup time out recoverably.
+    let update = fixture.produce_update(build_test_state_diff(1));
+    fixture.process_sau(&update);
+    fixture.seed_recovered_da(&[RecoveredDaBlob::new(
+        DaL1Ref::new(update.commit_txid(), make_test_l1_commitment(1)),
+        update.blob().clone(),
+    )]);
+    fixture.fail_next_bitcoin_tip(FetchBitcoinTipError::Rpc(ClientError::Timeout));
+
+    // 3. Process another tick and show the recoverable Bitcoin failure still
+    // permits verification through the previously recovered L1 frontier.
+    state.handle_tick().await.expect("tick processing succeeds");
+
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&state);
+    assert_eq!(status.next_update_seq_no, 1);
+    assert_eq!(
+        fixture.account_update_requests(),
+        [(fixture.account_id(), Seqno::zero())]
+    );
+    fixture.assert_injected_behavior_consumed();
+}
+
+#[tokio::test]
+async fn test_fatal_bitcoin_failure_blocks_stored_da_verification() {
+    // 1. Scan the genesis block so the service has a real recovered L1 frontier.
+    let mut fixture = DaVerifierFixture::new(
+        AlpenParams::default(),
+        TEST_GENESIS_L1_HEIGHT,
+        TEST_L1_REORG_SAFE_DEPTH,
+    )
+    .with_bitcoin_tip_height(TEST_ONE_BLOCK_SCAN_BITCOIN_TIP);
+    let mut state = fixture.build_verifier_service_state();
+    state.handle_tick().await.expect("tick processing succeeds");
+    let recovered_da_reads_before_failure = fixture.recovered_da_read_requests();
+
+    // 2. Seed candidate 0 and its matching OL update, then make the next
+    // Bitcoin tip lookup fail fatally.
+    let update = fixture.produce_update(build_test_state_diff(1));
+    fixture.process_sau(&update);
+    fixture.seed_recovered_da(&[RecoveredDaBlob::new(
+        DaL1Ref::new(update.commit_txid(), make_test_l1_commitment(1)),
+        update.blob().clone(),
+    )]);
+    fixture.fail_next_bitcoin_tip(FetchBitcoinTipError::Rpc(ClientError::MissingUserPassword));
+
+    // 3. Process another tick and show the fatal failure prevents verification.
+    let error = state
+        .handle_tick()
+        .await
+        .expect_err("a fatal Bitcoin failure must end the tick");
+
+    assert!(matches!(
+        error,
+        DaVerifierError::FetchBitcoinTip(FetchBitcoinTipError::Rpc(
+            ClientError::MissingUserPassword
+        ))
+    ));
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&state);
+    assert_eq!(status.next_update_seq_no, 0);
+    assert_eq!(
+        fixture.recovered_da_read_requests(),
+        recovered_da_reads_before_failure
+    );
+    assert!(fixture.account_update_requests().is_empty());
+    fixture.assert_injected_behavior_consumed();
+}
+
+#[tokio::test]
+async fn test_recoverable_persistence_failure_blocks_verification() {
+    // 1. Seed verifiable candidate 0 and publish update 1 on L1.
+    let mut fixture = DaVerifierFixture::new(
+        AlpenParams::default(),
+        TEST_GENESIS_L1_HEIGHT,
+        TEST_L1_REORG_SAFE_DEPTH,
+    )
+    .with_bitcoin_tip_height(TEST_TWO_BLOCK_DA_COMPLETION_HEIGHT + TEST_L1_REORG_SAFE_DEPTH);
+    let stored = fixture.produce_update(build_test_state_diff(1));
+    fixture.process_sau(&stored);
+    fixture.seed_recovered_da(&[RecoveredDaBlob::new(
+        DaL1Ref::new(stored.commit_txid(), make_test_l1_commitment(1)),
+        stored.blob().clone(),
+    )]);
+    let unpersisted = fixture.produce_update(build_test_state_diff(2));
+    fixture.publish_da(&unpersisted);
+    fixture.mine_block(TEST_GENESIS_L1_HEIGHT, [unpersisted.commit_transaction()]);
+    fixture.mine_block(
+        TEST_TWO_BLOCK_DA_COMPLETION_HEIGHT,
+        unpersisted.reveal_transactions(),
+    );
+
+    // 2. Make update 1's candidate-store write fail recoverably.
+    fixture.fail_next_recovered_da_write(RecoveredDaDbError::WorkerCancelled);
+    let mut state = fixture.build_verifier_service_state();
+
+    // 3. Process a tick and show the store failure blocks verification at seqno 0.
+    let error = state
+        .handle_tick()
+        .await
+        .expect_err("tick processing fails when candidate persistence fails");
+
+    assert!(matches!(
+        error,
+        DaVerifierError::DaRecovery(DaRecoveryError::Database(
+            RecoveredDaDbError::WorkerCancelled
+        ))
+    ));
+    // The write is worth retrying, but recovery has just reported the
+    // candidate store failing, so this tick must not turn around and read it.
+    assert!(error.is_recoverable());
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&state);
+    assert_eq!(status.next_update_seq_no, 0);
+    assert!(fixture.recovered_da_read_requests().is_empty());
+    assert!(fixture.account_update_requests().is_empty());
+    fixture.assert_injected_behavior_consumed();
+}
+
+#[tokio::test]
+async fn test_tick_replays_contiguous_recovered_da_prefix() {
+    // 1. Seed candidates and matching OL updates 0 through 2.
+    let mut fixture = DaVerifierFixture::new(
+        AlpenParams::default(),
+        TEST_GENESIS_L1_HEIGHT,
+        TEST_L1_REORG_SAFE_DEPTH,
+    )
+    .with_bitcoin_tip_height(TEST_ONE_BLOCK_SCAN_BITCOIN_TIP);
+    let account_id = fixture.account_id();
+    let updates = produce_test_updates(&mut fixture, 3);
+    fixture.seed_ol_updates_and_recovered_da_candidates(&updates);
+    let mut state = fixture.build_verifier_service_state();
+
+    // 2. Process one tick, which reads the complete contiguous recovered prefix.
+    state.handle_tick().await.expect("tick processing succeeds");
+
+    // 3. Show one candidate read verifies all three updates and reaches seqno 3.
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&state);
+    // All three entries in `updates` verified, so verification next expects sequence 3.
+    assert_eq!(status.next_update_seq_no, 3);
+    assert_eq!(
+        fixture.recovered_da_read_requests(),
+        [(0, TEST_GENESIS_L1_HEIGHT)]
+    );
+    assert_eq!(
+        fixture.account_update_requests(),
+        [
+            (account_id, Seqno::new(0)),
+            (account_id, Seqno::new(1)),
+            (account_id, Seqno::new(2)),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn test_verification_waits_for_missing_da_sequence_then_resumes() {
+    // 1. Seed candidates 0, 2 and 3 with matching OL updates 0 through 3.
+    let mut fixture = DaVerifierFixture::new(
+        AlpenParams::default(),
+        TEST_GENESIS_L1_HEIGHT,
+        TEST_L1_REORG_SAFE_DEPTH,
+    )
+    .with_bitcoin_tip_height(TEST_ONE_BLOCK_SCAN_BITCOIN_TIP);
+    let account_id = fixture.account_id();
+    let updates = produce_test_updates(&mut fixture, 4);
+    for update in &updates {
+        fixture.process_sau(update);
+    }
+    // Sequence 1 is absent from the recovered-DA store; completion heights are
+    // the sequence plus one and nothing here depends on them.
+    fixture.seed_recovered_da(&[
+        RecoveredDaBlob::new(
+            DaL1Ref::new(updates[0].commit_txid(), make_test_l1_commitment(1)),
+            updates[0].blob().clone(),
+        ),
+        RecoveredDaBlob::new(
+            DaL1Ref::new(updates[2].commit_txid(), make_test_l1_commitment(3)),
+            updates[2].blob().clone(),
+        ),
+        RecoveredDaBlob::new(
+            DaL1Ref::new(updates[3].commit_txid(), make_test_l1_commitment(4)),
+            updates[3].blob().clone(),
+        ),
+    ]);
+    let mut state = fixture.build_verifier_service_state();
+
+    // 2. Process a tick and show verification stops at missing seqno 1.
+    state.handle_tick().await.expect("tick processing succeeds");
+
+    // The seeded candidates omit `updates[1]`, so only the prefix through `updates[0]` verifies.
+    assert_eq!(
+        fixture.account_update_requests(),
+        [(account_id, Seqno::new(0))]
+    );
+
+    // 3. Insert candidate 1, process another tick, and show it verifies through 3.
+    fixture.seed_recovered_da(&[RecoveredDaBlob::new(
+        DaL1Ref::new(updates[1].commit_txid(), make_test_l1_commitment(2)),
+        updates[1].blob().clone(),
+    )]);
+    state.handle_tick().await.expect("tick processing succeeds");
+
+    assert_eq!(
+        fixture.account_update_requests(),
+        [
+            (account_id, Seqno::new(0)),
+            (account_id, Seqno::new(1)),
+            (account_id, Seqno::new(2)),
+            (account_id, Seqno::new(3)),
+        ]
+    );
+    // Tick one verifies sequence 0, then stalls at missing sequence 1. After
+    // sequence 1 is seeded, tick two retries from 1 and verifies through 3.
+    assert_eq!(
+        fixture.recovered_da_read_requests(),
+        [(0, TEST_GENESIS_L1_HEIGHT), (1, TEST_GENESIS_L1_HEIGHT),]
+    );
+}
+
+#[tokio::test]
+async fn test_verification_advances_past_verified_candidate_prefix() {
+    // 1. Seed candidates and matching OL updates 0 and 1.
+    let mut fixture = DaVerifierFixture::new(
+        AlpenParams::default(),
+        TEST_GENESIS_L1_HEIGHT,
+        TEST_L1_REORG_SAFE_DEPTH,
+    )
+    .with_bitcoin_tip_height(TEST_ONE_BLOCK_SCAN_BITCOIN_TIP);
+    let updates = produce_test_updates(&mut fixture, 2);
+    fixture.seed_ol_updates_and_recovered_da_candidates(&updates);
+    let mut state = fixture.build_verifier_service_state();
+
+    // 2. Process a tick over the complete contiguous candidate prefix.
+    state.handle_tick().await.expect("tick processing succeeds");
+
+    // 3. Show verification advances one past the two verified candidates.
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&state);
+    assert_eq!(status.next_update_seq_no, 2);
+    assert_eq!(
+        fixture.recovered_da_read_requests(),
+        [(0, TEST_GENESIS_L1_HEIGHT)]
+    );
+    assert_eq!(
+        fixture.account_update_requests(),
+        [
+            (fixture.account_id(), Seqno::new(0)),
+            (fixture.account_id(), Seqno::new(1)),
+        ]
+    );
+    assert_eq!(
+        fixture.context_operations(),
+        [
+            ContextOperation::FetchBitcoinTip,
+            ContextOperation::FetchL1BlockRange {
+                start_height: TEST_GENESIS_L1_HEIGHT,
+                end_height: TEST_GENESIS_L1_HEIGHT,
+            },
+            ContextOperation::GetContiguousRecoveredDa {
+                first_update_seq_no: 0,
+                recovered_l1_frontier: TEST_GENESIS_L1_HEIGHT,
+            },
+            ContextOperation::FetchFinalizedAccountState {
+                account_id: fixture.account_id(),
+            },
+            ContextOperation::FetchAccountUpdate {
+                account_id: fixture.account_id(),
+                update_seq_no: Seqno::new(0),
+            },
+            ContextOperation::FetchAccountUpdate {
+                account_id: fixture.account_id(),
+                update_seq_no: Seqno::new(1),
+            },
+        ]
+    );
+
+    // 4. Process another tick without adding data and show the next candidate
+    // read starts at the verified seqno 2 frontier.
+    state.handle_tick().await.expect("tick processing succeeds");
+    assert_eq!(
+        fixture.recovered_da_read_requests(),
+        [(0, TEST_GENESIS_L1_HEIGHT), (2, TEST_GENESIS_L1_HEIGHT),]
+    );
+}
+
+#[tokio::test]
+async fn test_ol_lag_stops_at_anchor_then_resumes() {
+    // 1. Seed candidate 0 without its matching OL update.
+    let mut fixture = DaVerifierFixture::new(
+        AlpenParams::default(),
+        TEST_GENESIS_L1_HEIGHT,
+        TEST_L1_REORG_SAFE_DEPTH,
+    )
+    .with_bitcoin_tip_height(TEST_ONE_BLOCK_SCAN_BITCOIN_TIP);
+    let update = fixture.produce_update(build_test_state_diff(1));
+    fixture.seed_recovered_da(&[RecoveredDaBlob::new(
+        DaL1Ref::new(update.commit_txid(), make_test_l1_commitment(1)),
+        update.blob().clone(),
+    )]);
+    let mut state = fixture.build_verifier_service_state();
+
+    // 2. Process a tick and show finalized OL state bounds the available
+    // prefix before seqno 0, so no manifest is requested and the anchor stays put.
+    state.handle_tick().await.expect("tick processing succeeds");
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&state);
+    assert_eq!(status.next_update_seq_no, 0);
+    assert!(fixture.account_update_requests().is_empty());
+
+    // 3. Finalize the OL update, process another tick, and show candidate 0 verifies.
+    fixture.process_sau(&update);
+    state.handle_tick().await.expect("tick processing succeeds");
+
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&state);
+    assert_eq!(status.next_update_seq_no, 1);
+    assert_eq!(
+        fixture.account_update_requests(),
+        [(fixture.account_id(), Seqno::zero())]
+    );
+}
+
+#[tokio::test]
+async fn test_finalized_ol_frontier_commits_available_prefix() {
+    // 1. Seed recovered candidates 0 and 1, but finalize only OL update 0.
+    let mut fixture = DaVerifierFixture::new(
+        AlpenParams::default(),
+        TEST_GENESIS_L1_HEIGHT,
+        TEST_L1_REORG_SAFE_DEPTH,
+    )
+    .with_bitcoin_tip_height(TEST_ONE_BLOCK_SCAN_BITCOIN_TIP);
+    let updates = produce_test_updates(&mut fixture, 2);
+    let recovered_blobs = updates
+        .iter()
+        .enumerate()
+        .map(|(index, update)| {
+            RecoveredDaBlob::new(
+                DaL1Ref::new(
+                    update.commit_txid(),
+                    make_test_l1_commitment(
+                        u8::try_from(index + 1).expect("test index fits in u8"),
+                    ),
+                ),
+                update.blob().clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    fixture.seed_recovered_da(&recovered_blobs);
+    fixture.process_sau(&updates[0]);
+    let mut state = fixture.build_verifier_service_state();
+
+    // 2. Process one tick and show the finalized OL frontier admits only
+    // candidate 0, which verifies and advances the anchor to seqno 1.
+    state.handle_tick().await.expect("tick processing succeeds");
+
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&state);
+    assert_eq!(status.next_update_seq_no, 1);
+    assert_eq!(
+        fixture.account_update_requests(),
+        [(fixture.account_id(), Seqno::zero())]
+    );
+
+    // 3. Finalize OL update 1 and show the next tick resumes from seqno 1.
+    fixture.process_sau(&updates[1]);
+    state.handle_tick().await.expect("tick processing succeeds");
+
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&state);
+    assert_eq!(status.next_update_seq_no, 2);
+    assert_eq!(
+        fixture.recovered_da_read_requests(),
+        [(0, TEST_GENESIS_L1_HEIGHT), (1, TEST_GENESIS_L1_HEIGHT),]
+    );
+    assert_eq!(
+        fixture.account_update_requests(),
+        [
+            (fixture.account_id(), Seqno::zero()),
+            (fixture.account_id(), Seqno::new(1)),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn test_lagging_finalized_ol_frontier_is_recoverable() {
+    // 1. Verify candidate 0 so the in-memory anchor next expects seqno 1.
+    let mut fixture = DaVerifierFixture::new(
+        AlpenParams::default(),
+        TEST_GENESIS_L1_HEIGHT,
+        TEST_L1_REORG_SAFE_DEPTH,
+    )
+    .with_bitcoin_tip_height(TEST_ONE_BLOCK_SCAN_BITCOIN_TIP);
+    let updates = produce_test_updates(&mut fixture, 2);
+    fixture.process_sau(&updates[0]);
+    fixture.seed_recovered_da(&[RecoveredDaBlob::new(
+        DaL1Ref::new(updates[0].commit_txid(), make_test_l1_commitment(1)),
+        updates[0].blob().clone(),
+    )]);
+    let mut state = fixture.build_verifier_service_state();
+    state.handle_tick().await.expect("tick processing succeeds");
+
+    // 2. Seed candidate 1, but make the next finalized-state read regress to
+    // seqno 0, behind the already verified frontier at seqno 1.
+    fixture.process_sau(&updates[1]);
+    fixture.seed_recovered_da(&[RecoveredDaBlob::new(
+        DaL1Ref::new(updates[1].commit_txid(), make_test_l1_commitment(2)),
+        updates[1].blob().clone(),
+    )]);
+    fixture.override_next_finalized_frontier(Ok(Seqno::zero()));
+
+    let error = state
+        .handle_tick()
+        .await
+        .expect_err("tick processing reports the lagging finalized OL frontier");
+
+    // 3. Show the lagging OL view is recoverable and leaves the verified anchor at seqno 1.
+    assert!(matches!(
+        error,
+        DaVerifierError::LaggingFinalizedOLFrontier {
+            anchor_next_update_seq_no,
+            finalized_next_update_seq_no,
+        } if anchor_next_update_seq_no == Seqno::new(1)
+            && finalized_next_update_seq_no == Seqno::zero()
+    ));
+    assert!(error.is_recoverable());
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&state);
+    assert_eq!(status.next_update_seq_no, 1);
+    fixture.assert_injected_behavior_consumed();
+}
+
+#[tokio::test]
+async fn test_recoverable_ol_failure_retries_from_anchor() {
+    // 1. Seed candidate 0 and its matching OL update.
+    let mut fixture = DaVerifierFixture::new(
+        AlpenParams::default(),
+        TEST_GENESIS_L1_HEIGHT,
+        TEST_L1_REORG_SAFE_DEPTH,
+    )
+    .with_bitcoin_tip_height(TEST_ONE_BLOCK_SCAN_BITCOIN_TIP);
+    let update = fixture.produce_update(build_test_state_diff(1));
+    fixture.seed_ol_updates_and_recovered_da_candidates(&[update]);
+
+    // 2. Make the first OL read time out and show the anchor remains at seqno 0.
+    fixture.fail_ol_update_at(
+        Seqno::zero(),
+        OLAccountUpdateError::new(
+            io::Error::new(io::ErrorKind::TimedOut, "OL account update unavailable"),
+            true,
+        ),
+    );
+    let mut state = fixture.build_verifier_service_state();
+
+    let error = state
+        .handle_tick()
+        .await
+        .expect_err("tick processing reports the OL account update timeout");
+    match error {
+        DaVerifierError::VerifyAccountState(VerifyAccountStateError::FetchAccountUpdate {
+            update_seq_no,
+            source: OLAccountUpdateError::Transient(source),
+        }) => {
+            assert_eq!(update_seq_no, Seqno::zero());
+            let source = source
+                .downcast_ref::<io::Error>()
+                .expect("mock OL timeout uses an IO error");
+            assert_eq!(source.kind(), io::ErrorKind::TimedOut);
+        }
+        error => panic!("unexpected verifier error: {error:?}"),
+    }
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&state);
+    assert_eq!(status.next_update_seq_no, 0);
+
+    // 3. Process another tick and show candidate 0 retries and verifies.
+    state.handle_tick().await.expect("tick processing succeeds");
+
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&state);
+    assert_eq!(status.next_update_seq_no, 1);
+    assert_eq!(
+        fixture.account_update_requests(),
+        [
+            (fixture.account_id(), Seqno::zero()),
+            (fixture.account_id(), Seqno::zero()),
+        ]
+    );
+    fixture.assert_injected_behavior_consumed();
+}
+
+#[tokio::test]
+async fn test_ol_transport_failure_after_available_update_leaves_anchor_unchanged() {
+    // 1. Seed candidates and matching OL updates 0 and 1 in one replay window.
+    let mut fixture = DaVerifierFixture::new(
+        AlpenParams::default(),
+        TEST_GENESIS_L1_HEIGHT,
+        TEST_L1_REORG_SAFE_DEPTH,
+    )
+    .with_bitcoin_tip_height(TEST_ONE_BLOCK_SCAN_BITCOIN_TIP);
+    let updates = produce_test_updates(&mut fixture, 2);
+    fixture.seed_ol_updates_and_recovered_da_candidates(&updates);
+
+    // 2. Fail the first tick's OL read at seqno 1 after it checks seqno 0.
+    fixture.fail_ol_update_at(
+        Seqno::new(1),
+        OLAccountUpdateError::new(
+            io::Error::new(io::ErrorKind::TimedOut, "second OL update unavailable"),
+            true,
+        ),
+    );
+    let mut state = fixture.build_verifier_service_state();
+
+    let error = state
+        .handle_tick()
+        .await
+        .expect_err("tick processing reports the second OL account update timeout");
+    assert!(error.is_recoverable());
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&state);
+    assert_eq!(status.next_update_seq_no, 0);
+
+    // 3. Process another tick and show both updates are requested again.
+    state.handle_tick().await.expect("tick processing succeeds");
+
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&state);
+    assert_eq!(status.next_update_seq_no, 2);
+    assert_eq!(
+        fixture.account_update_requests(),
+        [
+            (fixture.account_id(), Seqno::new(0)),
+            (fixture.account_id(), Seqno::new(1)),
+            (fixture.account_id(), Seqno::new(0)),
+            (fixture.account_id(), Seqno::new(1)),
+        ]
+    );
+    fixture.assert_injected_behavior_consumed();
+}
+
+#[tokio::test]
+async fn test_duplicate_candidates_fail_without_advancing_anchor() {
+    // 1. Seed two recovered candidates that both claim seqno 0.
+    let mut fixture = DaVerifierFixture::new(
+        AlpenParams::default(),
+        TEST_GENESIS_L1_HEIGHT,
+        TEST_L1_REORG_SAFE_DEPTH,
+    )
+    .with_bitcoin_tip_height(TEST_ONE_BLOCK_SCAN_BITCOIN_TIP);
+    let update = fixture.produce_update(build_test_state_diff(1));
+    let completion_block = make_test_l1_commitment(1);
+    fixture.seed_recovered_da(&[RecoveredDaBlob::new(
+        DaL1Ref::new(update.commit_txid(), completion_block),
+        update.blob().clone(),
+    )]);
+    // The competing commit txid is deliberately the only difference between
+    // the candidates, so transaction ordering cannot select a winner.
+    let competing_commit_txid = Txid::from_byte_array([0x42; 32]);
+    let duplicate = RecoveredDaBlob::new(
+        DaL1Ref::new(competing_commit_txid, completion_block),
+        update.blob().clone(),
+    );
+    fixture.seed_recovered_da(&[duplicate]);
+    fixture.process_sau(&update);
+    let mut state = fixture.build_verifier_service_state();
+
+    // 2. Process a tick and show reconstruction rejects both candidates after
+    // fetching their one shared OL update.
+    let error = state
+        .handle_tick()
+        .await
+        .expect_err("tick processing reports duplicate candidates");
+    assert!(!error.is_recoverable());
+    assert!(matches!(
+        error,
+        DaVerifierError::Reconstruct(L1ReconstructionError::BatchSequence(
+            BatchSequenceError::DuplicateUpdateSeqNo { update_seq_no }
+        )) if update_seq_no == Seqno::zero()
+    ));
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&state);
+    assert_eq!(status.next_update_seq_no, 0);
+    assert_eq!(
+        fixture.account_update_requests(),
+        [(fixture.account_id(), Seqno::zero())]
+    );
+}
+
+#[tokio::test]
+async fn test_state_root_divergence_is_fatal_and_leaves_anchor_unchanged() {
+    // 1. Process the OL update for one state diff and seed candidate 0 with another.
+    let mut fixture = DaVerifierFixture::new(
+        AlpenParams::default(),
+        TEST_GENESIS_L1_HEIGHT,
+        TEST_L1_REORG_SAFE_DEPTH,
+    )
+    .with_bitcoin_tip_height(TEST_ONE_BLOCK_SCAN_BITCOIN_TIP);
+    let update = fixture.produce_update(build_test_state_diff(1));
+    fixture.process_sau(&update);
+    let mut divergent_blob = update.blob().clone();
+    divergent_blob.state_diff = build_test_state_diff(2);
+    fixture.seed_recovered_da(&[RecoveredDaBlob::new(
+        DaL1Ref::new(update.commit_txid(), make_test_l1_commitment(1)),
+        divergent_blob,
+    )]);
+    let mut state = fixture.build_verifier_service_state();
+
+    // 2. Process a tick and show local verification detects the root mismatch.
+    let error = state
+        .handle_tick()
+        .await
+        .expect_err("tick processing reports the reconstructed state-root mismatch");
+    assert!(!error.is_recoverable());
+    assert!(matches!(
+        error,
+        DaVerifierError::VerifyAccountState(VerifyAccountStateError::VerifyUpdate(
+            AccountStateVerificationError::ApplyUpdate {
+                update_seq_no,
+                source: EeAccountReconstructionError::InnerStateRootMismatch { .. },
+            }
+        )) if update_seq_no == Seqno::zero()
+    ));
+
+    let status = DaVerifierService::<MockDaVerifierContext>::get_status(&state);
+    assert_eq!(status.next_update_seq_no, 0);
+    assert_eq!(
+        fixture.account_update_requests(),
+        [(fixture.account_id(), Seqno::zero())]
+    );
+}
+
+#[tokio::test]
 async fn test_service_continues_on_recoverable_error() {
     let fixture = DaVerifierFixture::new(
         AlpenParams::default(),
         TEST_GENESIS_L1_HEIGHT,
         TEST_L1_REORG_SAFE_DEPTH,
-    );
-    fixture.fail_next_bitcoin_tip(FetchBitcoinTipError::Rpc(ClientError::Timeout));
+    )
+    .with_bitcoin_tip_height(TEST_ONE_BLOCK_SCAN_BITCOIN_TIP);
+    fixture.fail_next_recovered_da_read(RecoveredDaDbError::WorkerCancelled);
     let mut state = fixture.build_verifier_service_state();
 
     let response = DaVerifierService::<MockDaVerifierContext>::process_input(&mut state, ())

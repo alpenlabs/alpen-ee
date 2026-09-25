@@ -9,7 +9,7 @@ use tracing::warn;
 
 use crate::{context::DaVerifierContext, state::DaVerifierServiceState};
 
-/// Current EE DA recovery progress.
+/// Current EE DA recovery and verification progress.
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct DaVerifierStatus {
     /// Next L1 height DA recovery will scan.
@@ -18,6 +18,11 @@ pub(crate) struct DaVerifierStatus {
     /// Latest reorg-safe L1 tip observed, absent until the chain is deeper
     /// than the configured safe depth.
     pub(crate) reorg_safe_tip: Option<L1Height>,
+
+    /// Next EE update sequence number verification expects.
+    ///
+    /// Starts at zero before any update has been verified.
+    pub(crate) next_update_seq_no: u64,
 }
 
 impl<C: DaVerifierContext> ServiceState for DaVerifierServiceState<C> {
@@ -43,6 +48,7 @@ impl<C: DaVerifierContext> Service for DaVerifierService<C> {
         DaVerifierStatus {
             next_l1_height: state.next_l1_height(),
             reorg_safe_tip: state.reorg_safe_tip(),
+            next_update_seq_no: state.next_update_seq_no(),
         }
     }
 }

@@ -28,7 +28,7 @@ pub(crate) enum FetchBitcoinTipError {
 }
 
 impl FetchBitcoinTipError {
-    /// Returns whether a later verification cycle may succeed without intervention.
+    /// Returns whether a later recovery attempt may succeed without intervention.
     pub(crate) fn is_recoverable(&self) -> bool {
         match self {
             Self::Rpc(source) => {

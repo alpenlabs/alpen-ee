@@ -1,11 +1,14 @@
 //! Runs the Alpen EE DA verifier service.
 
+mod account_state;
 mod args;
 mod bitcoin;
 mod builder;
 mod config;
 mod context;
 mod da_extraction;
+mod evm_state;
+mod ol_rpc;
 mod service;
 mod state;
 #[cfg(test)]
@@ -25,6 +28,7 @@ use crate::{
     bitcoin::create_bitcoin_rpc_client,
     builder::DaVerifierBuilder,
     config::DaVerifierConfig,
+    ol_rpc::RpcOLAccountUpdateSource,
 };
 
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
@@ -62,6 +66,8 @@ fn run(args: Args, handle: &Handle) -> anyhow::Result<()> {
     let bitcoin_client = create_bitcoin_rpc_client(config.bitcoind(), bitcoind_credentials)?;
     let recovered_da_db = open_recovered_da_db(&args.datadir, handle.clone())
         .map_err(|error| anyhow::anyhow!("failed to open recovered EE DA database: {error}"))?;
+    let account_update_source = RpcOLAccountUpdateSource::try_new(config.ol_rpc_url())
+        .map_err(|error| anyhow::anyhow!("failed to create OL RPC client: {error}"))?;
 
     let task_manager = TaskManager::new(handle.clone());
     let executor = task_manager.create_executor();
@@ -73,6 +79,7 @@ fn run(args: Args, handle: &Handle) -> anyhow::Result<()> {
             args.genesis_l1_height,
             bitcoin_client,
             recovered_da_db,
+            account_update_source,
         )
         .launch(&executor),
     )?;

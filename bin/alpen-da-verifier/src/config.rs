@@ -11,6 +11,7 @@ use std::{
 use anyhow::Context;
 use bitcoin::{secp256k1::XOnlyPublicKey, Network};
 use serde::{de::Error as _, Deserialize, Deserializer};
+use url::Url;
 
 // Applied when the corresponding configuration setting is omitted.
 const DEFAULT_FETCH_MAX_RETRIES: u16 = 3;
@@ -54,7 +55,7 @@ pub(crate) struct DaVerifierConfig {
     /// Zero treats the current tip as reorg-safe.
     l1_reorg_safe_depth: u32,
 
-    /// Interval between EE DA verification cycles, in milliseconds.
+    /// Interval between periodic EE DA recovery and state verification runs, in milliseconds.
     verification_interval_ms: NonZeroU64,
 
     /// Maximum number of L1 blocks scanned for DA in one recovery window.
@@ -74,6 +75,10 @@ pub(crate) struct DaVerifierConfig {
 
     /// Bitcoin RPC connection and retry configuration.
     bitcoind: BitcoindConfig,
+
+    /// URL of an OL sequencer RPC endpoint that retains EE account update manifests and
+    /// inner-state roots.
+    ol_rpc_url: Url,
 }
 
 impl DaVerifierConfig {
@@ -91,7 +96,7 @@ impl DaVerifierConfig {
         self.l1_reorg_safe_depth
     }
 
-    /// Returns the interval between EE DA verification cycles.
+    /// Returns the interval between periodic EE DA recovery and state verification runs.
     pub(crate) fn verification_interval(&self) -> Duration {
         Duration::from_millis(self.verification_interval_ms.get())
     }
@@ -134,6 +139,11 @@ impl DaVerifierConfig {
     pub(crate) fn block_fetch_concurrency(&self) -> NonZeroUsize {
         self.block_fetch_concurrency
     }
+
+    /// Returns the URL of the OL RPC endpoint.
+    pub(crate) fn ol_rpc_url(&self) -> &Url {
+        &self.ol_rpc_url
+    }
 }
 
 fn deserialize_xonly_public_key<'de, D>(deserializer: D) -> Result<XOnlyPublicKey, D::Error>
@@ -156,6 +166,7 @@ mod tests {
         l1_reorg_safe_depth = 6
         verification_interval_ms = 1000
         sequencer_pubkey = "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f"
+        ol_rpc_url = "http://127.0.0.1:8432"
 
         [bitcoind]
         rpc_url = "http://127.0.0.1:18443"
@@ -205,6 +216,7 @@ mod tests {
             DEFAULT_BLOCK_FETCH_CONCURRENCY
         );
         assert_eq!(config.bitcoin_network(), Network::Regtest);
+        assert_eq!(config.ol_rpc_url().as_str(), "http://127.0.0.1:8432/");
     }
 
     #[test]
@@ -258,5 +270,17 @@ mod tests {
         ]);
 
         assert!(parse_config(config).is_err());
+    }
+
+    #[test]
+    fn test_invalid_ol_rpc_url_rejected() {
+        let accepted = base_config_with([(
+            "ol_rpc_url",
+            Value::String("http://127.0.0.1:8432".to_owned()),
+        )]);
+        let rejected = base_config_with([("ol_rpc_url", Value::String("not a URL".to_owned()))]);
+
+        assert!(parse_config(accepted).is_ok());
+        assert!(parse_config(rejected).is_err());
     }
 }
