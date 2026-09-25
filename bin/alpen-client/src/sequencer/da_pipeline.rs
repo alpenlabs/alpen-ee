@@ -138,10 +138,10 @@ where
             btcio_params,
             broadcaster.max_fee_rate(),
         )
-            .with_broadcast_poll_interval_ms(broadcaster.poll_interval_ms)
-            .launch(service_executor)
-            .await
-            .map_err(|e| eyre::eyre!("starting broadcaster service: {e}"))?,
+        .with_broadcast_poll_interval_ms(broadcaster.poll_interval_ms)
+        .launch(service_executor)
+        .await
+        .map_err(|e| eyre::eyre!("starting broadcaster service: {e}"))?,
     );
 
     let (envelope_handle, envelope_watcher_task) = create_chunked_envelope_task(

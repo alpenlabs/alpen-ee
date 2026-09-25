@@ -1,7 +1,7 @@
 use std::{
     cell::Cell,
     io,
-    sync::Arc,
+    sync::{atomic::Ordering, Arc},
 };
 
 use alloy_consensus::{Header, Transaction};
@@ -594,6 +594,7 @@ mod tests {
             evm_config,
             EthereumBuilderConfig::default(),
             handle,
+            alpen_ee_params::DEFAULT_BASE_FEE_FLOOR,
         );
         let parent = Arc::new(SealedHeader::seal_slow(Header {
             gas_limit: 30_000_000,

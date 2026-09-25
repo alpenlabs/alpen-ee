@@ -965,6 +965,7 @@ mod tests {
         assert_eq!(seq.config.blocktime_ms.get(), 5_000);
         assert_eq!(seq.config.batch_sealing_block_count, 100);
         assert_eq!(seq.config.chunk_sealing_block_count(), 100);
+        assert_eq!(seq.config.broadcaster.max_fee_rate_sat_vb.get(), 1_000);
         let DaFeeRateConfig::WriterBacked {
             config: da_fee_rate,
         } = seq.config.da_fee_rate
@@ -980,6 +981,40 @@ mod tests {
         assert_eq!(da_fee_rate.explorer_timeout().as_secs(), 10);
         assert_eq!(da_fee_rate.bitcoind_timeout().as_secs(), 10);
         assert_eq!(da_fee_rate.policy_fetch_timeout().as_secs(), 20);
+    }
+
+    #[cfg(feature = "sequencer")]
+    #[test]
+    fn sequencer_accepts_custom_broadcast_max_fee_rate() {
+        let toml =
+            SEQUENCER_TOML.replace("max_fee_rate_sat_vb = 1000", "max_fee_rate_sat_vb = 250");
+        let config = AlpenClientConfig::from_toml_str(&toml).unwrap();
+        let NodeMode::Sequencer(seq) = &config.mode else {
+            panic!("expected sequencer mode");
+        };
+
+        assert_eq!(seq.config.broadcaster.max_fee_rate_sat_vb.get(), 250);
+    }
+
+    #[cfg(feature = "sequencer")]
+    #[test]
+    fn sequencer_rejects_fixed_fee_rate_above_broadcast_guardrail() {
+        let toml = SEQUENCER_TOML.replace("fixed_fee_rate = 1.0", "fixed_fee_rate = 1001.0");
+        let err = AlpenClientConfig::from_toml_str(&toml).unwrap_err();
+
+        assert!(err.to_string().contains(
+            "sequencer.l1_fee_policy.fixed_fee_rate must not exceed \
+             sequencer.broadcaster.max_fee_rate_sat_vb"
+        ));
+    }
+
+    #[cfg(feature = "sequencer")]
+    #[test]
+    fn sequencer_accepts_fixed_fee_rate_at_broadcast_guardrail() {
+        let toml = SEQUENCER_TOML.replace("fixed_fee_rate = 1.0", "fixed_fee_rate = 1000.0");
+
+        AlpenClientConfig::from_toml_str(&toml)
+            .expect("fixed fee rate at the broadcast guardrail should be accepted");
     }
 
     #[test]
