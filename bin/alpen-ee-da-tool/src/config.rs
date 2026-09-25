@@ -37,6 +37,9 @@ pub(crate) struct EeDaToolConfig {
 
     /// Bitcoin RPC connection and retry configuration.
     bitcoind: BitcoindConfig,
+
+    /// URL of the OL RPC endpoint.
+    ol_rpc_url: String,
 }
 
 impl EeDaToolConfig {
@@ -59,6 +62,11 @@ impl EeDaToolConfig {
         self.sequencer_pubkey
     }
 
+    /// Returns the configured block fetch concurrency.
+    pub(crate) fn block_fetch_concurrency(&self) -> NonZeroUsize {
+        self.block_fetch_concurrency
+    }
+
     /// Returns the Bitcoin RPC configuration.
     pub(crate) fn bitcoind(&self) -> &BitcoindConfig {
         &self.bitcoind
@@ -78,9 +86,9 @@ impl EeDaToolConfig {
             .unwrap_or(DEFAULT_FETCH_RETRY_DELAY_MS)
     }
 
-    /// Returns the configured block fetch concurrency.
-    pub(crate) fn block_fetch_concurrency(&self) -> NonZeroUsize {
-        self.block_fetch_concurrency
+    /// Returns the URL of the OL RPC endpoint.
+    pub(crate) fn ol_rpc_url(&self) -> &str {
+        &self.ol_rpc_url
     }
 }
 
@@ -104,6 +112,7 @@ mod tests {
             r#"
                 l1_reorg_safe_depth = 6
                 sequencer_pubkey = "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f"
+                ol_rpc_url = "http://127.0.0.1:8432"
 
                 [bitcoind]
                 rpc_url = "http://127.0.0.1:18443"
@@ -122,6 +131,7 @@ mod tests {
             DEFAULT_BLOCK_FETCH_CONCURRENCY
         );
         assert_eq!(config.bitcoind().network, Network::Regtest);
+        assert_eq!(config.ol_rpc_url(), "http://127.0.0.1:8432");
     }
 
     #[test]
@@ -131,6 +141,7 @@ mod tests {
                 l1_reorg_safe_depth = 6
                 sequencer_pubkey = "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f"
                 block_fetch_concurrency = 4
+                ol_rpc_url = "http://127.0.0.1:8432"
 
                 [bitcoind]
                 rpc_url = "http://127.0.0.1:18443"

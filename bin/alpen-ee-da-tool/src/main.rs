@@ -1,16 +1,19 @@
-//! Reconstructs Alpen EVM state from EE DA blobs published on Bitcoin.
+//! Reconstructs Alpen EVM state from Bitcoin DA and verifies its EE account state against OL.
 
+mod account_state;
 mod args;
 mod bitcoin;
 mod config;
 mod da_extraction;
 mod evm_state;
+mod ol_rpc;
 mod output;
 mod progress;
 
 use clap::Parser;
 
 use crate::{
+    account_state::verify_account_state_from_genesis,
     args::{load_alpen_params, Args},
     bitcoin::{
         create_bitcoin_rpc_client, ensure_bitcoin_network, fetch_transaction_block_commitment,
@@ -18,7 +21,8 @@ use crate::{
     config::EeDaToolConfig,
     da_extraction::recover_ee_da,
     evm_state::reconstruct_evm_state,
-    output::{emit, EvmStateReconstructionOutcome},
+    ol_rpc::RpcOLAccountUpdateSource,
+    output::{emit, EeDaVerificationOutcome},
     progress::StageProgress,
 };
 
@@ -45,9 +49,17 @@ async fn main() -> eyre::Result<()> {
     reconstruction_progress.finish();
 
     let Some(reconstruction_outcome) = reconstruction_outcome else {
-        let output = EvmStateReconstructionOutcome::NoEeDaBlobsFound;
+        let output = EeDaVerificationOutcome::NoEeDaBlobsFound;
         return emit(&output);
     };
+
+    let account_update_source = RpcOLAccountUpdateSource::try_new(config.ol_rpc_url())?;
+    let verified_account_state = verify_account_state_from_genesis(
+        &params,
+        reconstruction_outcome.batch_replay_outcome(),
+        &account_update_source,
+    )
+    .await?;
 
     let first_batch_l1_ref = reconstruction_outcome.first_batch_l1_ref();
     let last_batch_l1_ref = reconstruction_outcome.last_batch_l1_ref();
@@ -59,8 +71,9 @@ async fn main() -> eyre::Result<()> {
     } else {
         fetch_transaction_block_commitment(&bitcoin_client, last_batch_l1_ref.commit_txid()).await?
     };
-    let output = EvmStateReconstructionOutcome::complete(
+    let output = EeDaVerificationOutcome::verified(
         &reconstruction_outcome,
+        &verified_account_state,
         first_commit_block,
         last_commit_block,
     );
