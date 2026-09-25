@@ -175,6 +175,17 @@ pub trait Schema: Sized + Send + Sync + 'static {
 /// their bytes), so integer keys that must sort numerically should use a
 /// big-endian codec.
 pub trait KeyCodec<S: Schema>: Sized {
+    /// Whether the byte order of encoded keys is the logical order of the keys
+    /// themselves, so that a cursor range between two encoded keys is exactly
+    /// the keys between them.
+    ///
+    /// True for big-endian integers and raw byte strings; false by default,
+    /// because a codec that is generic over its key type cannot promise it —
+    /// borsh writes integers little-endian and prefixes vectors with their
+    /// length. A range query over a table whose codec does not set this must
+    /// be refused rather than return the wrong rows.
+    const ORDERED: bool = false;
+
     /// Encodes the key to its on-disk byte representation.
     fn encode_key(&self) -> Result<Vec<u8>, CodecError>;
 

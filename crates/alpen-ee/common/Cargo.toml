@@ -31,6 +31,7 @@ bincode.workspace = true
 bitcoin.workspace = true
 borsh.workspace = true
 eyre.workspace = true
+hex.workspace = true
 mockall = { workspace = true, optional = true }
 reth-ethereum-engine-primitives.workspace = true
 reth-ethereum-primitives.workspace = true
