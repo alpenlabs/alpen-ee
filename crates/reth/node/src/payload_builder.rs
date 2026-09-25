@@ -1,10 +1,7 @@
 use std::{
     cell::Cell,
     io,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
+    sync::{atomic::Ordering, Arc},
 };
 
 use alloy_consensus::{Header, Transaction};
@@ -12,7 +9,10 @@ use alloy_eips::eip4895::Withdrawals;
 use alpen_reth_evm::{
     base_fee::next_floored_base_fee,
     constants::BRIDGEOUT_PRECOMPILE_ADDRESS,
-    da_fee::{DA_COVERAGE_CAPPED, DA_COVERAGE_UNKNOWN},
+    da_fee::{
+        constrain_next_da_rate, stamped_da_rate_from_extra_data, DA_COVERAGE_CAPPED,
+        DA_COVERAGE_UNKNOWN,
+    },
     extract_withdrawal_intents,
 };
 use alpen_reth_primitives::WithdrawalIntent;
@@ -42,6 +42,7 @@ use tracing::{debug, info, trace, warn};
 
 use crate::{
     block_witness::build_block_witness_from_executed_state,
+    da_fee_rate::DaFeeRateHandle,
     engine::AlpenEngineTypes,
     evm_config::AlpenEvmConfig,
     payload::{AlpenBuiltPayload, AlpenPayloadAttributes},
@@ -54,39 +55,14 @@ use crate::{
 /// DA-inflated signed `gas_limit`; the precise per-tx fit is checked post-execution.
 const MIN_TX_GAS_LIMIT: u64 = 21_000;
 
-/// Fee inputs sampled by a payload build.
-///
-/// The DA rate is shared with the sequencer because it changes between payloads;
-/// the base-fee floor is fixed by the chain parameters.
-#[derive(Debug, Clone)]
-struct PayloadFeeConfig {
-    live_da_rate: Arc<AtomicU64>,
-    base_fee_floor: u64,
-}
-
 /// A custom payload service builder that supports the custom engine types
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct AlpenPayloadBuilderBuilder {
-    /// Live DA rate (wei per byte), shared with the payload builder.
-    ///
-    /// Shared and atomic — not because it changes *within* a block, but because the
-    /// sequencer updates it *between* blocks, out of band from the build task (from
-    /// its Bitcoin fee rate; see [`crate::payload_builder`]). The builder samples it
-    /// once and freezes that value into the block, so a single relaxed load/store on
-    /// an [`AtomicU64`] is all the synchronization the hand-off needs.
-    pub live_da_rate: Arc<AtomicU64>,
+    /// Provides read-only access to the DA rate sampled by each payload attempt.
+    pub da_fee_rate_handle: DaFeeRateHandle,
     /// Minimum EIP-1559 base fee from the chain params artifact.
     pub base_fee_floor: u64,
-}
-
-impl Default for AlpenPayloadBuilderBuilder {
-    fn default() -> Self {
-        Self {
-            live_da_rate: Arc::new(AtomicU64::new(0)),
-            base_fee_floor: alpen_ee_params::DEFAULT_BASE_FEE_FLOOR,
-        }
-    }
 }
 
 impl<Node, Pool> PayloadBuilderBuilder<Node, Pool, AlpenEvmConfig> for AlpenPayloadBuilderBuilder
@@ -119,7 +95,7 @@ where
             pool,
             evm_config,
             EthereumBuilderConfig::new().with_gas_limit(gas_limit),
-            self.live_da_rate,
+            self.da_fee_rate_handle,
             self.base_fee_floor,
         ))
     }
@@ -138,8 +114,10 @@ pub struct AlpenPayloadBuilder<Pool, Client> {
     evm_config: AlpenEvmConfig,
     /// Payload builder configuration.
     builder_config: EthereumBuilderConfig,
-    /// Fee inputs used when building payloads.
-    fee_config: PayloadFeeConfig,
+    /// Provides the DA rate sampled and frozen by each payload attempt.
+    da_fee_rate_handle: DaFeeRateHandle,
+    /// Minimum EIP-1559 base fee from the chain params artifact.
+    base_fee_floor: u64,
 }
 
 impl<Pool, Client> AlpenPayloadBuilder<Pool, Client> {
@@ -149,7 +127,7 @@ impl<Pool, Client> AlpenPayloadBuilder<Pool, Client> {
         pool: Pool,
         evm_config: AlpenEvmConfig,
         builder_config: EthereumBuilderConfig,
-        live_da_rate: Arc<AtomicU64>,
+        da_fee_rate_handle: DaFeeRateHandle,
         base_fee_floor: u64,
     ) -> Self {
         Self {
@@ -157,10 +135,8 @@ impl<Pool, Client> AlpenPayloadBuilder<Pool, Client> {
             pool,
             evm_config,
             builder_config,
-            fee_config: PayloadFeeConfig {
-                live_da_rate,
-                base_fee_floor,
-            },
+            da_fee_rate_handle,
+            base_fee_floor,
         }
     }
 }
@@ -180,11 +156,13 @@ where
         &self,
         args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
-        try_build_payload(
+        let da_rate = self.da_fee_rate_handle.current_rate();
+
+        try_build_payload::<Pool, Client, _>(
             self.evm_config.clone(),
-            &self.fee_config,
+            da_rate,
+            self.base_fee_floor,
             self.client.clone(),
-            self.pool.clone(),
             self.builder_config.clone(),
             args,
             |attributes| self.pool.best_transactions_with_attributes(attributes),
@@ -203,17 +181,9 @@ where
             Default::default(),
             None,
         );
-        try_build_payload(
-            self.evm_config.clone(),
-            &self.fee_config,
-            self.client.clone(),
-            self.pool.clone(),
-            self.builder_config.clone(),
-            args,
-            |attributes| self.pool.best_transactions_with_attributes(attributes),
-        )?
-        .into_payload()
-        .ok_or_else(|| PayloadBuilderError::MissingPayload)
+        self.try_build(args)?
+            .into_payload()
+            .ok_or_else(|| PayloadBuilderError::MissingPayload)
     }
 }
 
@@ -232,9 +202,9 @@ type BestTransactionsIter<Pool> = Box<
 #[inline]
 fn try_build_payload<Pool, Client, F>(
     evm_config: AlpenEvmConfig,
-    fee_config: &PayloadFeeConfig,
+    candidate_da_rate: u64,
+    base_fee_floor: u64,
     client: Client,
-    _pool: Pool,
     builder_config: EthereumBuilderConfig,
     args: BuildArguments<AlpenPayloadAttributes, AlpenBuiltPayload>,
     best_txs: F,
@@ -246,16 +216,6 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
 {
-    // Freeze the per-block DA rate: sample the live rate once and use it both as the
-    // in-EVM charge rate for this build and as the value committed into the block
-    // `extra_data`. Freezing per block keeps the charge and the committed rate identical, so
-    // the block re-executes to the same state root on full nodes/provers.
-    //
-    // NOTE: `live_da_rate` currently mirrors the sequencer's Bitcoin publication fee rate
-    // (`btcio::writer::fees::resolve_fee_rate`, gossiped from the OL). It should later be
-    // decoupled from the publication rate and smoothed/cached for the fee model.
-    let da_rate = fee_config.live_da_rate.load(Ordering::Relaxed);
-
     let BuildArguments {
         mut cached_reads,
         config,
@@ -268,6 +228,10 @@ where
         attributes,
         payload_id,
     } = config;
+    let da_rate = constrain_next_da_rate(
+        stamped_da_rate_from_extra_data(&parent_header.extra_data),
+        candidate_da_rate,
+    );
 
     // Refuse a spec version this binary has no variant for: it was resolved by newer code,
     // and failing beats building under rules older than the ones asked for.
@@ -327,7 +291,7 @@ where
         chain_spec.as_ref(),
         next_number,
         attributes.timestamp,
-        fee_config.base_fee_floor,
+        base_fee_floor,
     ) {
         evm_env.block_env.basefee = base_fee;
     }
@@ -595,4 +559,82 @@ where
         payload: strata_payload,
         cached_reads,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy_rpc_types::engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
+    use alpen_ee_params::{AlpenSpecId, EvmSpec, HeaderExtra};
+    use alpen_reth_evm::evm::AlpenEvmFactory;
+    use reth_node_api::BuiltPayload;
+    use reth_primitives_traits::SealedHeader;
+    use reth_storage_api::noop::NoopProvider;
+    use reth_transaction_pool::noop::NoopTransactionPool;
+
+    use super::*;
+    use crate::{da_fee_rate_channel, payload::AlpenPayloadAttributes};
+
+    #[test]
+    fn payload_attempts_sample_rates_independently_and_bound_increases() {
+        const PARENT_RATE: u64 = 100;
+        const INITIAL_RATE: u64 = 101;
+        const FIRST_ATTEMPT_RATE: u64 = 105;
+        const SECOND_ATTEMPT_RATE: u64 = 120;
+
+        let evm_spec: EvmSpec =
+            serde_json::from_str(r#"{"config":{"chainId":2892,"shanghaiTime":0}}"#)
+                .expect("genesis document parses");
+        let evm_config = AlpenEvmConfig::new(&evm_spec, AlpenEvmFactory::default());
+        let (updater, handle) = da_fee_rate_channel(INITIAL_RATE, u64::MAX);
+        let builder = AlpenPayloadBuilder::new(
+            NoopProvider::default(),
+            NoopTransactionPool::default(),
+            evm_config,
+            EthereumBuilderConfig::default(),
+            handle,
+            alpen_ee_params::DEFAULT_BASE_FEE_FLOOR,
+        );
+        let parent = Arc::new(SealedHeader::seal_slow(Header {
+            gas_limit: 30_000_000,
+            base_fee_per_gas: Some(7),
+            extra_data: HeaderExtra::new(AlpenSpecId::V0, PARENT_RATE)
+                .encode()
+                .into(),
+            ..Default::default()
+        }));
+        let attributes = |timestamp| {
+            AlpenPayloadAttributes::new_from_eth(
+                EthPayloadAttributes {
+                    timestamp,
+                    withdrawals: Some(Vec::new()),
+                    ..Default::default()
+                },
+                AlpenSpecId::V0,
+            )
+        };
+
+        updater.publish(FIRST_ATTEMPT_RATE);
+        let first_payload = builder
+            .build_empty_payload(PayloadConfig::new(
+                parent.clone(),
+                attributes(1),
+                PayloadId::default(),
+            ))
+            .expect("empty payload builds");
+        updater.publish(SECOND_ATTEMPT_RATE);
+        let second_payload = builder
+            .build_empty_payload(PayloadConfig::new(
+                parent.clone(),
+                attributes(2),
+                PayloadId::default(),
+            ))
+            .expect("empty payload builds");
+
+        for (payload, expected_rate) in [(first_payload, FIRST_ATTEMPT_RATE), (second_payload, 110)]
+        {
+            let header_extra = HeaderExtra::decode(&payload.block().header().extra_data)
+                .expect("built payload carries valid header extra data");
+            assert_eq!(header_extra.da_rate(), expected_rate);
+        }
+    }
 }

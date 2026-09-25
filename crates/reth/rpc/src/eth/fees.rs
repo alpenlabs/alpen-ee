@@ -13,15 +13,15 @@ use alloy_rpc_types_eth::{
     state::{EvmOverrides, StateOverride},
     BlockId,
 };
-use alpen_reth_evm::da_fee::{calc_diff_size, da_rate_from_extra_data};
+use alpen_reth_evm::da_fee::{
+    calc_diff_size, constrain_next_da_rate, stamped_da_rate_from_extra_data,
+    DA_RATE_SAFETY_MARGIN_BPS,
+};
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_provider::ProviderError;
 use reth_rpc_convert::RpcTxReq;
-use reth_rpc_eth_api::{
-    helpers::{estimate::EstimateCall, Call},
-    EthApiTypes, FromEvmError, RpcConvert, RpcNodeCore,
-};
+use reth_rpc_eth_api::{helpers::Call, EthApiTypes, FromEvmError, RpcConvert, RpcNodeCore};
 use reth_rpc_eth_types::{error::FromEthApiError, EthApiError};
 use reth_storage_api::BlockReaderIdExt;
 use serde::{Deserialize, Serialize};
@@ -31,19 +31,12 @@ use crate::AlpenEthApi;
 /// Basis-points denominator for the DA-fee safety margin.
 const BPS_DENOM: u64 = 10_000;
 
-/// Safety margin folded into the quoted DA fee (10%).
-///
-/// The quote inflates the DA fee so the signed effective-gas envelope still covers the
-/// charge if the committed DA rate ticks up between the quote and block inclusion. See
-/// the fee-model spec (§11, safety).
-const DA_FEE_SAFETY_MARGIN_BPS: u64 = 1_000;
-
 /// Quotes the DA fee (wei) for a diff of `diff_size` bytes at `da_rate`, including the
 /// safety margin.
 pub(crate) fn quote_da_fee(da_rate: u64, diff_size: u64) -> U256 {
     U256::from(da_rate)
         .saturating_mul(U256::from(diff_size))
-        .saturating_mul(U256::from(BPS_DENOM + DA_FEE_SAFETY_MARGIN_BPS))
+        .saturating_mul(U256::from(BPS_DENOM + DA_RATE_SAFETY_MARGIN_BPS))
         / U256::from(BPS_DENOM)
 }
 
@@ -67,7 +60,7 @@ pub(crate) struct DaFeeQuote {
     pub base_fee: u64,
     /// Estimated per-transaction DA payload size (bytes).
     pub diff_size: u64,
-    /// Committed DA rate (wei per DA byte) read from the head block header.
+    /// DA rate (wei per DA byte) used for the quote.
     pub da_rate: u64,
     /// DA fee (wei), including the safety margin.
     pub da_fee: U256,
@@ -87,7 +80,7 @@ pub struct FeeEstimate {
     pub base_fee: u64,
     /// Estimated per-transaction DA payload size (bytes).
     pub diff_size: u64,
-    /// Committed DA rate (wei per DA byte) read from the head block header.
+    /// DA rate (wei per DA byte) used for the estimate.
     pub da_rate: u64,
     /// DA fee charged for this transaction (wei), including the safety margin.
     pub da_fee: U256,
@@ -107,8 +100,9 @@ where
     /// Simulates `request` once and returns its DA fee components.
     ///
     /// Measures both the gas consumed and the resulting state-diff (the DA footprint) with
-    /// the same `calc_diff_size` estimator the STF charge uses, and reads the committed DA
-    /// rate and base fee from the chain-head header (the consensus source of truth).
+    /// the same `calc_diff_size` estimator the STF charge uses. `da_rate_override` carries the
+    /// next-block policy ceiling for mutable sequencer estimates; historical estimates read the
+    /// committed rate from the simulated block's header.
     pub(crate) async fn da_fee_quote(
         &self,
         request: RpcTxReq<
@@ -116,6 +110,7 @@ where
         >,
         at: BlockId,
         state_override: Option<StateOverride>,
+        da_rate_override: Option<u64>,
     ) -> Result<DaFeeQuote, EthApiError> {
         let res = self
             .transact_call_at(request, at, EvmOverrides::new(state_override, None))
@@ -123,10 +118,9 @@ where
         let gas_used = res.result.tx_gas_used();
         let diff_size = calc_diff_size(&res.state);
 
-        // Read the DA rate and base fee from the header of the block the transaction is
-        // simulated against (`at`), so a historical quote uses that block's committed fee
-        // parameters rather than the current head's. Falls back to the latest header when
-        // `at` does not resolve to a stored header (e.g. the pending tag).
+        // Read the base fee and any historical DA rate from the header of the block the
+        // transaction is simulated against (`at`). Falls back to the latest header when `at`
+        // does not resolve to a stored header (e.g. the pending tag).
         let header = match self
             .provider()
             .sealed_header_by_id(at)
@@ -139,7 +133,10 @@ where
                 .map_err(EthApiError::from_eth_err::<ProviderError>)?
                 .ok_or_else(|| EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?,
         };
-        let da_rate = da_rate_from_extra_data(header.extra_data());
+        let committed_da_rate = stamped_da_rate_from_extra_data(header.extra_data());
+        let da_rate = da_rate_override
+            .map(|candidate| constrain_next_da_rate(committed_da_rate, candidate))
+            .unwrap_or_else(|| committed_da_rate.unwrap_or(0));
         let base_fee = header.base_fee_per_gas().unwrap_or_default();
         let da_fee = quote_da_fee(da_rate, diff_size);
 
@@ -157,9 +154,9 @@ where
     ///
     /// `latest`/number tags otherwise re-resolve independently on each downstream call (the
     /// breakdown quote and the effective-gas estimate), and a block arriving between those
-    /// awaits would mix state, base fee, and DA rate from different heights. Concrete hashes
-    /// pass through unchanged; a tag that does not resolve to a stored header (e.g. the
-    /// `pending` tag) is left as-is.
+    /// awaits would mix state and header-derived fee parameters from different heights.
+    /// Concrete hashes pass through unchanged; a tag that does not resolve to a stored header
+    /// (e.g. the `pending` tag) is left as-is.
     fn pin_block_id(&self, at: BlockId) -> Result<BlockId, EthApiError> {
         if matches!(at, BlockId::Hash(_)) {
             return Ok(at);
@@ -202,10 +199,14 @@ where
         block_number: Option<BlockId>,
         state_override: Option<StateOverride>,
     ) -> RpcResult<FeeEstimate> {
-        // Pin the requested block up front so the effective-gas estimate and the breakdown
-        // quote are derived from the same snapshot; `latest` would otherwise be re-resolved by
-        // each call below and could straddle a newly produced block.
-        let block = self.pin_block_id(block_number.unwrap_or_default())?;
+        // Snapshot the live rate before pinning `latest` to a concrete block. Both the
+        // effective-gas estimate and breakdown quote must use this same value.
+        let requested_block = block_number.unwrap_or_default();
+        let da_rate = self.live_da_fee_rate(requested_block);
+
+        // Pin the requested block so the simulations use the same state and base fee;
+        // `latest` would otherwise be re-resolved by each call below.
+        let block = self.pin_block_id(requested_block)?;
 
         // Resolve the signed gas limit first. `effective_gas` is the value a wallet signs as
         // its gas limit, so it must be a safe gas *limit*, not the gas *used* by one roomy
@@ -214,7 +215,7 @@ where
         // same path as `eth_estimateGas`, which binary-searches the execution gas and folds in
         // the DA-fee headroom.
         let effective_gas = self
-            .estimate_gas_at(request.clone(), block, state_override.clone())
+            .estimate_gas_at_with_da_rate(request.clone(), block, state_override.clone(), da_rate)
             .await?
             .saturating_to::<u64>();
 
@@ -225,7 +226,7 @@ where
         let mut quote_request = request.clone();
         quote_request.as_mut().set_gas_limit(effective_gas);
         let quote = self
-            .da_fee_quote(quote_request, block, state_override)
+            .da_fee_quote(quote_request, block, state_override, da_rate)
             .await?;
 
         // The execution fee is paid at the transaction's *effective* gas price, which the

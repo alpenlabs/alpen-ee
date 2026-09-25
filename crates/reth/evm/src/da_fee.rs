@@ -24,7 +24,21 @@ use reth_evm::{eth::EthEvmContext, Database};
 use revm::state::EvmState;
 use revm_primitives::{Bytes, KECCAK_EMPTY, U256};
 
-use crate::utils::WEI_PER_SAT;
+const BPS_DENOMINATOR: u64 = 10_000;
+
+/// Safety margin used by fee quotes and as the maximum next-block DA-rate increase.
+pub const DA_RATE_SAFETY_MARGIN_BPS: u64 = 1_000;
+
+/// Reports a committed DA rate that exceeds the per-block increase bound.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+#[error(
+    "DA fee rate {next_rate} exceeds maximum {maximum_rate} allowed by parent rate {parent_rate}"
+)]
+pub struct DaRateIncreaseError {
+    parent_rate: u64,
+    next_rate: u64,
+    maximum_rate: u64,
+}
 
 // The constants below are deliberate **upper bounds** on the DA-encoded size of each
 // field (`statediff` `AccountDiff` / `StorageDiff` and their codecs). The DA charge must
@@ -172,38 +186,61 @@ pub fn calc_diff_size(state: &EvmState) -> u64 {
 /// execution its layout has already been checked, so falling back to `0` here is a
 /// belt-and-braces default rather than a policy decision.
 pub fn da_rate_from_extra_data(extra_data: &Bytes) -> u64 {
-    HeaderExtra::decode(extra_data)
-        .map(|extra| extra.da_rate())
-        .unwrap_or(0)
+    stamped_da_rate_from_extra_data(extra_data).unwrap_or(0)
 }
 
-/// SegWit witness discount: DA payload rides in witness data, weighted at 1/4 of a vByte.
-const SEGWIT_WITNESS_DIVISOR: u64 = 4;
-
-/// Default Bitcoin fee rate (sat/vByte) the live DA rate is seeded from when no explicit
-/// `ALPEN_DA_RATE_WEI_PER_BYTE` override is set.
+/// Decodes a rate only when the header carries an explicit [`HeaderExtra`] stamp.
 ///
-/// 4 sat/vByte is a conservative normal-conditions rate; after the SegWit witness discount
-/// it is exactly 1 satoshi per DA byte. It is only a seed — the live rate is expected to
-/// track the sequencer's actual Bitcoin fee rate later (see [`btc_fee_rate_to_da_rate`]).
-pub const DEFAULT_DA_BTC_FEE_RATE_SAT_PER_VBYTE: u64 = 4;
+/// Empty `extra_data` is the legacy pre-stamp representation, while an encoded zero is an active
+/// rate. Invalid non-empty data is treated as unstamped for the genesis-header fallback.
+pub fn stamped_da_rate_from_extra_data(extra_data: &Bytes) -> Option<u64> {
+    if extra_data.is_empty() {
+        return None;
+    }
 
-/// Default live DA rate (wei per DA byte): [`DEFAULT_DA_BTC_FEE_RATE_SAT_PER_VBYTE`] mapped
-/// through the SegWit witness discount (`WEI_PER_SAT` wei, i.e. 1 sat per DA byte).
-pub const DEFAULT_DA_RATE_WEI_PER_BYTE: u64 =
-    DEFAULT_DA_BTC_FEE_RATE_SAT_PER_VBYTE * WEI_PER_SAT / SEGWIT_WITNESS_DIVISOR;
+    HeaderExtra::decode(extra_data)
+        .ok()
+        .map(|extra| extra.da_rate())
+}
 
-/// Converts a Bitcoin fee rate (satoshis per virtual byte) to the DA rate (wei per byte).
+/// Caps a candidate DA rate to the increase covered by the fee-quote safety margin.
 ///
-/// `da_rate = btc_fee_rate[sat/vB] * 10^10[wei/sat] / 4` (the SegWit witness discount).
+/// An unstamped parent is pre-activation, so the first rate-bearing block may bootstrap directly
+/// to the configured candidate. After activation, decreases are unrestricted while increases are
+/// limited to 10% of the parent rate, with a minimum one-wei step so zero and small integer rates
+/// can recover instead of becoming absorbing states.
+pub fn constrain_next_da_rate(parent_rate: Option<u64>, candidate_rate: u64) -> u64 {
+    let Some(parent_rate) = parent_rate else {
+        return candidate_rate;
+    };
+
+    let maximum_increase = (u128::from(parent_rate) * u128::from(DA_RATE_SAFETY_MARGIN_BPS)
+        / u128::from(BPS_DENOMINATOR))
+    .max(1);
+    let maximum_rate = u128::from(parent_rate) + maximum_increase;
+    candidate_rate.min(u64::try_from(maximum_rate).unwrap_or(u64::MAX))
+}
+
+/// Validates a committed DA rate against the per-block increase bound.
 ///
-/// NOTE: for now this reuses the sequencer's Bitcoin publication fee rate
-/// (`btcio::writer::fees::resolve_fee_rate`). The DA fee-model rate is expected to be
-/// decoupled from the publication rate — and smoothed/cached — in a later revision.
-pub fn btc_fee_rate_to_da_rate(sat_per_vbyte: u64) -> u64 {
-    sat_per_vbyte
-        .saturating_mul(WEI_PER_SAT)
-        .saturating_div(SEGWIT_WITNESS_DIVISOR)
+/// An unstamped parent is the activation boundary and imposes no bound. Rate decreases are
+/// always valid.
+pub fn validate_da_rate_against_parent(
+    parent_rate: Option<u64>,
+    next_rate: u64,
+) -> Result<(), DaRateIncreaseError> {
+    let Some(parent_rate) = parent_rate else {
+        return Ok(());
+    };
+    let maximum_rate = constrain_next_da_rate(Some(parent_rate), u64::MAX);
+    if next_rate > maximum_rate {
+        return Err(DaRateIncreaseError {
+            parent_rate,
+            next_rate,
+            maximum_rate,
+        });
+    }
+    Ok(())
 }
 
 /// Computes the DA fee to charge, bounded by the caller's unused authorized gas value.
@@ -432,10 +469,16 @@ mod tests {
 
     #[test]
     fn da_rate_extra_data_roundtrips() {
-        let rate = 2_500_000_000_u64;
         for version in [AlpenSpecId::V0, AlpenSpecId::V1] {
-            let extra_data = Bytes::from(HeaderExtra::new(version, rate).encode());
-            assert_eq!(da_rate_from_extra_data(&extra_data), rate, "{version:?}");
+            for rate in [0, 2_500_000_000] {
+                let extra_data = Bytes::from(HeaderExtra::new(version, rate).encode());
+                assert_eq!(da_rate_from_extra_data(&extra_data), rate, "{version:?}");
+                assert_eq!(
+                    stamped_da_rate_from_extra_data(&extra_data),
+                    Some(rate),
+                    "{version:?}"
+                );
+            }
         }
     }
 
@@ -445,9 +488,26 @@ mod tests {
         assert_eq!(da_rate_from_extra_data(&Bytes::from_static(b"SC")), 0);
         assert_eq!(da_rate_from_extra_data(&Bytes::new()), 0);
         assert_eq!(
+            stamped_da_rate_from_extra_data(&Bytes::from_static(b"SC")),
+            None
+        );
+        assert_eq!(stamped_da_rate_from_extra_data(&Bytes::new()), None);
+        assert_eq!(
             da_rate_from_extra_data(&Bytes::from_static(&[0x00, 0x00])),
             0
         );
+    }
+
+    #[test]
+    fn next_da_rate_is_bounded_by_the_quote_margin() {
+        assert_eq!(constrain_next_da_rate(None, u64::MAX), u64::MAX);
+        assert_eq!(constrain_next_da_rate(Some(0), 0), 0);
+        assert_eq!(constrain_next_da_rate(Some(0), u64::MAX), 1);
+        assert_eq!(constrain_next_da_rate(Some(1), u64::MAX), 2);
+        assert_eq!(constrain_next_da_rate(Some(1_000), 900), 900);
+        assert_eq!(constrain_next_da_rate(Some(1_000), 1_100), 1_100);
+        assert_eq!(constrain_next_da_rate(Some(1_000), 1_101), 1_100);
+        assert_eq!(constrain_next_da_rate(Some(u64::MAX), u64::MAX), u64::MAX);
     }
 
     #[test]
