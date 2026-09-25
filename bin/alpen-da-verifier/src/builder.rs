@@ -17,8 +17,9 @@ use crate::{
     bitcoin::ensure_bitcoin_network,
     config::DaVerifierConfig,
     context::DaVerifierContextImpl,
+    ol_rpc::RpcOLAccountUpdateSource,
     service::{DaVerifierService, DaVerifierStatus},
-    state::{DaRecoveryState, DaVerifierServiceState},
+    state::{DaRecoveryState, DaVerificationState, DaVerifierServiceState},
 };
 
 /// Numerator of the growth factor applied to each Bitcoin fetch retry delay.
@@ -40,6 +41,7 @@ pub(crate) struct DaVerifierBuilder {
     genesis_l1_height: L1Height,
     bitcoin_client: Client,
     recovered_da_db: RecoveredDaDbOps,
+    account_update_source: RpcOLAccountUpdateSource,
 }
 
 impl DaVerifierBuilder {
@@ -50,6 +52,7 @@ impl DaVerifierBuilder {
         genesis_l1_height: L1Height,
         bitcoin_client: Client,
         recovered_da_db: RecoveredDaDbOps,
+        account_update_source: RpcOLAccountUpdateSource,
     ) -> Self {
         Self {
             params,
@@ -57,6 +60,7 @@ impl DaVerifierBuilder {
             genesis_l1_height,
             bitcoin_client,
             recovered_da_db,
+            account_update_source,
         }
     }
 
@@ -64,17 +68,18 @@ impl DaVerifierBuilder {
     ///
     /// # Errors
     ///
-    /// Returns an error if Bitcoin network validation fails.
+    /// Returns an error if Bitcoin network or EE account validation fails.
     pub(crate) async fn launch(
         self,
         executor: &impl AsyncExecutor,
     ) -> anyhow::Result<DaVerifierHandle> {
         self.check_bitcoin_network().await?;
+        self.check_ee_account().await?;
 
-        let fetch_policy = self.build_l1_block_fetch_policy();
+        let l1_block_fetch_policy = self.build_l1_block_fetch_policy();
         // Read input configuration before transferring ownership into service state.
         let verification_interval = self.config.verification_interval();
-        let service_state = self.into_service_state(fetch_policy);
+        let service_state = self.into_service_state(l1_block_fetch_policy);
 
         let (tick_handle, tick_input) = DumbTickingInput::new(verification_interval);
         let monitor = ServiceBuilder::<DaVerifierService<DaVerifierContextImpl>, _>::new()
@@ -87,6 +92,22 @@ impl DaVerifierBuilder {
             _monitor: monitor,
             _tick_handle: tick_handle,
         })
+    }
+
+    async fn check_bitcoin_network(&self) -> anyhow::Result<()> {
+        let bitcoin_network = self.config.bitcoin_network();
+        ensure_bitcoin_network(&self.bitcoin_client, bitcoin_network).await?;
+        info!(network = %bitcoin_network, "validated Bitcoin RPC network");
+        Ok(())
+    }
+
+    async fn check_ee_account(&self) -> anyhow::Result<()> {
+        let account_id = self.params.strata_exec_account_id();
+        self.account_update_source
+            .ensure_ee_account(account_id)
+            .await?;
+        info!(%account_id, "validated EE account against OL RPC");
+        Ok(())
     }
 
     fn build_l1_block_fetch_policy(&self) -> FetchPolicy {
@@ -103,35 +124,29 @@ impl DaVerifierBuilder {
         FetchPolicy::new(retry_policy, self.config.block_fetch_concurrency())
     }
 
-    async fn check_bitcoin_network(&self) -> anyhow::Result<()> {
-        let bitcoin_network = self.config.bitcoin_network();
-        ensure_bitcoin_network(&self.bitcoin_client, bitcoin_network).await?;
-        info!(network = %bitcoin_network, "validated Bitcoin RPC network");
-        Ok(())
-    }
-
     fn into_service_state(
         self,
-        fetch_policy: FetchPolicy,
+        l1_block_fetch_policy: FetchPolicy,
     ) -> DaVerifierServiceState<DaVerifierContextImpl> {
         let context = Arc::new(DaVerifierContextImpl::new(
             self.bitcoin_client,
-            fetch_policy,
+            l1_block_fetch_policy,
             self.recovered_da_db,
+            self.account_update_source,
         ));
 
         let da_extractor = DaExtractor::new(
             self.params.blob_spec().magic_bytes(),
             self.config.sequencer_pubkey(),
         );
-
         let recovery_state = DaRecoveryState::new(
             self.config.l1_reorg_safe_depth(),
             self.config.max_l1_scan_window_size(),
             da_extractor,
             self.genesis_l1_height,
         );
+        let verification_state = DaVerificationState::new(self.params);
 
-        DaVerifierServiceState::new(context, recovery_state)
+        DaVerifierServiceState::new(context, recovery_state, verification_state)
     }
 }
