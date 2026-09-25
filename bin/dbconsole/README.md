@@ -22,6 +22,84 @@ cargo build -p alpen-dbconsole
 `--datadir` is the directory that *contains* `mdbx/`, not the `mdbx/prover`
 environment itself — e.g. `functional-tests/_dd/<RUN>/el_ol/ee_sequencer`.
 
+## `migrate-sled`
+
+The one-time offline migration of a sled store into MDBX, beside the console
+in the same binary. The MDBX node refuses to start on a datadir that holds
+`sled/` and no `mdbx/`, so a node upgraded from the sled binary cannot start
+empty next to its history by accident. With the node stopped:
+
+```bash
+dbconsole migrate-sled --datadir <EE datadir>
+```
+
+It creates the four MDBX environments and fills every table from its sled
+tree in batched transactions, then verifies: every table's count equals its
+tree's length, every row decodes through the production codec and survives
+the console's canonical round trip, and the summary recipes print what the
+migrated store holds. The sled binary is alpen 0.3.0, and what it stored is
+not always what the MDBX store stores, so the tool's report says per table
+what happened to its rows:
+
+- *copied*: keys and values are the table's encoding already. Integer keys
+  were big-endian on both sides, hashes are raw bytes, and the index tables
+  kept their borsh values.
+- *tagged*: the table versions its values (a leading version tag, then the
+  payload) and the sled binary's bytes are exactly version 1's payload, so
+  the tag is prepended and nothing else. Seven tables: account state, chunk,
+  accessed state, both proof receipts, the witness state diff, and the L1 tx
+  node entry.
+- *re-encoded*: decoded from the sled binary's layout and encoded through
+  the table's codec. The exec block record and the batch gained a spec
+  version field since 0.3.0 and get the version in force then, and the
+  block's SSZ package is re-encoded to the current schema (its outputs
+  gained an empty predicate rotation); the prover
+  task changed from borsh to CBOR and its status enum changed shape, so the
+  single retry counter becomes the resume-class attempt count; the L1 tx
+  entry and the chunked-envelope entry changed from borsh to CBOR; the
+  witness block hash went from 32 raw bytes to bincode; the active-tx-node
+  marker from CBOR's `null` byte to the empty unit value.
+- The prover task key was written through borsh, a length prefix then the
+  bytes; the tool strips the prefix. Every other key copies.
+- Two trees did not exist at 0.3.0, the L1 tx node table and its active
+  marker set; their tables come up empty and the report says so.
+
+The verification pass is what proves each rule right: it decodes every row
+through the table's version chain with the node's own codecs. A rule that
+produced the wrong bytes fails there, naming the table and the row.
+
+### Upgrading a 0.3.0 node
+
+The store is one part of the datadir. Tested end to end (the current node
+resumed a migrated 0.3.0 datadir and went on building, sealing, publishing
+DA and proving), these are the other steps:
+
+1. Stop the 0.3.0 node cleanly. A killed node leaves the EE tables a block
+   or two ahead of what reth persisted; the current node re-validates those
+   blocks under its own rules (it has a base-fee floor 0.3.0 did not) and
+   refuses them. If that happened, `drop_chain_above(<reth head>)` from the
+   console with `--allow-writes` puts the two back in agreement.
+2. Run `dbconsole migrate-sled --datadir <dir>`.
+3. Write `alpen-config.toml` and `alpen-params.json` from the old command
+   line. The params need `"spec_schedule": {"v0": 0}` only, since every
+   migrated record carries V0, and the prover section needs
+   `[sequencer.prover.programs.v0]` with the native keys (the same bytes the
+   0.3.0 node had built in: chunk 0x03 repeated, acct 0x02 repeated).
+4. Move `exex/wal` aside. Reth 2.2 cannot read reth 1.9's write-ahead log
+   and refuses to start on it; without it, reth backfills the ExExes from
+   their recorded heads. Reth's static files heal themselves.
+5. Upgrade the OL in the same window. A 0.3.0 OL rejects the current EE's
+   update transactions, so the EE cannot advance its OL state against it.
+
+On success `sled/` is renamed to
+`sled.migrated/` for rollback until you delete it (`--keep-sled` leaves the
+name). A failure leaves `mdbx/` for inspection; remove it to run again. A
+tree the tool does not know is reported and left alone; a table whose tree is
+absent is created empty.
+
+The design and the per-table encoding table are in the knowledge base
+(`ee-storage-sled-migration.md`).
+
 ---
 
 ## Contents

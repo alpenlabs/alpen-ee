@@ -1239,6 +1239,7 @@ dependencies = [
  "rhai",
  "rustyline",
  "signal-hook",
+ "sled",
 ]
 
 [[package]]
