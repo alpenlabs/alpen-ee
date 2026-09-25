@@ -87,6 +87,8 @@ class AlpenClientFactory(flexitest.Factory):
         max_withdrawal_amount: int | None = 1_000_000_000,
         beneficiary_address: str | None = None,
         da_rate_wei_per_byte: int = 0,
+        l1_fee_policy: AlpenL1FeePolicyConfig | None = None,
+        da_fee_rate: AlpenDaFeeRateConfig | None = None,
         base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR,
         prover: ProverBackend = NATIVE_BACKEND,
         **kwargs,
@@ -155,6 +157,14 @@ class AlpenClientFactory(flexitest.Factory):
             else AlpenOlConfig(source="dummy", epoch_tracking_mode=epoch_tracking_mode)
         )
 
+        if da_fee_rate is None:
+            da_fee_rate = AlpenDaFeeRateConfig(
+                policy="fixed",
+                fixed_rate_wei_per_byte=da_rate_wei_per_byte,
+            )
+        if l1_fee_policy is None:
+            l1_fee_policy = AlpenL1FeePolicyConfig(fee_policy="fixed", fixed_fee_rate=1.0)
+
         sequencer_config = AlpenSequencerConfig(
             bitcoind=BitcoindConfig(
                 rpc_url=da_config.btc_rpc_url,
@@ -169,11 +179,8 @@ class AlpenClientFactory(flexitest.Factory):
             batch_sealing_block_count=batch_sealing_block_count,
             chunk_sealing_block_count=chunk_sealing_block_count,
             prover=prover_config,
-            l1_fee_policy=AlpenL1FeePolicyConfig(fee_policy="fixed", fixed_fee_rate=1.0),
-            da_fee_rate=AlpenDaFeeRateConfig(
-                policy="fixed",
-                fixed_rate_wei_per_byte=da_rate_wei_per_byte,
-            ),
+            l1_fee_policy=l1_fee_policy,
+            da_fee_rate=da_fee_rate,
         )
 
         alpen_config = AlpenClientConfig(
