@@ -158,12 +158,11 @@ where
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
         let da_rate = self.da_fee_rate_handle.current_rate();
 
-        try_build_payload(
+        try_build_payload::<Pool, Client, _>(
             self.evm_config.clone(),
             da_rate,
             self.base_fee_floor,
             self.client.clone(),
-            self.pool.clone(),
             self.builder_config.clone(),
             args,
             |attributes| self.pool.best_transactions_with_attributes(attributes),
@@ -206,7 +205,6 @@ fn try_build_payload<Pool, Client, F>(
     candidate_da_rate: u64,
     base_fee_floor: u64,
     client: Client,
-    _pool: Pool,
     builder_config: EthereumBuilderConfig,
     args: BuildArguments<AlpenPayloadAttributes, AlpenBuiltPayload>,
     best_txs: F,
