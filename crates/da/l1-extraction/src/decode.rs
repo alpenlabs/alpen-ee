@@ -65,14 +65,14 @@ pub fn decode_observed_da_payload(
 
 #[cfg(test)]
 mod tests {
-    use alpen_da_types::EvmHeaderSummary;
-    use alpen_params::{AlpenSpecId, HeaderExtra};
+    use alpen_params::AlpenSpecId;
     use bitcoin::{hashes::Hash, BlockHash, Txid};
     use strata_btc_types::BlockHashExt;
     use strata_identifiers::L1BlockCommitment;
     use strata_l1_envelope_fmt::L1TxRef;
 
     use super::*;
+    use crate::test_utils::build_da_blob;
 
     const TEST_HEIGHT: u32 = 42;
     const TEST_L1_REF_SEED: u8 = 1;
@@ -95,29 +95,6 @@ mod tests {
             blkid: BlockHash::from_byte_array([seed.wrapping_add(2); 32]).to_l1_block_id(),
         };
         DaL1Ref::new(commit_txref, completion_block)
-    }
-
-    /// Builds a DA blob for `update_seq_no`, whose batch ends at the EVM block
-    /// `block_num` mined at `timestamp`.
-    fn build_da_blob(
-        spec_version: AlpenSpecId,
-        update_seq_no: u64,
-        block_num: u64,
-        timestamp: u64,
-    ) -> DaBlob {
-        DaBlob {
-            spec_version,
-            update_seq_no,
-            evm_header: EvmHeaderSummary {
-                block_num,
-                timestamp,
-                base_fee: 100,
-                gas_used: 21_000,
-                gas_limit: 36_000_000,
-                da_rate: HeaderExtra::new(spec_version, 2_500_000_000).da_rate(),
-            },
-            state_diff: Default::default(),
-        }
     }
 
     #[test]
