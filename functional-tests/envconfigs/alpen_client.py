@@ -9,7 +9,12 @@ from typing import cast
 import flexitest
 
 from common.alpen_params import DEFAULT_BASE_FEE_FLOOR
-from common.config import EeDaConfig, ServiceType
+from common.config import (
+    AlpenDaFeeRateConfig,
+    AlpenL1FeePolicyConfig,
+    EeDaConfig,
+    ServiceType,
+)
 from common.prover_backend import NATIVE_BACKEND, ProverBackend
 from common.services.bitcoin import BitcoinService
 from factories.alpen_client import AlpenClientFactory, generate_sequencer_keypair
@@ -45,6 +50,8 @@ class AlpenClientEnvParams:
     beneficiary_address: str | None = None
     prover: ProverBackend = NATIVE_BACKEND
     da_rate_wei_per_byte: int = 0
+    l1_fee_policy: AlpenL1FeePolicyConfig | None = None
+    da_fee_rate: AlpenDaFeeRateConfig | None = None
     forward_tx: bool = True
     base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR
 
@@ -77,6 +84,8 @@ class AlpenClientEnv(flexitest.EnvConfig):
         batch_sealing_block_count: int = 5,
         beneficiary_address: str | None = None,
         da_rate_wei_per_byte: int = 0,
+        l1_fee_policy: AlpenL1FeePolicyConfig | None = None,
+        da_fee_rate: AlpenDaFeeRateConfig | None = None,
         forward_tx: bool = True,
         base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR,
     ):
@@ -90,6 +99,8 @@ class AlpenClientEnv(flexitest.EnvConfig):
             batch_sealing_block_count=batch_sealing_block_count,
             beneficiary_address=beneficiary_address,
             da_rate_wei_per_byte=da_rate_wei_per_byte,
+            l1_fee_policy=l1_fee_policy,
+            da_fee_rate=da_fee_rate,
             forward_tx=forward_tx,
             base_fee_floor=base_fee_floor,
         )
@@ -176,6 +187,8 @@ class AlpenClientEnv(flexitest.EnvConfig):
             beneficiary_address=envparams.beneficiary_address,
             prover=envparams.prover,
             da_rate_wei_per_byte=envparams.da_rate_wei_per_byte,
+            l1_fee_policy=envparams.l1_fee_policy,
+            da_fee_rate=envparams.da_fee_rate,
             base_fee_floor=envparams.base_fee_floor,
         )
         sequencer.wait_for_ready(timeout=60)

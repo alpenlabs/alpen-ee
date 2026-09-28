@@ -6,7 +6,13 @@
 use std::sync::Arc;
 
 use alloy_consensus::Block as AlloyBlock;
-use alpen_reth_evm::{config::AlpenEvmConfig, evm::AlpenEvmFactory, extract_withdrawal_intents};
+use alpen_ee_params::HeaderExtra;
+use alpen_reth_evm::{
+    config::AlpenEvmConfig,
+    da_fee::{stamped_da_rate_from_extra_data, validate_da_rate_against_parent},
+    evm::AlpenEvmFactory,
+    extract_withdrawal_intents,
+};
 use reth_chainspec::ChainSpec;
 use reth_consensus_common::validation::validate_body_against_header;
 use reth_ethereum_primitives::{EthPrimitives, Receipt as EthereumReceipt, TransactionSigned};
@@ -72,8 +78,7 @@ fn convert_withdrawal_intents_to_messages(
     }
 }
 
-/// Checks that the witness's `BLOCKHASH` ancestors belong to the chain the
-/// block being executed builds on.
+/// Checks that the witnessed parent belongs to the block's chain and permits its DA rate.
 ///
 /// [`EvmPartialState`] checks that its ancestors are contiguous and link to
 /// each other, but that only makes the set self-consistent: a fabricated chain
@@ -99,6 +104,19 @@ fn validate_ancestors_against_block(
     if *parent_hash != header_intrinsics.parent_hash() {
         return Err(EnvError::InvalidBlock);
     }
+
+    let parent_header = pre_state
+        .ancestor_headers()
+        .get(&parent_number)
+        .ok_or(EnvError::InvalidBlock)?;
+    let next_rate = HeaderExtra::decode(header_intrinsics.extra_data())
+        .map_err(|_| EnvError::InvalidBlock)?
+        .da_rate();
+    validate_da_rate_against_parent(
+        stamped_da_rate_from_extra_data(&parent_header.extra_data),
+        next_rate,
+    )
+    .map_err(|_| EnvError::InvalidBlock)?;
 
     Ok(())
 }
@@ -245,6 +263,7 @@ mod tests {
     use std::{collections::BTreeMap, fs, path::PathBuf};
 
     use alloy_consensus::{Header, Sealable};
+    use alpen_ee_params::AlpenSpecId;
     use reth_primitives_traits::Block as RethBlockTrait;
     use revm::{DatabaseRef, state::Bytecode};
     use revm_primitives::{B256, alloy_primitives::Bloom};
@@ -411,6 +430,47 @@ mod tests {
             result.is_err(),
             "ancestors that do not link to the executed block must be rejected"
         );
+    }
+
+    #[test]
+    fn guest_rejects_da_rate_increase_above_quote_margin() {
+        #[derive(Deserialize, Debug)]
+        struct TestData {
+            witness: EthClientExecutorInput,
+        }
+
+        let test_data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("test-utils/data/evm_ee/witness_params.json");
+        let json_content = fs::read_to_string(test_data_path).expect("read witness fixture");
+        let mut test_data: TestData =
+            serde_json::from_str(&json_content).expect("parse witness fixture");
+
+        let parent = test_data
+            .witness
+            .ancestor_headers
+            .last_mut()
+            .expect("witness contains the parent header");
+        parent.extra_data = HeaderExtra::new(AlpenSpecId::V1, 1_000).encode().into();
+        let parent_number = parent.number;
+        let parent_hash = parent.clone().seal_slow().hash();
+        let pre_state = EvmPartialState::new(
+            test_data.witness.parent_state,
+            rehashed_fixture_bytecodes(test_data.witness.bytecodes),
+            test_data.witness.ancestor_headers,
+        );
+        let intrinsics = |rate| {
+            EvmHeaderIntrinsics::from_header(&Header {
+                parent_hash,
+                number: parent_number + 1,
+                extra_data: HeaderExtra::new(AlpenSpecId::V1, rate).encode().into(),
+                ..Default::default()
+            })
+        };
+
+        assert!(validate_ancestors_against_block(&pre_state, &intrinsics(1_100)).is_ok());
+        assert!(validate_ancestors_against_block(&pre_state, &intrinsics(1_101)).is_err());
     }
 
     /// Test with real witness data from the reference implementation.

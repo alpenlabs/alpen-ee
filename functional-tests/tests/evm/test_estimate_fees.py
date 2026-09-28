@@ -11,7 +11,7 @@ import flexitest
 
 from common.accounts import get_dev_account
 from common.base_test import AlpenClientTest
-from common.config.constants import ServiceType
+from common.config.constants import BPS_DENOMINATOR, DA_RATE_SAFETY_MARGIN_BPS, ServiceType
 from envconfigs.alpen_client import AlpenClientEnv
 
 logger = logging.getLogger(__name__)
@@ -20,10 +20,6 @@ logger = logging.getLogger(__name__)
 DA_RATE_WEI_PER_BYTE = 1000
 
 TRANSFER_AMOUNT_WEI = 10**17
-
-# Must mirror the safety margin folded into the quote (crates/reth/rpc fees.rs).
-DA_FEE_SAFETY_MARGIN_BPS = 1000
-BPS_DENOM = 10000
 
 
 @flexitest.register
@@ -75,7 +71,9 @@ class TestEstimateFees(AlpenClientTest):
         assert gas_used >= 21000, f"gas_used {gas_used} below the 21000 transfer floor"
 
         # The quoted DA fee is `da_rate * diff_size` inflated by the safety margin.
-        expected_da_fee = da_rate * diff_size * (BPS_DENOM + DA_FEE_SAFETY_MARGIN_BPS) // BPS_DENOM
+        expected_da_fee = (
+            da_rate * diff_size * (BPS_DENOMINATOR + DA_RATE_SAFETY_MARGIN_BPS) // BPS_DENOMINATOR
+        )
         assert da_fee == expected_da_fee, f"da_fee {da_fee} != expected {expected_da_fee}"
         assert da_fee > 0, "expected a positive DA fee"
 

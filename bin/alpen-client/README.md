@@ -794,6 +794,15 @@ fixed_fee_rate = 1.0
 [sequencer.broadcaster]
 poll_interval_ms = 5000
 max_fee_rate_sat_vb = 1000  # per-transaction Bitcoin Core guardrail
+
+[sequencer.da_fee_rate]
+policy = "writer_backed"
+refresh_interval_seconds = 60
+stale_after_seconds = 300
+explorer_timeout_seconds = 10
+bitcoind_timeout_seconds = 10
+min_rate_wei_per_byte = 2500000000       # 1 sat/vB with the default adjustment
+max_rate_wei_per_byte = 2500000000000    # 1,000 sat/vB with the default adjustment
 ```
 
 Two secrets are read from the environment instead of the config file, both sequencer only:

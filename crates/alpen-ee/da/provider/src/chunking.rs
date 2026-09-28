@@ -7,7 +7,7 @@
 
 use alpen_ee_da_types::DaBlob;
 use strata_codec::{encode_to_vec, CodecError};
-use strata_l1_envelope_fmt::builder::MAX_ENVELOPE_PAYLOAD_SIZE;
+use strata_l1_envelope_fmt::MAX_ENVELOPE_PAYLOAD_SIZE;
 
 /// Splits a blob into chunk payloads.
 ///
@@ -55,7 +55,7 @@ mod tests {
     use alpen_ee_da_types::{reassemble_da_blob, DaBlob, EvmHeaderSummary};
     use alpen_reth_statediff::BatchStateDiff;
     use strata_codec::{decode_buf_exact, encode_to_vec};
-    use strata_l1_envelope_fmt::builder::MAX_ENVELOPE_PAYLOAD_SIZE;
+    use strata_l1_envelope_fmt::MAX_ENVELOPE_PAYLOAD_SIZE;
 
     use super::*;
 

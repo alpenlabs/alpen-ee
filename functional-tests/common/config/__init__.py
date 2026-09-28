@@ -5,6 +5,7 @@ Configuration and parameter dataclasses.
 from common.config.config import (
     AlpenAdminRpcConfig,
     AlpenClientConfig,
+    AlpenDaFeeRateConfig,
     AlpenFullNodeConfig,
     AlpenL1FeePolicyConfig,
     AlpenOlConfig,
@@ -62,6 +63,7 @@ __all__ = [
     "EpochSealingConfig",
     "AlpenAdminRpcConfig",
     "AlpenClientConfig",
+    "AlpenDaFeeRateConfig",
     "AlpenOlConfig",
     "AlpenFullNodeConfig",
     "AlpenProverConfig",

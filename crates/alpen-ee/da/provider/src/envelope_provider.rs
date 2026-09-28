@@ -17,7 +17,7 @@ use strata_db_types::{
     l1_broadcast::L1TxStatus,
 };
 use strata_identifiers::{Buf32, L1BlockCommitment, L1Height, WtxidsRoot};
-use strata_l1_envelope_fmt::builder::MAX_ENVELOPE_PAYLOAD_SIZE;
+use strata_l1_envelope_fmt::MAX_ENVELOPE_PAYLOAD_SIZE;
 use strata_l1_txfmt::MagicBytes;
 use tracing::*;
 
