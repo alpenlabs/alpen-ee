@@ -1241,6 +1241,7 @@ dependencies = [
  "rustyline",
  "signal-hook",
  "sled",
+ "tracing-subscriber 0.3.23",
 ]
 
 [[package]]

@@ -30,6 +30,7 @@ rhai = { workspace = true, features = ["metadata"] }
 rustyline = { workspace = true, features = ["derive"] }
 signal-hook.workspace = true
 sled.workspace = true
+tracing-subscriber.workspace = true
 
 [dev-dependencies]
 alpen-ee-database = { workspace = true, features = ["test-utils"] }

@@ -13,7 +13,7 @@
 
 use std::{
     collections::BTreeSet,
-    fs,
+    fs, io,
     path::PathBuf,
     sync::{atomic::AtomicBool, Arc},
     time::Instant,
@@ -27,6 +27,7 @@ use alpen_ee_database::{
     create_ee_envs,
 };
 use clap::Args;
+use tracing_subscriber::EnvFilter;
 
 use crate::dbconsole::{recipes, repl::render, session::Session};
 
@@ -64,6 +65,7 @@ pub(crate) struct MigrateArgs {
 /// Runs the migration end to end; any failure leaves `mdbx/` for inspection.
 pub(crate) fn run(args: MigrateArgs) -> eyre::Result<()> {
     let started = Instant::now();
+    install_log_output();
     let default_sled_dir = args.datadir.join("sled");
     let sled_dir = args
         .sled_dir
@@ -152,6 +154,20 @@ pub(crate) fn run(args: MigrateArgs) -> eyre::Result<()> {
     }
     println!("done in {:.1}s", started.elapsed().as_secs_f64());
     Ok(())
+}
+
+/// Routes `log` and `tracing` output to stderr at `warn` and above, or at
+/// whatever `RUST_LOG` says. sled reports what its recovery did to a store
+/// that was not shut down cleanly through `log::warn!`, and an operator
+/// migrating a crash-consistent copy needs to see that.
+fn install_log_output() {
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(io::stderr)
+        .with_target(true)
+        .without_time()
+        .try_init();
 }
 
 /// Copies one tree into its table, in key order, batched, reading the tree
