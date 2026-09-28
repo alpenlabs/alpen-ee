@@ -184,19 +184,13 @@ fn read_da_blob_version(
 
 #[cfg(test)]
 mod tests {
-    use bitcoin::{
-        block::{Header, Version},
-        hashes::Hash,
-        pow::CompactTarget,
-        Block, BlockHash, Transaction, TxMerkleNode,
-    };
-    use strata_identifiers::L1Height;
     use strata_l1_envelope_fmt::test_utils as commit_reveal_fixtures;
 
     use super::*;
-    use crate::fetch::L1BlockData;
+    use crate::test_utils::{
+        build_l1_block_data, make_alpen_magic_bytes, make_sequencer_pubkey, SEQUENCER_KEY_SEED,
+    };
 
-    const SEQUENCER_KEY_SEED: u8 = 7;
     const NON_SEQUENCER_KEY_SEED: u8 = 8;
 
     fn scan_preloaded_l1_blocks(
@@ -214,31 +208,8 @@ mod tests {
         ee_da_observations
     }
 
-    fn make_alpen_magic_bytes() -> MagicBytes {
-        "ALPN".parse().expect("valid ASCII magic")
-    }
-
     fn make_other_magic_bytes() -> MagicBytes {
         "OTHR".parse().expect("valid ASCII magic")
-    }
-
-    fn make_sequencer_pubkey() -> XOnlyPublicKey {
-        commit_reveal_fixtures::make_xonly_pubkey(SEQUENCER_KEY_SEED)
-    }
-
-    fn build_l1_block_data(height: L1Height, txs: Vec<Transaction>) -> L1BlockData {
-        let block = Block {
-            header: Header {
-                version: Version::from_consensus(1),
-                prev_blockhash: BlockHash::all_zeros(),
-                merkle_root: TxMerkleNode::all_zeros(),
-                time: 0,
-                bits: CompactTarget::from_consensus(0),
-                nonce: 0,
-            },
-            txdata: txs,
-        };
-        L1BlockData::new(height, block)
     }
 
     #[test]

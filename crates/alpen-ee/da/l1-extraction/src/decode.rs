@@ -65,13 +65,13 @@ pub fn decode_observed_da_payload(
 
 #[cfg(test)]
 mod tests {
-    use alpen_ee_da_types::EvmHeaderSummary;
     use bitcoin::{hashes::Hash, BlockHash, Txid};
     use strata_btc_types::BlockHashExt;
     use strata_codec::encode_to_vec;
     use strata_identifiers::L1BlockCommitment;
 
     use super::*;
+    use crate::test_utils::make_da_blob;
 
     const TEST_HEIGHT: u32 = 42;
 
@@ -81,20 +81,6 @@ mod tests {
             blkid: BlockHash::all_zeros().to_l1_block_id(),
         };
         EeDaL1Ref::new(Txid::all_zeros(), completion_block)
-    }
-
-    fn make_da_blob() -> DaBlob {
-        DaBlob {
-            update_seq_no: 3,
-            evm_header: EvmHeaderSummary {
-                block_num: 9,
-                timestamp: 1_700_000_000,
-                base_fee: 100,
-                gas_used: 21_000,
-                gas_limit: 36_000_000,
-            },
-            state_diff: Default::default(),
-        }
     }
 
     fn build_observation(payload: Vec<u8>) -> EeDaL1Observation {
