@@ -10,7 +10,13 @@ import toml
 from common.accounts import get_dev_account
 from common.base_test import BaseTest
 from common.config import AlpenDaFeeRateConfig, AlpenL1FeePolicyConfig
-from common.config.constants import DEV_RECIPIENT_ADDRESS, SATS_TO_WEI, ServiceType
+from common.config.constants import (
+    BPS_DENOMINATOR,
+    DA_RATE_SAFETY_MARGIN_BPS,
+    DEV_RECIPIENT_ADDRESS,
+    SATS_TO_WEI,
+    ServiceType,
+)
 from common.evm_utils import get_balance, wait_for_receipt
 from common.services import AlpenClientService
 from common.wait import wait_until_with_value
@@ -24,7 +30,16 @@ POLICY_RATE_WEI_PER_BYTE = L1_FEE_RATE_SAT_VB * SATS_TO_WEI // WEIGHT_UNITS_PER_
 UPDATED_MULTIPLIER_BPS = 5_000
 UPDATED_OFFSET_WEI_PER_BYTE = 17
 UPDATED_RATE_WEI_PER_BYTE = (
-    POLICY_RATE_WEI_PER_BYTE * UPDATED_MULTIPLIER_BPS // 10_000 + UPDATED_OFFSET_WEI_PER_BYTE
+    POLICY_RATE_WEI_PER_BYTE * UPDATED_MULTIPLIER_BPS // BPS_DENOMINATOR
+    + UPDATED_OFFSET_WEI_PER_BYTE
+)
+UPDATED_ESTIMATE_RATE_WEI_PER_BYTE = min(
+    POLICY_RATE_WEI_PER_BYTE,
+    UPDATED_RATE_WEI_PER_BYTE
+    + max(
+        UPDATED_RATE_WEI_PER_BYTE * DA_RATE_SAFETY_MARGIN_BPS // BPS_DENOMINATOR,
+        1,
+    ),
 )
 TRANSFER_AMOUNT_WEI = 10**17
 
@@ -70,7 +85,8 @@ class TestDaFeeRateRestartTest(BaseTest):
             self.runctx.get_service(ServiceType.AlpenSequencer),
         )
 
-        # Phase 1: the initial writer-backed rate reaches both block headers and fee estimates.
+        # Phase 1: the initial writer-backed rate reaches block headers and matches the configured
+        # estimate ceiling.
         initial_height, initial_rate = self._wait_for_rate(sequencer, POLICY_RATE_WEI_PER_BYTE)
         rpc = sequencer.create_rpc()
         account = get_dev_account(rpc)
@@ -86,7 +102,7 @@ class TestDaFeeRateRestartTest(BaseTest):
             initial_height,
         )
 
-        # Phase 2: changing the affine adjustment across a restart changes only the DA quote.
+        # Phase 2: changing the affine adjustment across a restart changes the committed rate.
         sequencer.stop()
         self._update_adjustment_config(sequencer)
         sequencer.start()
@@ -104,7 +120,13 @@ class TestDaFeeRateRestartTest(BaseTest):
             updated_height,
         )
 
-        updated_estimate = self._assert_estimate(rpc, request, UPDATED_RATE_WEI_PER_BYTE)
+        # Mutable-state estimates use the highest rate permitted for the next block rather than
+        # the lower current rate, so a source rebound before inclusion remains covered.
+        updated_estimate = self._assert_estimate(
+            rpc,
+            request,
+            UPDATED_ESTIMATE_RATE_WEI_PER_BYTE,
+        )
         assert updated_estimate["gasUsed"] == initial_estimate["gasUsed"]
         assert updated_estimate["diffSize"] == initial_estimate["diffSize"]
         assert int(updated_estimate["daFee"], 16) < int(initial_estimate["daFee"], 16)
@@ -134,6 +156,7 @@ class TestDaFeeRateRestartTest(BaseTest):
         assert charged_da_fee == expected_da_fee, (
             f"charged DA fee {charged_da_fee} != expected {expected_da_fee}"
         )
+        assert charged_da_fee < int(updated_estimate["daFee"], 16)
         assert gas_used == updated_estimate["gasUsed"], (
             "receipt gasUsed should remain the raw execution gas"
         )
@@ -142,7 +165,9 @@ class TestDaFeeRateRestartTest(BaseTest):
     @staticmethod
     def _assert_estimate(rpc, request: dict, expected_rate: int) -> dict:
         estimate = rpc.alpen_estimateFees(request)
-        assert estimate["daRate"] == expected_rate
+        assert estimate["daRate"] == expected_rate, (
+            f"estimated DA rate {estimate['daRate']} != expected {expected_rate}"
+        )
         estimated_gas = int(rpc.eth_estimateGas(request), 16)
         assert estimated_gas == estimate["effectiveGas"]
         return estimate
