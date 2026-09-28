@@ -430,8 +430,8 @@ pub(crate) enum DaFeeRateConfig {
 pub(crate) struct WriterBackedDaFeeRateConfig {
     /// Rejects adjusted external rates below this operator-approved value.
     min_rate_wei_per_byte: u64,
-    /// Rejects adjusted external rates above this operator-approved value.
-    max_rate_wei_per_byte: u64,
+    /// Rejects adjusted external rates above this positive operator-approved value.
+    max_rate_wei_per_byte: NonZeroU64,
     /// Controls how often the selected policy is queried.
     refresh_interval_seconds: NonZeroU64,
     /// Marks a dynamic rate stale after this long without a successful fetch.
@@ -490,7 +490,7 @@ impl WriterBackedDaFeeRateConfig {
 
     /// Returns the inclusive bounds for an adjusted external rate.
     pub(crate) const fn rate_bounds(&self) -> (u64, u64) {
-        (self.min_rate_wei_per_byte, self.max_rate_wei_per_byte)
+        (self.min_rate_wei_per_byte, self.max_rate_wei_per_byte.get())
     }
 
     /// Checks relationships between DA fee-rate settings.
@@ -1106,6 +1106,16 @@ mod tests {
                 refresh_interval_seconds = 5
                 stale_after_seconds = 10
                 bitcoind_timeout_seconds = 0
+                "#,
+            ),
+            (
+                "max_rate_wei_per_byte",
+                r#"
+                policy = "writer_backed"
+                refresh_interval_seconds = 5
+                stale_after_seconds = 10
+                min_rate_wei_per_byte = 0
+                max_rate_wei_per_byte = 0
                 "#,
             ),
             (
