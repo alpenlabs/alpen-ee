@@ -1383,6 +1383,7 @@ dependencies = [
  "clap",
  "eyre",
  "futures",
+ "indicatif 0.18.6",
  "serde",
  "serde_json",
  "strata-btc-types",
@@ -3780,6 +3781,18 @@ dependencies = [
  "once_cell",
  "unicode-width",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "console"
+version = "0.16.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e96a4956774c13c126a8b5af4daa79384f4d826534c95a02d76afb39e2ab64e3"
+dependencies = [
+ "encode_unicode",
+ "libc",
+ "unicode-width",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6189,10 +6202,25 @@ version = "0.17.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "183b3088984b400f4cfac3620d5e076c84da5364016b4f49473de574b2586235"
 dependencies = [
- "console",
+ "console 0.15.11",
  "number_prefix",
  "portable-atomic",
  "unicode-width",
+ "web-time",
+]
+
+[[package]]
+name = "indicatif"
+version = "0.18.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9433806cd6b4ec1aba79c021c7e4c58fb4c3b9977c085062e611ac929998fb0c"
+dependencies = [
+ "console 0.16.6",
+ "portable-atomic",
+ "tokio",
+ "unicode-segmentation",
+ "unicode-width",
+ "unit-prefix",
  "web-time",
 ]
 
@@ -13635,7 +13663,7 @@ dependencies = [
  "gecko_profile",
  "hashbrown 0.14.5",
  "hex",
- "indicatif",
+ "indicatif 0.17.11",
  "itertools 0.14.0",
  "memmap2",
  "num",
@@ -13900,7 +13928,7 @@ dependencies = [
  "futures",
  "hashbrown 0.14.5",
  "hex",
- "indicatif",
+ "indicatif 0.17.11",
  "itertools 0.14.0",
  "lru 0.12.5",
  "mti",
@@ -14124,7 +14152,7 @@ dependencies = [
  "eventsource-stream",
  "futures",
  "hex",
- "indicatif",
+ "indicatif 0.17.11",
  "itertools 0.14.0",
  "k256",
  "num-bigint 0.4.6",
@@ -16960,6 +16988,12 @@ name = "unicode-xid"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
+
+[[package]]
+name = "unit-prefix"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81e544489bf3d8ef66c953931f56617f423cd4b5494be343d9b9d3dda037b9a3"
 
 [[package]]
 name = "universal-hash"

@@ -6,6 +6,7 @@ mod config;
 mod da_extraction;
 mod evm_state;
 mod output;
+mod progress;
 
 use clap::Parser;
 
@@ -18,6 +19,7 @@ use crate::{
     da_extraction::recover_ee_da,
     evm_state::reconstruct_evm_state,
     output::{emit, EvmStateReconstructionOutcome},
+    progress::StageProgress,
 };
 
 #[tokio::main]
@@ -38,7 +40,11 @@ async fn main() -> eyre::Result<()> {
     )
     .await?;
 
-    let Some(reconstruction_outcome) = reconstruct_evm_state(&params, recovered_blobs)? else {
+    let reconstruction_progress = StageProgress::new("EVM state reconstruction");
+    let reconstruction_outcome = reconstruct_evm_state(&params, recovered_blobs)?;
+    reconstruction_progress.finish();
+
+    let Some(reconstruction_outcome) = reconstruction_outcome else {
         let output = EvmStateReconstructionOutcome::NoEeDaBlobsFound;
         return emit(&output);
     };

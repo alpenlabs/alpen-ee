@@ -12,7 +12,7 @@ use strata_common::retry::policies::ExponentialBackoff;
 use strata_identifiers::L1Height;
 use thiserror::Error;
 
-use crate::config::EeDaToolConfig;
+use crate::{config::EeDaToolConfig, progress::EeDaExtractionProgress};
 
 #[derive(Debug, Error)]
 enum ReorgSafetyError {
@@ -52,6 +52,8 @@ pub(crate) async fn recover_ee_da(
     let fetch_policy = FetchPolicy::new(retry_policy, config.block_fetch_concurrency());
     let blocks = fetch_l1_block_range(bitcoin_client, start_height, end_height, &fetch_policy)?;
     pin_mut!(blocks);
+    let block_count = u64::from(end_height) - u64::from(start_height) + 1;
+    let progress = EeDaExtractionProgress::new(block_count);
 
     let scanner_config =
         EeDaScannerConfig::new(params.blob_spec().magic_bytes(), config.sequencer_pubkey());
@@ -61,8 +63,10 @@ pub(crate) async fn recover_ee_da(
     while let Some(block) = blocks.next().await {
         let block = block?;
         recovered_blobs.extend(extractor.process_block(&block)?);
+        progress.block_processed(block.height(), recovered_blobs.len());
     }
 
+    progress.finish(recovered_blobs.len());
     Ok(recovered_blobs)
 }
 
