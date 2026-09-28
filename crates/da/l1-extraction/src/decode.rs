@@ -65,13 +65,13 @@ pub fn decode_observed_da_payload(
 
 #[cfg(test)]
 mod tests {
-    use alpen_da_types::EvmHeaderSummary;
-    use alpen_params::{AlpenSpecId, HeaderExtra};
+    use alpen_params::AlpenSpecId;
     use bitcoin::{hashes::Hash, BlockHash, Txid};
     use strata_btc_types::BlockHashExt;
     use strata_identifiers::L1BlockCommitment;
 
     use super::*;
+    use crate::test_utils::make_da_blob;
 
     const TEST_HEIGHT: u32 = 42;
 
@@ -81,22 +81,6 @@ mod tests {
             blkid: BlockHash::all_zeros().to_l1_block_id(),
         };
         DaL1Ref::new(Txid::all_zeros(), completion_block)
-    }
-
-    fn make_da_blob(spec_version: AlpenSpecId) -> DaBlob {
-        DaBlob {
-            spec_version,
-            update_seq_no: 3,
-            evm_header: EvmHeaderSummary {
-                block_num: 9,
-                timestamp: 1_700_000_000,
-                base_fee: 100,
-                gas_used: 21_000,
-                gas_limit: 36_000_000,
-                da_rate: HeaderExtra::new(spec_version, 2_500_000_000).da_rate(),
-            },
-            state_diff: Default::default(),
-        }
     }
 
     fn build_observation(spec_version: AlpenSpecId, payload: Vec<u8>) -> DaL1Observation {
