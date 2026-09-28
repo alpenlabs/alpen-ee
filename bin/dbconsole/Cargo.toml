@@ -24,6 +24,7 @@ clap = { workspace = true, features = [
 ] }
 dirs.workspace = true
 eyre.workspace = true
+hex.workspace = true
 libc.workspace = true
 rhai = { workspace = true, features = ["metadata"] }
 rustyline = { workspace = true, features = ["derive"] }

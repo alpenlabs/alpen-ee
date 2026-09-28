@@ -1,10 +1,15 @@
 //! The `migrate-sled` subcommand: fills a fresh MDBX store from the sled
 //! store a previous binary wrote, offline.
 //!
-//! The mapping of trees to tables and the two value re-encodes live in the
+//! The mapping of trees to tables and the per-table value rules live in the
 //! console core (`alpen_ee_database::console::migrate`); this command reads
 //! sled as raw bytes, hands them to the core's raw import, and then runs the
 //! console's own checks over the result. The node's crates never see sled.
+//!
+//! Every tree is read exactly once: the import counts the rows it writes,
+//! and the verification pass then counts and decodes the MDBX side. On a
+//! store of tens of gigabytes that is the difference between two full
+//! passes and four.
 
 use std::{
     collections::BTreeSet,
@@ -28,6 +33,10 @@ use crate::dbconsole::{recipes, repl::render, session::Session};
 /// sled's own default tree, present in every store and never ours.
 const SLED_DEFAULT_TREE: &str = "__sled__default";
 
+/// Rows between progress lines inside one tree, so a long tree on a slow
+/// disk is visibly moving rather than silently hung.
+const PROGRESS_EVERY: usize = 250_000;
+
 /// Arguments for `dbconsole migrate-sled`.
 #[derive(Debug, Args)]
 pub(crate) struct MigrateArgs {
@@ -35,6 +44,12 @@ pub(crate) struct MigrateArgs {
     /// created.
     #[arg(long)]
     datadir: PathBuf,
+
+    /// Read the sled store from here instead of `<datadir>/sled`. A store
+    /// given this way is left where it is afterwards; `--keep-sled` is
+    /// implied.
+    #[arg(long)]
+    sled_dir: Option<PathBuf>,
 
     /// Rows written per MDBX transaction.
     #[arg(long, default_value_t = 4096)]
@@ -48,10 +63,16 @@ pub(crate) struct MigrateArgs {
 
 /// Runs the migration end to end; any failure leaves `mdbx/` for inspection.
 pub(crate) fn run(args: MigrateArgs) -> eyre::Result<()> {
-    let sled_dir = args.datadir.join("sled");
+    let started = Instant::now();
+    let default_sled_dir = args.datadir.join("sled");
+    let sled_dir = args
+        .sled_dir
+        .clone()
+        .unwrap_or_else(|| default_sled_dir.clone());
+    let retire_sled = !args.keep_sled && args.sled_dir.is_none();
     let mdbx_dir = args.datadir.join("mdbx");
     if !sled_dir.is_dir() {
-        eyre::bail!("{} has no sled store to migrate", args.datadir.display());
+        eyre::bail!("{} has no sled store to migrate", sled_dir.display());
     }
     if mdbx_dir.exists() {
         eyre::bail!(
@@ -121,7 +142,7 @@ pub(crate) fn run(args: MigrateArgs) -> eyre::Result<()> {
     }
 
     drop(source);
-    if !args.keep_sled {
+    if retire_sled {
         let retired = args.datadir.join("sled.migrated");
         fs::rename(&sled_dir, &retired)?;
         println!(
@@ -129,11 +150,13 @@ pub(crate) fn run(args: MigrateArgs) -> eyre::Result<()> {
             retired.display()
         );
     }
-    println!("done");
+    println!("done in {:.1}s", started.elapsed().as_secs_f64());
     Ok(())
 }
 
-/// Copies one tree into its table, in key order, batched.
+/// Copies one tree into its table, in key order, batched, reading the tree
+/// once. Returns the number of rows written, which the verification pass
+/// checks against the table's own count.
 fn copy_tree(
     source: &sled::Db,
     db: &ConsoleDb,
@@ -143,19 +166,26 @@ fn copy_tree(
     let tree = source.open_tree(entry.tree)?;
     let started = Instant::now();
     let (key_rule, value_rule) = (entry.key, entry.value);
+    let mut seen = 0usize;
     let rows = tree.iter().map(move |item| {
         let (key, value) = item?;
-        Ok((key_rule.apply(&key)?, value_rule.apply(&value)?))
+        seen += 1;
+        if seen.is_multiple_of(PROGRESS_EVERY) {
+            println!(
+                "  {:<28}    {seen:>10} rows so far, {:.0}s",
+                entry.tree,
+                started.elapsed().as_secs_f64()
+            );
+        }
+        let key = key_rule
+            .apply(&key)
+            .map_err(|e| eyre::eyre!("`{}` key {}: {e}", entry.tree, hex::encode(&key)))?;
+        let value = value_rule
+            .apply(&value)
+            .map_err(|e| eyre::eyre!("`{}` key {}: {e}", entry.tree, hex::encode(&key)))?;
+        Ok((key, value))
     });
     let written = db.import_raw(entry.table, rows, batch)?;
-    if written != tree.len() {
-        eyre::bail!(
-            "`{}` has {} rows but {written} were written to `{}`",
-            entry.tree,
-            tree.len(),
-            entry.table
-        );
-    }
     println!(
         "  {:<28} -> {:<36} {written:>8} rows {} in {:.2}s",
         entry.tree,
@@ -235,6 +265,7 @@ mod tests {
 
         run(MigrateArgs {
             datadir: migrated.to_path_buf(),
+            sled_dir: None,
             batch: 3,
             keep_sled: false,
         })
@@ -256,6 +287,7 @@ mod tests {
         let datadir = TempDatadir::new();
         let err = run(MigrateArgs {
             datadir: datadir.to_path_buf(),
+            sled_dir: None,
             batch: 10,
             keep_sled: true,
         })
@@ -266,6 +298,7 @@ mod tests {
         fs::create_dir_all(datadir.join("mdbx")).unwrap();
         let err = run(MigrateArgs {
             datadir: datadir.to_path_buf(),
+            sled_dir: None,
             batch: 10,
             keep_sled: true,
         })
@@ -292,6 +325,7 @@ mod tests {
 
         run(MigrateArgs {
             datadir: migrated.to_path_buf(),
+            sled_dir: None,
             batch: 100,
             keep_sled: true,
         })
@@ -301,6 +335,39 @@ mod tests {
         assert_eq!(after.count("da/L1BroadcastTxSchema").unwrap(), 1);
         let sled = sled::open(sled_dir(&migrated)).unwrap();
         assert!(sled.open_tree("SomeFutureSchema").unwrap().len() == 1);
+    }
+
+    /// A store outside the datadir is read from where it is and never
+    /// renamed, and the datadir ends up holding only the MDBX store.
+    #[test]
+    fn a_store_outside_the_datadir_is_read_in_place() {
+        let original = TempDatadir::seeded();
+        let staged = TempDatadir::new();
+        let migrated = TempDatadir::new();
+        sled_from(&original, &staged);
+
+        run(MigrateArgs {
+            datadir: migrated.to_path_buf(),
+            sled_dir: Some(sled_dir(&staged)),
+            batch: 50,
+            keep_sled: false,
+        })
+        .unwrap();
+        assert!(sled_dir(&staged).is_dir());
+        assert!(!staged.join("sled.migrated").exists());
+        assert!(!migrated.join("sled.migrated").exists());
+        assert!(migrated.join("mdbx").is_dir());
+
+        let before = ConsoleDb::attach_readonly(&original).unwrap();
+        let after = ConsoleDb::attach_readonly(&migrated).unwrap();
+        for entry in sled_trees() {
+            assert_eq!(
+                raw_rows(&after, entry.table),
+                raw_rows(&before, entry.table),
+                "{}",
+                entry.table
+            );
+        }
     }
 
     /// The node refuses a datadir with sled and no MDBX, naming the command.

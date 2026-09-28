@@ -34,10 +34,18 @@ dbconsole migrate-sled --datadir <EE datadir>
 ```
 
 It creates the four MDBX environments and fills every table from its sled
-tree in batched transactions, then verifies: every table's count equals its
-tree's length, every row decodes through the production codec and survives
-the console's canonical round trip, and the summary recipes print what the
-migrated store holds. The sled binary is alpen 0.3.0, and what it stored is
+tree in batched transactions, reading each tree once and printing a progress
+line every 250,000 rows, then verifies: every table's count equals the number
+of rows copied from its tree, every row decodes through the production codec
+and survives the console's canonical round trip, and the summary recipes
+print what the migrated store holds. A rule that rejects a row names the
+tree and the key.
+
+When the sled store is not at `<datadir>/sled`, for instance a copy staged on
+another volume, `--sled-dir <path>` reads it from there; a store given that
+way is left in place afterwards, and the datadir ends up holding only
+`mdbx/`. Opening a sled store replays its log and rewrites its snapshot, so
+always run against a copy, never the only one. The sled binary is alpen 0.3.0, and what it stored is
 not always what the MDBX store stores, so the tool's report says per table
 what happened to its rows:
 

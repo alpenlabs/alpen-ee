@@ -1235,6 +1235,7 @@ dependencies = [
  "clap",
  "dirs 5.0.1",
  "eyre",
+ "hex",
  "libc",
  "rhai",
  "rustyline",
