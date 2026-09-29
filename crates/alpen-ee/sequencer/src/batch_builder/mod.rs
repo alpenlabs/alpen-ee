@@ -34,17 +34,17 @@
 //! use alpen_ee_genesis::ensure_batch_genesis;
 //! use alpen_ee_sequencer::{
 //!     create_batch_builder, BatchBuilderState, init_batch_builder_state,
-//!     sealing_policy::block_count_policy::{BlockCountPolicy, FixedBlockCountSealing},
+//!     sealing_policy::max_value_policy::{MaxValueSealing, ValueAccumulatorPolicy},
 //! };
 //!
 //! // Ensure genesis batch exists (must be called before init_batch_builder_state)
 //! ensure_batch_genesis(&config, &batch_storage).await?;
 //!
 //! // Initialize state from storage
-//! let state: BatchBuilderState<BlockCountPolicy> =
+//! let state: BatchBuilderState<ValueAccumulatorPolicy> =
 //!     init_batch_builder_state(&batch_storage).await?;
 //!
-//! let sealing = FixedBlockCountSealing::new(100);
+//! let sealing = MaxValueSealing::new(100);
 //!
 //! let (handle, task) = create_batch_builder(
 //!     initial_batch_id,

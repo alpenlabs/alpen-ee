@@ -3,8 +3,7 @@
 
 use alloy_consensus::BlockHeader;
 use alpen_ee_sequencer::sealing_policy::{
-    gas_limit_policy::{GasBlockData, GasLimitPolicy},
-    BlockDataProvider,
+    max_value_policy::ValueAccumulatorPolicy as GasLimitPolicy, BlockDataProvider,
 };
 use async_trait::async_trait;
 use reth_provider::HeaderProvider;
@@ -27,13 +26,11 @@ impl<P> BlockDataProvider<GasLimitPolicy> for RethGasDataProvider<P>
 where
     P: HeaderProvider + Send + Sync,
 {
-    async fn get_block_data(&self, hash: Hash) -> eyre::Result<Option<GasBlockData>> {
+    async fn get_block_data(&self, hash: Hash) -> eyre::Result<Option<u64>> {
         let block_hash = hash.0.into();
         let Some(header) = self.provider.header(block_hash)? else {
             return Ok(None);
         };
-        Ok(Some(GasBlockData {
-            gas_used: header.gas_used(),
-        }))
+        Ok(Some(header.gas_used()))
     }
 }

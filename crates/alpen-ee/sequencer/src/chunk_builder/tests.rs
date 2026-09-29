@@ -15,8 +15,11 @@ use super::{
     recovery::{cleanup_orphaned_chunks, enqueue_backfill, repair_batch_linkage},
     state::{init_chunk_builder_state, ChunkBuilderState, PendingEntry},
 };
-use crate::sealing_policy::block_count_policy::{
-    BlockCountDataProvider, BlockCountPolicy, FixedBlockCountSealing,
+use crate::sealing_policy::{
+    block_count_data_provider::BlockCountDataProvider,
+    max_value_policy::{
+        MaxValueSealing as FixedBlockCountSealing, ValueAccumulatorPolicy as BlockCountPolicy,
+    },
 };
 
 // ---------------------------------------------------------------------------

@@ -5,7 +5,7 @@
 //! block range). Both the batch builder and chunk builder use these with
 //! different policy implementations.
 
-use std::fmt::Debug;
+use std::{any::type_name, fmt::Debug};
 
 use alpen_ee_common::BlockNumHash;
 use async_trait::async_trait;
@@ -31,11 +31,30 @@ pub trait AccumulationPolicy: Send + Sync + 'static {
     fn accumulate(value: &mut Self::AccumulatedValue, data: &Self::BlockData);
 }
 
+/// Names the policy that asked for a seal, for logs and events.
+pub type SealReason = &'static str;
+
 /// Policy for deciding when to seal a group of accumulated blocks.
 ///
 /// Implementations define the threshold logic (e.g., by block count,
-/// DA size, prover cost, or a combination).
+/// DA size, prover cost, or a combination) through the `bool` checks. The
+/// `*_with_reason` variants wrap those and report [`Self::name`] so callers
+/// can say which policy sealed a group; combinators override them to return
+/// the leaf that triggered.
 pub trait SealingPolicy<P: AccumulationPolicy>: Send + Sync {
+    /// The [`SealReason`] this policy reports when it seals.
+    ///
+    /// Defaults to the bare type name without its module path. Override if
+    /// necessary.
+    fn name(&self) -> SealReason {
+        let full = type_name::<Self>(); // = `a::b::FooPolicy<c::BarAccumulator>`
+        let base_end = full.find('<').unwrap_or(full.len());
+        match full[..base_end].rfind("::") {
+            Some(idx) => &full[idx + 2..], // = FooPolicy
+            None => full,
+        }
+    }
+
     /// Check if adding a block would exceed the threshold.
     ///
     /// If this returns `true`, the current group should be sealed before
@@ -62,6 +81,20 @@ pub trait SealingPolicy<P: AccumulationPolicy>: Send + Sync {
     /// Defaults to `false`, for policies where only a threshold seals.
     fn must_seal(&self, _value: &P::AccumulatedValue) -> bool {
         false
+    }
+
+    /// [`Self::would_exceed`], naming the policy that triggered.
+    fn would_exceed_with_reason(
+        &self,
+        value: &P::AccumulatedValue,
+        block_data: &P::BlockData,
+    ) -> Option<SealReason> {
+        self.would_exceed(value, block_data).then(|| self.name())
+    }
+
+    /// [`Self::must_seal`], naming the policy that triggered.
+    fn must_seal_with_reason(&self, value: &P::AccumulatedValue) -> Option<SealReason> {
+        self.must_seal(value).then(|| self.name())
     }
 }
 
@@ -152,6 +185,23 @@ impl<P: AccumulationPolicy> Accumulator<P> {
         !self.is_empty() && policy.must_seal(self.value())
     }
 
+    /// [`Self::would_exceed`], naming the policy that would be exceeded.
+    pub fn would_exceed_with_reason(
+        &self,
+        policy: &impl SealingPolicy<P>,
+        block_data: &P::BlockData,
+    ) -> Option<SealReason> {
+        policy.would_exceed_with_reason(self.value(), block_data)
+    }
+
+    /// [`Self::must_seal`], naming the policy that requires the seal.
+    pub fn must_seal_with_reason(&self, policy: &impl SealingPolicy<P>) -> Option<SealReason> {
+        if self.is_empty() {
+            return None;
+        }
+        policy.must_seal_with_reason(self.value())
+    }
+
     /// Reset accumulator for a new batch.
     pub fn reset(&mut self) {
         self.blocks.clear();
@@ -205,6 +255,25 @@ mod tests {
         fn accumulate(value: &mut Self::AccumulatedValue, data: &Self::BlockData) {
             value.total += data.value;
         }
+    }
+
+    struct AlwaysSeals;
+
+    impl SealingPolicy<TestPolicy> for AlwaysSeals {
+        fn would_exceed(&self, _value: &TestAccumulatedValue, _data: &TestBlockData) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn default_name_is_bare_type_name() {
+        let acc: Accumulator<TestPolicy> = Accumulator::new();
+        assert_eq!(AlwaysSeals.name(), "AlwaysSeals");
+        assert_eq!(
+            acc.would_exceed_with_reason(&AlwaysSeals, &TestBlockData { value: 1 }),
+            Some("AlwaysSeals")
+        );
+        assert_eq!(acc.must_seal_with_reason(&AlwaysSeals), None);
     }
 
     #[test]

@@ -123,7 +123,7 @@ mod tests {
     use super::*;
     use crate::{
         batch_builder::canonical::MockCanonicalChainReader,
-        sealing_policy::block_count_policy::{BlockCountData, BlockCountPolicy},
+        sealing_policy::max_value_policy::ValueAccumulatorPolicy as BlockCountPolicy,
         test_utils::*,
     };
 
@@ -187,8 +187,8 @@ mod tests {
 
             let mut state: BatchBuilderState<BlockCountPolicy> =
                 BatchBuilderState::from_last_batch(0, genesis);
-            state.accumulator_mut().add_block(block1, &BlockCountData);
-            state.accumulator_mut().add_block(block2, &BlockCountData);
+            state.accumulator_mut().add_block(block1, &1);
+            state.accumulator_mut().add_block(block2, &1);
 
             let mut canonical = MockCanonicalChainReader::new();
             canonical
@@ -226,8 +226,8 @@ mod tests {
 
             let mut state: BatchBuilderState<BlockCountPolicy> =
                 BatchBuilderState::from_last_batch(0, genesis);
-            state.accumulator_mut().add_block(block1, &BlockCountData);
-            state.accumulator_mut().add_block(block2, &BlockCountData);
+            state.accumulator_mut().add_block(block1, &1);
+            state.accumulator_mut().add_block(block2, &1);
             state.push_pending_blocks(vec![block3, block4]);
 
             let mut canonical = MockCanonicalChainReader::new();

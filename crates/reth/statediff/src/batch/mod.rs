@@ -10,6 +10,6 @@ mod diff;
 mod storage;
 
 pub use account::{AccountChange, AccountDiff};
-pub use builder::BatchBuilder;
+pub use builder::{BatchBuilder, TrackedState};
 pub use diff::BatchStateDiff;
 pub use storage::StorageDiff;

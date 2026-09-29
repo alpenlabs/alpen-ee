@@ -46,6 +46,7 @@ class AlpenClientEnvParams:
     l1_reorg_safe_depth: int = 2
     batch_sealing_block_count: int = 10
     chunk_sealing_block_count: int | None = None
+    batch_sealing_da_size_bytes: int | None = None
     epoch_tracking_mode: str = "confirmed"
     beneficiary_address: str | None = None
     prover: ProverBackend = NATIVE_BACKEND
@@ -82,6 +83,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
         da_magic_bytes: bytes = DEFAULT_DA_MAGIC_BYTES,
         l1_reorg_safe_depth: int = 1,
         batch_sealing_block_count: int = 5,
+        batch_sealing_da_size_bytes: int | None = None,
         beneficiary_address: str | None = None,
         da_rate_wei_per_byte: int = 0,
         l1_fee_policy: AlpenL1FeePolicyConfig | None = None,
@@ -97,6 +99,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
             da_magic_bytes=da_magic_bytes,
             l1_reorg_safe_depth=l1_reorg_safe_depth,
             batch_sealing_block_count=batch_sealing_block_count,
+            batch_sealing_da_size_bytes=batch_sealing_da_size_bytes,
             beneficiary_address=beneficiary_address,
             da_rate_wei_per_byte=da_rate_wei_per_byte,
             l1_fee_policy=l1_fee_policy,
@@ -183,6 +186,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
             da_config=da_config,
             batch_sealing_block_count=envparams.batch_sealing_block_count,
             chunk_sealing_block_count=envparams.chunk_sealing_block_count,
+            batch_sealing_da_size_bytes=envparams.batch_sealing_da_size_bytes,
             epoch_tracking_mode=envparams.epoch_tracking_mode,
             beneficiary_address=envparams.beneficiary_address,
             prover=envparams.prover,

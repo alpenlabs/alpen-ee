@@ -10,14 +10,14 @@ use crate::block::{AccountSnapshot, BlockStateChanges};
 
 /// Tracks the original and current state of a value across a batch.
 ///
-/// Used internally by [`BatchBuilder`] to detect reverts (when current == original)
+/// Used by [`BatchBuilder`] to detect reverts (when current == original)
 /// and compute proper diffs.
 #[derive(Clone, Debug, Default)]
-struct TrackedState<T> {
+pub struct TrackedState<T> {
     /// State before the batch started.
-    original: T,
+    pub(crate) original: T,
     /// Current state after applying blocks.
-    current: T,
+    pub(crate) current: T,
 }
 
 impl<T: Clone> TrackedState<T> {
@@ -31,8 +31,18 @@ impl<T: Clone> TrackedState<T> {
 }
 
 impl<T> TrackedState<T> {
+    /// State before the batch started.
+    pub fn original(&self) -> &T {
+        &self.original
+    }
+
+    /// Current state after applying blocks.
+    pub fn current(&self) -> &T {
+        &self.current
+    }
+
     /// Returns true if the value reverted to its original state.
-    fn is_unchanged(&self) -> bool
+    pub fn is_unchanged(&self) -> bool
     where
         T: PartialEq,
     {
@@ -69,19 +79,34 @@ impl<T> TrackedState<T> {
 #[derive(Clone, Debug, Default)]
 pub struct BatchBuilder {
     /// Account states: address -> tracked state (original is None if account didn't exist).
-    accounts: BTreeMap<Address, TrackedState<Option<AccountSnapshot>>>,
+    pub(crate) accounts: BTreeMap<Address, TrackedState<Option<AccountSnapshot>>>,
 
     /// Storage states: address -> slot -> tracked value.
-    storage: BTreeMap<Address, BTreeMap<U256, TrackedState<U256>>>,
+    pub(crate) storage: BTreeMap<Address, BTreeMap<U256, TrackedState<U256>>>,
 
     /// Deployed contract bytecodes keyed by code hash (deduplicated).
-    deployed_bytecodes: BTreeMap<B256, Bytes>,
+    pub(crate) deployed_bytecodes: BTreeMap<B256, Bytes>,
 }
 
 impl BatchBuilder {
     /// Creates a new empty builder.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Tracked account states keyed by address.
+    pub fn accounts(&self) -> &BTreeMap<Address, TrackedState<Option<AccountSnapshot>>> {
+        &self.accounts
+    }
+
+    /// Tracked storage slot values keyed by address, then slot.
+    pub fn storage(&self) -> &BTreeMap<Address, BTreeMap<U256, TrackedState<U256>>> {
+        &self.storage
+    }
+
+    /// Deployed bytecodes collected so far, keyed by code hash.
+    pub fn deployed_bytecodes(&self) -> &BTreeMap<B256, Bytes> {
+        &self.deployed_bytecodes
     }
 
     /// Applies a block's state diff. Blocks must be applied in order.

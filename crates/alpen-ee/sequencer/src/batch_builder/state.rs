@@ -125,7 +125,9 @@ pub async fn init_batch_builder_state<P: AccumulationPolicy>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{sealing_policy::block_count_policy::BlockCountPolicy, test_utils::*};
+    use crate::{
+        sealing_policy::max_value_policy::ValueAccumulatorPolicy as BlockCountPolicy, test_utils::*,
+    };
 
     #[test]
     fn test_from_last_batch() {

@@ -1164,6 +1164,7 @@ dependencies = [
  "alpen-reth-exex",
  "alpen-reth-node",
  "alpen-reth-rpc",
+ "alpen-reth-statediff",
  "alpen-reth-witness",
  "anyhow",
  "async-trait",

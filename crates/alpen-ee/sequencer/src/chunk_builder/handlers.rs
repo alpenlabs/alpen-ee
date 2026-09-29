@@ -14,7 +14,10 @@ use super::{
     recovery,
     state::{ChunkBuilderState, PendingEntry},
 };
-use crate::sealing_policy::{AccumulationPolicy, BlockDataProvider, SealingPolicy};
+use crate::sealing_policy::{AccumulationPolicy, BlockDataProvider, SealReason, SealingPolicy};
+
+/// [`SealReason`] for a chunk closed because its batch ended.
+const SEAL_REASON_BATCH_BOUNDARY: SealReason = "batch_boundary";
 
 /// Maximum number of entries to process in a single tick cycle.
 const MAX_ENTRIES_PER_TICK: usize = 10;
@@ -123,12 +126,19 @@ where
 
                 state.pop_pending();
 
-                if !state.accumulator().is_empty()
-                    && state
-                        .accumulator()
-                        .would_exceed(sealing_policy, &block_data)
-                {
-                    seal_chunk(state, chunk_storage).await?;
+                // An empty accumulator skips the check: the first block of a
+                // chunk is always admitted, even if it alone exceeds a limit.
+                // Such a chunk is sealed by this same check when the next
+                // block arrives.
+                let exceeded = (!state.accumulator().is_empty())
+                    .then(|| {
+                        state
+                            .accumulator()
+                            .would_exceed_with_reason(sealing_policy, &block_data)
+                    })
+                    .flatten();
+                if let Some(reason) = exceeded {
+                    seal_chunk(state, chunk_storage, reason).await?;
                 }
 
                 state.accumulator_mut().add_block(block, &block_data);
@@ -152,7 +162,7 @@ async fn handle_batch_boundary<P: AccumulationPolicy>(
     batch_id: BatchId,
 ) -> Result<()> {
     if !state.accumulator().is_empty() {
-        seal_chunk(state, chunk_storage).await?;
+        seal_chunk(state, chunk_storage, SEAL_REASON_BATCH_BOUNDARY).await?;
     }
 
     // Read the chunk IDs without clearing them, so a failed `set_batch_chunks`
@@ -249,6 +259,7 @@ async fn reset_state_to_storage_frontier<P: AccumulationPolicy>(
 async fn seal_chunk<P: AccumulationPolicy>(
     state: &mut ChunkBuilderState<P>,
     chunk_storage: &impl ChunkStorage,
+    reason: SealReason,
 ) -> Result<()> {
     // Read the accumulated blocks without releasing them, so a failed
     // `save_next_chunk` below leaves them for the next seal. This state isn't
@@ -277,6 +288,7 @@ async fn seal_chunk<P: AccumulationPolicy>(
         chunk_idx,
         prev_block = %prev_block.hash(),
         last_block = %last_block.hash(),
+        reason,
         "sealing chunk"
     );
 

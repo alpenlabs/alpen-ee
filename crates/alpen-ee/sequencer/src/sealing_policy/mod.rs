@@ -7,22 +7,18 @@
 //!
 //! A [`SealingPolicy`] determines when to seal based on the accumulated state.
 //!
-//! These traits are used by the batch builder (and will be used by the chunk
-//! builder) with different policy implementations.
-//!
 //! # Built-in policies
 //!
 //! | Module | Seals when… |
 //! |--------|-------------|
-//! | [`block_count_policy`] | Block count reaches a threshold |
-//! | [`gas_limit_policy`] | Cumulative gas exceeds a limit |
-//! | [`or_policy`] | Either of two composed policies triggers |
+//! | [`max_value_policy`] | A summed per-block value (block count, gas, …) would exceed a limit |
+//! | [`or_policy`] | Any of the composed policies triggers (see [`crate::or_sealing!`]) |
 //! | [`rotation_policy`] | The group's last block consumed a predicate rotation |
 
-pub mod block_count_policy;
-pub mod gas_limit_policy;
+pub mod block_count_data_provider;
+pub mod max_value_policy;
 pub mod or_policy;
 mod policy;
 pub mod rotation_policy;
 
-pub use policy::{AccumulationPolicy, Accumulator, BlockDataProvider, SealingPolicy};
+pub use policy::{AccumulationPolicy, Accumulator, BlockDataProvider, SealReason, SealingPolicy};
