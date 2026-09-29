@@ -14,6 +14,7 @@ mod snapshot;
 mod test_utils;
 
 use clap::Parser;
+use tracing_subscriber::{filter::LevelFilter, EnvFilter};
 
 use crate::{
     account_state::verify_account_state,
@@ -32,6 +33,15 @@ use crate::{
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::WARN.into())
+                .from_env_lossy(),
+        )
+        .try_init()
+        .map_err(|err| eyre::eyre!("failed to initialize logging: {err}"))?;
+
     let args = Args::parse();
     let params = load_alpen_params(&args.alpen_params)?;
     let config = EeDaToolConfig::from_path(&args.config)?;
