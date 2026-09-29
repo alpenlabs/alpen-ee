@@ -10,6 +10,7 @@ use strata_common::retry::{policies::ExponentialBackoff, Backoff};
 use strata_identifiers::{L1BlockId, L1Height};
 use thiserror::Error;
 use tokio::time::sleep;
+use tracing::warn;
 
 /// bitcoind RPC error code returned while the node is warming up.
 const BITCOIND_RPC_WARMUP: i32 = -28;
@@ -224,7 +225,15 @@ where
                     source,
                 });
             }
-            Err(_) => {
+            Err(source) => {
+                warn!(
+                    height,
+                    attempt = u32::from(retries) + 1,
+                    max_attempts = u32::from(retry_policy.max_retries()) + 1,
+                    retry_delay_ms = delay_ms,
+                    err = %source,
+                    "L1 block fetch failed; retrying"
+                );
                 retries += 1;
                 sleep(Duration::from_millis(delay_ms)).await;
                 delay_ms = retry_policy.backoff().next_delay_ms(delay_ms);
