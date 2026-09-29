@@ -23,10 +23,10 @@ from flexitest.runtime import load_module_at, scan_dir_for_modules
 # Import environments
 from common.config import ServiceType
 from common.keepalive import KEEP_ALIVE_TEST_NAME, load_keepalive_test
-from common.prover_backend import resolve_prover_backend
 from common.runtime import TestRuntimeWithLogging
 from common.test_logging import TestNameFilter
 from envconfigs.alpen_client import AlpenClientEnv
+from envconfigs.eest import create_eest_env
 from envconfigs.el_ol import EeOLEnv
 
 # Import factories
@@ -299,13 +299,7 @@ def main(argv: list[str]) -> int:
         "alpen_ee": AlpenClientEnv(),
         # EEST needs the externally observable OL/EE path, not a
         # test-only client surface.
-        "alpen_eest": EeOLEnv(
-            fullnode_count=0,
-            pre_generate_blocks=110,
-            batch_sealing_block_count=5,
-            base_fee_floor=0,
-            prover=resolve_prover_backend(),
-        ),
+        "alpen_eest": create_eest_env(),
         "alpen_ee_discovery": AlpenClientEnv(enable_discovery=True, pure_discovery=True),
         "alpen_ee_multi": AlpenClientEnv(fullnode_count=3, forward_tx=False),
         "alpen_ee_mesh": AlpenClientEnv(

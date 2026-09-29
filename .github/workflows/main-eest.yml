@@ -41,6 +41,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: extract-rust-version
     timeout-minutes: 120
+    env:
+      EE_PROVER_BACKEND: sp1
+      SP1_PROVER: network
 
     steps:
       - name: Checkout repository
@@ -50,6 +53,15 @@ jobs:
 
       - name: Cleanup Space
         uses: $/.github/actions/cleanup
+
+      - name: Check SP1 network credentials
+        env:
+          NETWORK_PRIVATE_KEY: ${{ secrets.NETWORK_PRIVATE_KEY }}
+        run: |
+          if [[ -z "$NETWORK_PRIVATE_KEY" ]]; then
+            echo "::error::NETWORK_PRIVATE_KEY must be configured for SP1-backed EEST; refusing native fallback."
+            exit 1
+          fi
 
       - name: Install bitcoind
         env:
@@ -91,6 +103,18 @@ jobs:
 
       - name: Install SP1 core runner override
         uses: $/.github/actions/sp1-core-runner-override
+        with:
+          version: "6.5.0" # sp1-core-executor-runner-binary in Cargo.lock
+
+      - name: Install SP1 toolchain
+        env:
+          SP1_VERSION: "v6.5.0"
+        run: |
+          curl -fsSL --proto '=https' --tlsv1.2 https://sp1.succinct.xyz | bash
+          "$HOME/.sp1/bin/sp1up" -v "$SP1_VERSION" -c
+          echo "$HOME/.sp1/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.sp1/bin:$PATH"
+          cargo prove --version
 
       - name: Build alpen-client
         run: |
@@ -102,10 +126,22 @@ jobs:
           echo "Strata binaries at: ${STRATA_BIN_DIR}"
           echo "${STRATA_BIN_DIR}" >> "$GITHUB_PATH"
 
+      - name: Build matching EEST SP1 guests
+        working-directory: functional-tests
+        env:
+          SP1_SKIP_PROGRAM_BUILD: "false"
+        run: |
+          uv sync --frozen
+          ALPEN_PARAMS="$(uv run --frozen python -m scripts.gen_eest_sp1_guest_params)"
+          SP1_ALPEN_PARAMS_PATH="$ALPEN_PARAMS" \
+            cargo build --locked --release -p strata-sp1-guest-builder
+          uv run --frozen python -c 'from common.prover_backend import resolve_prover_backend; assert resolve_prover_backend().backend == "sp1"'
+
       - name: Run alpen EEST env in fntests
         env:
           NO_COLOR: "1"
           LOG_LEVEL: "info"
+          NETWORK_PRIVATE_KEY: ${{ secrets.NETWORK_PRIVATE_KEY }}
         run: |
           sudo apt-get install -y screen
           NEWPATH="$(realpath target/release/)"
