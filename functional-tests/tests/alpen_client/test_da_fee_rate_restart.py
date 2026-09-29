@@ -44,8 +44,14 @@ UPDATED_ESTIMATE_RATE_WEI_PER_BYTE = min(
 TRANSFER_AMOUNT_WEI = 10**17
 
 
-def _da_rate_from_block(block: dict) -> int:
-    """Decode the big-endian DA-rate body from Alpen header extra data."""
+def _da_rate_from_block(block: dict) -> int | None:
+    """Decode the big-endian DA-rate body from Alpen header extra data.
+
+    Returns `None` for genesis. Its extraData comes from the genesis document, not the DA-rate
+    layout.
+    """
+    if int(block["number"], 16) == 0:
+        return None
     extra_data_hex = block["extraData"].removeprefix("0x")
     extra_data = bytes.fromhex(extra_data_hex)
     assert len(extra_data) == 10, f"unexpected Alpen extraData length: {len(extra_data)}"
@@ -177,8 +183,8 @@ class TestDaFeeRateRestartTest(BaseTest):
         sequencer: AlpenClientService,
         expected_rate: int,
         after_height: int = 0,
-    ) -> tuple[int, int]:
-        def latest_height_and_rate() -> tuple[int, int]:
+    ) -> tuple[int, int | None]:
+        def latest_height_and_rate() -> tuple[int, int | None]:
             height = sequencer.get_block_number()
             block = sequencer.get_block_by_number(height)
             assert block is not None, f"block {height} was not found"
