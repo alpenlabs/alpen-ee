@@ -6,8 +6,8 @@
 //!
 //! Storage layout (MDBX-backed, own MDBX db under `<datadir>/mdbx` — fully
 //! separate from OL's; the prover trees live alongside the EE node trees):
-//! - `task_store` — shared across both provers; task keys carry a kind tag (`b'c'`/`b'a'`) so chunk
-//!   and batch entries don't collide in one tree.
+//! - chunk and acct task tables — one per prover kind, keyed by the owning spec version and the
+//!   task's block range; each resident version's prover gets a store scoped to its own rows.
 //! - `chunk_receipts` — chunk prover writes (via paas auto-store); acct `fetch_input` reads back.
 //! - `batch_proofs` — outer-proof store keyed by `BatchId`; outer hook writes, OL submission reads.
 //!
@@ -22,13 +22,13 @@ use alpen_ee_params::{AlpenParams, AlpenSpecId};
 use alpen_reth_witness::RangeWitnessExtractor;
 use bitcoind_async_client::Client as BtcClient;
 use reth_provider::{BlockReader, StateProviderFactory};
-use strata_paas::{ProverBuilder, ReceiptStore, RetryConfig, TaskStore};
+use strata_paas::{ProverBuilder, ReceiptStore, RetryConfig};
 use tracing::info;
 
 use super::prover::{
     launch_validated_ee_batch_prover, AcctRangeWitnessFn, AcctReceiptHook, AcctSpec,
-    ChunkReceiptHook, ChunkSpec, EeBatchProofDbManager, EeChunkReceiptStore, EeProverBuilders,
-    EeProverStores, EeProverTaskDbManager, PaasBatchProver, VersionedTaskStore,
+    ChunkReceiptHook, ChunkSpec, EeAcctTaskStore, EeBatchProofDbManager, EeChunkReceiptStore,
+    EeChunkTaskStore, EeProverBuilders, EeProverStores, PaasBatchProver,
 };
 use crate::{config::ProverBackendConfig, service_executor::ServiceExecutor};
 
@@ -67,10 +67,9 @@ where
     } = inputs;
 
     let prover_db = dbs.prover_db();
-    let task_store: Arc<dyn TaskStore> = Arc::new(EeProverTaskDbManager::new(prover_db.clone()));
     let chunk_receipts: Arc<dyn ReceiptStore> =
         Arc::new(EeChunkReceiptStore::new(prover_db.clone()));
-    let batch_proofs = Arc::new(EeBatchProofDbManager::new(prover_db));
+    let batch_proofs = Arc::new(EeBatchProofDbManager::new(prover_db.clone()));
     let batch_storage_dyn: Arc<dyn BatchStorage> = storage.clone();
     let chunk_storage_dyn: Arc<dyn ChunkStorage> = storage.clone();
 
@@ -92,22 +91,20 @@ where
     // A `ProverBuilder` is single-use (`.native(host)`/`.remote(host)`
     // consume it), but every resident prover program needs its own, so these
     // hand back a factory rather than a pre-built builder.
-    // Each call wraps the shared `task_store` in a `VersionedTaskStore`
-    // scoped to that candidate's declared version: chunk and acct tasks for
-    // every resident version otherwise share one physical MDBX table, and
-    // paas's own tick/recovery loop scans that table with no notion of which
-    // version submitted a task — without this scoping, one version's prover
-    // could claim and sign a task meant for another (see
-    // `VersionedTaskStore`'s doc comment). All other captures are cheap
-    // `Arc` clones.
+    // Each call gives its prover a task store scoped to that candidate's
+    // declared version: paas's own tick/recovery loop re-spawns whatever the
+    // store lists, with no notion of which version submitted a task, so a
+    // store shared across resident versions would let one version's prover
+    // claim and sign a task meant for another (see `EeTaskStore`'s doc
+    // comment). All other captures are cheap `Arc` clones.
     let chunk_builder_factory: Box<dyn Fn(AlpenSpecId) -> ProverBuilder<ChunkSpec> + Send + Sync> = {
         let chunk_storage_dyn = chunk_storage_dyn.clone();
         let storage = storage.clone();
-        let task_store = task_store.clone();
+        let prover_db = prover_db.clone();
         let chunk_receipts = chunk_receipts.clone();
         Box::new(move |spec_version| {
             ProverBuilder::new(ChunkSpec::new(chunk_storage_dyn.clone(), storage.clone()))
-                .task_store(VersionedTaskStore::new(task_store.clone(), spec_version))
+                .task_store(EeChunkTaskStore::new(prover_db.clone(), spec_version))
                 .receipt_store(chunk_receipts.clone())
                 .receipt_hook(ChunkReceiptHook::new(chunk_storage_dyn.clone()))
                 .retry(RetryConfig::default())
@@ -122,7 +119,7 @@ where
         let btc_client = btc_client.clone();
         let witness_db = witness_db.clone();
         let acct_range_witness_fn = acct_range_witness_fn.clone();
-        let task_store = task_store.clone();
+        let prover_db = prover_db.clone();
         let batch_proofs = batch_proofs.clone();
         Box::new(move |spec_version| {
             ProverBuilder::new(AcctSpec::new(
@@ -134,7 +131,7 @@ where
                 witness_db.clone(),
                 acct_range_witness_fn.clone(),
             ))
-            .task_store(VersionedTaskStore::new(task_store.clone(), spec_version))
+            .task_store(EeAcctTaskStore::new(prover_db.clone(), spec_version))
             .receipt_hook(AcctReceiptHook::new(
                 batch_storage_dyn.clone(),
                 batch_proofs.clone(),

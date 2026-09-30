@@ -13,12 +13,14 @@ mod db;
 mod envelope_db;
 mod prover_db;
 mod schema;
+mod task_key;
 
 pub(crate) use broadcast_db::L1BroadcastDbMdbx;
 pub use db::EeNodeDbMdbx;
 pub(crate) use envelope_db::L1ChunkedEnvelopeDbMdbx;
 pub use prover_db::EeProverDbMdbx;
 pub(crate) use schema::da_tables;
+pub use task_key::{BatchTaskKey, ChunkTaskKey, ProverTaskKey};
 
 /// Maps a storage-engine error into the database error type.
 fn to_db_error(err: MdbxError) -> DbError {

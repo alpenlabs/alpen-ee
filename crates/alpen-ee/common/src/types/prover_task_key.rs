@@ -1,4 +1,8 @@
 //! Shared EE prover task-key encoding.
+//!
+//! A paas task key is the task's `(prev_block, last_block)` range as 64 raw
+//! bytes. Chunk and acct tasks live in separate tables, so the encoding
+//! carries no kind tag: the table a key is read from says what it is.
 
 use std::fmt;
 
@@ -6,48 +10,32 @@ use strata_acct_types::Hash;
 
 use super::{batch::BatchId, chunk::ChunkId};
 
-/// EE chunk-prover task-key tag.
-pub const CHUNK_TASK_KEY_TAG: u8 = b'c';
-
-/// EE acct-prover task-key tag.
-pub const BATCH_TASK_KEY_TAG: u8 = b'a';
-
-/// Tag byte plus the `(prev_block, last_block)` range.
-pub const RANGE_TASK_KEY_BYTES: usize = 1 + 32 + 32;
+/// The `(prev_block, last_block)` range, 32 bytes each.
+pub const RANGE_TASK_KEY_BYTES: usize = 32 + 32;
 
 /// Encodes an EE chunk-prover task key.
 pub fn encode_chunk_task_key(chunk_id: ChunkId) -> Vec<u8> {
-    tagged_range_key(
-        CHUNK_TASK_KEY_TAG,
-        chunk_id.prev_block(),
-        chunk_id.last_block(),
-    )
+    range_key(chunk_id.prev_block(), chunk_id.last_block())
 }
 
 /// Encodes an EE acct-prover task key.
 pub fn encode_batch_task_key(batch_id: BatchId) -> Vec<u8> {
-    tagged_range_key(
-        BATCH_TASK_KEY_TAG,
-        batch_id.prev_block(),
-        batch_id.last_block(),
-    )
+    range_key(batch_id.prev_block(), batch_id.last_block())
 }
 
 /// Decodes an EE chunk-prover task key.
 pub fn decode_chunk_task_key(bytes: &[u8]) -> Result<ChunkId, ProverTaskKeyDecodeError> {
-    let (prev_block, last_block) =
-        decode_tagged_range_key(ProverTaskKeyKind::Chunk, CHUNK_TASK_KEY_TAG, bytes)?;
+    let (prev_block, last_block) = decode_range_key(ProverTaskKeyKind::Chunk, bytes)?;
     Ok(ChunkId::from_parts(prev_block, last_block))
 }
 
 /// Decodes an EE acct-prover task key.
 pub fn decode_batch_task_key(bytes: &[u8]) -> Result<BatchId, ProverTaskKeyDecodeError> {
-    let (prev_block, last_block) =
-        decode_tagged_range_key(ProverTaskKeyKind::Batch, BATCH_TASK_KEY_TAG, bytes)?;
+    let (prev_block, last_block) = decode_range_key(ProverTaskKeyKind::Batch, bytes)?;
     Ok(BatchId::from_parts(prev_block, last_block))
 }
 
-/// EE prover task-key kind.
+/// EE prover task-key kind, named in decode errors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProverTaskKeyKind {
     /// Chunk proof task key.
@@ -68,7 +56,7 @@ impl fmt::Display for ProverTaskKeyKind {
 /// Error returned when decoding an EE prover task key.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum ProverTaskKeyDecodeError {
-    /// The key length did not match the fixed tagged range-key size.
+    /// The key length did not match the fixed range-key size.
     #[error("invalid {kind} byte length: expected {expected}, got {actual}")]
     InvalidLength {
         /// Task-key kind being decoded.
@@ -78,21 +66,10 @@ pub enum ProverTaskKeyDecodeError {
         /// Actual byte length.
         actual: usize,
     },
-    /// The tag byte did not match the expected task type.
-    #[error("invalid {kind} tag byte: expected 0x{expected:02x}, got 0x{actual:02x}")]
-    InvalidTag {
-        /// Task-key kind being decoded.
-        kind: ProverTaskKeyKind,
-        /// Expected tag byte.
-        expected: u8,
-        /// Actual tag byte.
-        actual: u8,
-    },
 }
 
-fn tagged_range_key(tag: u8, prev_block: Hash, last_block: Hash) -> Vec<u8> {
+fn range_key(prev_block: Hash, last_block: Hash) -> Vec<u8> {
     let mut buf = Vec::with_capacity(RANGE_TASK_KEY_BYTES);
-    buf.push(tag);
     let prev: [u8; 32] = prev_block.into();
     let last: [u8; 32] = last_block.into();
     buf.extend_from_slice(&prev);
@@ -100,9 +77,8 @@ fn tagged_range_key(tag: u8, prev_block: Hash, last_block: Hash) -> Vec<u8> {
     buf
 }
 
-fn decode_tagged_range_key(
+fn decode_range_key(
     kind: ProverTaskKeyKind,
-    expected_tag: u8,
     bytes: &[u8],
 ) -> Result<(Hash, Hash), ProverTaskKeyDecodeError> {
     if bytes.len() != RANGE_TASK_KEY_BYTES {
@@ -112,18 +88,11 @@ fn decode_tagged_range_key(
             actual: bytes.len(),
         });
     }
-    if bytes[0] != expected_tag {
-        return Err(ProverTaskKeyDecodeError::InvalidTag {
-            kind,
-            expected: expected_tag,
-            actual: bytes[0],
-        });
-    }
 
     let mut prev = [0u8; 32];
     let mut last = [0u8; 32];
-    prev.copy_from_slice(&bytes[1..33]);
-    last.copy_from_slice(&bytes[33..]);
+    prev.copy_from_slice(&bytes[..32]);
+    last.copy_from_slice(&bytes[32..]);
 
     Ok((Hash::from(prev), Hash::from(last)))
 }
@@ -141,25 +110,21 @@ mod tests {
     }
 
     #[test]
-    fn chunk_and_batch_keys_are_tagged_ranges() {
+    fn chunk_and_batch_keys_are_bare_ranges() {
         let prev = test_hash(1);
         let last = test_hash(2);
 
         let chunk_key = encode_chunk_task_key(ChunkId::from_parts(prev, last));
         assert_eq!(chunk_key.len(), RANGE_TASK_KEY_BYTES);
-        assert_eq!(chunk_key[0], CHUNK_TASK_KEY_TAG);
-        assert_eq!(&chunk_key[1..33], <[u8; 32]>::from(prev).as_slice());
-        assert_eq!(&chunk_key[33..], <[u8; 32]>::from(last).as_slice());
+        assert_eq!(&chunk_key[..32], <[u8; 32]>::from(prev).as_slice());
+        assert_eq!(&chunk_key[32..], <[u8; 32]>::from(last).as_slice());
 
         let acct_key = encode_batch_task_key(BatchId::from_parts(prev, last));
-        assert_eq!(acct_key.len(), RANGE_TASK_KEY_BYTES);
-        assert_eq!(acct_key[0], BATCH_TASK_KEY_TAG);
-        assert_eq!(&acct_key[1..33], <[u8; 32]>::from(prev).as_slice());
-        assert_eq!(&acct_key[33..], <[u8; 32]>::from(last).as_slice());
+        assert_eq!(acct_key, chunk_key);
     }
 
     #[test]
-    fn task_keys_roundtrip_through_shared_decoder() {
+    fn task_keys_roundtrip() {
         let prev = test_hash(1);
         let last = test_hash(2);
 
@@ -177,16 +142,15 @@ mod tests {
     }
 
     #[test]
-    fn task_key_decoder_rejects_wrong_tag() {
-        let batch_id = BatchId::from_parts(test_hash(1), test_hash(2));
-        let err = decode_chunk_task_key(&encode_batch_task_key(batch_id)).unwrap_err();
+    fn task_key_decoder_rejects_wrong_length() {
+        let err = decode_chunk_task_key(&[0u8; RANGE_TASK_KEY_BYTES + 1]).unwrap_err();
 
         assert_eq!(
             err,
-            ProverTaskKeyDecodeError::InvalidTag {
+            ProverTaskKeyDecodeError::InvalidLength {
                 kind: ProverTaskKeyKind::Chunk,
-                expected: CHUNK_TASK_KEY_TAG,
-                actual: BATCH_TASK_KEY_TAG,
+                expected: RANGE_TASK_KEY_BYTES,
+                actual: RANGE_TASK_KEY_BYTES + 1,
             }
         );
     }
