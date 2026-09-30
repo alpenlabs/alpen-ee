@@ -2,6 +2,7 @@
 resolver = "2"
 
 members = [
+  "crates/alpen-ee/batch-replay",
   "crates/alpen-ee/block-assembly",
   "crates/alpen-ee/exec-chain",
   "crates/alpen-ee/common",
@@ -63,6 +64,7 @@ rustdoc.all = "warn"
 
 [workspace.dependencies]
 alpen-chainspec = { path = "crates/reth/chainspec" }
+alpen-ee-batch-replay = { path = "crates/alpen-ee/batch-replay" }
 alpen-ee-block-assembly = { path = "crates/alpen-ee/block-assembly" }
 alpen-ee-common = { path = "crates/alpen-ee/common" }
 alpen-ee-da-provider = { path = "crates/alpen-ee/da/provider" }
