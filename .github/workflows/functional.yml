@@ -52,6 +52,10 @@ jobs:
         working-directory: functional-tests
         run: uv run ruff check
 
+      - name: Test harness configuration (no services or proving)
+        working-directory: functional-tests
+        run: uv run python -m unittest discover -s unit_tests -v
+
   run:
     name: Run functional tests
     runs-on: ubuntu-latest-m

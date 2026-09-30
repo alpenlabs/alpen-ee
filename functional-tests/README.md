@@ -48,6 +48,35 @@ the strata-node tests live in the strata repo.
 ./run_tests.sh --help
 ```
 
+## EEST proving
+
+The shared `alpen_eest` environment resolves `EE_PROVER_BACKEND` once for both
+the EE prover and OL genesis predicate. Native remains the local default and
+seals every five blocks. SP1 seals every 100 blocks; the client's chunk block
+count follows the batch count when no separate chunk limit is configured.
+This reduces request frequency, not total proof cost by a guaranteed factor,
+and is not a spending cap.
+
+The daily `main-eest.yml` workflow explicitly selects `sp1` / `network`, builds
+the guest pair using the same generated parameters as the live environment,
+and requires the repository/organization Actions secret `NETWORK_PRIVATE_KEY`.
+It fails if credentials or guest artifacts are absent rather than falling back
+to native signed proofs. Merging this workflow change enables paid proving on
+its existing daily schedule; a PR push does not start that scheduled job.
+
+For local SP1 runs, install the matching SP1 toolchain and set
+`EE_PROVER_BACKEND=sp1`, `SP1_PROVER=network`, and `NETWORK_PRIVATE_KEY` before
+running `./run_tests.sh --keep-alive alpen_eest`. Never put the key in a command
+line or a tracked file. `ALPEN_SP1_PROOF_DEADLINE_SECS` optionally overrides the
+client's request deadline; it must be positive. The workflow's `proof_timeout`
+is a separate timeout for waiting for block coverage.
+
+Configuration-only tests (no nodes, credentials or proof requests):
+
+```bash
+uv run python -m unittest discover -s unit_tests -v
+```
+
 ## Structure
 
 ```
