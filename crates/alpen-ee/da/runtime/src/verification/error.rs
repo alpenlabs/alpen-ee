@@ -1,8 +1,10 @@
 //! Error types for EE DA proof verification.
 
-use alpen_ee_da_types::{DaParseError, EvmHeaderSummary};
+use alpen_ee_da_types::EvmHeaderSummary;
 use alpen_reth_statediff::ReconstructError;
 use strata_codec::CodecError;
+
+use crate::DaBlobRecoveryError;
 
 /// Result type used throughout DA verification. Defaults the success type to
 /// `()` for the common "verify and return nothing" case; pass a type parameter
@@ -18,8 +20,8 @@ pub enum DaVerificationError {
     NoChunks,
     #[error("last chunk transition decode failed ({0:?})")]
     LastChunkDecode(ssz::DecodeError),
-    #[error("DA blob reassembly failed ({0})")]
-    Reassembly(CodecError),
+    #[error("DA blob recovery failed ({0})")]
+    Recovery(#[from] DaBlobRecoveryError),
     #[error("malformed DA tx in witness ({0})")]
     DaTxDecode(String),
     #[error("DA witness block has no DA transactions")]
@@ -33,14 +35,6 @@ pub enum DaVerificationError {
         expected: [u8; 32],
         computed: [u8; 32],
     },
-
-    /// Errors from commit/reveal extraction shared with the host builder.
-    #[error("DA parse failure ({0})")]
-    Parse(#[from] DaParseError),
-    #[error("DA commit OP_RETURN magic mismatch (expected {expected:?}, got {actual:?})")]
-    CommitMagicMismatch { expected: [u8; 4], actual: [u8; 4] },
-    #[error("DA commit OP_RETURN version mismatch (expected {expected}, got {actual})")]
-    CommitVersionMismatch { expected: u32, actual: u32 },
 
     // Pre-state witness. "Partial pre-state" is the `EvmPartialState` sparse-MPT
     // witness: only the trie nodes the batch touches, enough to re-apply the diff

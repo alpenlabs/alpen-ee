@@ -1,7 +1,7 @@
 //! Producer-side helpers for splitting a [`DaBlob`] into envelope-sized chunks.
 //!
 //! Consumers (proof verifier, host witness builder) only need the codec types
-//! and `reassemble_da_blob` from [`alpen_ee_da_types`]; the chunking primitives
+//! and `decode_da_blob` from [`alpen_ee_da_types`]; the chunking primitives
 //! here are exclusively used by the chunked-envelope DA provider when building
 //! inscriptions.
 
@@ -52,7 +52,7 @@ pub fn prepare_da_chunks(
 
 #[cfg(test)]
 mod tests {
-    use alpen_ee_da_types::{reassemble_da_blob, DaBlob, EvmHeaderSummary};
+    use alpen_ee_da_types::{decode_da_blob, DaBlob, EvmHeaderSummary};
     use alpen_reth_statediff::BatchStateDiff;
     use strata_codec::{decode_buf_exact, encode_to_vec};
     use strata_l1_envelope_fmt::MAX_ENVELOPE_PAYLOAD_SIZE;
@@ -92,17 +92,17 @@ mod tests {
     fn full_pipeline_roundtrip() {
         let blob = make_test_da_blob();
         let chunks = prepare_da_chunks(&blob, MAX_ENVELOPE_PAYLOAD_SIZE).unwrap();
-        let reassembled = reassemble_da_blob(&chunks).unwrap();
-        assert_da_blob_eq(&blob, &reassembled);
+        let decoded = decode_da_blob(&chunks.concat()).unwrap();
+        assert_da_blob_eq(&blob, &decoded);
     }
 
     #[test]
-    fn small_chunk_payload_splits_and_reassembles() {
+    fn small_chunk_payload_splits_and_decodes() {
         let blob = make_test_da_blob();
         let chunks = prepare_da_chunks(&blob, 4).unwrap();
         assert!(chunks.len() > 1, "expected multiple chunks");
         assert!(chunks.iter().all(|c| c.len() <= 4));
-        let reassembled = reassemble_da_blob(&chunks).unwrap();
-        assert_da_blob_eq(&blob, &reassembled);
+        let decoded = decode_da_blob(&chunks.concat()).unwrap();
+        assert_da_blob_eq(&blob, &decoded);
     }
 }

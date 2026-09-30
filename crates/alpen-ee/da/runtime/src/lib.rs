@@ -12,7 +12,11 @@
 //!   [`DaWitness`](alpen_ee_da_types::DaWitness) the verifier checks. Enabled by the prover; left
 //!   out of guest builds.
 
+mod payload;
+
 pub mod verification;
 
 #[cfg(feature = "builders")]
 pub mod builders;
+
+pub use payload::DaBlobRecoveryError;

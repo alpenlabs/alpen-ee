@@ -14,10 +14,8 @@ use std::collections::BTreeSet;
 
 use alloy_primitives::{keccak256, B256};
 use alpen_ee_da_types::{
-    compute_bitcoin_merkle_root_from_proof, extract_da_chunks as parse_da_chunks,
-    read_commit_marker_payload, reassemble_da_blob, ArchivedBitcoinMerkleProof,
-    ArchivedDaBlockWitness, ArchivedDaWitness, ArchivedDedupWitness, DaBlob, DaParseError,
-    EvmHeaderSummary, DA_BLOB_VERSION, EE_DA_MAGIC_BYTES,
+    compute_bitcoin_merkle_root_from_proof, ArchivedBitcoinMerkleProof, ArchivedDaBlockWitness,
+    ArchivedDaWitness, ArchivedDedupWitness, DaBlob, EvmHeaderSummary,
 };
 use alpen_reth_statediff::{
     apply_batch_state_diff_to_ethereum_state, AccountChange, BatchStateDiff,
@@ -32,6 +30,8 @@ use strata_ee_acct_runtime::ArchivedEePrivateInput;
 use strata_ee_chain_types::ChunkTransition;
 use strata_evm_ee::EvmPartialState;
 use strata_snark_acct_types::{LedgerRefs, UpdateProofPubParams};
+
+use crate::payload::{recover_ee_da_blob, L1DaTransactions};
 
 /// Runs DA correctness checks for the outer proof.
 ///
@@ -59,13 +59,16 @@ pub fn verify_da_witness(
         return Err(DaVerificationError::NoChunks);
     }
 
-    let mut included_txs = Vec::new();
+    let mut included_blocks = Vec::with_capacity(da_witness.blocks().len());
     for block in da_witness.blocks() {
-        included_txs.extend(verify_block_witness(block, pub_params.ledger_refs())?);
+        let transactions = verify_block_witness(block, pub_params.ledger_refs())?;
+        included_blocks.push(L1DaTransactions::new(
+            block.inclusion().l1_block_height(),
+            transactions,
+        ));
     }
 
-    let encoded_chunks = extract_and_verify_da_chunks(included_txs.iter())?;
-    let blob = reassemble_da_blob(&encoded_chunks).map_err(DaVerificationError::Reassembly)?;
+    let blob = recover_ee_da_blob(included_blocks)?;
     let last_chunk = decode_last_chunk_transition(ee_input)?;
     verify_da_blob_metadata(
         &blob,
@@ -148,51 +151,6 @@ fn verify_l1_ref_binding(
         .any(|claim| claim.idx() == idx && claim.entry_hash().as_ref() == expected_hash.as_slice());
     if !found {
         return Err(DaVerificationError::L1DaBlockRefNotInLedgerRefs { idx });
-    }
-
-    Ok(())
-}
-
-// DA blob extraction + commit marker verification
-
-/// Extracts ordered DA chunks from included txs and verifies the commit
-/// marker matches the proof's expected magic + version.
-fn extract_and_verify_da_chunks<'a>(
-    txs: impl Iterator<Item = &'a Transaction>,
-) -> DaVerificationResult<Vec<Vec<u8>>> {
-    let txs: Vec<&Transaction> = txs.collect();
-    let chunks = parse_da_chunks(txs.iter().copied())?;
-    let commit = txs
-        .iter()
-        .copied()
-        .find(|tx| read_commit_marker_payload(tx).ok().flatten().is_some())
-        .ok_or(DaVerificationError::Parse(DaParseError::MissingCommit))?;
-    verify_commit_marker(commit)?;
-    Ok(chunks)
-}
-
-fn verify_commit_marker(commit: &Transaction) -> DaVerificationResult {
-    let payload = read_commit_marker_payload(commit)?
-        .ok_or(DaVerificationError::Parse(DaParseError::MissingCommit))?;
-    let actual_magic: [u8; 4] = payload[..4]
-        .try_into()
-        .expect("payload length checked by parser");
-    if actual_magic != EE_DA_MAGIC_BYTES {
-        return Err(DaVerificationError::CommitMagicMismatch {
-            expected: EE_DA_MAGIC_BYTES,
-            actual: actual_magic,
-        });
-    }
-
-    let version_bytes: [u8; 4] = payload[4..]
-        .try_into()
-        .expect("payload length checked by parser");
-    let actual_version = u32::from_be_bytes(version_bytes);
-    if actual_version != DA_BLOB_VERSION {
-        return Err(DaVerificationError::CommitVersionMismatch {
-            expected: DA_BLOB_VERSION,
-            actual: actual_version,
-        });
     }
 
     Ok(())
