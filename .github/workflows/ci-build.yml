@@ -128,8 +128,9 @@ jobs:
           SP1_ALPEN_PARAMS_PATH: ${{ github.workspace }}/bin/alpen-client/tests/res/alpen-params.json
         run: |
           # The guest builder's build script compiles the guest programs and
-          # writes the ELFs to provers/sp1/generated/.
-          cargo build --release -p strata-sp1-guest-builder
+          # writes the ELFs to provers/sp1/generated/. `docker-build` compiles
+          # them in SP1's pinned image so the ELFs match the release ones.
+          cargo build --release -p strata-sp1-guest-builder --features docker-build
 
           mkdir -p artifacts/elfs/sp1
           cp -v provers/sp1/generated/guest-alpen-chunk.elf \
