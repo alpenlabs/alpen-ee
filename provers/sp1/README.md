@@ -31,3 +31,36 @@ embedded.
 
 - `docker-build` — compile the guests inside Docker for reproducible ELFs.
 - `SP1_SKIP_PROGRAM_BUILD=true` — skip guest compilation.
+- `SP1_ALPEN_PARAMS_PATH` — absolute path to the `alpen-params.json` baked into
+  both guests. The guests are only built when this is set.
+
+## Publishing
+
+The params are baked into the guests, so each network has its own ELFs and
+account predicate. Per-network params live in `params/<network>/alpen-params.json`.
+
+`.github/workflows/publish-guests.yml` builds the guests for one network with
+`docker-build` and publishes these files:
+
+- `guest-alpen-chunk-<network>.elf` and `guest-alpen-acct-<network>.elf`
+- `alpen-acct-<network>.predicate`, the account guest's `Sp1Groth16` predicate
+  that the OL uses to check account proofs
+- `alpen-params-<network>.json`, the params baked into both guests
+- a `.sha256` file for each of the above, in `sha256sum -c` format
+- `manifest-<network>.json`, with the source commit, params source and digests
+
+The files always go to a workflow artifact. They also go to
+`s3://$ALPEN_GUESTS_S3_BUCKET/alpen-guests/<network>/<version>/` when the
+`ALPEN_GUESTS_S3_BUCKET` and `ALPEN_GUESTS_S3_ROLE_ARN` repo variables are set.
+
+Pushing a `v*` tag runs `.github/workflows/release.yml`. It creates a draft
+GitHub Release, runs `publish-guests.yml` for every network in `params/`,
+attaches the files, and then publishes the release.
+
+For a network whose params are not in the repo yet, run `publish-guests.yml` by
+hand with `params_url`. Releases are immutable once published, so `release_tag`
+only works while that release is still a draft.
+
+To check published files, rebuild at the same commit with
+`--features docker-build` and `SP1_ALPEN_PARAMS_PATH` pointing at the published
+params, then compare digests.

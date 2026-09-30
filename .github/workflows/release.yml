@@ -1,0 +1,91 @@
+# On a version tag, builds the SP1 guests for every network in params/ and
+# attaches them to the tag's GitHub Release.
+#
+# Releases are immutable once published, so the release is created as a draft,
+# every network attaches its files, and only then is it published.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  prepare:
+    name: Create draft release and list networks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the draft release
+    outputs:
+      networks: ${{ steps.networks.outputs.networks }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          sparse-checkout: params
+
+      - name: List networks
+        id: networks
+        run: |
+          set -euo pipefail
+          networks="$(find params -mindepth 2 -maxdepth 2 -name alpen-params.json \
+            | cut -d/ -f2 | sort | jq -R . | jq -cs .)"
+          if [ "$networks" = "[]" ]; then
+            echo "::error::no params/<network>/alpen-params.json found"
+            exit 1
+          fi
+          echo "networks=$networks" >> "$GITHUB_OUTPUT"
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            if [ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" != "true" ]; then
+              echo "::error::release $TAG is already published; files cannot be attached to an immutable release"
+              exit 1
+            fi
+          else
+            prerelease_flag=""
+            case "$TAG" in *-*) prerelease_flag="--prerelease" ;; esac
+            gh release create "$TAG" --draft $prerelease_flag --title "$TAG" --generate-notes
+          fi
+
+  guests:
+    name: Guests
+    needs: prepare
+    strategy:
+      fail-fast: true
+      matrix:
+        network: ${{ fromJSON(needs.prepare.outputs.networks) }}
+    uses: $/.github/workflows/publish-guests.yml
+    permissions:
+      contents: write
+      id-token: write
+    with:
+      network: ${{ matrix.network }}
+      ref: ${{ github.ref_name }}
+      release_tag: ${{ github.ref_name }}
+
+  publish:
+    name: Publish release
+    needs: guests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # publish the draft release
+    steps:
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
