@@ -12,6 +12,7 @@ mod broadcast_db;
 mod db;
 mod envelope_db;
 mod prover_db;
+mod recovered_da_db;
 pub(crate) mod schema;
 mod witness_db;
 
@@ -19,6 +20,7 @@ pub(crate) use broadcast_db::L1BroadcastDbMdbx;
 pub use db::NodeDbMdbx;
 pub(crate) use envelope_db::L1ChunkedEnvelopeDbMdbx;
 pub use prover_db::{ProverDbMdbx, ProverTaskKey};
+pub(crate) use recovered_da_db::RecoveredDaDbMdbx;
 pub use witness_db::{DaContextDbMdbx, WitnessDbMdbx};
 
 /// Maps a storage-engine error into the database error type.
