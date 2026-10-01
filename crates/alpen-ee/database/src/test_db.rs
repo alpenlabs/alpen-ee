@@ -22,6 +22,7 @@ use alpen_ee_common::{
     exec_block_storage_test_fns::create_exec_block, AccessedAccount, AccessedStateRecord, Batch,
     Chunk,
 };
+use alpen_ee_params::AlpenSpecId;
 use alpen_reth_db::{
     mdbx::{witness_tables, EeDaContextDbMdbx, WitnessDbMdbx},
     EeDaContext, StateDiffStore,
@@ -47,10 +48,10 @@ use crate::{
     database::EeNodeDb,
     mdbxdb::{
         da_tables, prover_tables, AcctProofIdIndexSchema, AcctProofReceiptSchema,
-        ChunkProofReceiptSchema, EeNodeDbMdbx, L1BroadcastDbMdbx, L1ChunkedEnvelopeDbMdbx,
-        ProverTaskSchema,
+        AcctProverTaskSchema, BatchTaskKey, ChunkProofReceiptSchema, ChunkProverTaskSchema,
+        ChunkTaskKey, EeNodeDbMdbx, L1BroadcastDbMdbx, L1ChunkedEnvelopeDbMdbx,
     },
-    serialization_types::DBBatchId,
+    serialization_types::{DBBatchId, DBChunkId},
 };
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -143,7 +144,9 @@ pub fn seed_node(datadir: &Path) {
     db.put_block_witness(h1, vec![1, 2, 3]).unwrap();
 }
 
-/// The prover environment: the task store and the receipt tables.
+/// The prover environment: a task of each kind under the V0 prover, over the
+/// chunk and the genesis batch the node environment holds, and the receipt
+/// each task points to.
 pub fn seed_prover(datadir: &Path) {
     let env = MdbxEnv::open(
         &datadir.join("mdbx").join("prover"),
@@ -155,12 +158,16 @@ pub fn seed_prover(datadir: &Path) {
         ProofReceipt::new(Proof::new(vec![7; 64]), PublicValues::new(vec![8; 16])),
         ProofMetadata::new(ZkVm::Native, ProgramId([1; 32]), "0.1", ProofType::Groth16),
     );
-    let batch_id: DBBatchId = Batch::new_genesis_batch(hash(1), 0).unwrap().id().into();
+    let (h0, h1, h2) = (hash(1), hash(2), hash(3));
+    let batch_id = Batch::new_genesis_batch(h0, 0).unwrap().id();
+    let chunk_id = Chunk::new(0, h0, h2, 2, 0, vec![h1, h2]).id();
+    let pending = TaskRecordData::new(TaskStatus::Pending);
     env.update(|w| {
-        w.put::<ProverTaskSchema>(&vec![1, 2, 3], &TaskRecordData::new(TaskStatus::Pending))?;
-        w.put::<ChunkProofReceiptSchema>(&vec![4, 5, 6], &receipt)?;
-        w.put::<AcctProofReceiptSchema>(&batch_id, &receipt)?;
-        w.put::<AcctProofIdIndexSchema>(&hash(5), &batch_id)
+        w.put::<ChunkProverTaskSchema>(&ChunkTaskKey::new(AlpenSpecId::V0, chunk_id), &pending)?;
+        w.put::<AcctProverTaskSchema>(&BatchTaskKey::new(AlpenSpecId::V0, batch_id), &pending)?;
+        w.put::<ChunkProofReceiptSchema>(&DBChunkId::from(chunk_id), &receipt)?;
+        w.put::<AcctProofReceiptSchema>(&DBBatchId::from(batch_id), &receipt)?;
+        w.put::<AcctProofIdIndexSchema>(&hash(5), &DBBatchId::from(batch_id))
     })
     .unwrap();
 }

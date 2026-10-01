@@ -28,12 +28,13 @@ use super::{
     value::{FieldValue, Record},
 };
 use crate::mdbxdb::{
-    AccountStateAtOLEpochSchema, AcctProofIdIndexSchema, AcctProofReceiptSchema, BatchByIdxSchema,
-    BatchChunksSchema, BatchIdToIdxSchema, BlockAccessedStateSchema, BlockWitnessSchema,
-    BytecodeSchema, ChunkByIdxSchema, ChunkIdToIdxSchema, ChunkProofReceiptSchema,
-    ExecBlockFinalizedSchema, ExecBlockPayloadSchema, ExecBlockSchema, ExecBlocksAtHeightSchema,
+    AccountStateAtOLEpochSchema, AcctProofIdIndexSchema, AcctProofReceiptSchema,
+    AcctProverTaskSchema, BatchByIdxSchema, BatchChunksSchema, BatchIdToIdxSchema,
+    BlockAccessedStateSchema, BlockWitnessSchema, BytecodeSchema, ChunkByIdxSchema,
+    ChunkIdToIdxSchema, ChunkProofReceiptSchema, ChunkProverTaskSchema, ExecBlockFinalizedSchema,
+    ExecBlockPayloadSchema, ExecBlockSchema, ExecBlocksAtHeightSchema,
     L1BroadcastActiveTxNodeSchema, L1BroadcastTxIdSchema, L1BroadcastTxNodeSchema,
-    L1BroadcastTxSchema, L1ChunkedEnvelopeSchema, OLBlockAtEpochSchema, ProverTaskSchema,
+    L1BroadcastTxSchema, L1ChunkedEnvelopeSchema, OLBlockAtEpochSchema,
 };
 
 /// Which keys a walk covers.
@@ -707,12 +708,16 @@ console_tables! {
 console_tables! {
     /// Builds the console's view of the prover environment's tables.
     pub(crate) fn prover_env_tables() in "prover" {
-        ProverTaskSchema => {
-            key: "tag-prefixed ProofSpec::Task bytes ([u8] -> hex)",
+        ChunkProverTaskSchema => {
+            key: "ChunkTaskKey: spec version (u16 BE) then prev_block, last_block (66 bytes -> hex)",
+            value: "TaskRecordData { status, updated_at_secs, retry_after_secs, metadata }",
+        },
+        AcctProverTaskSchema => {
+            key: "BatchTaskKey: spec version (u16 BE) then prev_block, last_block (66 bytes -> hex)",
             value: "TaskRecordData { status, updated_at_secs, retry_after_secs, metadata }",
         },
         ChunkProofReceiptSchema => {
-            key: "chunk task bytes ([u8] -> hex)",
+            key: "DBChunkId (prev_block:last_block hex pair)",
             value: "ProofReceiptWithMetadata { receipt: { proof: bytes, public_values: bytes }, metadata }",
             reflector: MirrorReflector<ProofReceiptMirror>,
         },
@@ -752,7 +757,8 @@ mod tests {
         assert_eq!(
             names,
             vec![
-                <ProverTaskSchema as Schema>::NAME,
+                <ChunkProverTaskSchema as Schema>::NAME,
+                <AcctProverTaskSchema as Schema>::NAME,
                 <ChunkProofReceiptSchema as Schema>::NAME,
                 <AcctProofReceiptSchema as Schema>::NAME,
                 <AcctProofIdIndexSchema as Schema>::NAME,

@@ -361,8 +361,8 @@ fn print_help() {
     println!("a record is {{ key, value }}: `r.key` is where it lives,");
     println!("`r.value.<field>` is what it holds");
     println!();
-    println!("a table is named bare (\"ProverTaskSchema\") or as env/Table");
-    println!("(\"prover/ProverTaskSchema\"); the latter is required only if the");
+    println!("a table is named bare (\"ChunkProverTaskSchema\") or as env/Table");
+    println!("(\"prover/ChunkProverTaskSchema\"); the latter is required only if the");
     println!("bare name exists in more than one environment");
     println!();
     println!("scripting: `fn name(args) {{ ... }}` stays defined for the session;");
@@ -380,7 +380,7 @@ fn print_help() {
     println!("  abort()                      discard staged writes");
     println!();
     println!("example:");
-    println!(r#"  count_where("ProverTaskSchema", |r| r.value.status == "PermanentFailure")"#);
+    println!(r#"  count_where("ChunkProverTaskSchema", |r| r.value.status == "PermanentFailure")"#);
 }
 
 /// Rows of a result array printed before the rest is summarised.
@@ -504,8 +504,8 @@ mod tests {
         recipes::install(&mut session).unwrap();
         let mut repl = Repl::new(session);
 
-        let input = "let k = first(\"ProverTaskSchema\").key;\n\
-                     set(\"ProverTaskSchema\", k, \"updated_at_secs\", 7)\n\
+        let input = "let k = first(\"ChunkProverTaskSchema\").key;\n\
+                     set(\"ChunkProverTaskSchema\", k, \"updated_at_secs\", 7)\n\
                      nope()\n\
                      commit()\n";
         let err = repl.run_reader(Cursor::new(input)).unwrap_err();
@@ -516,7 +516,7 @@ mod tests {
         let stored = repl
             .session
             .eval(
-                "get(\"ProverTaskSchema\", first(\"ProverTaskSchema\").key).value.updated_at_secs",
+                "get(\"ChunkProverTaskSchema\", first(\"ChunkProverTaskSchema\").key).value.updated_at_secs",
             )
             .unwrap();
         assert_ne!(stored.as_int().unwrap(), 7);
@@ -530,7 +530,7 @@ mod tests {
         let script = datadir.join("partial.rhai");
         fs::write(
             &script,
-            "set(\"ProverTaskSchema\", first(\"ProverTaskSchema\").key, \"updated_at_secs\", 7);\nnope()\n",
+            "set(\"ChunkProverTaskSchema\", first(\"ChunkProverTaskSchema\").key, \"updated_at_secs\", 7);\nnope()\n",
         )
         .unwrap();
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();

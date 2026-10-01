@@ -789,6 +789,8 @@ fn open_env(path: &Path, name: &str, mode: AttachMode) -> eyre::Result<MdbxEnv> 
 mod tests {
     use std::path::Path;
 
+    use alpen_ee_common::ChunkId;
+    use alpen_ee_params::AlpenSpecId;
     use alpen_store_mdbx::{DbError, Direction, MdbxConfig, MdbxEnv, TableSpec};
     use strata_acct_types::Hash;
     use strata_paas::{TaskRecordData, TaskStatus};
@@ -802,9 +804,24 @@ mod tests {
         AttachMode, ConsoleDb, StagedSummary,
     };
     use crate::{
-        mdbxdb::{ExecBlockFinalizedSchema, ProverTaskSchema},
+        console::key::ConsoleKey,
+        mdbxdb::{ChunkProverTaskSchema, ChunkTaskKey, ExecBlockFinalizedSchema},
         test_db::TempDatadir,
     };
+
+    /// The V0 prover's task over the chunk whose hashes are filled with
+    /// `prev` and `last`.
+    fn task(prev: u8, last: u8) -> ChunkTaskKey {
+        ChunkTaskKey::new(
+            AlpenSpecId::V0,
+            ChunkId::from_parts(Hash::from([prev; 32]), Hash::from([last; 32])),
+        )
+    }
+
+    /// The same key as `get` takes it: the version, then the two hashes.
+    fn task_key(prev: u8, last: u8) -> String {
+        task(prev, last).render()
+    }
 
     /// Creates a prover env with two tasks: a pending one and a permanently
     /// failed one. The env handle is dropped before returning so the console can
@@ -822,16 +839,16 @@ mod tests {
         let env = MdbxEnv::open(
             &path,
             &MdbxConfig::default(),
-            &[TableSpec::of::<ProverTaskSchema>()],
+            &[TableSpec::of::<ChunkProverTaskSchema>()],
         )
         .unwrap();
         env.update(|writer| {
-            writer.put::<ProverTaskSchema>(
-                &vec![1u8, 2, 3],
+            writer.put::<ChunkProverTaskSchema>(
+                &task(1, 2),
                 &TaskRecordData::new(TaskStatus::Pending),
             )?;
-            writer.put::<ProverTaskSchema>(
-                &vec![4u8, 5, 6],
+            writer.put::<ChunkProverTaskSchema>(
+                &task(4, 5),
                 &TaskRecordData::new(TaskStatus::PermanentFailure {
                     error: "boom".to_owned(),
                 }),
@@ -852,20 +869,23 @@ mod tests {
         assert!(db
             .table_infos()
             .iter()
-            .any(|info| info.name == "ProverTaskSchema"));
-        assert_eq!(db.count("ProverTaskSchema").unwrap(), 2);
+            .any(|info| info.name == "ChunkProverTaskSchema"));
+        assert_eq!(db.count("ChunkProverTaskSchema").unwrap(), 2);
 
         // get() decodes through the production codec and reflects the value in
         // its serde shape: a data-carrying variant nests under its own name,
         // rather than being flattened into a scalar.
-        let record = db.get("ProverTaskSchema", "040506").unwrap().unwrap();
+        let record = db
+            .get("ChunkProverTaskSchema", &task_key(4, 5))
+            .unwrap()
+            .unwrap();
         match record.value.get("status") {
             Some(FieldValue::Variant { name, .. }) => assert_eq!(name, "PermanentFailure"),
             other => panic!("unexpected status field: {other:?}"),
         }
 
         // The key belongs to the record, not to the value it holds.
-        assert_eq!(record.key, "040506");
+        assert_eq!(record.key, task_key(4, 5));
         assert!(
             record.value.get("key").is_none(),
             "the key leaked into the value's fields"
@@ -875,16 +895,16 @@ mod tests {
         let pending = |record: &Record| matches!(record.value.get("status"), Some(FieldValue::Enum(s)) if s == "Pending");
         let matched = collect(
             &db,
-            "ProverTaskSchema",
+            "ChunkProverTaskSchema",
             &Range::All,
             Direction::Forward,
             None,
             pending,
         );
         assert_eq!(matched.len(), 1);
-        assert_eq!(matched[0].key, "010203");
+        assert_eq!(matched[0].key, task_key(1, 2));
         assert_eq!(
-            db.count_where("ProverTaskSchema", &mut |r| Ok(pending(r)))
+            db.count_where("ChunkProverTaskSchema", &mut |r| Ok(pending(r)))
                 .unwrap(),
             1
         );
@@ -927,7 +947,7 @@ mod tests {
 
         let forward = collect(
             &db,
-            "ProverTaskSchema",
+            "ChunkProverTaskSchema",
             &Range::All,
             Direction::Forward,
             None,
@@ -935,12 +955,12 @@ mod tests {
         );
         assert_eq!(
             forward.iter().map(|r| r.key.as_str()).collect::<Vec<_>>(),
-            vec!["010203", "040506"]
+            vec![task_key(1, 2), task_key(4, 5)]
         );
 
         let backward = collect(
             &db,
-            "ProverTaskSchema",
+            "ChunkProverTaskSchema",
             &Range::All,
             Direction::Backward,
             None,
@@ -948,7 +968,7 @@ mod tests {
         );
         assert_eq!(
             backward.iter().map(|r| r.key.as_str()).collect::<Vec<_>>(),
-            vec!["040506", "010203"]
+            vec![task_key(4, 5), task_key(1, 2)]
         );
 
         // The limit counts matches, not rows visited, and ends the walk.
@@ -959,7 +979,7 @@ mod tests {
         };
         assert_eq!(
             db.scan(
-                "ProverTaskSchema",
+                "ChunkProverTaskSchema",
                 &Range::All,
                 Direction::Backward,
                 Some(1),
@@ -985,7 +1005,7 @@ mod tests {
         };
         let err = db
             .scan(
-                "ProverTaskSchema",
+                "ChunkProverTaskSchema",
                 &Range::All,
                 Direction::Forward,
                 None,
@@ -1005,18 +1025,18 @@ mod tests {
         let mut keys = Vec::new();
         let mut visit = |key: &str| {
             keys.push(key.to_owned());
-            Ok(key.starts_with("04"))
+            Ok(key.starts_with("000004"))
         };
         let matched = db
             .keys(
-                "ProverTaskSchema",
+                "ChunkProverTaskSchema",
                 &Range::All,
                 Direction::Forward,
                 None,
                 &mut visit,
             )
             .unwrap();
-        assert_eq!(keys, vec!["010203", "040506"]);
+        assert_eq!(keys, vec![task_key(1, 2), task_key(4, 5)]);
         assert_eq!(matched, 1);
     }
 
@@ -1030,7 +1050,9 @@ mod tests {
         seed_prover_env(&datadir);
 
         let db = ConsoleDb::attach_readonly(&datadir).unwrap();
-        let err = db.stage_delete("ProverTaskSchema", "010203").unwrap_err();
+        let err = db
+            .stage_delete("ChunkProverTaskSchema", &task_key(1, 2))
+            .unwrap_err();
         assert!(err.to_string().contains("read-only"), "{err}");
         assert!(db.staged().is_empty());
     }
@@ -1041,9 +1063,9 @@ mod tests {
         seed_prover_env(&datadir);
 
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
-        assert!(db.stage_delete("NoSuchSchema", "010203").is_err());
+        assert!(db.stage_delete("NoSuchSchema", &task_key(1, 2)).is_err());
 
-        let err = db.stage_delete("ProverTaskSchema", "zz").unwrap_err();
+        let err = db.stage_delete("ChunkProverTaskSchema", "zz").unwrap_err();
         assert!(err.to_string().contains("hex"), "{err}");
         assert!(db.staged().is_empty());
     }
@@ -1057,7 +1079,9 @@ mod tests {
         seed_prover_env(&datadir);
 
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
-        let err = db.stage_delete("ProverTaskSchema", "0a0b0c").unwrap_err();
+        let err = db
+            .stage_delete("ChunkProverTaskSchema", &task_key(10, 11))
+            .unwrap_err();
         assert!(err.to_string().contains("no record at key"), "{err}");
     }
 
@@ -1068,26 +1092,34 @@ mod tests {
         seed_prover_env(&datadir);
 
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
-        assert_eq!(db.count("ProverTaskSchema").unwrap(), 2);
+        assert_eq!(db.count("ChunkProverTaskSchema").unwrap(), 2);
 
-        db.stage_delete("ProverTaskSchema", "010203").unwrap();
+        db.stage_delete("ChunkProverTaskSchema", &task_key(1, 2))
+            .unwrap();
         assert_eq!(db.staged().len(), 1);
         assert_eq!(
-            db.count("ProverTaskSchema").unwrap(),
+            db.count("ChunkProverTaskSchema").unwrap(),
             2,
             "staging touched the store"
         );
 
         assert_eq!(db.abort(), 1);
         assert!(db.staged().is_empty());
-        assert_eq!(db.count("ProverTaskSchema").unwrap(), 2);
+        assert_eq!(db.count("ChunkProverTaskSchema").unwrap(), 2);
 
-        db.stage_delete("ProverTaskSchema", "010203").unwrap();
+        db.stage_delete("ChunkProverTaskSchema", &task_key(1, 2))
+            .unwrap();
         assert_eq!(db.commit().unwrap().total(), 1);
         assert!(db.staged().is_empty());
-        assert_eq!(db.count("ProverTaskSchema").unwrap(), 1);
-        assert!(db.get("ProverTaskSchema", "010203").unwrap().is_none());
-        assert!(db.get("ProverTaskSchema", "040506").unwrap().is_some());
+        assert_eq!(db.count("ChunkProverTaskSchema").unwrap(), 1);
+        assert!(db
+            .get("ChunkProverTaskSchema", &task_key(1, 2))
+            .unwrap()
+            .is_none());
+        assert!(db
+            .get("ChunkProverTaskSchema", &task_key(4, 5))
+            .unwrap()
+            .is_some());
     }
 
     #[test]
@@ -1096,11 +1128,13 @@ mod tests {
         seed_prover_env(&datadir);
 
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
-        db.stage_delete("ProverTaskSchema", "010203").unwrap();
-        db.stage_delete("ProverTaskSchema", "040506").unwrap();
+        db.stage_delete("ChunkProverTaskSchema", &task_key(1, 2))
+            .unwrap();
+        db.stage_delete("ChunkProverTaskSchema", &task_key(4, 5))
+            .unwrap();
 
         assert_eq!(db.commit().unwrap().total(), 2);
-        assert_eq!(db.count("ProverTaskSchema").unwrap(), 0);
+        assert_eq!(db.count("ChunkProverTaskSchema").unwrap(), 0);
     }
 
     #[test]
@@ -1134,25 +1168,36 @@ mod tests {
         seed_prover_env(&datadir);
 
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
-        let before = db.get("ProverTaskSchema", "010203").unwrap().unwrap().value;
+        let before = db
+            .get("ChunkProverTaskSchema", &task_key(1, 2))
+            .unwrap()
+            .unwrap()
+            .value;
 
         db.stage_set(
-            "ProverTaskSchema",
-            "010203",
+            "ChunkProverTaskSchema",
+            &task_key(1, 2),
             "updated_at_secs",
             FieldValue::U64(1234),
         )
         .unwrap();
         assert_eq!(db.staged().len(), 1);
         assert_eq!(
-            db.get("ProverTaskSchema", "010203").unwrap().unwrap().value,
+            db.get("ChunkProverTaskSchema", &task_key(1, 2))
+                .unwrap()
+                .unwrap()
+                .value,
             before,
             "staging touched the store"
         );
 
         assert_eq!(db.commit().unwrap().total(), 1);
 
-        let after = db.get("ProverTaskSchema", "010203").unwrap().unwrap().value;
+        let after = db
+            .get("ChunkProverTaskSchema", &task_key(1, 2))
+            .unwrap()
+            .unwrap()
+            .value;
         assert_eq!(after.get("updated_at_secs"), Some(&FieldValue::U64(1234)));
         for (name, value) in before.fields().expect("struct-shaped") {
             if name != "updated_at_secs" {
@@ -1169,14 +1214,19 @@ mod tests {
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
 
         let err = db
-            .stage_set("ProverTaskSchema", "010203", "nope", FieldValue::U64(1))
+            .stage_set(
+                "ChunkProverTaskSchema",
+                &task_key(1, 2),
+                "nope",
+                FieldValue::U64(1),
+            )
             .unwrap_err();
         assert!(err.to_string().contains("no field `nope`"), "{err}");
 
         let err = db
             .stage_set(
-                "ProverTaskSchema",
-                "010203",
+                "ChunkProverTaskSchema",
+                &task_key(1, 2),
                 "updated_at_secs",
                 FieldValue::Str("not a number".to_owned()),
             )
@@ -1193,8 +1243,8 @@ mod tests {
         let db = ConsoleDb::attach_readonly(&datadir).unwrap();
         let err = db
             .stage_set(
-                "ProverTaskSchema",
-                "010203",
+                "ChunkProverTaskSchema",
+                &task_key(1, 2),
                 "updated_at_secs",
                 FieldValue::U64(1),
             )
@@ -1210,18 +1260,19 @@ mod tests {
 
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
         db.stage_set(
-            "ProverTaskSchema",
-            "010203",
+            "ChunkProverTaskSchema",
+            &task_key(1, 2),
             "updated_at_secs",
             FieldValue::U64(7),
         )
         .unwrap();
-        db.stage_delete("ProverTaskSchema", "040506").unwrap();
+        db.stage_delete("ChunkProverTaskSchema", &task_key(4, 5))
+            .unwrap();
 
         assert_eq!(db.commit().unwrap().total(), 2);
-        assert_eq!(db.count("ProverTaskSchema").unwrap(), 1);
+        assert_eq!(db.count("ChunkProverTaskSchema").unwrap(), 1);
         assert_eq!(
-            db.get("ProverTaskSchema", "010203")
+            db.get("ChunkProverTaskSchema", &task_key(1, 2))
                 .unwrap()
                 .unwrap()
                 .value
@@ -1241,15 +1292,20 @@ mod tests {
         seed_prover_env(&datadir);
 
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
-        let before = db.read_value("ProverTaskSchema", "010203").unwrap();
+        let before = db
+            .read_value("ChunkProverTaskSchema", &task_key(1, 2))
+            .unwrap();
 
         let mut edited = before.clone();
         assert!(edited.replace_field("updated_at_secs", FieldValue::U64(11)));
         assert!(edited.replace_field("retry_after_secs", FieldValue::U64(22)));
-        db.stage_put("ProverTaskSchema", "010203", edited).unwrap();
+        db.stage_put("ChunkProverTaskSchema", &task_key(1, 2), edited)
+            .unwrap();
         assert_eq!(db.commit().unwrap().total(), 1);
 
-        let after = db.read_value("ProverTaskSchema", "010203").unwrap();
+        let after = db
+            .read_value("ChunkProverTaskSchema", &task_key(1, 2))
+            .unwrap();
         assert_eq!(after.get("updated_at_secs"), Some(&FieldValue::U64(11)));
         assert_eq!(after.get("retry_after_secs"), Some(&FieldValue::U64(22)));
         assert_eq!(after.get("status"), before.get("status"));
@@ -1263,16 +1319,30 @@ mod tests {
         seed_prover_env(&datadir);
 
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
-        let value = db.read_value("ProverTaskSchema", "010203").unwrap();
-
-        db.stage_put("ProverTaskSchema", "aabbcc", value.clone())
+        let value = db
+            .read_value("ChunkProverTaskSchema", &task_key(1, 2))
             .unwrap();
+
+        db.stage_put(
+            "ChunkProverTaskSchema",
+            &task_key(0xaa, 0xbb),
+            value.clone(),
+        )
+        .unwrap();
         assert_eq!(db.commit().unwrap().total(), 1);
 
-        assert_eq!(db.count("ProverTaskSchema").unwrap(), 3);
-        assert_eq!(db.read_value("ProverTaskSchema", "aabbcc").unwrap(), value);
+        assert_eq!(db.count("ChunkProverTaskSchema").unwrap(), 3);
+        assert_eq!(
+            db.read_value("ChunkProverTaskSchema", &task_key(0xaa, 0xbb))
+                .unwrap(),
+            value
+        );
         // the source is untouched
-        assert_eq!(db.read_value("ProverTaskSchema", "010203").unwrap(), value);
+        assert_eq!(
+            db.read_value("ChunkProverTaskSchema", &task_key(1, 2))
+                .unwrap(),
+            value
+        );
     }
 
     /// Overwriting is allowed, and the staged line says which it is.
@@ -1282,21 +1352,28 @@ mod tests {
         seed_prover_env(&datadir);
 
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
-        let value = db.read_value("ProverTaskSchema", "010203").unwrap();
+        let value = db
+            .read_value("ChunkProverTaskSchema", &task_key(1, 2))
+            .unwrap();
 
-        db.stage_put("ProverTaskSchema", "040506", value.clone())
+        db.stage_put("ChunkProverTaskSchema", &task_key(4, 5), value.clone())
             .unwrap();
         assert!(db.staged()[0].describe().contains("overwrite"));
         assert_eq!(db.commit().unwrap().total(), 1);
 
         assert_eq!(
-            db.count("ProverTaskSchema").unwrap(),
+            db.count("ChunkProverTaskSchema").unwrap(),
             2,
             "a record was added"
         );
-        assert_eq!(db.read_value("ProverTaskSchema", "040506").unwrap(), value);
+        assert_eq!(
+            db.read_value("ChunkProverTaskSchema", &task_key(4, 5))
+                .unwrap(),
+            value
+        );
 
-        db.stage_put("ProverTaskSchema", "ffeedd", value).unwrap();
+        db.stage_put("ChunkProverTaskSchema", &task_key(0xff, 0xee), value)
+            .unwrap();
         assert!(db.staged()[0].describe().contains("create"));
     }
 
@@ -1309,15 +1386,17 @@ mod tests {
 
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
         db.stage_set(
-            "ProverTaskSchema",
-            "010203",
+            "ChunkProverTaskSchema",
+            &task_key(1, 2),
             "status",
             FieldValue::Str("Completed".to_owned()),
         )
         .unwrap();
         assert_eq!(db.commit().unwrap().total(), 1);
 
-        let after = db.read_value("ProverTaskSchema", "010203").unwrap();
+        let after = db
+            .read_value("ChunkProverTaskSchema", &task_key(1, 2))
+            .unwrap();
         assert_eq!(
             after.get("status"),
             Some(&FieldValue::Enum("Completed".to_owned())),
@@ -1334,8 +1413,8 @@ mod tests {
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
         let err = db
             .stage_set(
-                "ProverTaskSchema",
-                "010203",
+                "ChunkProverTaskSchema",
+                &task_key(1, 2),
                 "status",
                 FieldValue::Str("NotAVariant".to_owned()),
             )
@@ -1350,9 +1429,11 @@ mod tests {
         seed_prover_env(&datadir);
 
         let db = ConsoleDb::attach_readonly(&datadir).unwrap();
-        let value = db.read_value("ProverTaskSchema", "010203").unwrap();
+        let value = db
+            .read_value("ChunkProverTaskSchema", &task_key(1, 2))
+            .unwrap();
         let err = db
-            .stage_put("ProverTaskSchema", "010203", value)
+            .stage_put("ChunkProverTaskSchema", &task_key(1, 2), value)
             .unwrap_err();
         assert!(err.to_string().contains("read-only"), "{err}");
     }
@@ -1392,9 +1473,9 @@ mod tests {
             "an absent env still lists its tables"
         );
 
-        let err = db.count("node/ProverTaskSchema").unwrap_err();
+        let err = db.count("node/ChunkProverTaskSchema").unwrap_err();
         assert!(err.to_string().contains("not present"), "{err}");
-        assert_eq!(db.count("prover/ProverTaskSchema").unwrap(), 2);
+        assert_eq!(db.count("prover/ChunkProverTaskSchema").unwrap(), 2);
     }
 
     /// The production registry attaches a prover-only datadir and resolves the
@@ -1412,8 +1493,8 @@ mod tests {
             .map(|e| e.name)
             .collect();
         assert_eq!(present, vec!["prover"]);
-        assert_eq!(db.count("ProverTaskSchema").unwrap(), 2);
-        assert_eq!(db.count("prover/ProverTaskSchema").unwrap(), 2);
+        assert_eq!(db.count("ChunkProverTaskSchema").unwrap(), 2);
+        assert_eq!(db.count("prover/ChunkProverTaskSchema").unwrap(), 2);
     }
 
     #[test]
@@ -1430,21 +1511,24 @@ mod tests {
         seed_env(&datadir, "prover");
 
         let db = ConsoleDb::attach(&datadir, AttachMode::ReadOnly, two_env_specs()).unwrap();
-        let err = db.count("ProverTaskSchema").unwrap_err();
+        let err = db.count("ChunkProverTaskSchema").unwrap_err();
         assert!(
             err.to_string().contains("more than one environment"),
             "{err}"
         );
-        assert!(err.to_string().contains("node/ProverTaskSchema"), "{err}");
-
-        assert_eq!(db.count("node/ProverTaskSchema").unwrap(), 2);
-        assert_eq!(db.count("prover/ProverTaskSchema").unwrap(), 2);
-        assert_eq!(
-            db.qualified_name("prover/ProverTaskSchema").unwrap(),
-            "prover/ProverTaskSchema"
+        assert!(
+            err.to_string().contains("node/ChunkProverTaskSchema"),
+            "{err}"
         );
 
-        let err = db.count("da/ProverTaskSchema").unwrap_err();
+        assert_eq!(db.count("node/ChunkProverTaskSchema").unwrap(), 2);
+        assert_eq!(db.count("prover/ChunkProverTaskSchema").unwrap(), 2);
+        assert_eq!(
+            db.qualified_name("prover/ChunkProverTaskSchema").unwrap(),
+            "prover/ChunkProverTaskSchema"
+        );
+
+        let err = db.count("da/ChunkProverTaskSchema").unwrap_err();
         assert!(
             err.to_string().contains("unknown environment `da`"),
             "{err}"
@@ -1460,21 +1544,25 @@ mod tests {
         seed_env(&datadir, "prover");
 
         let db = ConsoleDb::attach(&datadir, AttachMode::ReadWrite, two_env_specs()).unwrap();
-        db.stage_delete("prover/ProverTaskSchema", "010203")
+        db.stage_delete("prover/ChunkProverTaskSchema", &task_key(1, 2))
             .unwrap();
-        db.stage_delete("node/ProverTaskSchema", "040506").unwrap();
-        db.stage_delete("prover/ProverTaskSchema", "040506")
+        db.stage_delete("node/ChunkProverTaskSchema", &task_key(4, 5))
+            .unwrap();
+        db.stage_delete("prover/ChunkProverTaskSchema", &task_key(4, 5))
             .unwrap();
         assert_eq!(
             db.staged()[0].describe(),
-            "del prover/ProverTaskSchema 010203"
+            format!("del prover/ChunkProverTaskSchema {}", task_key(1, 2))
         );
 
         assert_eq!(db.commit().unwrap().total(), 3);
         assert!(db.staged().is_empty());
-        assert_eq!(db.count("prover/ProverTaskSchema").unwrap(), 0);
-        assert_eq!(db.count("node/ProverTaskSchema").unwrap(), 1);
-        assert!(db.get("node/ProverTaskSchema", "010203").unwrap().is_some());
+        assert_eq!(db.count("prover/ChunkProverTaskSchema").unwrap(), 0);
+        assert_eq!(db.count("node/ChunkProverTaskSchema").unwrap(), 1);
+        assert!(db
+            .get("node/ChunkProverTaskSchema", &task_key(1, 2))
+            .unwrap()
+            .is_some());
     }
 
     /// A read-write attach holds every present environment exclusively, not
@@ -1656,29 +1744,30 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("not stored in key order"), "{err}");
 
-        // The raw-bytes task key is ordered, so a prefix over it works both ways.
+        // The task key is stored version first and ordered, so a prefix over
+        // it works both ways.
         assert_eq!(
             keys_of(
                 &db,
-                "ProverTaskSchema",
-                &Range::Prefix("01".into()),
+                "ChunkProverTaskSchema",
+                &Range::Prefix("000001".into()),
                 Direction::Forward
             ),
-            vec!["010203"]
+            vec![task_key(1, 2)]
         );
         assert_eq!(
             keys_of(
                 &db,
-                "ProverTaskSchema",
-                &Range::Prefix("04".into()),
+                "ChunkProverTaskSchema",
+                &Range::Prefix("000004".into()),
                 Direction::Backward
             ),
-            vec!["040506"]
+            vec![task_key(4, 5)]
         );
         assert_eq!(
             keys_of(
                 &db,
-                "ProverTaskSchema",
+                "ChunkProverTaskSchema",
                 &Range::Prefix("ff".into()),
                 Direction::Backward
             ),
@@ -1711,8 +1800,11 @@ mod tests {
         seed_prover_env(&datadir);
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
 
-        db.stage_delete("ProverTaskSchema", "010203").unwrap();
-        let err = db.stage_delete("ProverTaskSchema", "010203").unwrap_err();
+        db.stage_delete("ChunkProverTaskSchema", &task_key(1, 2))
+            .unwrap();
+        let err = db
+            .stage_delete("ChunkProverTaskSchema", &task_key(1, 2))
+            .unwrap_err();
         assert!(
             err.to_string().contains("already has a staged del"),
             "{err}"
@@ -1720,8 +1812,8 @@ mod tests {
 
         let err = db
             .stage_set(
-                "ProverTaskSchema",
-                "010203",
+                "ChunkProverTaskSchema",
+                &task_key(1, 2),
                 "updated_at_secs",
                 FieldValue::U64(1),
             )
@@ -1733,9 +1825,11 @@ mod tests {
         assert_eq!(db.staged().len(), 1);
 
         // Another key is fine, and after an abort the first key is free again.
-        db.stage_delete("ProverTaskSchema", "040506").unwrap();
+        db.stage_delete("ChunkProverTaskSchema", &task_key(4, 5))
+            .unwrap();
         db.abort();
-        db.stage_delete("ProverTaskSchema", "010203").unwrap();
+        db.stage_delete("ChunkProverTaskSchema", &task_key(1, 2))
+            .unwrap();
     }
 
     #[test]
@@ -1744,24 +1838,32 @@ mod tests {
         seed_prover_env(&datadir);
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
 
-        let both = vec!["010203".to_owned(), "040506".to_owned()];
-        assert_eq!(db.stage_delete_many("ProverTaskSchema", &both).unwrap(), 2);
+        let both = vec![task_key(1, 2), task_key(4, 5)];
+        assert_eq!(
+            db.stage_delete_many("ChunkProverTaskSchema", &both)
+                .unwrap(),
+            2
+        );
         assert_eq!(db.staged().len(), 2);
         db.abort();
 
-        let with_missing = vec!["010203".to_owned(), "0a0b0c".to_owned()];
+        let with_missing = vec![task_key(1, 2), task_key(10, 11)];
         let err = db
-            .stage_delete_many("ProverTaskSchema", &with_missing)
+            .stage_delete_many("ChunkProverTaskSchema", &with_missing)
             .unwrap_err();
-        assert!(err.to_string().contains("no record at key 0a0b0c"), "{err}");
+        assert!(
+            err.to_string()
+                .contains(&format!("no record at key {}", task_key(10, 11))),
+            "{err}"
+        );
         assert!(
             db.staged().is_empty(),
             "a failed list delete staged something"
         );
 
-        let twice = vec!["010203".to_owned(), "010203".to_owned()];
+        let twice = vec![task_key(1, 2), task_key(1, 2)];
         let err = db
-            .stage_delete_many("ProverTaskSchema", &twice)
+            .stage_delete_many("ChunkProverTaskSchema", &twice)
             .unwrap_err();
         assert!(err.to_string().contains("listed twice"), "{err}");
         assert!(db.staged().is_empty());
@@ -1774,29 +1876,30 @@ mod tests {
         seed_env(&datadir, "prover");
         let db = ConsoleDb::attach(&datadir, AttachMode::ReadWrite, two_env_specs()).unwrap();
 
-        db.stage_delete("prover/ProverTaskSchema", "010203")
+        db.stage_delete("prover/ChunkProverTaskSchema", &task_key(1, 2))
             .unwrap();
         db.stage_set(
-            "prover/ProverTaskSchema",
-            "040506",
+            "prover/ChunkProverTaskSchema",
+            &task_key(4, 5),
             "updated_at_secs",
             FieldValue::U64(7),
         )
         .unwrap();
-        db.stage_delete("node/ProverTaskSchema", "010203").unwrap();
+        db.stage_delete("node/ChunkProverTaskSchema", &task_key(1, 2))
+            .unwrap();
 
         assert_eq!(
             db.staged_summary(),
             vec![
                 StagedSummary {
                     env: "prover",
-                    table: "ProverTaskSchema",
+                    table: "ChunkProverTaskSchema",
                     deletes: 1,
                     puts: 1
                 },
                 StagedSummary {
                     env: "node",
-                    table: "ProverTaskSchema",
+                    table: "ChunkProverTaskSchema",
                     deletes: 1,
                     puts: 0
                 },
@@ -1818,13 +1921,23 @@ mod tests {
         let env = MdbxEnv::open(
             &prover,
             &MdbxConfig::small(),
-            &[TableSpec::of::<ProverTaskSchema>()],
+            &[TableSpec::of::<ChunkProverTaskSchema>()],
         )
         .unwrap();
-        let keys: Vec<Vec<u8>> = (0..10_000u32).map(|i| i.to_be_bytes().to_vec()).collect();
+        let keys: Vec<ChunkTaskKey> = (0..10_000u32)
+            .map(|i| {
+                let mut prev = [0u8; 32];
+                prev[28..].copy_from_slice(&i.to_be_bytes());
+                ChunkTaskKey::new(
+                    AlpenSpecId::V0,
+                    ChunkId::from_parts(Hash::from(prev), Hash::default()),
+                )
+            })
+            .collect();
         env.update(|writer| {
             for key in &keys {
-                writer.put::<ProverTaskSchema>(key, &TaskRecordData::new(TaskStatus::Pending))?;
+                writer
+                    .put::<ChunkProverTaskSchema>(key, &TaskRecordData::new(TaskStatus::Pending))?;
             }
             Ok::<_, DbError>(())
         })
@@ -1832,14 +1945,15 @@ mod tests {
         drop(env);
 
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
-        let rendered: Vec<String> = keys.iter().map(hex::encode).collect();
+        let rendered: Vec<String> = keys.iter().map(ConsoleKey::render).collect();
         assert_eq!(
-            db.stage_delete_many("ProverTaskSchema", &rendered).unwrap(),
+            db.stage_delete_many("ChunkProverTaskSchema", &rendered)
+                .unwrap(),
             10_000
         );
         assert_eq!(db.staged_summary()[0].deletes, 10_000);
         assert_eq!(db.commit().unwrap().total(), 10_000);
-        assert_eq!(db.count("ProverTaskSchema").unwrap(), 0);
+        assert_eq!(db.count("ChunkProverTaskSchema").unwrap(), 0);
     }
 
     /// The batch knows a key by its canonical spelling, so `0x` and case do
@@ -1850,18 +1964,25 @@ mod tests {
         seed_prover_env(&datadir);
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
 
-        db.stage_delete("ProverTaskSchema", "0x010203").unwrap();
-        let err = db.stage_delete("ProverTaskSchema", "010203").unwrap_err();
+        db.stage_delete("ChunkProverTaskSchema", &format!("0x{}", task_key(1, 2)))
+            .unwrap();
+        let err = db
+            .stage_delete("ChunkProverTaskSchema", &task_key(1, 2))
+            .unwrap_err();
         assert!(
             err.to_string().contains("already has a staged del"),
             "{err}"
         );
-        assert_eq!(db.staged()[0].key(), "010203", "staged in canonical form");
+        assert_eq!(
+            db.staged()[0].key(),
+            task_key(1, 2),
+            "staged in canonical form"
+        );
 
         let err = db
             .stage_delete_many(
-                "ProverTaskSchema",
-                &["040506".to_owned(), "0x040506".to_owned()],
+                "ChunkProverTaskSchema",
+                &[task_key(4, 5), format!("0x{}", task_key(4, 5))],
             )
             .unwrap_err();
         assert!(err.to_string().contains("listed twice"), "{err}");

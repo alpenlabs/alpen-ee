@@ -30,8 +30,8 @@ fn to_db_error(err: MdbxError) -> DbError {
 // The prover tables, for the seeding helpers in `test_db`.
 #[cfg(any(test, feature = "test-utils"))]
 pub(crate) use schema::{
-    prover_tables, AcctProofIdIndexSchema, AcctProofReceiptSchema, ChunkProofReceiptSchema,
-    ProverTaskSchema,
+    prover_tables, AcctProofIdIndexSchema, AcctProofReceiptSchema, AcctProverTaskSchema,
+    ChunkProofReceiptSchema, ChunkProverTaskSchema,
 };
 // Re-exported for the operator console (`console` feature), which reflects
 // these tables through the production codecs.
@@ -45,5 +45,6 @@ pub(crate) use schema::{
 };
 #[cfg(all(feature = "console", not(any(test, feature = "test-utils"))))]
 pub(crate) use schema::{
-    AcctProofIdIndexSchema, AcctProofReceiptSchema, ChunkProofReceiptSchema, ProverTaskSchema,
+    AcctProofIdIndexSchema, AcctProofReceiptSchema, AcctProverTaskSchema, ChunkProofReceiptSchema,
+    ChunkProverTaskSchema,
 };

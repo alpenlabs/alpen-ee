@@ -9,12 +9,16 @@
 
 use alloy_primitives::B256;
 use alpen_ee_common::{BatchId, ChunkId};
+use alpen_store_mdbx::KeyCodec;
 use strata_acct_types::Hash;
 use strata_db_types::fee_bump::TxNodeId;
 use strata_identifiers::{Buf32, OLBlockId};
 
 use super::value::{hex, parse_hex};
-use crate::serialization_types::{DBBatchId, DBChunkId, DBOLBlockId};
+use crate::{
+    mdbxdb::{AcctProverTaskSchema, BatchTaskKey, ChunkProverTaskSchema, ChunkTaskKey},
+    serialization_types::{DBBatchId, DBChunkId, DBOLBlockId},
+};
 
 /// A key type the console can parse from user text and render back.
 ///
@@ -205,6 +209,45 @@ impl ConsoleKey for DBChunkId {
     }
 }
 
+/// A prover task key is written as the hex of its stored bytes: the owning
+/// spec version, big-endian, then the range's two hashes, 66 bytes. That is
+/// the order the table keeps, so one version's tasks share a prefix (`0000`
+/// is the V0 prover's) and a key copied out of a scan pastes straight back.
+/// The table's own codec parses it, so a key of the wrong length or of a
+/// version the binary does not know is refused as such.
+macro_rules! impl_console_key_task {
+    ($key:ty, $schema:ty, $what:literal) => {
+        impl ConsoleKey for $key {
+            fn parse(input: &str) -> eyre::Result<Self> {
+                let bytes = parse_hex(input).map_err(|e| eyre::eyre!("bad key: {e}"))?;
+                <$key as KeyCodec<$schema>>::decode_key(&bytes).map_err(|e| {
+                    eyre::eyre!(
+                        "bad {} task key {input:?}: {:#}",
+                        $what,
+                        eyre::Report::new(e)
+                    )
+                })
+            }
+
+            fn render(&self) -> String {
+                let bytes = <$key as KeyCodec<$schema>>::encode_key(self)
+                    .expect("a task key's encoding has no failure path");
+                hex(&bytes)
+            }
+
+            fn prefix(input: &str) -> eyre::Result<Vec<u8>> {
+                parse_prefix(input, TASK_KEY_BYTES)
+            }
+        }
+    };
+}
+
+/// A stored task key: the `u16` spec version, then two 32-byte hashes.
+const TASK_KEY_BYTES: usize = 2 + 32 + 32;
+
+impl_console_key_task!(ChunkTaskKey, ChunkProverTaskSchema, "chunk");
+impl_console_key_task!(BatchTaskKey, AcctProverTaskSchema, "acct");
+
 impl ConsoleKey for DBOLBlockId {
     fn parse(input: &str) -> eyre::Result<Self> {
         let raw = parse_hash32(input)?;
@@ -225,8 +268,8 @@ impl ConsoleKey for DBOLBlockId {
 mod tests {
     use std::fmt::Debug;
 
+    use alpen_ee_params::AlpenSpecId;
     use alpen_reth_db::mdbx::BlockStateChangesSchema;
-    use alpen_store_mdbx::KeyCodec;
 
     use super::*;
 
@@ -261,6 +304,38 @@ mod tests {
             Hash::from([3u8; 32]),
             Hash::from([4u8; 32]),
         )));
+    }
+
+    /// A task key renders as the bytes the table stores, version first, so
+    /// the V0 prover's tasks sit under the prefix `0000`; a key of another
+    /// length or of an unknown version is refused by the table's own codec.
+    #[test]
+    fn task_keys_round_trip_as_their_stored_bytes() {
+        let chunk = ChunkTaskKey::new(
+            AlpenSpecId::V0,
+            ChunkId::from_parts(Hash::from([1u8; 32]), Hash::from([2u8; 32])),
+        );
+        round_trip(chunk);
+        let rendered = chunk.render();
+        assert_eq!(rendered.len(), 2 * TASK_KEY_BYTES);
+        assert!(rendered.starts_with("0000"), "{rendered}");
+        assert_eq!(&rendered[4..68], hex(&[1u8; 32]));
+        assert_eq!(ChunkTaskKey::prefix("0000").unwrap(), [0, 0]);
+
+        let batch = BatchTaskKey::new(
+            AlpenSpecId::V1,
+            BatchId::from_parts(Hash::from([3u8; 32]), Hash::from([4u8; 32])),
+        );
+        round_trip(batch);
+        assert!(batch.render().starts_with("0001"));
+
+        let err = ChunkTaskKey::parse("010203").unwrap_err().to_string();
+        assert!(err.contains("chunk task key"), "{err}");
+        assert!(err.contains("66-byte task key"), "{err}");
+        let err = BatchTaskKey::parse(&format!("ffff{}", hex(&[0u8; 64])))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("unknown spec version 65535"), "{err}");
     }
 
     #[test]

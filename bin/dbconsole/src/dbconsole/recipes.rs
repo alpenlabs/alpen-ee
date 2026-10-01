@@ -97,7 +97,10 @@ mod tests {
         let (_datadir, mut session) = seeded_session();
 
         let prover = map(&mut session, "prover_summary()");
-        assert_eq!(prover.get("Pending").unwrap().as_int().unwrap(), 1);
+        for kind in ["chunk", "acct"] {
+            let by_status = prover.get(kind).unwrap().clone().cast::<Map>();
+            assert_eq!(by_status.get("Pending").unwrap().as_int().unwrap(), 1);
+        }
 
         let chain = map(&mut session, "chain_summary()");
         assert_eq!(chain.get("tip_height").unwrap().as_int().unwrap(), 2);
@@ -125,20 +128,41 @@ mod tests {
         assert!(session.db().staged().is_empty());
     }
 
+    /// The keys of the two seeded tasks: the chunk task and the account task,
+    /// each the only row of its table.
+    fn seeded_tasks(session: &mut Session) -> (String, String) {
+        let key = |session: &mut Session, table: &str| {
+            session
+                .eval(&format!(r#"first("{table}").key"#))
+                .unwrap()
+                .to_string()
+        };
+        let chunk = key(session, "ChunkProverTaskSchema");
+        let acct = key(session, "AcctProverTaskSchema");
+        (chunk, acct)
+    }
+
     #[test]
     fn prover_reset_and_abandon_stage_a_status_change_and_nothing_else() {
         let (_datadir, mut session) = seeded_session();
-        assert_eq!(int(&mut session, r#"prover_reset("010203")"#), 1);
+        let (chunk, acct) = seeded_tasks(&mut session);
+        assert_eq!(
+            int(
+                &mut session,
+                &format!(r#"prover_reset("ChunkProverTaskSchema", "{chunk}")"#)
+            ),
+            1
+        );
         let staged = session.db().staged();
         assert_eq!(staged.len(), 1);
         assert!(matches!(&staged[0], StagedOp::Put { table, record, .. }
-            if *table == "ProverTaskSchema" && record.value.get("status").unwrap().to_string() == "Pending"));
+            if *table == "ChunkProverTaskSchema" && record.value.get("status").unwrap().to_string() == "Pending"));
         session.db().abort();
 
         assert_eq!(
             int(
                 &mut session,
-                r#"prover_abandon("010203", "operator gave up")"#
+                &format!(r#"prover_abandon("AcctProverTaskSchema", "{acct}", "operator gave up")"#)
             ),
             1
         );
@@ -158,78 +182,99 @@ mod tests {
         );
     }
 
-    /// Builds a task at a receipt-shaped key by copying the seeded rows:
-    /// a chunk task over a chunk receipt, a batch task over an account
-    /// receipt whose proof-id index entry the seed also wrote.
-    fn seed_receipted_tasks(session: &mut Session) -> (String, String) {
-        let hashes = "04".repeat(64);
-        let chunk_task = format!("000163{hashes}");
-        let chunk_receipt = format!("63{hashes}");
-        // The seeded account receipt sits at the genesis batch's pair key and
-        // the seeded index entry points at that same pair.
-        let pair = session
-            .eval(r#"first("AcctProofReceiptSchema").key"#)
-            .unwrap()
-            .to_string();
-        let (prev, last) = pair.split_once(':').unwrap();
-        let batch_task = format!("000161{prev}{last}");
-        let _ = session
-            .eval(&format!(
-                r#"
-                put("ChunkProofReceiptSchema", "{chunk_receipt}", edit("ChunkProofReceiptSchema", "040506"));
-                put("ProverTaskSchema", "{chunk_task}", edit("ProverTaskSchema", "010203"));
-                put("ProverTaskSchema", "{batch_task}", edit("ProverTaskSchema", "010203"));
-                commit();
-                "#
-            ))
-            .unwrap();
-        (chunk_task, batch_task)
-    }
-
+    /// The seeded chunk task points at the seeded chunk receipt and the
+    /// account task at the account receipt; a task copied to a range nothing
+    /// was proved for has none, and a key that is not a task key is refused
+    /// by the table rather than guessed at.
     #[test]
     fn prover_task_finds_the_receipt_behind_a_task_key() {
         let (_datadir, mut session) = seeded_session();
-        let (chunk_task, batch_task) = seed_receipted_tasks(&mut session);
+        let (chunk, acct) = seeded_tasks(&mut session);
 
-        let shown = map(&mut session, &format!(r#"prover_task("{chunk_task}")"#));
+        let shown = map(
+            &mut session,
+            &format!(r#"prover_task("ChunkProverTaskSchema", "{chunk}")"#),
+        );
         assert!(shown.get("task").unwrap().is_map());
         assert!(
             shown.get("receipt").unwrap().is_map(),
             "chunk receipt not found"
         );
-        let shown = map(&mut session, &format!(r#"prover_task("{batch_task}")"#));
+        let shown = map(
+            &mut session,
+            &format!(r#"prover_task("prover/AcctProverTaskSchema", "{acct}")"#),
+        );
         assert!(
             shown.get("receipt").unwrap().is_map(),
             "account receipt not found"
         );
-        // A key of neither shape has no receipt and does not fail.
-        let shown = map(&mut session, r#"prover_task("010203")"#);
+
+        let unproved = unproved_chunk_task(&mut session, &chunk);
+        let shown = map(
+            &mut session,
+            &format!(r#"prover_task("ChunkProverTaskSchema", "{unproved}")"#),
+        );
+        assert!(shown.get("task").unwrap().is_map());
         assert!(shown.get("receipt").unwrap().is_unit());
+
+        let err = session
+            .eval(r#"prover_task("ChunkProverTaskSchema", "010203")"#)
+            .unwrap_err();
+        assert!(err.to_string().contains("task key"), "{err}");
+        assert!(session.db().staged().is_empty());
+    }
+
+    /// Writes a copy of the seeded chunk task over a range no receipt covers
+    /// and returns its key: the same version, hashes of their own.
+    fn unproved_chunk_task(session: &mut Session, chunk: &str) -> String {
+        let key = format!("0000{}{}", "aa".repeat(32), "bb".repeat(32));
+        let _ = session
+            .eval(&format!(
+                r#"
+                put("ChunkProverTaskSchema", "{key}", edit("ChunkProverTaskSchema", "{chunk}"));
+                commit();
+                "#
+            ))
+            .unwrap();
+        key
     }
 
     #[test]
     fn prover_delete_takes_the_task_its_receipt_and_the_index_entry() {
         let (_datadir, mut session) = seeded_session();
-        let (chunk_task, batch_task) = seed_receipted_tasks(&mut session);
+        let (chunk, acct) = seeded_tasks(&mut session);
+        let unproved = unproved_chunk_task(&mut session, &chunk);
 
-        assert_eq!(int(&mut session, r#"prover_delete("010203")"#), 1);
+        assert_eq!(
+            int(
+                &mut session,
+                &format!(r#"prover_delete("ChunkProverTaskSchema", "{unproved}")"#)
+            ),
+            1
+        );
         session.db().abort();
 
         assert_eq!(
-            int(&mut session, &format!(r#"prover_delete("{chunk_task}")"#)),
+            int(
+                &mut session,
+                &format!(r#"prover_delete("ChunkProverTaskSchema", "{chunk}")"#)
+            ),
             2
         );
         let ops = session.db().staged();
-        assert_eq!(staged_of(&ops, "ProverTaskSchema").len(), 1);
+        assert_eq!(staged_of(&ops, "ChunkProverTaskSchema").len(), 1);
         assert_eq!(staged_of(&ops, "ChunkProofReceiptSchema").len(), 1);
         session.db().abort();
 
         assert_eq!(
-            int(&mut session, &format!(r#"prover_delete("{batch_task}")"#)),
+            int(
+                &mut session,
+                &format!(r#"prover_delete("AcctProverTaskSchema", "{acct}")"#)
+            ),
             3
         );
         let ops = session.db().staged();
-        assert_eq!(staged_of(&ops, "ProverTaskSchema").len(), 1);
+        assert_eq!(staged_of(&ops, "AcctProverTaskSchema").len(), 1);
         assert_eq!(staged_of(&ops, "AcctProofReceiptSchema").len(), 1);
         assert_eq!(staged_of(&ops, "AcctProofIdIndexSchema").len(), 1);
         assert_eq!(int(&mut session, "commit()"), 3);

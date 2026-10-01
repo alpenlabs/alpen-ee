@@ -85,6 +85,7 @@ key type is already covered gets `get` for free:
 | `Buf32` / `Hash`, `B256`, `TxNodeId` | 32-byte hex | `"0389ca9e…631e"` |
 | `u32`, `u64` | decimal | `"41"` |
 | `DBBatchId`, `DBChunkId` | `prev:last` hex pair | `"3324fbd0…:044945f0…"` |
+| `ChunkTaskKey`, `BatchTaskKey` | 66-byte hex: spec version, `prev`, `last` | `"00003324fbd0…dda56"` |
 | `DBOLBlockId` | 32-byte hex | `"c9a033ca…0caf"` |
 
 Rendering and parsing must round-trip — a key printed by a scan has to paste
@@ -150,7 +151,7 @@ the round trip a write is gated on.
 registry mirrors the layout: one `console_tables!` block per environment, and
 `ee_envs()` listing them in the order `.tables` prints.
 
-A table is named bare (`"ProverTaskSchema"`) or qualified (`"prover/ProverTaskSchema"`).
+A table is named bare (`"ChunkProverTaskSchema"`) or qualified (`"prover/ChunkProverTaskSchema"`).
 A bare name resolves while it is unique across environments, which every EE
 table is today and a registry test enforces; the qualified form is accepted
 everywhere and is required only if that ever changes. A table in an absent
@@ -231,11 +232,11 @@ Ctrl-C — see [Scripting](#scripting).
 table it came from:
 
 ```rhai
-let v = edit("ProverTaskSchema", K);
+let v = edit("ChunkProverTaskSchema", K);
 v["updated_at_secs"]        // indexer read
 v.get("status")             // same thing
 v.set("status", "Pending"); // checked against the table's real type, immediately
-v.table()                   // "prover/ProverTaskSchema"
+v.table()                   // "prover/ChunkProverTaskSchema"
 ```
 
 Carrying the table is what lets `set` validate at the point of the mistake
@@ -277,7 +278,8 @@ db> .tables
   …
 [prover]
   table                            rows
-  ProverTaskSchema                   49
+  ChunkProverTaskSchema              25
+  AcctProverTaskSchema               24
   ChunkProofReceiptSchema            25
   …
 [witness]
@@ -294,10 +296,10 @@ db> .tables
 Check `.schema` before trusting a key format:
 
 ```
-db> .schema ProverTaskSchema
-  table: ProverTaskSchema
+db> .schema ChunkProverTaskSchema
+  table: ChunkProverTaskSchema
   env:   prover
-  key:   tag-prefixed ProofSpec::Task bytes ([u8] -> hex)
+  key:   ChunkTaskKey: spec version (u16 BE) then prev_block, last_block (66 bytes -> hex)
   value: TaskRecordData { status, updated_at_secs, retry_after_secs, metadata }
 ```
 
@@ -307,17 +309,17 @@ interchangeable while the bare name is unique.
 ### `get(table, key)` — one row by key
 
 ```rhai
-get("ProverTaskSchema", "61044945f0dd…41d91")
-// → { key: 61044945…, value: { status: Completed, updated_at_secs: …, … } }
+get("ChunkProverTaskSchema", "000061044945f0dd…41d91")
+// → { key: 000061044945…, value: { status: Completed, updated_at_secs: …, … } }
 
-get("ProverTaskSchema", "61044945…").value.status    // → Completed
-get("ProverTaskSchema", "61044945…").key             // → 61044945…
+get("ChunkProverTaskSchema", "000061044945…").value.status    // → Completed
+get("ChunkProverTaskSchema", "000061044945…").key             // → 000061044945…
 ```
 
 A miss returns unit rather than erroring, so test it explicitly:
 
 ```rhai
-get("ProverTaskSchema", "deadbeef") == ()            // → true
+get("ChunkProverTaskSchema", "deadbeef") == ()            // → true
 ```
 
 Key formats vary by table — `.schema` names the one you need:
@@ -327,6 +329,7 @@ Key formats vary by table — `.schema` names the one you need:
 | bytes / hash | hex, `0x` optional | `"61044945…41d91"` |
 | `u64` / `u32` | decimal | `"41"` |
 | batch / chunk id | `prev:last` hex pair | `"3324fbd0…48fc:044945f0…dda56"` |
+| prover task | 66-byte hex: spec version (`0000` for V0), `prev`, `last` | `"00003324fbd0…dda56"` |
 
 ```rhai
 get("AcctProofReceiptSchema", "3324fbd0…48fc:044945f0…dda56")
@@ -340,18 +343,18 @@ instead of `count_where(t, |r| true)`, which walks and decodes every row.
 ### `count_where(table, pred)` — count matching rows
 
 ```rhai
-count_where("ProverTaskSchema", |r| true)                                      // 84
-count_where("ProverTaskSchema", |r| r.value.status == "Completed")             // 84
+count_where("ChunkProverTaskSchema", |r| true)                                      // 84
+count_where("ChunkProverTaskSchema", |r| r.value.status == "Completed")             // 84
 count_where("ChunkProofReceiptSchema", |r| r.value.metadata.zkvm == "Native")  // 42
-count_where("ProverTaskSchema", |r| r.key.starts_with("6109"))                 // by key
+count_where("ChunkProverTaskSchema", |r| r.key.starts_with("6109"))                 // by key
 ```
 
 ### `scan_where(table, pred)` — list matching rows
 
 ```rhai
-scan_where("ProverTaskSchema", |r| true)
-scan_where("ProverTaskSchema", |r| r.value.status != "Completed")
-scan_where("ProverTaskSchema", |r| r.value.updated_at_secs > 1789600000)
+scan_where("ChunkProverTaskSchema", |r| true)
+scan_where("ChunkProverTaskSchema", |r| r.value.status != "Completed")
+scan_where("ChunkProverTaskSchema", |r| r.value.updated_at_secs > 1789600000)
 ```
 
 ### Limits, direction, and the ends of a table
@@ -361,9 +364,9 @@ reached; `scan_rev_where` walks from the end. `first` and `last` are the
 one-record cases, returning unit on an empty table.
 
 ```rhai
-scan_where("ProverTaskSchema", |r| r.value.status == "Pending", 10)   // first 10 pending
-scan_rev_where("ProverTaskSchema", |r| true, 5)                         // last 5 by key
-last("ProverTaskSchema")                                                // the highest key
+scan_where("ChunkProverTaskSchema", |r| r.value.status == "Pending", 10)   // first 10 pending
+scan_rev_where("ChunkProverTaskSchema", |r| true, 5)                         // last 5 by key
+last("ChunkProverTaskSchema")                                                // the highest key
 first("BatchByIdxSchema").value                                         // idx 0
 ```
 
@@ -372,7 +375,7 @@ the big-endian `u64` tables. A table keyed by hash has no useful order, and
 "newest" there still means a full scan and a sort in rhai:
 
 ```rhai
-let rows = scan_where("ProverTaskSchema", |r| true);
+let rows = scan_where("ChunkProverTaskSchema", |r| true);
 rows.sort(|a, b| b.value.updated_at_secs - a.value.updated_at_secs);
 rows.extract(0, 5)                    // newest 5 records
 rows.extract(0, 5).map(|r| r.key)     // just their keys
@@ -394,9 +397,9 @@ message rather than answered wrongly.
 scan_range("ExecBlockFinalizedSchema", "100", "200", |r| true)      // heights 100..=200
 scan_rev_range("BatchByIdxSchema", "0", "41", |r| true, 5)          // the 5 batches up to 41
 keys_range("ExecBlocksAtHeightSchema", "100", "200")                // just the heights
-scan_prefix("ProverTaskSchema", "0001", |r| r.value.status != "Completed")
-keys_prefix("ProverTaskSchema", "0001")                             // one kind of task
-scan_rev_prefix("ProverTaskSchema", "0001", |r| true, 1)            // the last of that kind
+scan_prefix("ChunkProverTaskSchema", "0000", |r| r.value.status != "Completed")
+keys_prefix("ChunkProverTaskSchema", "0000")                        // the V0 prover's tasks
+scan_rev_prefix("ChunkProverTaskSchema", "0000", |r| true, 1)       // the last of them
 ```
 
 `from` and `to` are written exactly as `get` takes them and both ends are
@@ -412,8 +415,8 @@ the natural input to a batch of `del`s:
 
 ```rhai
 keys("AcctProofIdIndexSchema")                                  // every key
-keys_where("ProverTaskSchema", |k| k.starts_with("0001"))       // by prefix
-keys_where("ProverTaskSchema", |k| k.starts_with("0001"), 100)  // first 100 of them
+keys_where("ChunkProverTaskSchema", |k| k.starts_with("0000"))       // by prefix
+keys_where("ChunkProverTaskSchema", |k| k.starts_with("0000"), 100)  // first 100 of them
 ```
 
 `r.key` is rendered in exactly the form `get` accepts, so a key copied out of a
@@ -423,7 +426,7 @@ scan pastes straight into a lookup.
 
 ```bash
 # evaluate one expression and exit
-dbconsole --datadir <dir> -c 'count_where("ProverTaskSchema", |r| true)'
+dbconsole --datadir <dir> -c 'count_where("ChunkProverTaskSchema", |r| true)'
 
 # run a script file and exit; its last value is printed
 dbconsole --datadir <dir> --script ops/find_stuck.rhai
@@ -454,7 +457,7 @@ arguments as often as needed.
 
 ```
 db> fn stuck(secs) {
-...   scan_where("ProverTaskSchema", |r| status_name(r.value.status) == "Proving" && r.value.updated_at_secs < secs)
+...   scan_where("ChunkProverTaskSchema", |r| status_name(r.value.status) == "Proving" && r.value.updated_at_secs < secs)
 ... }
 db> stuck(1789600000).len()
 3
@@ -500,11 +503,11 @@ until you say otherwise. `.recipes` lists them:
 
 | Recipe | Stages |
 |---|---|
-| `prover_summary()` | nothing; tasks counted by status |
-| `prover_task(key)` | nothing; one task and the receipt it points to |
-| `prover_reset(key)` | the task's status back to `Pending` |
-| `prover_abandon(key, reason)` | the task's status to `PermanentFailure` |
-| `prover_delete(key)` | the task, its receipt, and the proof-id index entries of an account receipt |
+| `prover_summary()` | nothing; chunk tasks and account tasks counted by status |
+| `prover_task(table, key)` | nothing; one task from `ChunkProverTaskSchema` or `AcctProverTaskSchema` and the receipt it points to |
+| `prover_reset(table, key)` | the task's status back to `Pending` |
+| `prover_abandon(table, key, reason)` | the task's status to `PermanentFailure` |
+| `prover_delete(table, key)` | the task, its receipt, and the proof-id index entries of an account receipt |
 | `chain_summary()` | nothing; tip and finalized heights, counts, latest batch and chunk |
 | `drop_chain_above(height)` | every exec block above `height` with its payload, accessed state and witness; the height and finalized entries; the witness environment's diffs above `height`; the OL epoch entries whose accepted account state points at a dropped block, so the tracker resumes from the last surviving epoch; then `revert_batches_from` for the first batch ending above `height`. Chain, witness and batches are each cut by their own top, so a witness that ran ahead is trimmed even when the chain is already at `height` |
 | `batch_summary()` | nothing; batches and chunks counted by status |
@@ -556,7 +559,7 @@ A fieldless enum variant is a bare string — the case predicates lean on most:
 ```
 value: { status: Completed, … }
 
-db> count_where("ProverTaskSchema", |r| r.value.status == "Completed")
+db> count_where("ChunkProverTaskSchema", |r| r.value.status == "Completed")
 ```
 
 A variant that carries data nests under its own name, so it is a map, not a
@@ -567,14 +570,14 @@ whether or not it carries data:
 ```
 value: { status: { Blocked: { reason: "chunk receipt missing for …", … } }, … }
 
-db> scan_where("ProverTaskSchema", |r| status_name(r.value.status) == "Blocked")
+db> scan_where("ChunkProverTaskSchema", |r| status_name(r.value.status) == "Blocked")
 ```
 
 To reach the payload, check the shape first: `.Blocked` on a row whose status
 is the plain string `Completed` is an error in rhai, not unit.
 
 ```
-db> scan_where("ProverTaskSchema", |r| { let s = r.value.status; s.type_of() == "map" && s.Blocked.reason.contains("missing") })
+db> scan_where("ChunkProverTaskSchema", |r| { let s = r.value.status; s.type_of() == "map" && s.Blocked.reason.contains("missing") })
 ```
 
 Nested structs nest too, and predicates walk them with dotted syntax:
@@ -658,11 +661,11 @@ what was not applied and the error names what was. A batch that must be
 all-or-nothing should stay within one environment.
 
 ```rhai
-del("ProverTaskSchema", "61044945…")                           // stage a deletion
-del("ProverTaskSchema", keys_prefix("ProverTaskSchema", "0002")) // stage many, all or none
-set("ProverTaskSchema", "61044945…", "updated_at_secs", 4242)  // stage a field edit
-commit()                                                       // → number applied
-abort()                                                        // → number discarded
+del("ChunkProverTaskSchema", "000061044945…")                            // stage a deletion
+del("ChunkProverTaskSchema", keys_prefix("ChunkProverTaskSchema", "0001")) // stage many, all or none
+set("ChunkProverTaskSchema", "000061044945…", "updated_at_secs", 4242)   // stage a field edit
+commit()                                                                 // → number applied
+abort()                                                                  // → number discarded
 ```
 
 A key can have one staged edit at a time. A second `del`, `put` or `set` on a
@@ -682,12 +685,12 @@ twenty; `.staged full` lists every edit. When a batch spans environments,
 different key, read it out and edit it in hand:
 
 ```rhai
-let v = edit("ProverTaskSchema", "61044945…");  // decoded value, no key attached
-v["updated_at_secs"]                            // read a field
-v.set("updated_at_secs", 4242);                 // change fields
+let v = edit("ChunkProverTaskSchema", "000061044945…");  // decoded value, no key attached
+v["updated_at_secs"]                                     // read a field
+v.set("updated_at_secs", 4242);                          // change fields
 v.set("status", "Pending");
-put("ProverTaskSchema", "61044945…", v);        // write it back
-put("ProverTaskSchema", "aabbcc", v);           // or at another key — a copy
+put("ChunkProverTaskSchema", "000061044945…", v);        // write it back
+put("ChunkProverTaskSchema", "0000aabbcc…", v);          // or at another key — a copy
 commit()
 ```
 
@@ -723,7 +726,7 @@ and the canonical variant is what gets stored.
 ```
 db> .staged
 1 staged change(s); `commit()` applies them:
-  [0] put prover/ProverTaskSchema 61044945… (updated_at_secs=4242)
+  [0] put prover/ChunkProverTaskSchema 000061044945… (updated_at_secs=4242)
 ```
 
 Staging validates the table, the key, the row's presence, the field name and the
@@ -767,7 +770,7 @@ put("ChunkProofReceiptSchema", K, v);
 is visible first. Anything malformed is named precisely:
 
 ```
-db> v.set("status", #{ Nonsense: #{} }); put("ProverTaskSchema", K, v);
+db> v.set("status", #{ Nonsense: #{} }); put("ChunkProverTaskSchema", K, v);
 error: unknown variant `Nonsense`, expected one of `Pending`, `Proving`,
        `Completed`, `Blocked`, `TransientFailure`, `PermanentFailure`
 
@@ -863,8 +866,8 @@ Adding a table is one entry in `console_tables!`:
 ```rust
 console_tables! {
     pub(crate) fn prover_env_tables() {
-        ProverTaskSchema => {
-            key: "tag-prefixed ProofSpec::Task bytes ([u8] -> hex)",
+        ChunkProverTaskSchema => {
+            key: "ChunkTaskKey: spec version (u16 BE) then prev_block, last_block (66 bytes -> hex)",
             value: "TaskRecordData { status, updated_at_secs, … }",
         },
         // a table whose value no strategy can read yet:

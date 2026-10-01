@@ -181,6 +181,10 @@ define_table! {
 impl_versioned_value_codec!(AcctProverTaskSchema { 1 => TaskRecordData as cbor });
 
 impl KeyCodec<ChunkProverTaskSchema> for ChunkTaskKey {
+    // The version is big-endian and the hashes are raw, so byte order is key
+    // order: a range or prefix walk over the table is sound.
+    const ORDERED: bool = true;
+
     fn encode_key(&self) -> Result<Vec<u8>, CodecError> {
         Ok(encode_versioned_range(
             self.spec_version(),
@@ -200,6 +204,10 @@ impl KeyCodec<ChunkProverTaskSchema> for ChunkTaskKey {
 }
 
 impl KeyCodec<AcctProverTaskSchema> for BatchTaskKey {
+    // The version is big-endian and the hashes are raw, so byte order is key
+    // order: a range or prefix walk over the table is sound.
+    const ORDERED: bool = true;
+
     fn encode_key(&self) -> Result<Vec<u8>, CodecError> {
         Ok(encode_versioned_range(
             self.spec_version(),
