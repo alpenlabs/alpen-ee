@@ -18,8 +18,8 @@ pub enum DaVerificationError {
     NoChunks,
     #[error("last chunk transition decode failed ({0:?})")]
     LastChunkDecode(ssz::DecodeError),
-    #[error("DA blob reassembly failed ({0})")]
-    Reassembly(CodecError),
+    #[error("DA blob decode failed: {0}")]
+    Decode(CodecError),
     #[error("malformed DA tx in witness ({0})")]
     DaTxDecode(String),
     #[error("DA witness block has no DA transactions")]

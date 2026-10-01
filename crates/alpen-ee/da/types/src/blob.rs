@@ -1,7 +1,7 @@
 //! DA codec types and format constants shared between producer and verifier.
 
 use alpen_reth_statediff::BatchStateDiff;
-use strata_codec::{Codec, CodecError, Decoder};
+use strata_codec::{decode_buf_exact, Codec, CodecError, Decoder};
 
 /// Magic bytes in the EE DA commit transaction marker output.
 ///
@@ -12,8 +12,8 @@ pub const EE_DA_MAGIC_BYTES: [u8; 4] = *b"ALPN";
 /// Current EE DA blob encoding version.
 ///
 /// The commit transaction carries this version next to the EE DA magic bytes
-/// in OP_RETURN, so L1 scanners can associate reassembled blob bytes with the
-/// schema that produced them. The current decoder handles only the present
+/// in OP_RETURN, so L1 scanners can associate recovered payload bytes with the
+/// schema used to decode them. The current decoder handles only the present
 /// [`DaBlob`] shape; version dispatch can be added when a future blob schema
 /// is introduced.
 ///
@@ -58,12 +58,19 @@ pub struct EvmHeaderSummary {
     pub gas_limit: u64,
 }
 
-/// Reassembles a [`DaBlob`] from raw chunk payloads.
+/// Decodes a [`DaBlob`] from contiguous payload bytes.
+///
+/// Trailing bytes after a complete `DaBlob` are rejected.
+pub fn decode_da_blob(payload: &[u8]) -> Result<DaBlob, CodecError> {
+    decode_buf_exact(payload)
+}
+
+/// Decodes a [`DaBlob`] across ordered payload chunks.
 ///
 /// `chunks` must be in commit-output order. The blob is decoded directly across
 /// the chunk slices (no intermediate contiguous copy), and any trailing bytes
-/// after a complete `DaBlob` are rejected — matching `decode_buf_exact`.
-pub fn reassemble_da_blob(chunks: &[Vec<u8>]) -> Result<DaBlob, CodecError> {
+/// after a complete `DaBlob` are rejected.
+pub fn decode_da_blob_from_chunks(chunks: &[Vec<u8>]) -> Result<DaBlob, CodecError> {
     if chunks.is_empty() {
         return Err(CodecError::MalformedField("no DA chunks provided"));
     }
@@ -79,7 +86,7 @@ pub fn reassemble_da_blob(chunks: &[Vec<u8>]) -> Result<DaBlob, CodecError> {
 /// A [`Decoder`] that reads across a sequence of byte chunks without first
 /// concatenating them into one contiguous buffer.
 ///
-/// Lets [`reassemble_da_blob`] decode a [`DaBlob`] straight from its
+/// Lets [`decode_da_blob_from_chunks`] decode a [`DaBlob`] straight from its
 /// commit/reveal chunk payloads, avoiding an O(blob) allocation + copy on the
 /// proof-verification path.
 struct MultiSliceDecoder<'a> {
@@ -148,7 +155,7 @@ mod tests {
 
     use super::*;
 
-    fn sample_blob() -> DaBlob {
+    fn make_da_blob() -> DaBlob {
         DaBlob {
             update_seq_no: 7,
             evm_header: EvmHeaderSummary {
@@ -163,14 +170,14 @@ mod tests {
     }
 
     #[test]
-    fn reassembles_across_arbitrary_chunk_boundaries() {
-        let encoded = encode_to_vec(&sample_blob()).unwrap();
+    fn decodes_across_arbitrary_chunk_boundaries() {
+        let encoded = encode_to_vec(&make_da_blob()).unwrap();
 
         // Splitting the same bytes at every boundary must decode identically to
         // the single-buffer path (compared via re-encoding, as DaBlob is not Eq).
         for chunk_size in 1..=encoded.len() {
             let chunks: Vec<Vec<u8>> = encoded.chunks(chunk_size).map(|c| c.to_vec()).collect();
-            let got = reassemble_da_blob(&chunks).expect("decode across chunks");
+            let got = decode_da_blob_from_chunks(&chunks).expect("decode across chunks");
             assert_eq!(
                 encode_to_vec(&got).unwrap(),
                 encoded,
@@ -181,15 +188,32 @@ mod tests {
 
     #[test]
     fn empty_chunks_is_error() {
-        assert!(reassemble_da_blob(&[]).is_err());
+        assert!(decode_da_blob_from_chunks(&[]).is_err());
+    }
+
+    #[test]
+    fn decodes_contiguous_payload() {
+        let encoded = encode_to_vec(&make_da_blob()).unwrap();
+        let got = decode_da_blob(&encoded).expect("decode contiguous payload");
+        assert_eq!(encode_to_vec(&got).unwrap(), encoded);
+    }
+
+    #[test]
+    fn contiguous_trailing_bytes_are_rejected() {
+        let mut encoded = encode_to_vec(&make_da_blob()).unwrap();
+        encoded.push(0xFF);
+        assert!(matches!(
+            decode_da_blob(&encoded),
+            Err(CodecError::ExtraInput)
+        ));
     }
 
     #[test]
     fn trailing_bytes_are_rejected() {
-        let mut encoded = encode_to_vec(&sample_blob()).unwrap();
+        let mut encoded = encode_to_vec(&make_da_blob()).unwrap();
         encoded.push(0xFF);
         assert!(matches!(
-            reassemble_da_blob(&[encoded]),
+            decode_da_blob_from_chunks(&[encoded]),
             Err(CodecError::ExtraInput)
         ));
     }
