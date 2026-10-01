@@ -27,6 +27,7 @@ use alpen_mdbx::{
     TableSpec,
 };
 use alpen_reth_statediff::BlockStateChanges;
+use bitcoin::{hashes::Hash as _, Txid};
 use strata_acct_types::Hash;
 use strata_db_types::{
     chunked_envelope::ChunkedEnvelopeEntry,
@@ -40,8 +41,10 @@ use zkaleido::ProofReceiptWithMetadata;
 use crate::serialization_types::{
     decode_versioned_range, encode_versioned_range, BatchTaskKey, ChunkTaskKey,
     DBAccountStateAtEpoch, DBBatchId, DBBatchWithStatus, DBChunkId, DBChunkWithStatus,
-    DBExecBlockRecord, DBOLBlockId,
+    DBExecBlockRecord, DBOLBlockId, DBRecoveredDaBlob, RecoveredDaKey,
 };
+
+const RECOVERED_DA_KEY_LEN: usize = size_of::<u64>() + Txid::LEN;
 
 /// Raw 32-byte [`KeyCodec`] for [`TxNodeId`], which is a newtype over a hash
 /// and carries no codec of its own.
@@ -319,6 +322,49 @@ define_table! {
 impl_be_key_codec!(PublishedCodeHashSchema, B256);
 impl_unit_value_codec!(PublishedCodeHashSchema);
 
+// --- Recovered EE DA tables ---
+
+define_table! {
+    /// Canonically encoded, validated EE DA blobs ordered by update sequence and commit txid.
+    (RecoveredDaSchema) RecoveredDaKey => DBRecoveredDaBlob
+}
+
+impl KeyCodec<RecoveredDaSchema> for RecoveredDaKey {
+    const ORDERED: bool = true;
+
+    fn encode_key(&self) -> Result<Vec<u8>, CodecError> {
+        let mut bytes = Vec::with_capacity(RECOVERED_DA_KEY_LEN);
+        bytes.extend_from_slice(&self.update_seq_no().to_be_bytes());
+        bytes.extend_from_slice(&self.commit_txid().to_byte_array());
+        Ok(bytes)
+    }
+
+    fn decode_key(bytes: &[u8]) -> Result<Self, CodecError> {
+        if bytes.len() != RECOVERED_DA_KEY_LEN {
+            return Err(CodecError::decode(
+                <RecoveredDaSchema as Schema>::NAME,
+                format!(
+                    "expected {RECOVERED_DA_KEY_LEN}-byte recovered DA key, got {}",
+                    bytes.len()
+                ),
+            ));
+        }
+
+        let mut update_seq_no_bytes = [0; size_of::<u64>()];
+        update_seq_no_bytes.copy_from_slice(&bytes[..size_of::<u64>()]);
+        let update_seq_no = u64::from_be_bytes(update_seq_no_bytes);
+
+        let mut commit_txid_bytes = [0; Txid::LEN];
+        commit_txid_bytes.copy_from_slice(&bytes[size_of::<u64>()..]);
+        let commit_txid = Txid::from_byte_array(commit_txid_bytes);
+        Ok(Self::new(update_seq_no, commit_txid))
+    }
+}
+
+impl_versioned_value_codec!(RecoveredDaSchema {
+    1 => DBRecoveredDaBlob as cbor
+});
+
 /// The full set of tables backing the EE node database, for
 /// [`MdbxEnv::open`](alpen_mdbx::MdbxEnv::open).
 pub fn node_tables() -> Vec<TableSpec> {
@@ -373,6 +419,11 @@ pub fn da_tables() -> Vec<TableSpec> {
     ]
 }
 
+/// Tables backing the standalone recovered EE DA environment.
+pub(crate) fn recovered_da_tables() -> Vec<TableSpec> {
+    tables![RecoveredDaSchema]
+}
+
 #[cfg(test)]
 mod tests {
     use alpen_mdbx::{CodecError, UpgradeCtx, VersionedTable};
@@ -395,6 +446,7 @@ mod tests {
             $check::<L1BroadcastTxSchema>();
             $check::<L1BroadcastTxNodeSchema>();
             $check::<L1ChunkedEnvelopeSchema>();
+            $check::<RecoveredDaSchema>();
         };
     }
 

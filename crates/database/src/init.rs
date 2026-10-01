@@ -20,10 +20,12 @@ pub use strata_db_types::chunked_envelope::L1ChunkedEnvelopeDatabaseProxy as Chu
 pub use strata_db_types::l1_broadcast::L1BroadcastDatabaseProxy as BroadcastDbOps;
 use tokio::runtime::Handle;
 
+/// Async operations for the recovered EE DA database.
+pub use crate::database::RecoveredDaDatabaseProxy as RecoveredDaDbOps;
 use crate::{
     mdbxdb::{
         da_tables, witness_tables, DaContextDbMdbx, L1BroadcastDbMdbx, L1ChunkedEnvelopeDbMdbx,
-        NodeDbMdbx, ProverDbMdbx, WitnessDbMdbx,
+        NodeDbMdbx, ProverDbMdbx, RecoveredDaDbMdbx, WitnessDbMdbx,
     },
     storage::NodeStorage,
 };
@@ -182,6 +184,23 @@ impl SequencerDatabases {
     pub fn prover_db(&self) -> Arc<ProverDbMdbx> {
         self.prover_db.clone()
     }
+}
+
+/// Opens the standalone recovered EE DA database.
+///
+/// The verifier service currently runs in its own pod, so this opens only
+/// `<datadir>/mdbx/recovered-da` and does not materialize any EE node
+/// environments. When L1 sync moves into the EE node, [`Stores`] can own the
+/// same environment and expose this unchanged operations type.
+pub fn open_recovered_da_db(datadir: &Path, handle: Handle) -> Result<RecoveredDaDbOps> {
+    let database = Arc::new(
+        RecoveredDaDbMdbx::open(
+            &datadir.join("mdbx").join("recovered-da"),
+            &MdbxConfig::default(),
+        )
+        .map_err(|error| eyre!("failed to open recovered EE DA db: {error}"))?,
+    );
+    Ok(RecoveredDaDbOps::new(handle, database))
 }
 
 /// Opens the DA broadcast + chunked-envelope stores over one env at `datadir`

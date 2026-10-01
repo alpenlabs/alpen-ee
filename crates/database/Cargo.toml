@@ -20,6 +20,8 @@ alloy-primitives.workspace = true
 alpen-acct-types.workspace = true
 alpen-chain-types.workspace = true
 alpen-common.workspace = true
+alpen-da-l1-extraction.workspace = true
+alpen-da-types.workspace = true
 alpen-mdbx.workspace = true
 alpen-params.workspace = true
 alpen-reth-statediff.workspace = true
@@ -28,6 +30,7 @@ hex.workspace = true
 serde.workspace = true
 serde_bytes.workspace = true
 strata-acct-types.workspace = true
+strata-codec.workspace = true
 strata-db-macros.workspace = true
 strata-db-types = { workspace = true, features = ["proxies"] }
 strata-identifiers = { workspace = true, features = ["borsh"] }
@@ -52,4 +55,6 @@ tracing.workspace = true
 [dev-dependencies]
 strata-l1-txfmt.workspace = true
 alpen-common = { workspace = true, features = ["test-utils"] }
+signet-libmdbx.workspace = true
 strata-db-tests.workspace = true
+tempfile.workspace = true
