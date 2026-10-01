@@ -16,9 +16,14 @@
 //!   the batch's `spec_version`, and the prover task status enum changed its variants. Those are
 //!   decoded through the sled-era layouts kept beside the current types and converted, with the
 //!   spec version in force at 0.3.0 filled in.
-//! - **Keys.** The sled binary wrote the prover task key through borsh, which prefixes a byte
-//!   string with its length; MDBX stores it raw. That one tree strips the prefix. Every other key
-//!   copies byte for byte: integer keys were big-endian on both sides, hashes are raw 32 bytes.
+//! - **Keys.** The sled binary kept chunk and acct prover tasks in one tree, each key written
+//!   through borsh (a length prefix) as a kind tag then the range's two hashes; the store keeps a
+//!   table per kind, keyed by the spec version whose prover owns the task, then the range. That one
+//!   tree feeds two tables: each takes the rows with its kind's tag, drops the prefix and the tag
+//!   and puts the version in front, the version in force at 0.3.0. The chunk receipt was keyed by
+//!   the chunk's task bytes the same way, length prefix, tag and range; the table keys it by the
+//!   range alone, so the prefix and the tag go. Every other key copies byte for byte: integer keys
+//!   were big-endian on both sides, hashes are raw 32 bytes.
 //!
 //! Two trees the MDBX store has, the L1 tx node table and its active-marker
 //! set, did not exist at 0.3.0 and come up empty; the rules for them stay so
@@ -30,6 +35,7 @@
 //! chain, which is what proves each rule produced what the table reads.
 
 use alloy_primitives::B256;
+use alpen_ee_params::AlpenSpecId;
 use alpen_reth_db::mdbx::BlockHashByNumber;
 #[cfg(any(test, feature = "test-utils"))]
 use alpen_store_mdbx::UpgradeCtx;
@@ -46,8 +52,8 @@ use strata_paas::{AttemptCounts, TaskRecordData, TaskStatus};
 
 use crate::{
     mdbxdb::{
-        BatchByIdxSchema, ExecBlockSchema, L1BroadcastTxSchema, L1ChunkedEnvelopeSchema,
-        ProverTaskSchema,
+        BatchByIdxSchema, ChunkProverTaskSchema, ExecBlockSchema, L1BroadcastTxSchema,
+        L1ChunkedEnvelopeSchema,
     },
     serialization_types::{DBBatchWithStatus, DBExecBlockRecord},
 };
@@ -59,49 +65,121 @@ const SLED_ERA_VERSION: u8 = 1;
 /// CBOR's encoding of `()`, which the sled binary stored as a presence marker.
 const CBOR_NULL: u8 = 0xf6;
 
+/// The spec version in force when the sled binary ran, which owns every task
+/// it stored.
+const SLED_ERA_SPEC_VERSION: AlpenSpecId = AlpenSpecId::V0;
+
+/// The kind tag the sled binary put in front of a chunk task's range, in the
+/// task key and in the chunk receipt key.
+const SLED_ERA_CHUNK_TAG: u8 = b'c';
+
+/// The kind tag the sled binary put in front of an acct task's range.
+const SLED_ERA_BATCH_TAG: u8 = b'a';
+
+/// The two hashes of a task's range.
+const RANGE_BYTES: usize = 32 + 32;
+
 /// What to do with a tree's keys on the way into its table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KeyRule {
     /// The bytes are already the table's key encoding.
     Copy,
-    /// The sled binary wrote the key through borsh, a little-endian `u32`
-    /// length then the bytes; the table stores the bytes alone.
-    StripBorshLength,
+    /// A prover task key. The sled binary wrote it through borsh, a
+    /// little-endian `u32` length, then the kind tag, then the range; the
+    /// table stores the owning spec version, then the range. Only the rows
+    /// carrying `tag` belong to the table; the tree feeds one table per kind.
+    TaskKey {
+        /// The kind tag of the rows this table takes.
+        tag: u8,
+    },
+    /// A chunk receipt key. The sled binary wrote the chunk's task bytes
+    /// through borsh like the task key, a length, the kind tag, then the
+    /// range; the table stores the range alone.
+    ChunkReceiptKey {
+        /// The kind tag every row carries.
+        tag: u8,
+    },
 }
 
 impl KeyRule {
+    /// Whether a row with this sled key belongs to the table. Only a task
+    /// tree holds rows for more than one table; a malformed key is taken so
+    /// that [`Self::apply`] reports it.
+    pub fn takes(self, key: &[u8]) -> bool {
+        match self {
+            Self::TaskKey { tag } => key.get(4).is_none_or(|found| *found == tag),
+            Self::Copy | Self::ChunkReceiptKey { .. } => true,
+        }
+    }
+
     /// Applies the rule to one key.
     pub fn apply(self, key: &[u8]) -> eyre::Result<Vec<u8>> {
         match self {
             Self::Copy => Ok(key.to_vec()),
-            Self::StripBorshLength => {
-                let (prefix, rest) = key.split_first_chunk::<4>().ok_or_else(|| {
-                    eyre::eyre!("key of {} bytes has no length prefix", key.len())
-                })?;
-                let declared = u32::from_le_bytes(*prefix) as usize;
-                if declared != rest.len() {
-                    eyre::bail!(
-                        "key length prefix says {declared} bytes but {} follow",
-                        rest.len()
-                    );
-                }
-                Ok(rest.to_vec())
+            Self::TaskKey { tag } => {
+                let range = sled_tagged_range(key, tag)?;
+                let mut out = u16::from(SLED_ERA_SPEC_VERSION).to_be_bytes().to_vec();
+                out.extend_from_slice(range);
+                Ok(out)
             }
+            Self::ChunkReceiptKey { tag } => Ok(sled_tagged_range(key, tag)?.to_vec()),
         }
     }
 
     /// The inverse, for tests that build a sled store from an MDBX one.
+    /// Errors for a key the sled binary could not have written: a task owned
+    /// by a later spec version.
     #[cfg(any(test, feature = "test-utils"))]
-    pub fn invert(self, key: &[u8]) -> Vec<u8> {
+    pub fn invert(self, key: &[u8]) -> eyre::Result<Vec<u8>> {
         match self {
-            Self::Copy => key.to_vec(),
-            Self::StripBorshLength => {
-                let mut out = (key.len() as u32).to_le_bytes().to_vec();
-                out.extend_from_slice(key);
-                out
+            Self::Copy => Ok(key.to_vec()),
+            Self::TaskKey { tag } => {
+                let (version, range) = key.split_first_chunk::<2>().ok_or_else(|| {
+                    eyre::eyre!("task key of {} bytes has no spec version", key.len())
+                })?;
+                if u16::from_be_bytes(*version) != u16::from(SLED_ERA_SPEC_VERSION) {
+                    eyre::bail!("task is owned by a spec version past 0.3.0");
+                }
+                Ok(sled_tagged_key(tag, range))
             }
+            Self::ChunkReceiptKey { tag } => Ok(sled_tagged_key(tag, key)),
         }
     }
+}
+
+/// The sled binary's form of a tagged range key: the borsh length prefix,
+/// the kind tag, the range.
+#[cfg(any(test, feature = "test-utils"))]
+fn sled_tagged_key(tag: u8, range: &[u8]) -> Vec<u8> {
+    let mut out = ((1 + range.len()) as u32).to_le_bytes().to_vec();
+    out.push(tag);
+    out.extend_from_slice(range);
+    out
+}
+
+/// The range behind a sled-era key written through borsh: the length prefix
+/// is checked against what follows, then the kind tag and the range's length.
+fn sled_tagged_range(key: &[u8], tag: u8) -> eyre::Result<&[u8]> {
+    let (prefix, rest) = key
+        .split_first_chunk::<4>()
+        .ok_or_else(|| eyre::eyre!("key of {} bytes has no length prefix", key.len()))?;
+    let declared = u32::from_le_bytes(*prefix) as usize;
+    if declared != rest.len() {
+        eyre::bail!(
+            "key length prefix says {declared} bytes but {} follow",
+            rest.len()
+        );
+    }
+    let (found, range) = rest
+        .split_first()
+        .ok_or_else(|| eyre::eyre!("key has no kind tag"))?;
+    if *found != tag {
+        eyre::bail!("key carries kind tag {found:#04x}, expected {tag:#04x}");
+    }
+    if range.len() != RANGE_BYTES {
+        eyre::bail!("key range is {} bytes, expected {RANGE_BYTES}", range.len());
+    }
+    Ok(range)
 }
 
 /// What to do with a tree's values on the way into its table.
@@ -195,15 +273,36 @@ pub fn sled_trees() -> Vec<SledTree> {
         tag("BlockAccessedStateSchema", "node/BlockAccessedStateSchema"),
         copy("BytecodeSchema", "node/BytecodeSchema"),
         copy("BlockWitnessSchema", "node/BlockWitnessSchema"),
-        // prover: the task key was written through borsh and its record
-        // changed both codec and shape; the receipts are borsh on both sides.
+        // prover: the one task tree feeds a table per kind. Its key was
+        // written through borsh and carried the kind where the table keeps
+        // the owning spec version, and its record changed both codec and
+        // shape. The chunk receipt's key was the chunk's task bytes the same
+        // way and is the range alone now. The receipts' payloads are borsh
+        // on both sides.
         SledTree {
             tree: "ProverTaskSchema",
-            table: "prover/ProverTaskSchema",
-            key: KeyRule::StripBorshLength,
+            table: "prover/ChunkProverTaskSchema",
+            key: KeyRule::TaskKey {
+                tag: SLED_ERA_CHUNK_TAG,
+            },
             value: ValueRule::Recode(prover_task),
         },
-        tag("ChunkProofReceiptSchema", "prover/ChunkProofReceiptSchema"),
+        SledTree {
+            tree: "ProverTaskSchema",
+            table: "prover/AcctProverTaskSchema",
+            key: KeyRule::TaskKey {
+                tag: SLED_ERA_BATCH_TAG,
+            },
+            value: ValueRule::Recode(prover_task),
+        },
+        SledTree {
+            tree: "ChunkProofReceiptSchema",
+            table: "prover/ChunkProofReceiptSchema",
+            key: KeyRule::ChunkReceiptKey {
+                tag: SLED_ERA_CHUNK_TAG,
+            },
+            value: ValueRule::Tag,
+        },
         tag("AcctProofReceiptSchema", "prover/AcctProofReceiptSchema"),
         copy("AcctProofIdIndexSchema", "prover/AcctProofIdIndexSchema"),
         // witness: the diff is bincode on both sides and versioned now; the
@@ -333,6 +432,7 @@ fn task_record(
 }
 
 /// The prover task: borsh then, CBOR now, and the status enum changed shape.
+/// Both task tables store the record through the same codec.
 fn prover_task(raw: &[u8]) -> eyre::Result<Vec<u8>> {
     let old = SledEraTaskRecord::try_from_slice(raw)
         .map_err(|e| eyre::eyre!("prover task is not the sled binary's layout: {e}"))?;
@@ -356,7 +456,7 @@ fn prover_task(raw: &[u8]) -> eyre::Result<Vec<u8>> {
         old.retry_after_secs,
         old.metadata,
     )?;
-    Ok(<TaskRecordData as ValueCodec<ProverTaskSchema>>::encode_value(&record)?)
+    Ok(<TaskRecordData as ValueCodec<ChunkProverTaskSchema>>::encode_value(&record)?)
 }
 
 /// The L1 tx entry as the sled binary stored it, through borsh: no
@@ -491,7 +591,7 @@ fn chunked_envelope(raw: &[u8]) -> eyre::Result<Vec<u8>> {
 /// Turns a table's key bytes into the form the sled binary stored.
 #[cfg(any(test, feature = "test-utils"))]
 pub fn to_sled_key(table: &str, key: &[u8]) -> eyre::Result<Vec<u8>> {
-    Ok(rule_for(table)?.key.invert(key))
+    rule_for(table)?.key.invert(key)
 }
 
 /// Turns a table's value bytes into the form the sled binary stored, the
@@ -537,9 +637,9 @@ pub fn to_sled_form(table: &str, value: &[u8]) -> eyre::Result<Vec<u8>> {
                 .to_sled_era()
                 .ok_or_else(|| eyre::eyre!("batch carries a spec version past 0.3.0"))
         }
-        (ValueRule::Recode(_), "prover/ProverTaskSchema") => {
+        (ValueRule::Recode(_), "prover/ChunkProverTaskSchema" | "prover/AcctProverTaskSchema") => {
             let record =
-                <TaskRecordData as ValueCodec<ProverTaskSchema>>::decode_value(value, &ctx)?;
+                <TaskRecordData as ValueCodec<ChunkProverTaskSchema>>::decode_value(value, &ctx)?;
             let retry_only = |counts: &AttemptCounts| -> eyre::Result<u32> {
                 if counts.resubmit != 0 || counts.recheck != 0 {
                     eyre::bail!("task counts beyond retries did not exist at 0.3.0");
@@ -655,12 +755,17 @@ fn rule_for(table: &str) -> eyre::Result<SledTree> {
 
 #[cfg(test)]
 mod tests {
+    use alpen_ee_common::ChunkId;
     use alpen_reth_db::mdbx::BlockStateChangesSchema;
     use alpen_reth_statediff::BlockStateChanges;
-    use alpen_store_mdbx::VersionedTable;
+    use alpen_store_mdbx::{KeyCodec, VersionedTable};
+    use strata_acct_types::Hash;
 
     use super::{super::registry::ee_envs, *};
-    use crate::mdbxdb::L1BroadcastActiveTxNodeSchema;
+    use crate::{
+        mdbxdb::{ChunkProofReceiptSchema, ChunkTaskKey, L1BroadcastActiveTxNodeSchema},
+        serialization_types::DBChunkId,
+    };
 
     /// Every table the store has is fed by exactly one tree, and no tree
     /// names a table the store does not have.
@@ -680,10 +785,17 @@ mod tests {
         assert_eq!(fed, registered);
 
         let mut trees: Vec<&str> = sled_trees().iter().map(|t| t.tree).collect();
-        let total = trees.len();
         trees.sort_unstable();
-        trees.dedup();
-        assert_eq!(trees.len(), total, "a tree feeds two tables");
+        let shared: Vec<&str> = trees
+            .windows(2)
+            .filter(|pair| pair[0] == pair[1])
+            .map(|pair| pair[0])
+            .collect();
+        assert_eq!(
+            shared,
+            ["ProverTaskSchema"],
+            "only the task tree feeds two tables"
+        );
     }
 
     /// A versioned table whose payload did not change is tagged; one whose
@@ -715,31 +827,107 @@ mod tests {
             [
                 "node/ExecBlockSchema",
                 "node/BatchByIdxSchema",
-                "prover/ProverTaskSchema",
+                "prover/ChunkProverTaskSchema",
+                "prover/AcctProverTaskSchema",
                 "witness/BlockHashByNumber",
                 "da/L1BroadcastTxSchema",
                 "da/L1BroadcastActiveTxNodeSchema",
                 "da/L1ChunkedEnvelopeSchema",
             ]
         );
-        let prefixed: Vec<&str> = sled_trees()
+        let rekeyed: Vec<(&str, KeyRule)> = sled_trees()
             .into_iter()
-            .filter(|entry| entry.key == KeyRule::StripBorshLength)
-            .map(|entry| entry.table)
+            .filter(|entry| entry.key != KeyRule::Copy)
+            .map(|entry| (entry.table, entry.key))
             .collect();
-        assert_eq!(prefixed, ["prover/ProverTaskSchema"]);
+        assert_eq!(
+            rekeyed,
+            [
+                (
+                    "prover/ChunkProverTaskSchema",
+                    KeyRule::TaskKey { tag: b'c' }
+                ),
+                (
+                    "prover/AcctProverTaskSchema",
+                    KeyRule::TaskKey { tag: b'a' }
+                ),
+                (
+                    "prover/ChunkProofReceiptSchema",
+                    KeyRule::ChunkReceiptKey { tag: b'c' }
+                ),
+            ]
+        );
     }
 
+    /// A task key: the sled binary's length prefix and kind tag become the V0
+    /// version in front of the range, exactly the bytes the table's typed key
+    /// encodes to; a row of the other kind is not this table's; the inverse
+    /// gives the sled bytes back and refuses a task of a later version.
     #[test]
-    fn the_key_rule_strips_a_borsh_length_and_puts_it_back() {
-        let raw = [0x61u8; 65];
-        let sled = KeyRule::StripBorshLength.invert(&raw);
+    fn the_task_key_rule_swaps_the_kind_tag_for_the_owning_version() {
+        let chunk_id = ChunkId::from_parts(Hash::from([1u8; 32]), Hash::from([2u8; 32]));
+        let stored = ChunkTaskKey::new(AlpenSpecId::V0, chunk_id)
+            .encode_key()
+            .unwrap();
+        let rule = KeyRule::TaskKey { tag: b'c' };
+
+        let sled = rule.invert(&stored).unwrap();
         assert_eq!(&sled[..4], &65u32.to_le_bytes());
-        assert_eq!(KeyRule::StripBorshLength.apply(&sled).unwrap(), raw);
-        assert!(KeyRule::StripBorshLength.apply(&[1, 2]).is_err());
+        assert_eq!(sled[4], b'c');
+        assert_eq!(&sled[5..], &stored[2..]);
+        assert!(rule.takes(&sled));
+        assert_eq!(rule.apply(&sled).unwrap(), stored);
+
+        let mut acct = sled.clone();
+        acct[4] = b'a';
+        assert!(!rule.takes(&acct), "an acct task is not the chunk table's");
+        assert!(KeyRule::TaskKey { tag: b'a' }.takes(&acct));
+        assert!(
+            rule.apply(&acct).is_err(),
+            "the tag is checked all the same"
+        );
+
+        assert!(
+            rule.takes(&[1, 2]),
+            "a malformed key is taken so it is reported"
+        );
+        assert!(rule.apply(&[1, 2]).is_err());
         let mut wrong = sled.clone();
         wrong[0] = 64;
-        assert!(KeyRule::StripBorshLength.apply(&wrong).is_err());
+        assert!(rule.apply(&wrong).is_err());
+        let mut short = sled.clone();
+        short.pop();
+        short[0] = 64;
+        assert!(rule.apply(&short).is_err());
+
+        let later = ChunkTaskKey::new(AlpenSpecId::V1, chunk_id)
+            .encode_key()
+            .unwrap();
+        assert!(rule.invert(&later).is_err());
+    }
+
+    /// A chunk receipt key: the sled binary's length prefix and kind tag go,
+    /// leaving the range the table's key encodes to; the inverse puts them
+    /// back.
+    #[test]
+    fn the_receipt_key_rule_drops_the_prefix_and_the_kind_tag() {
+        let chunk_id = ChunkId::from_parts(Hash::from([1u8; 32]), Hash::from([2u8; 32]));
+        let stored =
+            <DBChunkId as KeyCodec<ChunkProofReceiptSchema>>::encode_key(&chunk_id.into()).unwrap();
+        let rule = KeyRule::ChunkReceiptKey { tag: b'c' };
+
+        let sled = rule.invert(&stored).unwrap();
+        assert_eq!(&sled[..4], &65u32.to_le_bytes());
+        assert_eq!(sled[4], b'c');
+        assert_eq!(&sled[5..], &stored[..]);
+        assert_eq!(rule.apply(&sled).unwrap(), stored);
+        assert!(rule.apply(&stored).is_err(), "no prefix or tag");
+        let mut acct = sled.clone();
+        acct[4] = b'a';
+        assert!(rule.apply(&acct).is_err(), "wrong tag");
+        let mut short = sled[..44].to_vec();
+        short[0] = 40;
+        assert!(rule.apply(&short).is_err(), "short range");
     }
 
     /// A tagged table: the sled payload gets the version-1 tag and nothing
@@ -785,7 +973,7 @@ mod tests {
         };
         let sled = borsh::to_vec(&old).unwrap();
         let stored = prover_task(&sled).unwrap();
-        let record = <TaskRecordData as ValueCodec<ProverTaskSchema>>::decode_value(
+        let record = <TaskRecordData as ValueCodec<ChunkProverTaskSchema>>::decode_value(
             &stored,
             &UpgradeCtx::detached(),
         )
@@ -805,7 +993,11 @@ mod tests {
         assert_eq!(record.retry_after_secs(), Some(1_700_000_060));
         assert_eq!(record.metadata(), Some(&[9u8, 9][..]));
         assert_eq!(
-            to_sled_form("prover/ProverTaskSchema", &stored).unwrap(),
+            to_sled_form("prover/ChunkProverTaskSchema", &stored).unwrap(),
+            sled
+        );
+        assert_eq!(
+            to_sled_form("prover/AcctProverTaskSchema", &stored).unwrap(),
             sled
         );
         assert!(prover_task(b"nope").is_err());

@@ -6,10 +6,11 @@
 //! sled as raw bytes, hands them to the core's raw import, and then runs the
 //! console's own checks over the result. The node's crates never see sled.
 //!
-//! Every tree is read exactly once: the import counts the rows it writes,
-//! and the verification pass then counts and decodes the MDBX side. On a
-//! store of tens of gigabytes that is the difference between two full
-//! passes and four.
+//! Every tree is read once per table it feeds, which is once for all but
+//! the prover task tree: the import counts the rows it writes, and the
+//! verification pass then counts and decodes the MDBX side. On a store of
+//! tens of gigabytes that is the difference between two full passes and
+//! four.
 
 use std::{
     collections::BTreeSet,
@@ -171,8 +172,9 @@ fn install_log_output() {
 }
 
 /// Copies one tree into its table, in key order, batched, reading the tree
-/// once. Returns the number of rows written, which the verification pass
-/// checks against the table's own count.
+/// once and skipping the rows that belong to another table. Returns the
+/// number of rows written, which the verification pass checks against the
+/// table's own count.
 fn copy_tree(
     source: &sled::Db,
     db: &ConsoleDb,
@@ -183,8 +185,11 @@ fn copy_tree(
     let started = Instant::now();
     let (key_rule, value_rule) = (entry.key, entry.value);
     let mut seen = 0usize;
-    let rows = tree.iter().map(move |item| {
-        let (key, value) = item?;
+    let rows = tree.iter().filter_map(move |item| {
+        let (key, value) = match item {
+            Ok(row) => row,
+            Err(err) => return Some(Err(err.into())),
+        };
         seen += 1;
         if seen.is_multiple_of(PROGRESS_EVERY) {
             println!(
@@ -193,13 +198,15 @@ fn copy_tree(
                 started.elapsed().as_secs_f64()
             );
         }
-        let key = key_rule
-            .apply(&key)
-            .map_err(|e| eyre::eyre!("`{}` key {}: {e}", entry.tree, hex::encode(&key)))?;
-        let value = value_rule
-            .apply(&value)
-            .map_err(|e| eyre::eyre!("`{}` key {}: {e}", entry.tree, hex::encode(&key)))?;
-        Ok((key, value))
+        if !key_rule.takes(&key) {
+            return None;
+        }
+        let row = || -> eyre::Result<(Vec<u8>, Vec<u8>)> {
+            let key = key_rule.apply(&key)?;
+            let value = value_rule.apply(&value)?;
+            Ok((key, value))
+        };
+        Some(row().map_err(|e| eyre::eyre!("`{}` key {}: {e}", entry.tree, hex::encode(&key))))
     });
     let written = db.import_raw(entry.table, rows, batch)?;
     println!(
