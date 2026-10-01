@@ -42,6 +42,7 @@ updates:
       - dependency-name: "alloy*"
       - dependency-name: "revm*"
       - dependency-name: "rsp-*"
+      - dependency-name: "sp1-*"
     # Group non-security updates
     groups:
       rust-dependencies:
