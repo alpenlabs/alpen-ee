@@ -3,7 +3,7 @@
 use std::borrow::Cow;
 
 use alloy_primitives::B256;
-pub use alpen_ee_rpc_types::{
+pub use alpen_rpc_types::{
     AdminStatusResponse, BlockStatus, BlockStatusResponse, ChunkProofCoverageResponse,
 };
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};

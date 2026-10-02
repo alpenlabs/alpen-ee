@@ -4,13 +4,13 @@
 //!
 //! ```sh
 //! # Pretty-printed to stdout
-//! cargo run -p strata-rpc-openrpc-spec
+//! cargo run -p alpen-openrpc-spec
 //!
 //! # Write to file
-//! cargo run -p strata-rpc-openrpc-spec > alpen-openrpc.json
+//! cargo run -p alpen-openrpc-spec > alpen-openrpc.json
 //!
 //! # Compact (single line)
-//! cargo run -p strata-rpc-openrpc-spec -- --compact
+//! cargo run -p alpen-openrpc-spec -- --compact
 //! ```
 //!
 //! The output is a valid OpenRPC 1.2.6 document that can be loaded into
@@ -22,7 +22,7 @@
 
 use std::env;
 
-use strata_rpc_openrpc_spec::serialize_alpen_rpc_project;
+use alpen_openrpc_spec::serialize_alpen_rpc_project;
 
 fn main() {
     let compact = env::args().any(|a| a == "--compact");

@@ -70,9 +70,9 @@ jobs:
       matrix:
         crate:
           # - alpen-client # unsupported due to `rkyv` dependency
-          - strata-ee-acct-types
-          - strata-ee-chain-types
-          - strata-simple-ee
+          - alpen-acct-types
+          - alpen-chain-types
+          - alpen-simple-ee
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

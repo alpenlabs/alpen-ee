@@ -6,12 +6,12 @@
 
 use std::marker::PhantomData;
 
-use strata_acct_types::ADMIN_MSG_ACCT_ID;
-use strata_ee_acct_types::{
+use alpen_acct_types::{
     DecodedEeMessageData, EeAccountState, EnvError, ExecutionEnvironment, PendingInputEntry,
     UpdateExtraData,
 };
-use strata_ee_chain_types::SubjectDepositData;
+use alpen_chain_types::SubjectDepositData;
+use strata_acct_types::ADMIN_MSG_ACCT_ID;
 use strata_snark_acct_runtime::*;
 
 use crate::verification_state::{EeVerificationInput, EeVerificationState};
@@ -224,8 +224,8 @@ pub(crate) fn apply_decoded_message(
 
 #[cfg(test)]
 mod tests {
+    use alpen_acct_types::PredicateUpdateMsgData;
     use strata_acct_types::{AccountId, BitcoinAmount, Hash};
-    use strata_ee_acct_types::PredicateUpdateMsgData;
     use strata_predicate::PredicateKey;
 
     use super::*;

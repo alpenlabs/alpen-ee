@@ -1,7 +1,7 @@
 use std::result;
 
-use alpen_ee_common::{OLClientError, StorageError};
-use strata_ee_acct_types::EnvError;
+use alpen_acct_types::EnvError;
+use alpen_common::{OLClientError, StorageError};
 use strata_identifiers::Hash;
 use strata_snark_acct_runtime::ProgramError;
 use thiserror::Error;

@@ -1,9 +1,9 @@
 //! Error raised while building a DA witness on the host.
 
-use alpen_ee_da_types::DaParseError;
+use alpen_da_types::DaParseError;
 use strata_codec::CodecError;
 
-/// Error raised while building a [`DaWitness`](alpen_ee_da_types::DaWitness).
+/// Error raised while building a [`DaWitness`](alpen_da_types::DaWitness).
 ///
 /// Spans both layers of the build — L1 inclusion (block fetch, wtxid roots,
 /// blob reassembly) and EVM dedup resolution (state-diff/bytecode lookups) —

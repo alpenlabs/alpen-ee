@@ -13,12 +13,15 @@ mod tests;
 use std::collections::BTreeSet;
 
 use alloy_primitives::{keccak256, B256};
-use alpen_ee_da_types::{
+use alpen_acct_runtime::ArchivedEePrivateInput;
+use alpen_chain_types::ChunkTransition;
+use alpen_da_types::{
     compute_bitcoin_merkle_root_from_proof, extract_da_chunks as parse_da_chunks,
     read_commit_marker_payload, reassemble_da_blob, ArchivedBitcoinMerkleProof,
     ArchivedDaBlockWitness, ArchivedDaWitness, ArchivedDedupWitness, DaBlob, DaParseError,
     EvmHeaderSummary, DA_BLOB_VERSION, EE_DA_MAGIC_BYTES,
 };
+use alpen_evm_ee::EvmPartialState;
 use alpen_reth_statediff::{
     apply_batch_state_diff_to_ethereum_state, AccountChange, BatchStateDiff,
 };
@@ -28,9 +31,6 @@ use revm_primitives::KECCAK_EMPTY;
 use ssz::Decode;
 use strata_acct_types::l1_block_record_leaf_hash;
 use strata_codec::decode_buf_exact;
-use strata_ee_acct_runtime::ArchivedEePrivateInput;
-use strata_ee_chain_types::ChunkTransition;
-use strata_evm_ee::EvmPartialState;
 use strata_snark_acct_types::{LedgerRefs, UpdateProofPubParams};
 
 /// Runs DA correctness checks for the outer proof.

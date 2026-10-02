@@ -1,5 +1,5 @@
 [package]
-name = "strata-evm-ee"
+name = "alpen-evm-ee"
 version.workspace = true
 edition = "2024"
 license.workspace = true
@@ -7,14 +7,14 @@ repository.workspace = true
 
 [dependencies]
 # Alpen crates
-alpen-ee-da-types.workspace = true
-alpen-ee-params.workspace = true
+alpen-da-types.workspace = true
+alpen-params.workspace = true
 
 # Strata crates
+alpen-acct-types.workspace = true
+alpen-chain-types.workspace = true
 strata-acct-types.workspace = true
 strata-codec.workspace = true
-strata-ee-acct-types.workspace = true
-strata-ee-chain-types.workspace = true
 strata-msg-fmt.workspace = true
 strata-ol-msg-types.workspace = true
 

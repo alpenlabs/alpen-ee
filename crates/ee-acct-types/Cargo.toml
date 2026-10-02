@@ -1,18 +1,18 @@
 [package]
-name = "strata-ee-acct-types"
+name = "alpen-acct-types"
 version.workspace = true
 edition = "2024"
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
+alpen-chain-types.workspace = true
 ssz.workspace = true
 ssz_derive.workspace = true
 ssz_primitives.workspace = true
 ssz_types.workspace = true
 strata-acct-types.workspace = true
 strata-codec.workspace = true
-strata-ee-chain-types.workspace = true
 strata-identifiers.workspace = true
 strata-msg-fmt.workspace = true
 strata-ol-msg-types.workspace = true

@@ -13,12 +13,16 @@
 use std::{fmt, sync::Arc};
 
 use alloy_primitives::B256;
-use alpen_ee_common::{
+use alpen_acct_runtime::{ChunkInput, EePrivateInput};
+use alpen_acct_types::UpdateExtraData;
+use alpen_chain_types::ChunkTransition;
+use alpen_common::{
     build_ledger_refs_from_da, decode_batch_task_key, encode_batch_task_key, BatchId, BatchStatus,
     BatchStorage, ChunkStorage, ExecBlockStorage, L1DaBlockRef, ProverTaskKeyDecodeError, Storage,
 };
-use alpen_ee_da_runtime::builders::{build_da_witness, DaDedupResolver, DaWitnessBuildError};
-use alpen_ee_database::EeNodeStorage;
+use alpen_da_runtime::builders::{build_da_witness, DaDedupResolver, DaWitnessBuildError};
+use alpen_database::EeNodeStorage;
+use alpen_proof_acct::{EeAcctProgram, EeAcctProofInput};
 use alpen_reth_db::StateDiffProvider;
 use alpen_reth_witness::RangeWitnessData;
 use async_trait::async_trait;
@@ -26,13 +30,9 @@ use bitcoind_async_client::Client as BtcClient;
 use ssz::{Decode, Encode as _};
 use strata_acct_types::Hash;
 use strata_codec::encode_to_vec;
-use strata_ee_acct_runtime::{ChunkInput, EePrivateInput};
-use strata_ee_acct_types::UpdateExtraData;
-use strata_ee_chain_types::ChunkTransition;
 use strata_paas::{
     InputResolution, ProofSpec, ProverError as PaasError, ProverResult, ReceiptStore,
 };
-use strata_proofimpl_alpen_acct::{EeAcctProgram, EeAcctProofInput};
 use strata_snark_acct_runtime::{Coinput, IInnerState, PrivateInput as UpdatePrivateInput};
 use strata_snark_acct_types::{
     OutputMessage, OutputTransfer, ProofState, Seqno, UpdateOutputs, UpdateProofPubParams,

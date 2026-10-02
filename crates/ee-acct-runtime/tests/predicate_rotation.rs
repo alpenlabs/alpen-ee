@@ -7,17 +7,17 @@
 
 mod common;
 
+use alpen_acct_runtime::{EeVerificationInput, UpdateBuilder};
+use alpen_acct_types::{EnvError, PendingInputEntry};
+use alpen_chain_types::{ExecOutputs, SequenceTracker};
+use alpen_simple_ee::SimpleExecutionEnvironment;
 use common::{
     apply_unconditionally, assert_verified_chunks_succeed, create_deposit_message,
     create_initial_state, create_predicate_update_message, create_vstate,
     empty_exec_header_summary, simple_chunk,
 };
 use strata_acct_types::{AccountId, BitcoinAmount, Hash, SubjectId};
-use strata_ee_acct_runtime::{EeVerificationInput, UpdateBuilder};
-use strata_ee_acct_types::{EnvError, PendingInputEntry};
-use strata_ee_chain_types::{ExecOutputs, SequenceTracker};
 use strata_predicate::{PredicateKey, PredicateTypeId};
-use strata_simple_ee::SimpleExecutionEnvironment;
 use strata_snark_acct_types::UpdateOutputs;
 
 #[test]

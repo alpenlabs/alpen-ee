@@ -1,7 +1,7 @@
 //! For handling deterministic genesis blocks used in EE.
 
-use alpen_ee_common::ExecBlockStorage;
-use alpen_ee_params::AlpenParams;
+use alpen_common::ExecBlockStorage;
+use alpen_params::AlpenParams;
 use eyre::Context;
 use strata_identifiers::OLBlockCommitment;
 use tracing::info;

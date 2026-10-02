@@ -1,9 +1,9 @@
-use alpen_ee_common::{
+use alpen_acct_types::EeAccountState;
+use alpen_common::{
     EeAccountStateAtEpoch, MockOLClient, MockStorage, OLBlockOrEpoch, OLClientError,
     SnarkAccountEpochSummary,
 };
 use strata_acct_types::Hash;
-use strata_ee_acct_types::EeAccountState;
 use strata_identifiers::{Buf32, EpochCommitment, OLBlockCommitment, OLBlockId};
 
 pub(crate) fn make_epoch_commitment(epoch: u32, slot: u64, id: u8) -> EpochCommitment {

@@ -68,21 +68,24 @@ clippy.absolute_paths = "warn"
 rustdoc.all = "warn"
 
 [workspace.dependencies]
-alpen-ee-block-assembly = { path = "crates/alpen-ee/block-assembly" }
-alpen-ee-common = { path = "crates/alpen-ee/common" }
-alpen-ee-da-provider = { path = "crates/alpen-ee/da/provider" }
-alpen-ee-da-runtime = { path = "crates/alpen-ee/da/runtime" }
-alpen-ee-da-types = { path = "crates/alpen-ee/da/types" }
-alpen-ee-database = { path = "crates/alpen-ee/database", default-features = false }
-alpen-ee-engine = { path = "crates/alpen-ee/engine" }
-alpen-ee-exec-chain = { path = "crates/alpen-ee/exec-chain" }
-alpen-ee-genesis = { path = "crates/alpen-ee/genesis" }
-alpen-ee-ol-tracker = { path = "crates/alpen-ee/ol-tracker" }
-alpen-ee-params = { path = "crates/alpen-ee/params" }
-alpen-ee-rpc-api = { path = "crates/alpen-ee/rpc/api" }
-alpen-ee-rpc-server = { path = "crates/alpen-ee/rpc/server" }
-alpen-ee-rpc-types = { path = "crates/alpen-ee/rpc/types" }
-alpen-ee-sequencer = { path = "crates/alpen-ee/sequencer" }
+alpen-acct-runtime = { path = "crates/ee-acct-runtime" }
+alpen-acct-types = { path = "crates/ee-acct-types" }
+alpen-block-assembly = { path = "crates/alpen-ee/block-assembly" }
+alpen-chain-types = { path = "crates/ee-chain-types" }
+alpen-chunk-runtime = { path = "crates/ee-chunk-runtime" }
+alpen-common = { path = "crates/alpen-ee/common" }
+alpen-da-provider = { path = "crates/alpen-ee/da/provider" }
+alpen-da-runtime = { path = "crates/alpen-ee/da/runtime" }
+alpen-da-types = { path = "crates/alpen-ee/da/types" }
+alpen-database = { path = "crates/alpen-ee/database", default-features = false }
+alpen-engine = { path = "crates/alpen-ee/engine" }
+alpen-evm-ee = { path = "crates/evm-ee" }
+alpen-exec-chain = { path = "crates/alpen-ee/exec-chain" }
+alpen-genesis = { path = "crates/alpen-ee/genesis" }
+alpen-ol-tracker = { path = "crates/alpen-ee/ol-tracker" }
+alpen-params = { path = "crates/alpen-ee/params" }
+alpen-proof-acct = { path = "crates/proof-impl/alpen-acct" }
+alpen-proof-chunk = { path = "crates/proof-impl/alpen-chunk" }
 alpen-reth-db = { path = "crates/reth/db" }
 alpen-reth-evm = { path = "crates/reth/evm" }
 alpen-reth-exex = { path = "crates/reth/exex" }
@@ -91,15 +94,12 @@ alpen-reth-primitives = { path = "crates/reth/primitives" }
 alpen-reth-rpc = { path = "crates/reth/rpc" }
 alpen-reth-statediff = { path = "crates/reth/statediff", default-features = false }
 alpen-reth-witness = { path = "crates/reth/witness" }
+alpen-rpc-api = { path = "crates/alpen-ee/rpc/api" }
+alpen-rpc-server = { path = "crates/alpen-ee/rpc/server" }
+alpen-rpc-types = { path = "crates/alpen-ee/rpc/types" }
+alpen-sequencer = { path = "crates/alpen-ee/sequencer" }
+alpen-simple-ee = { path = "crates/simple-ee" }
 alpen-store-mdbx = { path = "crates/store-mdbx" }
-strata-ee-acct-runtime = { path = "crates/ee-acct-runtime" }
-strata-ee-acct-types = { path = "crates/ee-acct-types" }
-strata-ee-chain-types = { path = "crates/ee-chain-types" }
-strata-ee-chunk-runtime = { path = "crates/ee-chunk-runtime" }
-strata-evm-ee = { path = "crates/evm-ee" }
-strata-proofimpl-alpen-acct = { path = "crates/proof-impl/alpen-acct" }
-strata-proofimpl-alpen-chunk = { path = "crates/proof-impl/alpen-chunk" }
-strata-simple-ee = { path = "crates/simple-ee" }
 
 # strata dependencies, pinned to the pre-split repo's main so the EE stays in
 # lockstep with the OL side. The strata-common, asm, and zkaleido pins below

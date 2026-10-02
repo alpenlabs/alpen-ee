@@ -1,12 +1,12 @@
 //! Generic input definitions.
 
+use alpen_acct_types::{ExecBlock, ExecutionEnvironment};
+use alpen_chain_types::{ChunkTransition, ExecInputs, ExecOutputs};
 use rkyv::{Archive, Deserialize, Serialize};
 use rkyv_impl::archive_impl;
 use ssz::{Decode, DecodeError, Encode};
 use strata_acct_types::Hash;
 use strata_codec::CodecError;
-use strata_ee_acct_types::{ExecBlock, ExecutionEnvironment};
-use strata_ee_chain_types::{ChunkTransition, ExecInputs, ExecOutputs};
 
 /// Private inputs we expose to the runtime.
 #[derive(Debug, Archive, Deserialize, Serialize)]

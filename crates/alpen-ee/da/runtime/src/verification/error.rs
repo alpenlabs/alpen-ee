@@ -1,6 +1,6 @@
 //! Error types for EE DA proof verification.
 
-use alpen_ee_da_types::{DaParseError, EvmHeaderSummary};
+use alpen_da_types::{DaParseError, EvmHeaderSummary};
 use alpen_reth_statediff::ReconstructError;
 use strata_codec::CodecError;
 

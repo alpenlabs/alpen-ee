@@ -20,7 +20,7 @@ use crate::{Batch, BatchStatus, EeAccountStateAtEpoch, ExecBlockRecord, StorageE
 ///
 /// Returns other [`StorageError`] variants for underlying storage failures.
 ///
-/// `ensure_batch_genesis`: alpen_ee_genesis::batch::ensure_batch_genesis
+/// `ensure_batch_genesis`: alpen_genesis::batch::ensure_batch_genesis
 pub async fn require_latest_batch(
     storage: &impl BatchStorage,
 ) -> Result<(Batch, BatchStatus), StorageError> {
@@ -49,7 +49,7 @@ pub async fn require_latest_batch(
 ///
 /// Returns other [`StorageError`] variants for underlying storage failures.
 ///
-/// `ensure_batch_genesis`: alpen_ee_genesis::batch::ensure_batch_genesis
+/// `ensure_batch_genesis`: alpen_genesis::batch::ensure_batch_genesis
 pub async fn require_genesis_batch(
     storage: &impl BatchStorage,
 ) -> Result<(Batch, BatchStatus), StorageError> {
@@ -81,7 +81,7 @@ pub async fn require_genesis_batch(
 /// Returns other [`StorageError`] variants for underlying storage failures.
 ///
 /// `ensure_genesis_ee_account_state`:
-/// alpen_ee_genesis::account_state::ensure_genesis_ee_account_state
+/// alpen_genesis::account_state::ensure_genesis_ee_account_state
 pub async fn require_best_ee_account_state(
     storage: &impl Storage,
 ) -> Result<EeAccountStateAtEpoch, StorageError> {
@@ -113,7 +113,7 @@ pub async fn require_best_ee_account_state(
 /// Returns other [`StorageError`] variants for underlying storage failures.
 ///
 /// `ensure_finalized_exec_chain_genesis`:
-/// alpen_ee_genesis::exec_chain::ensure_finalized_exec_chain_genesis
+/// alpen_genesis::exec_chain::ensure_finalized_exec_chain_genesis
 pub async fn require_best_finalized_block(
     storage: &impl ExecBlockStorage,
 ) -> Result<ExecBlockRecord, StorageError> {

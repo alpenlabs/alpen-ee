@@ -1,7 +1,7 @@
 # SP1 guest builder
 
 Builds the SP1 guest programs (`guest-alpen-chunk`, `guest-alpen-acct`) and exposes
-the compiled ELF paths to host crates via `strata_sp1_guest_builder::GUEST_*_ELF_PATH`.
+the compiled ELF paths to host crates via `alpen_sp1_guest_builder::GUEST_*_ELF_PATH`.
 
 ## Building
 
@@ -9,7 +9,7 @@ Building this crate compiles the guest programs, which requires the
 [SP1 toolchain](https://docs.succinct.xyz/docs/sp1/getting-started/install):
 
 ```sh
-cargo build --release -p strata-sp1-guest-builder
+cargo build --release -p alpen-sp1-guest-builder
 ```
 
 To build without the SP1 toolchain (e.g. when running workspace-wide tests or

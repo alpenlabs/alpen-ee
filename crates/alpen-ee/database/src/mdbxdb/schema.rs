@@ -18,7 +18,7 @@
 //! encoded witness — has framing owned by whatever produced it rather than by
 //! this store.
 
-use alpen_ee_common::{AccessedStateRecord, BatchId, ChunkId};
+use alpen_common::{AccessedStateRecord, BatchId, ChunkId};
 use alpen_store_mdbx::{
     define_table, define_table_be_key, define_table_borsh, define_table_versioned,
     define_table_versioned_be_key, impl_be_key_codec, impl_unit_value_codec,

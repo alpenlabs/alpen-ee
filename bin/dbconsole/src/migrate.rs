@@ -2,7 +2,7 @@
 //! store a previous binary wrote, offline.
 //!
 //! The mapping of trees to tables and the per-table value rules live in the
-//! console core (`alpen_ee_database::console::migrate`); this command reads
+//! console core (`alpen_database::console::migrate`); this command reads
 //! sled as raw bytes, hands them to the core's raw import, and then runs the
 //! console's own checks over the result. The node's crates never see sled.
 //!
@@ -20,7 +20,7 @@ use std::{
     time::Instant,
 };
 
-use alpen_ee_database::{
+use alpen_database::{
     console::{
         migrate::{sled_trees, SledTree},
         ConsoleDb,
@@ -223,7 +223,7 @@ fn copy_tree(
 mod tests {
     use std::{env, path::Path};
 
-    use alpen_ee_database::{
+    use alpen_database::{
         console::migrate::{to_sled_form, to_sled_key},
         test_db::TempDatadir,
     };
@@ -398,7 +398,7 @@ mod tests {
     fn the_node_refuses_to_start_on_an_unmigrated_datadir() {
         let datadir = TempDatadir::new();
         fs::create_dir_all(sled_dir(&datadir)).unwrap();
-        let err = alpen_ee_database::open_ee_db(&datadir, 0).unwrap_err();
+        let err = alpen_database::open_ee_db(&datadir, 0).unwrap_err();
         assert!(err.to_string().contains("migrate-sled"), "{err}");
     }
 }

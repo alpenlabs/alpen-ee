@@ -2,7 +2,7 @@
 //!
 //! Two `ProofSpec`s — one per proof kind — each driven by its own paas
 //! `Prover`. A thin [`PaasBatchProver`] wraps both handles and implements
-//! [`alpen_ee_common::BatchProver`], the integration seam the existing
+//! [`alpen_common::BatchProver`], the integration seam the existing
 //! `batch_lifecycle` task already drives.
 //!
 //! ```text

@@ -1,6 +1,6 @@
 [package]
 edition.workspace = true
-name = "alpen-ee-block-assembly"
+name = "alpen-block-assembly"
 version.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -9,14 +9,14 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-alpen-ee-common.workspace = true
-alpen-ee-params.workspace = true
+alpen-acct-runtime.workspace = true
+alpen-acct-types.workspace = true
+alpen-chain-types.workspace = true
+alpen-common.workspace = true
+alpen-params.workspace = true
 alpen-reth-evm.workspace = true
 strata-acct-types.workspace = true
 strata-codec.workspace = true
-strata-ee-acct-runtime.workspace = true
-strata-ee-acct-types.workspace = true
-strata-ee-chain-types.workspace = true
 strata-msg-fmt.workspace = true
 strata-ol-bridge-types.workspace = true
 strata-ol-msg-types.workspace = true
@@ -28,9 +28,9 @@ eyre.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-alpen-ee-common = { workspace = true, features = ["test-utils"] }
+alpen-common = { workspace = true, features = ["test-utils"] }
 alloy-primitives.workspace = true
 alpen-reth-primitives.workspace = true
 async-trait.workspace = true
-strata-ee-acct-runtime = { workspace = true, features = ["test-utils"] }
+alpen-acct-runtime = { workspace = true, features = ["test-utils"] }
 tokio = { workspace = true, features = ["macros", "rt"] }

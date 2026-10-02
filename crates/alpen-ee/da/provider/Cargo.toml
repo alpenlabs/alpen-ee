@@ -1,6 +1,6 @@
 [package]
 edition.workspace = true
-name = "alpen-ee-da-provider"
+name = "alpen-da-provider"
 version.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -9,9 +9,9 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-alpen-ee-common.workspace = true
-alpen-ee-da-types.workspace = true
-alpen-ee-database.workspace = true
+alpen-common.workspace = true
+alpen-da-types.workspace = true
+alpen-database.workspace = true
 alpen-reth-db.workspace = true
 alpen-reth-statediff.workspace = true
 
@@ -30,5 +30,5 @@ strata-l1-txfmt.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-alpen-ee-database = { workspace = true, features = ["test-utils"] }
+alpen-database = { workspace = true, features = ["test-utils"] }
 tokio.workspace = true

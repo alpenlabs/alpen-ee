@@ -1,6 +1,6 @@
 //! Data availability provider trait for batch lifecycle management.
 
-use alpen_ee_da_types::EvmHeaderSummary;
+use alpen_da_types::EvmHeaderSummary;
 use async_trait::async_trait;
 
 use crate::{BatchId, L1DaBlockRef};

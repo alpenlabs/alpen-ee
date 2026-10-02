@@ -6,7 +6,7 @@
 //!   proofs, blob reassembly), execution-environment agnostic.
 //! - `dedup` — the EVM bytecode-dedup layer: which bytecodes the blob omits, resolving their
 //!   preimages, and the [`DedupWitnessResolver`] seam that produces the
-//!   [`DedupWitness`](alpen_ee_da_types::DedupWitness).
+//!   [`DedupWitness`](alpen_da_types::DedupWitness).
 //! - [`build_da_witness`] — the single entry point that orchestrates the two into a [`DaWitness`].
 
 mod dedup;
@@ -14,8 +14,8 @@ mod error;
 mod inclusion;
 
 use alloy_primitives::B256;
-use alpen_ee_common::L1DaBlockRef;
-use alpen_ee_da_types::DaWitness;
+use alpen_common::L1DaBlockRef;
+use alpen_da_types::DaWitness;
 use bitcoind_async_client::traits::Reader;
 pub use dedup::{DaDedupResolver, DedupWitnessResolver};
 pub use error::DaWitnessBuildError;

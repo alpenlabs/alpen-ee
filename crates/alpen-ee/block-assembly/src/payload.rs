@@ -1,11 +1,11 @@
 use std::num::NonZero;
 
 use alloy_primitives::B256;
-use alpen_ee_common::{DepositInfo, EnginePayload, PayloadBuildAttributes, PayloadBuilderEngine};
-use alpen_ee_params::AlpenSpecId;
+use alpen_acct_types::{PendingInputEntry, UpdateExtraData};
+use alpen_common::{DepositInfo, EnginePayload, PayloadBuildAttributes, PayloadBuilderEngine};
+use alpen_params::AlpenSpecId;
 use alpen_reth_evm::subject_to_address_unchecked;
 use strata_acct_types::Hash;
-use strata_ee_acct_types::{PendingInputEntry, UpdateExtraData};
 use strata_predicate::PredicateKey;
 use tracing::{debug, info};
 
@@ -131,8 +131,8 @@ pub(crate) async fn build_exec_payload<E: PayloadBuilderEngine>(
 #[cfg(test)]
 mod tests {
     use alloy_primitives::Address;
+    use alpen_chain_types::SubjectDepositData;
     use strata_acct_types::{BitcoinAmount, SubjectId};
-    use strata_ee_chain_types::SubjectDepositData;
 
     use super::*;
 

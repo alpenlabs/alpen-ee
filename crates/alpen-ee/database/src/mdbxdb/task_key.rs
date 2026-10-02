@@ -12,11 +12,11 @@
 //! [`encode_chunk_task_key`] / [`encode_batch_task_key`]; the version is
 //! added and removed at the storage boundary.
 
-use alpen_ee_common::{
+use alpen_common::{
     decode_batch_task_key, decode_chunk_task_key, encode_batch_task_key, encode_chunk_task_key,
     BatchId, ChunkId, ProverTaskKeyDecodeError, RANGE_TASK_KEY_BYTES,
 };
-use alpen_ee_params::AlpenSpecId;
+use alpen_params::AlpenSpecId;
 use alpen_store_mdbx::{CodecError, DbResult, Reader, Writer};
 use strata_acct_types::Hash;
 use strata_paas::TaskRecordData;

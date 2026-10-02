@@ -2,8 +2,8 @@
 // crate?  so that ee-chunk-runtime doesn't have to depend on this crate?  maybe
 // do this after repo restructure
 
+use alpen_chain_types::{ExecHeaderSummary, ExecInputs};
 use strata_codec::Codec;
-use strata_ee_chain_types::{ExecHeaderSummary, ExecInputs};
 use strata_identifiers::Hash;
 
 use crate::{errors::EnvResult, inputs::ExecPayload, outputs::ExecBlockOutput};

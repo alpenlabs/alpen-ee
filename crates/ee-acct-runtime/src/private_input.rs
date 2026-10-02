@@ -1,8 +1,8 @@
+use alpen_acct_types::CommitChainSegment;
+use alpen_chain_types::ChunkTransition;
 use rkyv::{Archive, Deserialize, Serialize};
 use rkyv_impl::archive_impl;
 use ssz::{Decode, DecodeError, Encode};
-use strata_ee_acct_types::CommitChainSegment;
-use strata_ee_chain_types::ChunkTransition;
 
 /// EE update private input.
 ///

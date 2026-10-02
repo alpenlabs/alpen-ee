@@ -1127,6 +1127,109 @@ dependencies = [
 ]
 
 [[package]]
+name = "alpen-acct-runtime"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alpen-acct-types",
+ "alpen-chain-types",
+ "alpen-simple-ee",
+ "rkyv",
+ "rkyv_impl 0.2.2",
+ "ssz",
+ "ssz_derive",
+ "strata-acct-types",
+ "strata-codec",
+ "strata-msg-fmt",
+ "strata-predicate",
+ "strata-snark-acct-runtime",
+ "strata-snark-acct-types",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "alpen-acct-types"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alpen-chain-types",
+ "proptest",
+ "ssz",
+ "ssz_codegen",
+ "ssz_derive",
+ "ssz_primitives",
+ "ssz_types",
+ "strata-acct-types",
+ "strata-codec",
+ "strata-identifiers",
+ "strata-msg-fmt",
+ "strata-ol-msg-types",
+ "strata-predicate",
+ "strata-snark-acct-runtime",
+ "strata-test-utils-ssz",
+ "thiserror 2.0.20",
+ "tree_hash 0.17.0",
+ "tree_hash_derive 0.17.0",
+]
+
+[[package]]
+name = "alpen-block-assembly"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alloy-primitives",
+ "alpen-acct-runtime",
+ "alpen-acct-types",
+ "alpen-chain-types",
+ "alpen-common",
+ "alpen-params",
+ "alpen-reth-evm",
+ "alpen-reth-primitives",
+ "async-trait",
+ "bitcoin-bosd",
+ "eyre",
+ "strata-acct-types",
+ "strata-codec",
+ "strata-msg-fmt",
+ "strata-ol-bridge-types",
+ "strata-ol-msg-types",
+ "strata-predicate",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "alpen-chain-types"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "proptest",
+ "ssz",
+ "ssz_codegen",
+ "ssz_derive",
+ "ssz_primitives",
+ "ssz_types",
+ "strata-acct-types",
+ "strata-identifiers",
+ "strata-predicate",
+ "strata-test-utils-ssz",
+ "thiserror 2.0.20",
+ "tree_hash 0.17.0",
+ "tree_hash_derive 0.17.0",
+]
+
+[[package]]
+name = "alpen-chunk-runtime"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alpen-acct-types",
+ "alpen-chain-types",
+ "alpen-simple-ee",
+ "rkyv",
+ "rkyv_impl 0.2.2",
+ "ssz",
+ "strata-acct-types",
+ "strata-codec",
+ "strata-predicate",
+]
+
+[[package]]
 name = "alpen-client"
 version = "0.3.0-alpha.1"
 dependencies = [
@@ -1136,18 +1239,23 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-engine",
- "alpen-ee-common",
- "alpen-ee-da-provider",
- "alpen-ee-da-runtime",
- "alpen-ee-da-types",
- "alpen-ee-database",
- "alpen-ee-engine",
- "alpen-ee-exec-chain",
- "alpen-ee-genesis",
- "alpen-ee-ol-tracker",
- "alpen-ee-params",
- "alpen-ee-rpc-server",
- "alpen-ee-sequencer",
+ "alpen-acct-runtime",
+ "alpen-acct-types",
+ "alpen-chain-types",
+ "alpen-chunk-runtime",
+ "alpen-common",
+ "alpen-da-provider",
+ "alpen-da-runtime",
+ "alpen-da-types",
+ "alpen-database",
+ "alpen-engine",
+ "alpen-evm-ee",
+ "alpen-exec-chain",
+ "alpen-genesis",
+ "alpen-ol-tracker",
+ "alpen-params",
+ "alpen-proof-acct",
+ "alpen-proof-chunk",
  "alpen-reth-db",
  "alpen-reth-evm",
  "alpen-reth-exex",
@@ -1155,6 +1263,8 @@ dependencies = [
  "alpen-reth-rpc",
  "alpen-reth-statediff",
  "alpen-reth-witness",
+ "alpen-rpc-server",
+ "alpen-sequencer",
  "anyhow",
  "async-trait",
  "bitcoind-async-client",
@@ -1189,11 +1299,6 @@ dependencies = [
  "strata-common",
  "strata-config",
  "strata-db-types",
- "strata-ee-acct-runtime",
- "strata-ee-acct-types",
- "strata-ee-chain-types",
- "strata-ee-chunk-runtime",
- "strata-evm-ee",
  "strata-identifiers",
  "strata-logging",
  "strata-ol-rpc-api",
@@ -1201,8 +1306,6 @@ dependencies = [
  "strata-paas",
  "strata-predicate",
  "strata-primitives",
- "strata-proofimpl-alpen-acct",
- "strata-proofimpl-alpen-chunk",
  "strata-service",
  "strata-snark-acct-runtime",
  "strata-snark-acct-types",
@@ -1217,57 +1320,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "alpen-dbconsole"
-version = "0.3.0-alpha.1"
-dependencies = [
- "alpen-ee-database",
- "clap",
- "dirs",
- "eyre",
- "hex",
- "libc",
- "rhai",
- "rustyline",
- "signal-hook",
- "sled",
- "tracing-subscriber 0.3.23",
-]
-
-[[package]]
-name = "alpen-ee-block-assembly"
-version = "0.3.0-alpha.1"
-dependencies = [
- "alloy-primitives",
- "alpen-ee-common",
- "alpen-ee-params",
- "alpen-reth-evm",
- "alpen-reth-primitives",
- "async-trait",
- "bitcoin-bosd",
- "eyre",
- "strata-acct-types",
- "strata-codec",
- "strata-ee-acct-runtime",
- "strata-ee-acct-types",
- "strata-ee-chain-types",
- "strata-msg-fmt",
- "strata-ol-bridge-types",
- "strata-ol-msg-types",
- "strata-predicate",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "alpen-ee-common"
+name = "alpen-common"
 version = "0.3.0-alpha.1"
 dependencies = [
  "alloy-eips 2.0.4",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-engine",
- "alpen-ee-da-types",
- "alpen-ee-params",
+ "alpen-acct-types",
+ "alpen-chain-types",
+ "alpen-da-types",
+ "alpen-params",
  "alpen-reth-node",
  "async-trait",
  "bincode",
@@ -1283,8 +1346,6 @@ dependencies = [
  "serde",
  "strata-acct-types",
  "strata-codec",
- "strata-ee-acct-types",
- "strata-ee-chain-types",
  "strata-identifiers",
  "strata-predicate",
  "strata-snark-acct-types",
@@ -1294,13 +1355,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "alpen-ee-da-provider"
+name = "alpen-da-provider"
 version = "0.3.0-alpha.1"
 dependencies = [
  "alloy-primitives",
- "alpen-ee-common",
- "alpen-ee-da-types",
- "alpen-ee-database",
+ "alpen-common",
+ "alpen-da-types",
+ "alpen-database",
  "alpen-reth-db",
  "alpen-reth-statediff",
  "async-trait",
@@ -1319,12 +1380,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "alpen-ee-da-runtime"
+name = "alpen-da-runtime"
 version = "0.3.0-alpha.1"
 dependencies = [
  "alloy-primitives",
- "alpen-ee-common",
- "alpen-ee-da-types",
+ "alpen-acct-runtime",
+ "alpen-chain-types",
+ "alpen-common",
+ "alpen-da-types",
+ "alpen-evm-ee",
  "alpen-reth-db",
  "alpen-reth-statediff",
  "async-trait",
@@ -1337,9 +1401,6 @@ dependencies = [
  "ssz",
  "strata-acct-types",
  "strata-codec",
- "strata-ee-acct-runtime",
- "strata-ee-chain-types",
- "strata-evm-ee",
  "strata-identifiers",
  "strata-l1-envelope-fmt",
  "strata-primitives",
@@ -1348,7 +1409,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "alpen-ee-da-types"
+name = "alpen-da-types"
 version = "0.3.0-alpha.1"
 dependencies = [
  "alpen-reth-statediff",
@@ -1362,12 +1423,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "alpen-ee-database"
+name = "alpen-database"
 version = "0.3.0-alpha.1"
 dependencies = [
  "alloy-primitives",
- "alpen-ee-common",
- "alpen-ee-params",
+ "alpen-acct-types",
+ "alpen-chain-types",
+ "alpen-common",
+ "alpen-params",
  "alpen-reth-db",
  "alpen-reth-statediff",
  "alpen-store-mdbx",
@@ -1388,8 +1451,6 @@ dependencies = [
  "strata-db-macros",
  "strata-db-tests",
  "strata-db-types",
- "strata-ee-acct-types",
- "strata-ee-chain-types",
  "strata-identifiers",
  "strata-l1-txfmt",
  "strata-paas",
@@ -1402,13 +1463,32 @@ dependencies = [
 ]
 
 [[package]]
-name = "alpen-ee-engine"
+name = "alpen-dbconsole"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alpen-database",
+ "clap",
+ "dirs",
+ "eyre",
+ "hex",
+ "libc",
+ "rhai",
+ "rustyline",
+ "signal-hook",
+ "sled",
+ "tracing-subscriber 0.3.23",
+]
+
+[[package]]
+name = "alpen-engine"
 version = "0.3.0-alpha.1"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
- "alpen-ee-common",
- "alpen-ee-params",
+ "alpen-acct-types",
+ "alpen-chain-types",
+ "alpen-common",
+ "alpen-params",
  "alpen-reth-node",
  "async-trait",
  "mockall",
@@ -1416,8 +1496,6 @@ dependencies = [
  "reth-provider",
  "strata-acct-types",
  "strata-common",
- "strata-ee-acct-types",
- "strata-ee-chain-types",
  "strata-identifiers",
  "thiserror 2.0.20",
  "tokio",
@@ -1425,17 +1503,54 @@ dependencies = [
 ]
 
 [[package]]
-name = "alpen-ee-exec-chain"
+name = "alpen-evm-ee"
 version = "0.3.0-alpha.1"
 dependencies = [
- "alpen-ee-common",
- "alpen-ee-params",
+ "alloy-consensus 2.0.4",
+ "alloy-eips 2.0.4",
+ "alloy-rlp",
+ "alloy-rpc-types-debug",
+ "alpen-acct-types",
+ "alpen-chain-types",
+ "alpen-da-types",
+ "alpen-params",
+ "alpen-reth-evm",
+ "alpen-reth-primitives",
+ "bincode",
+ "itertools 0.14.0",
+ "reth-chainspec",
+ "reth-consensus-common",
+ "reth-errors",
+ "reth-ethereum-primitives",
+ "reth-evm",
+ "reth-primitives-traits",
+ "reth-trie",
+ "revm",
+ "revm-primitives",
+ "rsp-client-executor",
+ "rsp-mpt",
+ "serde",
+ "serde_json",
+ "strata-acct-types",
+ "strata-codec",
+ "strata-msg-fmt",
+ "strata-ol-bridge-types",
+ "strata-ol-msg-types",
+ "strata-primitives",
+]
+
+[[package]]
+name = "alpen-exec-chain"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alpen-acct-types",
+ "alpen-chain-types",
+ "alpen-common",
+ "alpen-params",
  "anyhow",
  "eyre",
  "serde",
  "strata-acct-types",
- "strata-ee-acct-types",
- "strata-ee-chain-types",
  "strata-identifiers",
  "strata-service",
  "thiserror 2.0.20",
@@ -1444,32 +1559,32 @@ dependencies = [
 ]
 
 [[package]]
-name = "alpen-ee-genesis"
+name = "alpen-genesis"
 version = "0.3.0-alpha.1"
 dependencies = [
- "alpen-ee-common",
- "alpen-ee-params",
+ "alpen-acct-types",
+ "alpen-chain-types",
+ "alpen-common",
+ "alpen-params",
  "eyre",
  "hex",
  "serde_json",
  "strata-acct-types",
- "strata-ee-acct-types",
- "strata-ee-chain-types",
  "strata-identifiers",
  "tracing",
 ]
 
 [[package]]
-name = "alpen-ee-ol-tracker"
+name = "alpen-ol-tracker"
 version = "0.3.0-alpha.1"
 dependencies = [
- "alpen-ee-common",
+ "alpen-acct-runtime",
+ "alpen-acct-types",
+ "alpen-common",
+ "alpen-evm-ee",
  "anyhow",
  "serde",
  "strata-acct-types",
- "strata-ee-acct-runtime",
- "strata-ee-acct-types",
- "strata-evm-ee",
  "strata-identifiers",
  "strata-predicate",
  "strata-service",
@@ -1481,7 +1596,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "alpen-ee-params"
+name = "alpen-openrpc-spec"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alpen-rpc-api",
+ "serde_json",
+ "strata-ol-rpc-api",
+ "strata-open-rpc",
+]
+
+[[package]]
+name = "alpen-params"
 version = "0.3.0-alpha.1"
 dependencies = [
  "alloy-consensus 2.0.4",
@@ -1498,72 +1623,90 @@ dependencies = [
 ]
 
 [[package]]
-name = "alpen-ee-rpc-api"
+name = "alpen-proof-acct"
 version = "0.3.0-alpha.1"
 dependencies = [
- "alloy-primitives",
- "alpen-ee-rpc-types",
- "jsonrpsee",
- "schemars 1.2.2",
- "strata-open-rpc",
-]
-
-[[package]]
-name = "alpen-ee-rpc-server"
-version = "0.3.0-alpha.1"
-dependencies = [
- "alloy-primitives",
- "alpen-ee-common",
- "alpen-ee-rpc-api",
- "async-trait",
- "http 1.5.0",
- "jsonrpsee",
- "reth-node-builder",
- "reth-provider",
- "reth-rpc-layer",
- "strata-identifiers",
- "tempfile",
- "tokio",
- "tower 0.5.3",
-]
-
-[[package]]
-name = "alpen-ee-rpc-types"
-version = "0.3.0-alpha.1"
-dependencies = [
- "schemars 1.2.2",
- "serde",
- "serde_json",
- "strata-identifiers",
-]
-
-[[package]]
-name = "alpen-ee-sequencer"
-version = "0.3.0-alpha.1"
-dependencies = [
- "alpen-ee-block-assembly",
- "alpen-ee-common",
- "alpen-ee-exec-chain",
- "alpen-ee-params",
- "anyhow",
- "async-trait",
- "bitcoin",
- "eyre",
- "futures",
- "mockall",
- "serde",
- "strata-acct-types",
- "strata-btc-types",
+ "alpen-acct-runtime",
+ "alpen-acct-types",
+ "alpen-da-runtime",
+ "alpen-da-types",
+ "alpen-evm-ee",
+ "alpen-params",
+ "alpen-reth-evm",
+ "k256",
+ "reth-chainspec",
+ "rkyv",
+ "ssz",
  "strata-codec",
- "strata-ee-acct-types",
- "strata-ee-chain-types",
  "strata-identifiers",
  "strata-predicate",
- "strata-service",
+ "strata-snark-acct-runtime",
  "strata-snark-acct-types",
- "thiserror 2.0.20",
+ "zkaleido",
+ "zkaleido-native-adapter",
+]
+
+[[package]]
+name = "alpen-proof-chunk"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alpen-acct-types",
+ "alpen-chain-types",
+ "alpen-chunk-runtime",
+ "alpen-evm-ee",
+ "alpen-params",
+ "alpen-reth-evm",
+ "k256",
+ "reth-chainspec",
+ "reth-primitives-traits",
+ "rkyv",
+ "rsp-client-executor",
+ "serde",
+ "serde_json",
+ "ssz",
+ "strata-acct-types",
+ "strata-codec",
+ "strata-predicate",
+ "zkaleido",
+ "zkaleido-native-adapter",
+]
+
+[[package]]
+name = "alpen-prover-perf"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alpen-acct-runtime",
+ "alpen-acct-types",
+ "alpen-chain-types",
+ "alpen-chunk-runtime",
+ "alpen-da-types",
+ "alpen-evm-ee",
+ "alpen-params",
+ "alpen-proof-acct",
+ "alpen-proof-chunk",
+ "alpen-reth-evm",
+ "alpen-sp1-guest-builder",
+ "anyhow",
+ "argh",
+ "num-format",
+ "reqwest 0.12.28",
+ "reth-chainspec",
+ "reth-primitives-traits",
+ "rsp-client-executor",
+ "serde",
+ "serde_json",
+ "sp1-sdk",
+ "ssz",
+ "strata-acct-types",
+ "strata-codec",
+ "strata-identifiers",
+ "strata-predicate",
+ "strata-snark-acct-runtime",
+ "strata-snark-acct-types",
  "tokio",
  "tracing",
+ "zkaleido",
+ "zkaleido-sp1-host",
 ]
 
 [[package]]
@@ -1586,7 +1729,7 @@ dependencies = [
  "alloy-eips 2.0.4",
  "alloy-rpc-types-engine",
  "alloy-sol-types",
- "alpen-ee-params",
+ "alpen-params",
  "alpen-reth-primitives",
  "proptest",
  "reth-chainspec",
@@ -1613,7 +1756,7 @@ dependencies = [
  "alloy-eips 2.0.4",
  "alloy-primitives",
  "alloy-rpc-types",
- "alpen-ee-common",
+ "alpen-common",
  "alpen-reth-db",
  "alpen-reth-statediff",
  "alpen-reth-witness",
@@ -1640,7 +1783,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types",
- "alpen-ee-params",
+ "alpen-params",
  "alpen-reth-evm",
  "alpen-reth-primitives",
  "alpen-reth-rpc",
@@ -1754,7 +1897,8 @@ version = "0.3.0-alpha.1"
 dependencies = [
  "alloy-consensus 2.0.4",
  "alloy-primitives",
- "alpen-ee-common",
+ "alpen-common",
+ "alpen-evm-ee",
  "eyre",
  "reth-ethereum-primitives",
  "reth-provider",
@@ -1765,9 +1909,102 @@ dependencies = [
  "rsp-mpt",
  "strata-acct-types",
  "strata-codec",
- "strata-evm-ee",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "alpen-rpc-api"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alloy-primitives",
+ "alpen-rpc-types",
+ "jsonrpsee",
+ "schemars 1.2.2",
+ "strata-open-rpc",
+]
+
+[[package]]
+name = "alpen-rpc-server"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alloy-primitives",
+ "alpen-common",
+ "alpen-rpc-api",
+ "async-trait",
+ "http 1.5.0",
+ "jsonrpsee",
+ "reth-node-builder",
+ "reth-provider",
+ "reth-rpc-layer",
+ "strata-identifiers",
+ "tempfile",
+ "tokio",
+ "tower 0.5.3",
+]
+
+[[package]]
+name = "alpen-rpc-types"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "strata-identifiers",
+]
+
+[[package]]
+name = "alpen-sequencer"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alpen-acct-types",
+ "alpen-block-assembly",
+ "alpen-chain-types",
+ "alpen-common",
+ "alpen-exec-chain",
+ "alpen-params",
+ "anyhow",
+ "async-trait",
+ "bitcoin",
+ "eyre",
+ "futures",
+ "mockall",
+ "serde",
+ "strata-acct-types",
+ "strata-btc-types",
+ "strata-codec",
+ "strata-identifiers",
+ "strata-predicate",
+ "strata-service",
+ "strata-snark-acct-types",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "alpen-simple-ee"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alpen-acct-types",
+ "alpen-chain-types",
+ "digest 0.10.7",
+ "sha2",
+ "strata-acct-types",
+ "strata-codec",
+]
+
+[[package]]
+name = "alpen-sp1-guest-builder"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alloy-consensus 2.0.4",
+ "alpen-params",
+ "serde_json",
+ "sp1-build",
+ "sp1-sdk",
+ "sp1-verifier",
+ "zkaleido-sp1-groth16-verifier",
 ]
 
 [[package]]
@@ -14995,121 +15232,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "strata-ee-acct-runtime"
-version = "0.3.0-alpha.1"
-dependencies = [
- "rkyv",
- "rkyv_impl 0.2.2",
- "ssz",
- "ssz_derive",
- "strata-acct-types",
- "strata-codec",
- "strata-ee-acct-types",
- "strata-ee-chain-types",
- "strata-msg-fmt",
- "strata-predicate",
- "strata-simple-ee",
- "strata-snark-acct-runtime",
- "strata-snark-acct-types",
- "thiserror 2.0.20",
-]
-
-[[package]]
-name = "strata-ee-acct-types"
-version = "0.3.0-alpha.1"
-dependencies = [
- "proptest",
- "ssz",
- "ssz_codegen",
- "ssz_derive",
- "ssz_primitives",
- "ssz_types",
- "strata-acct-types",
- "strata-codec",
- "strata-ee-chain-types",
- "strata-identifiers",
- "strata-msg-fmt",
- "strata-ol-msg-types",
- "strata-predicate",
- "strata-snark-acct-runtime",
- "strata-test-utils-ssz",
- "thiserror 2.0.20",
- "tree_hash 0.17.0",
- "tree_hash_derive 0.17.0",
-]
-
-[[package]]
-name = "strata-ee-chain-types"
-version = "0.3.0-alpha.1"
-dependencies = [
- "proptest",
- "ssz",
- "ssz_codegen",
- "ssz_derive",
- "ssz_primitives",
- "ssz_types",
- "strata-acct-types",
- "strata-identifiers",
- "strata-predicate",
- "strata-test-utils-ssz",
- "thiserror 2.0.20",
- "tree_hash 0.17.0",
- "tree_hash_derive 0.17.0",
-]
-
-[[package]]
-name = "strata-ee-chunk-runtime"
-version = "0.3.0-alpha.1"
-dependencies = [
- "rkyv",
- "rkyv_impl 0.2.2",
- "ssz",
- "strata-acct-types",
- "strata-codec",
- "strata-ee-acct-types",
- "strata-ee-chain-types",
- "strata-predicate",
- "strata-simple-ee",
-]
-
-[[package]]
-name = "strata-evm-ee"
-version = "0.3.0-alpha.1"
-dependencies = [
- "alloy-consensus 2.0.4",
- "alloy-eips 2.0.4",
- "alloy-rlp",
- "alloy-rpc-types-debug",
- "alpen-ee-da-types",
- "alpen-ee-params",
- "alpen-reth-evm",
- "alpen-reth-primitives",
- "bincode",
- "itertools 0.14.0",
- "reth-chainspec",
- "reth-consensus-common",
- "reth-errors",
- "reth-ethereum-primitives",
- "reth-evm",
- "reth-primitives-traits",
- "reth-trie",
- "revm",
- "revm-primitives",
- "rsp-client-executor",
- "rsp-mpt",
- "serde",
- "serde_json",
- "strata-acct-types",
- "strata-codec",
- "strata-ee-acct-types",
- "strata-ee-chain-types",
- "strata-msg-fmt",
- "strata-ol-bridge-types",
- "strata-ol-msg-types",
- "strata-primitives",
-]
-
-[[package]]
 name = "strata-identifiers"
 version = "0.1.0"
 source = "git+https://github.com/alpenlabs/strata-common?tag=v0.4.0-rc.3#4b7fd841447910cd9b29b057c02d847b91d23872"
@@ -15672,55 +15794,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "strata-proofimpl-alpen-acct"
-version = "0.3.0-alpha.1"
-dependencies = [
- "alpen-ee-da-runtime",
- "alpen-ee-da-types",
- "alpen-ee-params",
- "alpen-reth-evm",
- "k256",
- "reth-chainspec",
- "rkyv",
- "ssz",
- "strata-codec",
- "strata-ee-acct-runtime",
- "strata-ee-acct-types",
- "strata-evm-ee",
- "strata-identifiers",
- "strata-predicate",
- "strata-snark-acct-runtime",
- "strata-snark-acct-types",
- "zkaleido",
- "zkaleido-native-adapter",
-]
-
-[[package]]
-name = "strata-proofimpl-alpen-chunk"
-version = "0.3.0-alpha.1"
-dependencies = [
- "alpen-ee-params",
- "alpen-reth-evm",
- "k256",
- "reth-chainspec",
- "reth-primitives-traits",
- "rkyv",
- "rsp-client-executor",
- "serde",
- "serde_json",
- "ssz",
- "strata-acct-types",
- "strata-codec",
- "strata-ee-acct-types",
- "strata-ee-chain-types",
- "strata-ee-chunk-runtime",
- "strata-evm-ee",
- "strata-predicate",
- "zkaleido",
- "zkaleido-native-adapter",
-]
-
-[[package]]
 name = "strata-prover-core"
 version = "0.1.0"
 source = "git+https://github.com/alpenlabs/alpen.git?rev=7f20dcb65fa478c9654626b77a05ea789d28806a#7f20dcb65fa478c9654626b77a05ea789d28806a"
@@ -15733,54 +15806,6 @@ dependencies = [
  "tokio",
  "tracing",
  "zkaleido",
-]
-
-[[package]]
-name = "strata-provers-perf"
-version = "0.3.0-alpha.1"
-dependencies = [
- "alpen-ee-da-types",
- "alpen-ee-params",
- "alpen-reth-evm",
- "anyhow",
- "argh",
- "num-format",
- "reqwest 0.12.28",
- "reth-chainspec",
- "reth-primitives-traits",
- "rsp-client-executor",
- "serde",
- "serde_json",
- "sp1-sdk",
- "ssz",
- "strata-acct-types",
- "strata-codec",
- "strata-ee-acct-runtime",
- "strata-ee-acct-types",
- "strata-ee-chain-types",
- "strata-ee-chunk-runtime",
- "strata-evm-ee",
- "strata-identifiers",
- "strata-predicate",
- "strata-proofimpl-alpen-acct",
- "strata-proofimpl-alpen-chunk",
- "strata-snark-acct-runtime",
- "strata-snark-acct-types",
- "strata-sp1-guest-builder",
- "tokio",
- "tracing",
- "zkaleido",
- "zkaleido-sp1-host",
-]
-
-[[package]]
-name = "strata-rpc-openrpc-spec"
-version = "0.3.0-alpha.1"
-dependencies = [
- "alpen-ee-rpc-api",
- "serde_json",
- "strata-ol-rpc-api",
- "strata-open-rpc",
 ]
 
 [[package]]
@@ -15810,18 +15835,6 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "strata-simple-ee"
-version = "0.3.0-alpha.1"
-dependencies = [
- "digest 0.10.7",
- "sha2",
- "strata-acct-types",
- "strata-codec",
- "strata-ee-acct-types",
- "strata-ee-chain-types",
 ]
 
 [[package]]
@@ -15867,19 +15880,6 @@ dependencies = [
  "thiserror 2.0.20",
  "tree_hash 0.17.0",
  "tree_hash_derive 0.17.0",
-]
-
-[[package]]
-name = "strata-sp1-guest-builder"
-version = "0.3.0-alpha.1"
-dependencies = [
- "alloy-consensus 2.0.4",
- "alpen-ee-params",
- "serde_json",
- "sp1-build",
- "sp1-sdk",
- "sp1-verifier",
- "zkaleido-sp1-groth16-verifier",
 ]
 
 [[package]]

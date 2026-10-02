@@ -122,7 +122,7 @@ macro_rules! chunk_storage_tests {
 
 #[cfg(feature = "test-utils")]
 pub mod tests {
-    use alpen_ee_params::AlpenSpecId;
+    use alpen_params::AlpenSpecId;
     use strata_acct_types::Hash;
     use strata_identifiers::Buf32;
 

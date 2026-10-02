@@ -49,7 +49,7 @@ pub async fn start_authenticated_rpc_server(
 
 #[cfg(test)]
 mod tests {
-    use alpen_ee_rpc_api::{AlpenAdminRpcClient, AlpenAdminRpcServer as _};
+    use alpen_rpc_api::{AlpenAdminRpcClient, AlpenAdminRpcServer as _};
     use http::{header::AUTHORIZATION, HeaderMap};
     use jsonrpsee::http_client::{HttpClient, HttpClientBuilder};
     use reth_rpc_layer::secret_to_bearer_header;

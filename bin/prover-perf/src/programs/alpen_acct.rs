@@ -5,13 +5,13 @@
 //! minimal account-proof path rather than pretending an empty DA witness is
 //! valid for an executed chunk.
 
-use alpen_ee_da_types::DaWitness;
+use alpen_acct_runtime::EePrivateInput;
+use alpen_acct_types::{EeAccountState, UpdateExtraData};
+use alpen_da_types::DaWitness;
+use alpen_proof_acct::{EeAcctProgram, EeAcctProofInput};
 use ssz::Encode;
 use strata_codec::encode_to_vec;
-use strata_ee_acct_runtime::EePrivateInput;
-use strata_ee_acct_types::{EeAccountState, UpdateExtraData};
 use strata_identifiers::Hash;
-use strata_proofimpl_alpen_acct::{EeAcctProgram, EeAcctProofInput};
 use strata_snark_acct_runtime::{IInnerState, PrivateInput as UpdatePrivateInput};
 use strata_snark_acct_types::{LedgerRefs, ProofState, Seqno, UpdateOutputs, UpdateProofPubParams};
 use tracing::info;
@@ -60,7 +60,7 @@ pub(crate) fn gen_perf_report(host: &impl ZkVmHost) -> (String, ExecutionSummary
 
 #[cfg(test)]
 mod tests {
-    use alpen_ee_params::{AlpenParams, AlpenSpecId};
+    use alpen_params::{AlpenParams, AlpenSpecId};
     use strata_predicate::PredicateKey;
 
     use super::*;

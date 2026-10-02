@@ -1,6 +1,6 @@
 [package]
 edition.workspace = true
-name = "alpen-ee-engine"
+name = "alpen-engine"
 version.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -9,7 +9,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-alpen-ee-common.workspace = true
+alpen-common.workspace = true
 alpen-reth-node.workspace = true
 strata-acct-types.workspace = true
 strata-common = { workspace = true, features = ["async"] }
@@ -24,11 +24,11 @@ tokio.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-alpen-ee-common = { workspace = true, features = ["test-utils"] }
-alpen-ee-params.workspace = true
+alpen-common = { workspace = true, features = ["test-utils"] }
+alpen-params.workspace = true
 strata-acct-types.workspace = true
-strata-ee-acct-types.workspace = true
-strata-ee-chain-types.workspace = true
+alpen-acct-types.workspace = true
+alpen-chain-types.workspace = true
 strata-identifiers.workspace = true
 
 mockall.workspace = true

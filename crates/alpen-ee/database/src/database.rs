@@ -1,10 +1,10 @@
-use alpen_ee_common::{
+use alpen_acct_types::EeAccountState;
+use alpen_common::{
     AccessedStateRecord, Batch, BatchId, BatchStatus, Chunk, ChunkId, ChunkStatus,
     EeAccountStateAtEpoch, ExecBlockRecord,
 };
 use strata_acct_types::Hash;
 use strata_db_macros::gen_proxy;
-use strata_ee_acct_types::EeAccountState;
 use strata_identifiers::{EpochCommitment, OLBlockId};
 
 use crate::{DbError, DbResult};

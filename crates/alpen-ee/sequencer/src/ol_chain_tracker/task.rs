@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use alpen_ee_common::{
+use alpen_common::{
     get_inbox_messages_checked, ExecBlockStorage, OLBlockData, OLFinalizedStatus, SequencerOLClient,
 };
 use eyre::eyre;
@@ -200,7 +200,7 @@ async fn handle_state_pruning(
 
 #[cfg(test)]
 mod tests {
-    use alpen_ee_common::{MockExecBlockStorage, MockSequencerOLClient, OLClientError};
+    use alpen_common::{MockExecBlockStorage, MockSequencerOLClient, OLClientError};
 
     use super::*;
     use crate::ol_chain_tracker::test_utils::{
@@ -530,7 +530,7 @@ mod tests {
                 .expect_get_exec_block()
                 .times(1)
                 .returning(|_| {
-                    Err(alpen_ee_common::StorageError::Other(eyre::eyre!(
+                    Err(alpen_common::StorageError::Other(eyre::eyre!(
                         "db connection failed"
                     )))
                 });

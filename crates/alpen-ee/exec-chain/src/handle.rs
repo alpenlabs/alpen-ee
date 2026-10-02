@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use alpen_ee_common::{ConsensusHeads, ExecBlockRecord};
+use alpen_common::{ConsensusHeads, ExecBlockRecord};
 use strata_acct_types::Hash;
 use strata_service::CommandHandle;
 

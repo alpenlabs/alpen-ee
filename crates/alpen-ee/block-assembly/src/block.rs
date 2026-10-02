@@ -1,12 +1,12 @@
 use std::num::NonZero;
 
-use alpen_ee_common::{EnginePayload, ExecBlockPayload, PayloadBuilderEngine};
-use alpen_ee_params::AlpenSpecId;
+use alpen_acct_runtime::apply_input_messages;
+use alpen_acct_types::EeAccountState;
+use alpen_chain_types::ExecBlockPackage;
+use alpen_common::{EnginePayload, ExecBlockPayload, PayloadBuilderEngine};
+use alpen_params::AlpenSpecId;
 use eyre::Context;
 use strata_acct_types::{AccountId, Hash, MessageEntry};
-use strata_ee_acct_runtime::apply_input_messages;
-use strata_ee_acct_types::EeAccountState;
-use strata_ee_chain_types::ExecBlockPackage;
 
 use crate::{
     package::build_block_package,
@@ -152,12 +152,12 @@ pub async fn build_next_exec_block<E: PayloadBuilderEngine>(
 mod tests {
     use std::convert::Infallible;
 
-    use alpen_ee_common::{
+    use alpen_acct_types::PendingInputEntry;
+    use alpen_common::{
         ExecutionEngine, ExecutionEngineError, ForkchoiceState, PayloadBuildAttributes,
     };
     use alpen_reth_primitives::WithdrawalIntent;
     use async_trait::async_trait;
-    use strata_ee_acct_types::PendingInputEntry;
     use strata_predicate::PredicateKey;
 
     use super::*;

@@ -326,10 +326,10 @@ macro_rules! exec_block_storage_tests {
 
 #[cfg(feature = "test-utils")]
 pub mod exec_block_storage_test_fns {
-    use alpen_ee_params::AlpenSpecId;
+    use alpen_acct_types::EeAccountState;
+    use alpen_chain_types::{ExecBlockCommitment, ExecBlockPackage, ExecInputs, ExecOutputs};
+    use alpen_params::AlpenSpecId;
     use strata_acct_types::{AccountId, BitcoinAmount, Hash, MessageEntry, MsgPayload};
-    use strata_ee_acct_types::EeAccountState;
-    use strata_ee_chain_types::{ExecBlockCommitment, ExecBlockPackage, ExecInputs, ExecOutputs};
     use strata_identifiers::{Buf32, OLBlockCommitment, OLBlockId};
 
     use super::*;

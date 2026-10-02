@@ -6,13 +6,13 @@
 //! genesis work beyond what [`crate::node`] already did, no ExExes, and no
 //! services past the two every node runs.
 
-use alpen_ee_common::BlockNumHash;
-use alpen_ee_rpc_server::{AlpenEeRpcServer, EeRpcServer};
+use alpen_common::BlockNumHash;
 use alpen_reth_evm::evm::AlpenEvmFactory;
 use alpen_reth_node::{
     AlpenEthereumNode, AlpenGossipProtocolHandler, AlpenGossipState, AlpenNodeMode, DaFeeRateHandle,
 };
 use alpen_reth_rpc::AlpenFeeApiServer;
+use alpen_rpc_server::{AlpenEeRpcServer, EeRpcServer};
 use reth_chainspec::ChainSpec;
 use reth_network::{protocol::IntoRlpxSubProtocol, NetworkProtocols};
 use reth_node_builder::{NodeBuilder, WithLaunchContext};

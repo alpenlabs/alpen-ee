@@ -1,4 +1,4 @@
-use alpen_ee_common::{Batch, BatchDaProvider, BatchProver, BatchStatus, BatchStorage, DaStatus};
+use alpen_common::{Batch, BatchDaProvider, BatchProver, BatchStatus, BatchStorage, DaStatus};
 use eyre::Result;
 use tracing::{debug, error, warn};
 

@@ -1,8 +1,8 @@
-use alpen_ee_common::{ExecBlockPayload, ExecBlockRecord};
-use alpen_ee_params::AlpenParams;
+use alpen_acct_types::EeAccountState;
+use alpen_chain_types::{ExecBlockCommitment, ExecBlockPackage, ExecInputs, ExecOutputs};
+use alpen_common::{ExecBlockPayload, ExecBlockRecord};
+use alpen_params::AlpenParams;
 use strata_acct_types::Hash;
-use strata_ee_acct_types::EeAccountState;
-use strata_ee_chain_types::{ExecBlockCommitment, ExecBlockPackage, ExecInputs, ExecOutputs};
 use strata_identifiers::{Buf32, OLBlockCommitment};
 
 pub fn build_genesis_ee_account_state(params: &AlpenParams) -> EeAccountState {
@@ -73,7 +73,7 @@ pub fn build_genesis_exec_block(
 mod tests {
     use std::{fs, path::Path};
 
-    use alpen_ee_params::AlpenParams;
+    use alpen_params::AlpenParams;
     use strata_acct_types::tree_hash::{Sha256Hasher, TreeHash};
 
     use super::build_genesis_ee_account_state;

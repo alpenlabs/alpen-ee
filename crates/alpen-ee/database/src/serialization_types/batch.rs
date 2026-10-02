@@ -5,10 +5,10 @@
 //! untouched. Fixed 32-byte arrays are marked hex so they reflect as one
 //! string rather than a list of integers.
 
-use alpen_ee_common::{
+use alpen_common::{
     Batch, BatchId, BatchStatus, Chunk, ChunkId, ChunkStatus, L1DaBlockInfo, L1DaBlockRef, ProofId,
 };
-use alpen_ee_params::AlpenSpecId;
+use alpen_params::AlpenSpecId;
 use bitcoin::{hashes::Hash as _, Txid, Wtxid};
 #[cfg(feature = "console")]
 use borsh::io;

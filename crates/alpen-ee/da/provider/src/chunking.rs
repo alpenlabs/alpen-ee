@@ -1,11 +1,11 @@
 //! Producer-side helpers for splitting a [`DaBlob`] into envelope-sized chunks.
 //!
 //! Consumers (proof verifier, host witness builder) only need the codec types
-//! and `reassemble_da_blob` from [`alpen_ee_da_types`]; the chunking primitives
+//! and `reassemble_da_blob` from [`alpen_da_types`]; the chunking primitives
 //! here are exclusively used by the chunked-envelope DA provider when building
 //! inscriptions.
 
-use alpen_ee_da_types::DaBlob;
+use alpen_da_types::DaBlob;
 use strata_codec::{encode_to_vec, CodecError};
 use strata_l1_envelope_fmt::MAX_ENVELOPE_PAYLOAD_SIZE;
 
@@ -52,7 +52,7 @@ pub fn prepare_da_chunks(
 
 #[cfg(test)]
 mod tests {
-    use alpen_ee_da_types::{reassemble_da_blob, DaBlob, EvmHeaderSummary};
+    use alpen_da_types::{reassemble_da_blob, DaBlob, EvmHeaderSummary};
     use alpen_reth_statediff::BatchStateDiff;
     use strata_codec::{decode_buf_exact, encode_to_vec};
     use strata_l1_envelope_fmt::MAX_ENVELOPE_PAYLOAD_SIZE;

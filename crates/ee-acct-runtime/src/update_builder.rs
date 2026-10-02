@@ -4,11 +4,11 @@
 //! inputs, allowing the consumer to query available inputs and accept
 //! validated [`ChunkTransition`]s.
 
-use strata_acct_types::{Hash, MessageEntry};
-use strata_ee_acct_types::{
+use alpen_acct_types::{
     EeAccountState, EnvError, ExecutionEnvironment, PendingInputEntry, UpdateExtraData,
 };
-use strata_ee_chain_types::ChunkTransition;
+use alpen_chain_types::ChunkTransition;
+use strata_acct_types::{Hash, MessageEntry};
 use strata_snark_acct_runtime::{PrivateInput, UpdateBuilder as GenericUpdateBuilder};
 use strata_snark_acct_types::{
     LedgerRefs, OutputMessage, OutputTransfer, Seqno, SnarkAccountState, UpdateOperationData,

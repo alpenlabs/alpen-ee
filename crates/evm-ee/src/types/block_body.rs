@@ -1,9 +1,9 @@
 //! EVM block body implementation.
 
 use alloy_consensus::BlockBody;
+use alpen_acct_types::ExecBlockBody;
 use reth_ethereum_primitives::TransactionSigned;
 use strata_codec::{Codec, CodecError};
-use strata_ee_acct_types::ExecBlockBody;
 
 use crate::codec_shims::{decode_rlp_with_length, encode_rlp_with_length};
 

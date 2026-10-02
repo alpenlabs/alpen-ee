@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 
-use alpen_ee_common::{BlockNumHash, ExecBlockRecord, ExecBlockStorage, StorageError};
+use alpen_common::{BlockNumHash, ExecBlockRecord, ExecBlockStorage, StorageError};
 use strata_acct_types::Hash;
 use thiserror::Error;
 use tracing::warn;
@@ -180,7 +180,7 @@ pub async fn init_exec_chain_state_from_storage<TStorage: ExecBlockStorage>(
     storage: &TStorage,
 ) -> Result<ExecChainState, ExecChainStateError> {
     // Note: This function is expected to be run after
-    // `alpen_ee_genesis::handle_finalized_exec_genesis` which ensures there is at least genesis
+    // `alpen_genesis::handle_finalized_exec_genesis` which ensures there is at least genesis
     // block written to the db if it was originally empty.
     // If the db is still empty at this point, something really unexpected has happened, and we
     // cannot continue normal execution.
@@ -205,9 +205,9 @@ pub async fn init_exec_chain_state_from_storage<TStorage: ExecBlockStorage>(
 
 #[cfg(test)]
 mod tests {
-    use alpen_ee_params::AlpenSpecId;
-    use strata_ee_acct_types::EeAccountState;
-    use strata_ee_chain_types::{ExecBlockCommitment, ExecBlockPackage, ExecInputs, ExecOutputs};
+    use alpen_acct_types::EeAccountState;
+    use alpen_chain_types::{ExecBlockCommitment, ExecBlockPackage, ExecInputs, ExecOutputs};
+    use alpen_params::AlpenSpecId;
     use strata_identifiers::{Buf32, OLBlockCommitment};
 
     use super::*;

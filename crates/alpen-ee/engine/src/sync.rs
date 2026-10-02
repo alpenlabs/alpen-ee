@@ -4,7 +4,7 @@ use std::future::Future;
 
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::ForkchoiceState;
-use alpen_ee_common::{EnginePayload, ExecBlockStorage, ExecutionEngine};
+use alpen_common::{EnginePayload, ExecBlockStorage, ExecutionEngine};
 use reth_node_builder::NodeTypesWithDB;
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
@@ -320,14 +320,14 @@ where
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use alpen_ee_common::{
+    use alpen_acct_types::EeAccountState;
+    use alpen_chain_types::{ExecBlockCommitment, ExecBlockPackage, ExecInputs, ExecOutputs};
+    use alpen_common::{
         EnginePayload, ExecBlockPayload, ExecBlockRecord, ExecutionEngineError,
         MockExecBlockStorage, StorageError,
     };
-    use alpen_ee_params::AlpenSpecId;
+    use alpen_params::AlpenSpecId;
     use async_trait::async_trait;
-    use strata_ee_acct_types::EeAccountState;
-    use strata_ee_chain_types::{ExecBlockCommitment, ExecBlockPackage, ExecInputs, ExecOutputs};
 
     use super::*;
 

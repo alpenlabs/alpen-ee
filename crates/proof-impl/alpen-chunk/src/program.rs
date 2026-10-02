@@ -1,9 +1,9 @@
-use alpen_ee_params::{AlpenParams, AlpenSpecId};
+use alpen_chain_types::ChunkTransition;
+use alpen_chunk_runtime::PrivateInput;
+use alpen_params::{AlpenParams, AlpenSpecId};
 use k256::schnorr::SigningKey;
 use rkyv::rancor::Error as RkyvError;
 use ssz::Decode;
-use strata_ee_chain_types::ChunkTransition;
-use strata_ee_chunk_runtime::PrivateInput;
 use strata_predicate::{PredicateKey, PredicateTypeId};
 use zkaleido::{
     ProofType, PublicValues, ZkVmError, ZkVmInputError, ZkVmInputResult, ZkVmProgram, ZkVmResult,
@@ -110,19 +110,19 @@ impl EeChunkProgram {
 mod tests {
     use std::{fs, path::PathBuf, sync::Arc};
 
-    use alpen_ee_params::{AlpenSpecId, DEV_PARAMS_JSON};
+    use alpen_acct_types::{ExecBlock, ExecHeader, ExecPayload, ExecutionEnvironment};
+    use alpen_chain_types::{ChunkTransition, ExecInputs};
+    use alpen_chunk_runtime::{PrivateInput, RawBlockData, RawChunkData};
+    use alpen_evm_ee::{
+        EvmBlock, EvmBlockBody, EvmExecutionEnvironment, EvmHeader, EvmPartialState,
+    };
+    use alpen_params::{AlpenSpecId, DEV_PARAMS_JSON};
     use alpen_reth_evm::evm::AlpenEvmFactory;
     use reth_primitives_traits::Block as _;
     use rsp_client_executor::io::EthClientExecutorInput;
     use serde::Deserialize;
     use strata_acct_types::Hash;
     use strata_codec::encode_to_vec;
-    use strata_ee_acct_types::{ExecBlock, ExecHeader, ExecPayload, ExecutionEnvironment};
-    use strata_ee_chain_types::{ChunkTransition, ExecInputs};
-    use strata_ee_chunk_runtime::{PrivateInput, RawBlockData, RawChunkData};
-    use strata_evm_ee::{
-        EvmBlock, EvmBlockBody, EvmExecutionEnvironment, EvmHeader, EvmPartialState,
-    };
 
     use super::*;
 

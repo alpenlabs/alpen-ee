@@ -1,4 +1,5 @@
-use alpen_ee_common::{
+use alpen_acct_types::UpdateExtraData;
+use alpen_common::{
     build_ledger_refs_from_da, Batch, BatchProver, ExecBlockRecord, ExecBlockStorage, L1DaBlockRef,
     ProofId,
 };
@@ -9,7 +10,6 @@ use strata_acct_types::{
     Hash,
 };
 use strata_codec::encode_to_vec;
-use strata_ee_acct_types::UpdateExtraData;
 use strata_snark_acct_types::{
     LedgerRefs, OutputMessage, OutputTransfer, ProofState, SnarkAccountUpdate, UpdateOperationData,
     UpdateOutputs,

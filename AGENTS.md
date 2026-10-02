@@ -115,7 +115,7 @@ Crate tables list repository paths. Package names usually carry a `strata-*` or 
 | `bin/strata-dbtool` | `strata-dbtool` | Database inspection and debugging utility |
 | `bin/strata-test-cli` | `strata-test-cli` | Bridge, ASM, and transaction testing utility |
 | `bin/datatool` | `strata-datatool` | Development utility for test data and key generation |
-| `bin/prover-perf` | `strata-provers-perf` | Performance benchmarking for proof systems |
+| `bin/prover-perf` | `alpen-prover-perf` | Performance benchmarking for proof systems |
 
 The workspace default members include the main runtime and testing binaries, but not every workspace crate. Check root `Cargo.toml` before assuming a crate is built by default.
 
@@ -597,7 +597,7 @@ The datadir will be the outputted by the test framework and will be named after 
 
 ### Network Params
 
-`params/<network>.json` holds the full `AlpenParams` of each network (`dev`, `staging`, `testnet`, `mainnet`). It is the file `alpen-client --alpen-params` loads and the file the SP1 guests bake in through `SP1_ALPEN_PARAMS_PATH`, so changing it changes that network's guest ELFs. Tests and CI use `dev.json`. The `genesis_inner_state_roots_are_stable` test in `alpen-ee-genesis` parses every file and pins its genesis root.
+`params/<network>.json` holds the full `AlpenParams` of each network (`dev`, `staging`, `testnet`, `mainnet`). It is the file `alpen-client --alpen-params` loads and the file the SP1 guests bake in through `SP1_ALPEN_PARAMS_PATH`, so changing it changes that network's guest ELFs. Tests and CI use `dev.json`. The `genesis_inner_state_roots_are_stable` test in `alpen-genesis` parses every file and pins its genesis root.
 
 ### Key Dependencies
 

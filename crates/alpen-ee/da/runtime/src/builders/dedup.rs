@@ -6,8 +6,8 @@
 use std::collections::BTreeSet;
 
 use alloy_primitives::{keccak256, B256};
-use alpen_ee_common::AccessedStateStore;
-use alpen_ee_da_types::{BytecodePreimage, DaBlob, DedupWitness};
+use alpen_common::AccessedStateStore;
+use alpen_da_types::{BytecodePreimage, DaBlob, DedupWitness};
 use alpen_reth_db::StateDiffProvider;
 use alpen_reth_statediff::{AccountChange, BatchBuilder, BatchStateDiff};
 use async_trait::async_trait;
@@ -193,7 +193,7 @@ fn build_batch_state_diff(
 #[cfg(test)]
 mod tests {
     use alloy_primitives::{Address, Bytes, U256};
-    use alpen_ee_da_types::EvmHeaderSummary;
+    use alpen_da_types::EvmHeaderSummary;
     use alpen_reth_statediff::AccountDiff;
 
     use super::*;

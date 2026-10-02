@@ -1,10 +1,10 @@
 //! Shared test utilities for batch_lifecycle tests.
 
-use alpen_ee_common::{
+use alpen_common::{
     Batch, BatchId, BatchStatus, BatchStorage, InMemoryStorage, L1DaBlockInfo, L1DaBlockRef,
     ProofId,
 };
-use alpen_ee_params::AlpenSpecId;
+use alpen_params::AlpenSpecId;
 use bitcoin::{hashes::Hash as _, BlockHash, Txid, Wtxid};
 use strata_acct_types::Hash;
 use strata_btc_types::BlockHashExt;

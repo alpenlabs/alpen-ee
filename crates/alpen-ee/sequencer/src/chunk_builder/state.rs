@@ -2,7 +2,7 @@
 
 use std::{collections::VecDeque, mem};
 
-use alpen_ee_common::{BatchId, BlockNumHash, ChunkId, ChunkStorage};
+use alpen_common::{BatchId, BlockNumHash, ChunkId, ChunkStorage};
 use eyre::Result;
 use tracing::debug;
 

@@ -2,15 +2,15 @@
 
 use std::sync::Arc;
 
-use alpen_ee_da_runtime::verification::verify_da_witness;
-use alpen_ee_da_types::ArchivedDaWitness;
-use alpen_ee_params::{AlpenParams, AlpenSpecId};
+use alpen_acct_runtime::ArchivedEePrivateInput;
+use alpen_acct_types::EeAccountState;
+use alpen_da_runtime::verification::verify_da_witness;
+use alpen_da_types::ArchivedDaWitness;
+use alpen_evm_ee::EvmExecutionEnvironment;
+use alpen_params::{AlpenParams, AlpenSpecId};
 use alpen_reth_evm::evm::AlpenEvmFactory;
 use reth_chainspec::ChainSpec;
 use rkyv::rancor::Error as RkyvError;
-use strata_ee_acct_runtime::ArchivedEePrivateInput;
-use strata_ee_acct_types::EeAccountState;
-use strata_evm_ee::EvmExecutionEnvironment;
 use strata_predicate::PredicateKey;
 use strata_snark_acct_runtime::ArchivedPrivateInput as ArchivedUpdatePrivateInput;
 use zkaleido::ZkVmEnvSerde;
@@ -66,13 +66,8 @@ pub fn process_ee_acct_update(
 
     let ee = EvmExecutionEnvironment::new(chain_spec, evm_factory);
 
-    strata_ee_acct_runtime::verify_and_process_update(
-        &ee,
-        chunk_predicate_key,
-        ee_input,
-        upd_input,
-    )
-    .expect("account update verification failed");
+    alpen_acct_runtime::verify_and_process_update(&ee, chunk_predicate_key, ee_input, upd_input)
+        .expect("account update verification failed");
 
     let update_pub_params = upd_input
         .try_decode_update_pub_params()

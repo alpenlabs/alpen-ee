@@ -2,7 +2,7 @@
 
 use std::collections::VecDeque;
 
-use alpen_ee_common::{BatchStorage, BlockNumHash};
+use alpen_common::{BatchStorage, BlockNumHash};
 use eyre::Result;
 
 use crate::sealing_policy::{AccumulationPolicy, Accumulator};

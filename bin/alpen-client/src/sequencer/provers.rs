@@ -11,14 +11,14 @@
 //! - `chunk_receipts` — chunk prover writes (via paas auto-store); acct `fetch_input` reads back.
 //! - `batch_proofs` — outer-proof store keyed by `BatchId`; outer hook writes, OL submission reads.
 //!
-//! All backed by `EeProverDbMdbx`; see `alpen_ee_database::mdbxdb`
+//! All backed by `EeProverDbMdbx`; see `alpen_database::mdbxdb`
 //! for schemas.
 
 use std::sync::Arc;
 
-use alpen_ee_common::{BatchStorage, ChunkStorage, SequencerOLClient};
-use alpen_ee_database::{EeNodeStorage, SequencerDatabases};
-use alpen_ee_params::{AlpenParams, AlpenSpecId};
+use alpen_common::{BatchStorage, ChunkStorage, SequencerOLClient};
+use alpen_database::{EeNodeStorage, SequencerDatabases};
+use alpen_params::{AlpenParams, AlpenSpecId};
 use alpen_reth_witness::RangeWitnessExtractor;
 use bitcoind_async_client::Client as BtcClient;
 use reth_provider::{BlockReader, StateProviderFactory};

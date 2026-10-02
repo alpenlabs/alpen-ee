@@ -863,8 +863,8 @@ fn open_env(path: &Path, name: &str, mode: AttachMode) -> eyre::Result<MdbxEnv> 
 mod tests {
     use std::path::Path;
 
-    use alpen_ee_common::ChunkId;
-    use alpen_ee_params::AlpenSpecId;
+    use alpen_common::ChunkId;
+    use alpen_params::AlpenSpecId;
     use alpen_store_mdbx::{DbError, Direction, MdbxConfig, MdbxEnv, TableSpec};
     use strata_acct_types::Hash;
     use strata_paas::{TaskRecordData, TaskStatus};

@@ -8,7 +8,7 @@
 //! `on_launch` and pushes entries into the processing queue — the
 //! normal tick loop handles sealing, data fetching, and witness dispatch.
 
-use alpen_ee_common::{BatchStorage, BlockNumHash, ChunkStorage, ExecBlockStorage};
+use alpen_common::{BatchStorage, BlockNumHash, ChunkStorage, ExecBlockStorage};
 use eyre::{eyre, Result};
 use strata_acct_types::Hash;
 use tracing::{debug, info, warn};

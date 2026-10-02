@@ -1,7 +1,7 @@
 //! [`DaBlobSource`] — the seam between DA blob assembly and publication.
 
-use alpen_ee_common::BatchId;
-use alpen_ee_da_types::DaBlob;
+use alpen_common::BatchId;
+use alpen_da_types::DaBlob;
 use async_trait::async_trait;
 
 /// Source of [`DaBlob`]s for a batch, and owner of the cross-batch DA dedup

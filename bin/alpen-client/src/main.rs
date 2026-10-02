@@ -43,7 +43,7 @@ mod services;
 
 use std::{env, process};
 
-use alpen_ee_params::AlpenSpecId;
+use alpen_params::AlpenSpecId;
 use clap::Parser;
 use reth_chainspec::ChainSpec;
 use reth_cli_commands::{launcher::FnLauncher, node::NodeCommand};

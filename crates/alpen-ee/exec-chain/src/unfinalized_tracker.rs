@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use alpen_ee_common::{BlockNumHash, ExecBlockRecord};
+use alpen_common::{BlockNumHash, ExecBlockRecord};
 use strata_acct_types::Hash;
 use thiserror::Error;
 

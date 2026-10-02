@@ -3,7 +3,7 @@
 //!
 //! Reth assumes one chain spec for the lifetime of the EVM component, but the
 //! Alpen spec version governing a block is decided per block, from the version
-//! carried in the header's `extra_data` (see [`alpen_ee_params::HeaderExtra`]).
+//! carried in the header's `extra_data` (see [`alpen_params::HeaderExtra`]).
 //! This config keeps `NodeTypes::ChainSpec` and the surrounding generics
 //! untouched: it holds the whole per-version table — total over the closed
 //! [`AlpenSpecId`] enum by [`EvmSpec`]'s construction — and dispatches each
@@ -31,7 +31,7 @@ use std::{convert::Infallible, io};
 use alloy_eips::Decodable2718;
 use alloy_primitives::Bytes;
 use alloy_rpc_types::engine::payload::ExecutionData;
-use alpen_ee_params::{
+use alpen_params::{
     header_spec_version, peek_spec_version, AlpenSpecId, EvmSpec, HeaderExtra, HeaderExtraError,
 };
 use alpen_reth_evm::{
@@ -389,7 +389,7 @@ pub fn payload_spec_version(payload: &ExecutionData) -> Result<AlpenSpecId, Head
 #[cfg(test)]
 mod tests {
     use alloy_primitives::Bytes;
-    use alpen_ee_params::{AlpenSpecId, EvmSpec, HeaderExtra, HeaderExtraError};
+    use alpen_params::{AlpenSpecId, EvmSpec, HeaderExtra, HeaderExtraError};
     use alpen_reth_evm::evm::AlpenEvmFactory;
     use reth_evm::{
         eth::EthBlockExecutionCtx,

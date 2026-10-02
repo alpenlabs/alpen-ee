@@ -1,6 +1,6 @@
 //! Alpen OpenRPC specification assembly.
 
-use alpen_ee_rpc_api::{AlpenAdminRpcOpenRpc, AlpenEeRpcOpenRpc};
+use alpen_rpc_api::{AlpenAdminRpcOpenRpc, AlpenEeRpcOpenRpc};
 use strata_ol_rpc_api::{
     OLClientRpcOpenRpc, OLFullNodeRpcOpenRpc, OLSequencerRpcOpenRpc, OLSubmitRpcOpenRpc,
 };

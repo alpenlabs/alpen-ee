@@ -1,15 +1,15 @@
 [package]
-name = "strata-ee-chunk-runtime"
+name = "alpen-chunk-runtime"
 version.workspace = true
 edition = "2024"
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
+alpen-acct-types.workspace = true
+alpen-chain-types.workspace = true
 strata-acct-types.workspace = true
 strata-codec.workspace = true
-strata-ee-acct-types.workspace = true
-strata-ee-chain-types.workspace = true
 strata-predicate.workspace = true
 
 rkyv.workspace = true
@@ -17,7 +17,7 @@ rkyv_impl.workspace = true
 ssz.workspace = true
 
 [dev-dependencies]
-strata-simple-ee.workspace = true
+alpen-simple-ee.workspace = true
 
 [lints]
 workspace = true

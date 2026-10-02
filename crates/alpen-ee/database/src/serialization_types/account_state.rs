@@ -1,8 +1,8 @@
+use alpen_acct_types::{EeAccountState, PendingFinclEntry, PendingInputEntry};
+use alpen_chain_types::SubjectDepositData;
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 use strata_acct_types::{BitcoinAmount, Hash, SubjectId};
-use strata_ee_acct_types::{EeAccountState, PendingFinclEntry, PendingInputEntry};
-use strata_ee_chain_types::SubjectDepositData;
 use strata_predicate::PredicateKey;
 
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]

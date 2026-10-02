@@ -27,12 +27,12 @@
 //!
 //! Use [`create_batch_builder`] to construct the task.
 //!
-//! **Important**: [`alpen_ee_genesis::ensure_batch_genesis`] must be called before
+//! **Important**: [`alpen_genesis::ensure_batch_genesis`] must be called before
 //! [`init_batch_builder_state`] to ensure the genesis batch exists in storage.
 //!
 //! ```ignore
-//! use alpen_ee_genesis::ensure_batch_genesis;
-//! use alpen_ee_sequencer::{
+//! use alpen_genesis::ensure_batch_genesis;
+//! use alpen_sequencer::{
 //!     create_batch_builder, BatchBuilderState, init_batch_builder_state,
 //!     sealing_policy::max_value_policy::{MaxValueSealing, ValueAccumulatorPolicy},
 //! };

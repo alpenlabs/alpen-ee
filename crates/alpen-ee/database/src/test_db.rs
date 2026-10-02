@@ -18,11 +18,12 @@ use std::{
 };
 
 use alloy_primitives::B256;
-use alpen_ee_common::{
+use alpen_acct_types::EeAccountState;
+use alpen_common::{
     exec_block_storage_test_fns::create_exec_block, AccessedAccount, AccessedStateRecord, Batch,
     Chunk,
 };
-use alpen_ee_params::AlpenSpecId;
+use alpen_params::AlpenSpecId;
 use alpen_reth_db::{
     mdbx::{witness_tables, EeDaContextDbMdbx, WitnessDbMdbx},
     EeDaContext, StateDiffStore,
@@ -35,7 +36,6 @@ use strata_db_types::{
     fee_bump::{TxAttempt, TxAttemptParts, TxAttemptStatus, TxNodeKind, TxNodeRecord},
     l1_broadcast::{L1BroadcastDatabase, L1TxEntry},
 };
-use strata_ee_acct_types::EeAccountState;
 use strata_identifiers::{Buf32, EpochCommitment, OLBlockId, RBuf32};
 use strata_l1_txfmt::MagicBytes;
 use strata_paas::{TaskRecordData, TaskStatus};

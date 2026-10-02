@@ -22,9 +22,9 @@
 
 use std::{marker::PhantomData, sync::Arc};
 
-use alpen_ee_common::{decode_chunk_task_key, BatchId, Proof, ProofId};
-use alpen_ee_database::{BatchTaskKey, ChunkTaskKey, EeProverDbMdbx, ProverTaskKey};
-use alpen_ee_params::AlpenSpecId;
+use alpen_common::{decode_chunk_task_key, BatchId, Proof, ProofId};
+use alpen_database::{BatchTaskKey, ChunkTaskKey, EeProverDbMdbx, ProverTaskKey};
+use alpen_params::AlpenSpecId;
 use strata_db_types::errors::DbError;
 use strata_paas::{
     ProverError, ProverResult, ReceiptStore, TaskRecord, TaskRecordData, TaskStatus, TaskStore,

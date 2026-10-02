@@ -4,6 +4,7 @@ use std::{collections::BTreeMap, fs::read_to_string, path::PathBuf};
 
 use alloy_consensus::{Header, Sealable, constants::EMPTY_ROOT_HASH};
 use alloy_rpc_types_debug::ExecutionWitness;
+use alpen_acct_types::ExecHeader;
 use reth_primitives_traits::Account;
 use reth_trie::{HashedPostState, HashedStorage, TrieAccount};
 use revm::{DatabaseRef, state::Bytecode};
@@ -12,7 +13,6 @@ use rsp_client_executor::io::EthClientExecutorInput;
 use rsp_mpt::EthereumState;
 use serde::Deserialize;
 use strata_codec::{decode_buf_exact, encode_to_vec};
-use strata_ee_acct_types::ExecHeader;
 
 use super::{EvmBlock, EvmBlockBody, EvmHeader, EvmPartialState, EvmWriteBatch};
 
@@ -349,11 +349,11 @@ fn test_evm_partial_state_rejects_invalid_ancestor_parent_hash() {
 fn test_evm_partial_state_codec_roundtrip_execution() {
     use std::sync::Arc;
 
+    use alpen_acct_types::{ExecBlock, ExecPayload, ExecutionEnvironment};
+    use alpen_chain_types::ExecInputs;
     use alpen_reth_evm::evm::AlpenEvmFactory;
     use reth_chainspec::ChainSpec;
     use reth_primitives_traits::Block as _;
-    use strata_ee_acct_types::{ExecBlock, ExecPayload, ExecutionEnvironment};
-    use strata_ee_chain_types::ExecInputs;
 
     use crate::EvmExecutionEnvironment;
 

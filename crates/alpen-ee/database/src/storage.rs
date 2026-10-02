@@ -1,13 +1,13 @@
 use std::{num::NonZeroUsize, sync::Arc};
 
-use alpen_ee_common::{
+use alpen_acct_types::EeAccountState;
+use alpen_common::{
     AccessedStateRecord, AccessedStateStore, Batch, BatchId, BatchStatus, BatchStorage,
     BlockWitnessStore, Chunk, ChunkId, ChunkStatus, ChunkStorage, EeAccountStateAtEpoch,
     ExecBlockPayload, ExecBlockRecord, ExecBlockStorage, OLBlockOrEpoch, Storage, StorageError,
 };
 use async_trait::async_trait;
 use strata_acct_types::Hash;
-use strata_ee_acct_types::EeAccountState;
 use strata_identifiers::{EpochCommitment, OLBlockId};
 use strata_storage_common::cache::CacheTable;
 use tokio::runtime::Handle;

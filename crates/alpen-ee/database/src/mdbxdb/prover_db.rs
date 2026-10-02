@@ -2,8 +2,8 @@
 
 use std::{path::Path, sync::Arc};
 
-use alpen_ee_common::{BatchId, ChunkId, ProofId};
-use alpen_ee_params::AlpenSpecId;
+use alpen_common::{BatchId, ChunkId, ProofId};
+use alpen_params::AlpenSpecId;
 use alpen_store_mdbx::{MdbxConfig, MdbxEnv};
 use strata_db_types::{errors::DbError, DbResult};
 use strata_paas::TaskRecordData;

@@ -1,4 +1,4 @@
-use alpen_ee_common::{BatchId, ChunkId, StorageError};
+use alpen_common::{BatchId, ChunkId, StorageError};
 use strata_acct_types::Hash;
 use strata_identifiers::OLBlockId;
 use strata_storage_common::exec::OpsError;

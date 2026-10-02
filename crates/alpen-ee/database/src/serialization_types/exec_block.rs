@@ -1,15 +1,15 @@
-use alpen_ee_common::ExecBlockRecord;
-use alpen_ee_params::AlpenSpecId;
+use alpen_acct_types::EeAccountState;
+use alpen_chain_types::ExecBlockPackage;
+#[cfg(feature = "console")]
+use alpen_chain_types::{
+    ExecBlockCommitment, ExecInputs, ExecOutputs, OutputMessage, OutputTransfer,
+};
+use alpen_common::ExecBlockRecord;
+use alpen_params::AlpenSpecId;
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 use ssz::{Decode, Encode};
 use strata_acct_types::{BitcoinAmount, Hash, MessageEntry, MsgPayload};
-use strata_ee_acct_types::EeAccountState;
-use strata_ee_chain_types::ExecBlockPackage;
-#[cfg(feature = "console")]
-use strata_ee_chain_types::{
-    ExecBlockCommitment, ExecInputs, ExecOutputs, OutputMessage, OutputTransfer,
-};
 use strata_identifiers::OLBlockCommitment;
 
 use super::account_state::DBEeAccountState;
@@ -26,7 +26,7 @@ pub(crate) struct DBExecBlockRecord {
     account_state: DBEeAccountState,
     next_inbox_msg_idx: u64,
     next_deposit_idx: u64,
-    /// Raw `AlpenSpecId` discriminant; `alpen-ee-params` doesn't derive Borsh, so this is
+    /// Raw `AlpenSpecId` discriminant; `alpen-params` doesn't derive Borsh, so this is
     /// stored as its primitive form and converted at the `ExecBlockRecord` boundary.
     next_spec_version: u16,
     messages: Vec<DBMessageEntry>,

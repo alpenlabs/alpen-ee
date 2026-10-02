@@ -1,6 +1,6 @@
 //! High-level entrypoint functions for EE account update processing.
 
-use strata_ee_acct_types::{EeAccountState, EnvError, ExecutionEnvironment};
+use alpen_acct_types::{EeAccountState, EnvError, ExecutionEnvironment};
 use strata_predicate::PredicateKey;
 use strata_snark_acct_runtime::{
     ArchivedPrivateInput as ArchivedUpdatePrivateInput, ProgramResult,

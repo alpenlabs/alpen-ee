@@ -1,10 +1,10 @@
 //! Simple execution environment implementation.
 
-use strata_ee_acct_types::{
+use alpen_acct_types::{
     BlockAssembler, EnvResult, ExecBlock, ExecBlockOutput, ExecPartialState, ExecPayload,
     ExecutionEnvironment,
 };
-use strata_ee_chain_types::{ExecInputs, ExecOutputs};
+use alpen_chain_types::{ExecInputs, ExecOutputs};
 
 use crate::types::{SimpleBlock, SimpleHeader, SimplePartialState, SimpleWriteBatch};
 
@@ -35,7 +35,7 @@ impl ExecutionEnvironment for SimpleExecutionEnvironment {
             let balance = accounts.entry(deposit.dest()).or_insert(0);
             *balance = balance
                 .checked_add(deposit.value().to_sat())
-                .ok_or(strata_ee_acct_types::EnvError::InvalidBlockTx)?;
+                .ok_or(alpen_acct_types::EnvError::InvalidBlockTx)?;
         }
 
         // 2. Apply transactions from the block body
@@ -92,9 +92,9 @@ impl BlockAssembler for SimpleExecutionEnvironment {
 mod tests {
     use std::collections::BTreeMap;
 
+    use alpen_acct_types::{EnvError, EnvResult, ExecHeader, ExecPartialState, ExecPayload};
+    use alpen_chain_types::ExecInputs;
     use strata_acct_types::{AccountId, BitcoinAmount, Hash, SubjectId};
-    use strata_ee_acct_types::{EnvError, EnvResult, ExecHeader, ExecPartialState, ExecPayload};
-    use strata_ee_chain_types::ExecInputs;
 
     use super::*;
     use crate::types::{SimpleBlockBody, SimpleHeader, SimpleHeaderIntrinsics, SimpleTransaction};
@@ -233,7 +233,7 @@ mod tests {
 
         // Create a deposit of 1000 to alice
         let mut inputs = ExecInputs::new_empty();
-        inputs.add_subject_deposit(strata_ee_chain_types::SubjectDepositData::new(
+        inputs.add_subject_deposit(alpen_chain_types::SubjectDepositData::new(
             alice(),
             BitcoinAmount::try_from(1000u64).unwrap(),
         ));
@@ -261,15 +261,15 @@ mod tests {
 
         // Create multiple deposits
         let mut inputs = ExecInputs::new_empty();
-        inputs.add_subject_deposit(strata_ee_chain_types::SubjectDepositData::new(
+        inputs.add_subject_deposit(alpen_chain_types::SubjectDepositData::new(
             alice(),
             BitcoinAmount::try_from(500u64).unwrap(),
         ));
-        inputs.add_subject_deposit(strata_ee_chain_types::SubjectDepositData::new(
+        inputs.add_subject_deposit(alpen_chain_types::SubjectDepositData::new(
             bob(),
             BitcoinAmount::try_from(300u64).unwrap(),
         ));
-        inputs.add_subject_deposit(strata_ee_chain_types::SubjectDepositData::new(
+        inputs.add_subject_deposit(alpen_chain_types::SubjectDepositData::new(
             charlie(),
             BitcoinAmount::try_from(1000u64).unwrap(),
         ));
@@ -412,11 +412,11 @@ mod tests {
         // Block 1: Deposit 2000 to alice, 1500 to bob
         {
             let mut inputs = ExecInputs::new_empty();
-            inputs.add_subject_deposit(strata_ee_chain_types::SubjectDepositData::new(
+            inputs.add_subject_deposit(alpen_chain_types::SubjectDepositData::new(
                 alice(),
                 BitcoinAmount::try_from(2000u64).unwrap(),
             ));
-            inputs.add_subject_deposit(strata_ee_chain_types::SubjectDepositData::new(
+            inputs.add_subject_deposit(alpen_chain_types::SubjectDepositData::new(
                 bob(),
                 BitcoinAmount::try_from(1500u64).unwrap(),
             ));
@@ -491,7 +491,7 @@ mod tests {
         // Block 3: Deposit 500 to charlie, alice withdraws 600, charlie -> bob: 200
         {
             let mut inputs = ExecInputs::new_empty();
-            inputs.add_subject_deposit(strata_ee_chain_types::SubjectDepositData::new(
+            inputs.add_subject_deposit(alpen_chain_types::SubjectDepositData::new(
                 charlie(),
                 BitcoinAmount::try_from(500u64).unwrap(),
             ));
@@ -546,7 +546,7 @@ mod tests {
         // Block 4: bob withdraws 800, charlie withdraws 400, deposit 1000 to alice
         {
             let mut inputs = ExecInputs::new_empty();
-            inputs.add_subject_deposit(strata_ee_chain_types::SubjectDepositData::new(
+            inputs.add_subject_deposit(alpen_chain_types::SubjectDepositData::new(
                 alice(),
                 BitcoinAmount::try_from(1000u64).unwrap(),
             ));

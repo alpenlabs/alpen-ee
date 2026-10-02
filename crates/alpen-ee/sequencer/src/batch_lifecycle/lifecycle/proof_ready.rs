@@ -1,4 +1,4 @@
-use alpen_ee_common::{
+use alpen_common::{
     Batch, BatchDaProvider, BatchProver, BatchStatus, BatchStorage, ProofGenerationStatus,
 };
 use eyre::Result;

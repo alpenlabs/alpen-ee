@@ -3,9 +3,9 @@
 
 use std::sync::Arc;
 
-use alpen_ee_da_provider::{ChunkedEnvelopeDaProvider, DaBlobSource, StateDiffBlobProvider};
-use alpen_ee_database::{EeNodeStorage, SequencerDatabases};
-use alpen_ee_params::AlpenParams;
+use alpen_da_provider::{ChunkedEnvelopeDaProvider, DaBlobSource, StateDiffBlobProvider};
+use alpen_database::{EeNodeStorage, SequencerDatabases};
+use alpen_params::AlpenParams;
 use bitcoind_async_client::{
     corepc_types::bitcoin::key::Keypair,
     traits::{Reader, Wallet as _},

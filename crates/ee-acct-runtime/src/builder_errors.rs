@@ -1,8 +1,8 @@
 //! Error types for builder utilities.
 
+use alpen_acct_types::{EnvError, MessageDecodeError};
 use strata_acct_types::Hash;
 use strata_codec::CodecError;
-use strata_ee_acct_types::{EnvError, MessageDecodeError};
 use strata_snark_acct_runtime::ProgramError;
 use thiserror::Error;
 

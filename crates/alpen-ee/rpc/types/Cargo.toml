@@ -1,6 +1,6 @@
 [package]
 edition.workspace = true
-name = "alpen-ee-rpc-types"
+name = "alpen-rpc-types"
 version.workspace = true
 license.workspace = true
 repository.workspace = true

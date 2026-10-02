@@ -9,17 +9,17 @@ mod common;
 
 use std::iter;
 
+use alpen_acct_runtime::{BuilderError, EeVerificationInput, UpdateBuilder};
+use alpen_acct_types::{PendingInputEntry, UpdateExtraData};
+use alpen_chain_types::{ExecInputs, ExecOutputs, SequenceTracker, SubjectDepositData};
+use alpen_simple_ee::SimpleExecutionEnvironment;
 use common::{
     build_update_operation, create_chunk_transition, create_deposit_message, create_initial_state,
     create_vstate, empty_exec_header_summary, simple_chunk, verify_update,
 };
 use strata_acct_types::{AccountId, BitcoinAmount, Hash, SubjectId};
 use strata_codec::encode_to_vec;
-use strata_ee_acct_runtime::{BuilderError, EeVerificationInput, UpdateBuilder};
-use strata_ee_acct_types::{PendingInputEntry, UpdateExtraData};
-use strata_ee_chain_types::{ExecInputs, ExecOutputs, SequenceTracker, SubjectDepositData};
 use strata_predicate::PredicateKey;
-use strata_simple_ee::SimpleExecutionEnvironment;
 use strata_snark_acct_runtime::ProgramError;
 use strata_snark_acct_types::{
     LedgerRefs, OutputTransfer, ProofState, UpdateOperationData, UpdateOutputs,
@@ -360,7 +360,7 @@ fn test_chain_linkage_mismatch() {
     assert!(
         matches!(
             result,
-            Err(strata_ee_acct_types::EnvError::MismatchedChainSegment)
+            Err(alpen_acct_types::EnvError::MismatchedChainSegment)
         ),
         "expected MismatchedChainSegment, got: {result:?}"
     );
@@ -374,7 +374,7 @@ fn test_deposit_mismatch_in_chunk() {
     let value = BitcoinAmount::try_from(1000u64).unwrap();
     let deposit = SubjectDepositData::new(dest, value);
 
-    let initial_state = strata_ee_acct_types::EeAccountState::new(
+    let initial_state = alpen_acct_types::EeAccountState::new(
         Hash::new([0u8; 32]),
         Hash::zero(),
         vec![PendingInputEntry::Deposit(deposit)],
@@ -411,10 +411,7 @@ fn test_deposit_mismatch_in_chunk() {
 
     let result = vstate.process_decoded_transition(&transition, &mut tracker);
     assert!(
-        matches!(
-            result,
-            Err(strata_ee_acct_types::EnvError::InconsistentChunkIo)
-        ),
+        matches!(result, Err(alpen_acct_types::EnvError::InconsistentChunkIo)),
         "expected InconsistentChunkIo, got: {result:?}"
     );
 }
@@ -423,7 +420,7 @@ fn test_deposit_mismatch_in_chunk() {
 fn test_input_count_mismatch() {
     let ee = SimpleExecutionEnvironment;
 
-    let initial_state = strata_ee_acct_types::EeAccountState::new(
+    let initial_state = alpen_acct_types::EeAccountState::new(
         Hash::new([0u8; 32]),
         Hash::zero(),
         Vec::new(),
@@ -461,10 +458,7 @@ fn test_input_count_mismatch() {
 
     let result = vstate.process_decoded_transition(&transition, &mut tracker);
     assert!(
-        matches!(
-            result,
-            Err(strata_ee_acct_types::EnvError::InconsistentChunkIo)
-        ),
+        matches!(result, Err(alpen_acct_types::EnvError::InconsistentChunkIo)),
         "expected InconsistentChunkIo, got: {result:?}"
     );
 }

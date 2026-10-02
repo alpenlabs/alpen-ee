@@ -2,14 +2,14 @@
 
 use std::collections::BTreeMap;
 
+use alpen_acct_types::{
+    EnvError, EnvResult, ExecBlock, ExecBlockBody, ExecHeader, ExecPartialState,
+};
+use alpen_chain_types::{ExecHeaderSummary, ExecOutputs, OutputMessage};
 use digest::Digest;
 use sha2::Sha256;
 use strata_acct_types::{AccountId, BitcoinAmount, Hash, MsgPayload, SubjectId};
 use strata_codec::{Codec, CodecError};
-use strata_ee_acct_types::{
-    EnvError, EnvResult, ExecBlock, ExecBlockBody, ExecHeader, ExecPartialState,
-};
-use strata_ee_chain_types::{ExecHeaderSummary, ExecOutputs, OutputMessage};
 
 /// Write batch containing the updated account state.
 #[derive(Clone, Debug)]
@@ -333,7 +333,7 @@ impl SimpleTransaction {
                     .ok_or(EnvError::InvalidBlockTx)?;
 
                 // Emit output
-                use strata_ee_chain_types::OutputTransfer;
+                use alpen_chain_types::OutputTransfer;
                 let value =
                     BitcoinAmount::try_from(*value).map_err(|_| EnvError::InvalidBlockTx)?;
                 outputs.add_transfer(OutputTransfer::new(*dest, value));

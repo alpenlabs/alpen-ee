@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use alpen_ee_common::BlockNumHash;
+use alpen_common::BlockNumHash;
 use alpen_reth_node::{
     AlpenGossipCommand, AlpenGossipEvent, AlpenGossipMessage, AlpenGossipPackage,
 };

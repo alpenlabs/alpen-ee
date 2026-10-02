@@ -3,21 +3,21 @@
 #![allow(unreachable_pub, reason = "test utilities")]
 #![allow(dead_code, reason = "utilities used by different test files")]
 
+use alpen_acct_runtime::{
+    ArchivedEePrivateInput, ChunkInput, EePrivateInput, EeSnarkAccountProgram, EeVerificationInput,
+    EeVerificationState, UpdateBuilder,
+};
+use alpen_acct_types::{DecodedEeMessageData, EeAccountState, EnvError, UpdateExtraData};
+use alpen_chain_types::{
+    ChunkTransition, ExecHeaderSummary, ExecInputs, ExecOutputs, SubjectDepositData,
+};
+use alpen_simple_ee::SimpleExecutionEnvironment;
 use rkyv::rancor::Error as RkyvError;
 use ssz::Encode;
 use strata_acct_types::{AccountId, BitcoinAmount, Hash, MessageEntry, MsgPayload, SubjectId};
 use strata_codec::encode_to_vec;
-use strata_ee_acct_runtime::{
-    ArchivedEePrivateInput, ChunkInput, EePrivateInput, EeSnarkAccountProgram, EeVerificationInput,
-    EeVerificationState, UpdateBuilder,
-};
-use strata_ee_acct_types::{DecodedEeMessageData, EeAccountState, EnvError, UpdateExtraData};
-use strata_ee_chain_types::{
-    ChunkTransition, ExecHeaderSummary, ExecInputs, ExecOutputs, SubjectDepositData,
-};
 use strata_msg_fmt::Msg as MsgTrait;
 use strata_predicate::PredicateKey;
-use strata_simple_ee::SimpleExecutionEnvironment;
 use strata_snark_acct_runtime::{
     ArchivedPrivateInput as ArchivedSnarkPrivateInput, Coinput, IInnerState, InputMessage,
     PrivateInput as SnarkPrivateInput, ProgramResult, SnarkAccountProgram,
@@ -108,7 +108,7 @@ pub fn apply_unconditionally(
     );
 
     let predicate_key = PredicateKey::always_accept();
-    strata_ee_acct_runtime::process_update_unconditionally::<SimpleExecutionEnvironment>(
+    alpen_acct_runtime::process_update_unconditionally::<SimpleExecutionEnvironment>(
         &mut state,
         &manifest,
         predicate_key,
@@ -182,7 +182,7 @@ pub(crate) fn create_deposit_message(
     source: AccountId,
     incl_epoch: u32,
 ) -> MessageEntry {
-    use strata_ee_acct_types::{DEPOSIT_MSG_TYPE_ID, DepositMsgData};
+    use alpen_acct_types::{DEPOSIT_MSG_TYPE_ID, DepositMsgData};
     use strata_msg_fmt::OwnedMsg;
 
     let deposit_data = DepositMsgData::new(dest);
@@ -203,9 +203,9 @@ pub(crate) fn create_predicate_update_message(
     new_key: &PredicateKey,
     incl_epoch: u32,
 ) -> MessageEntry {
+    use alpen_acct_types::{MAX_PREDICATE_KEY_BYTES, PREDICATE_UPDATE_MSG_TYPE_ID};
     use strata_acct_types::ADMIN_MSG_ACCT_ID;
     use strata_codec::VarVec;
-    use strata_ee_acct_types::{MAX_PREDICATE_KEY_BYTES, PREDICATE_UPDATE_MSG_TYPE_ID};
     use strata_msg_fmt::OwnedMsg;
 
     // The body is a strata-codec-encoded VarVec of the new key's raw

@@ -1,4 +1,4 @@
-use alpen_ee_common::BlockNumHash;
+use alpen_common::BlockNumHash;
 use strata_acct_types::Hash;
 
 pub(crate) fn test_hash(n: u8) -> Hash {

@@ -13,7 +13,7 @@ name = "dbconsole"
 path = "src/main.rs"
 
 [dependencies]
-alpen-ee-database = { workspace = true, features = ["console"] }
+alpen-database = { workspace = true, features = ["console"] }
 
 clap = { workspace = true, features = [
   "derive",
@@ -35,4 +35,4 @@ sled.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
-alpen-ee-database = { workspace = true, features = ["test-utils"] }
+alpen-database = { workspace = true, features = ["test-utils"] }

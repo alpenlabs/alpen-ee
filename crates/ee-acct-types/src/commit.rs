@@ -1,7 +1,7 @@
 //! Commit operation types.
 
+use alpen_chain_types::ExecBlockPackage;
 use strata_acct_types::Hash;
-use strata_ee_chain_types::ExecBlockPackage;
 
 use crate::errors::EnvError;
 

@@ -1,6 +1,6 @@
 [package]
 edition.workspace = true
-name = "strata-rpc-openrpc-spec"
+name = "alpen-openrpc-spec"
 version.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -9,7 +9,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-alpen-ee-rpc-api.workspace = true
+alpen-rpc-api.workspace = true
 serde_json.workspace = true
 strata-ol-rpc-api.workspace = true
 strata-open-rpc.workspace = true

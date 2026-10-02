@@ -163,9 +163,9 @@ impl PendingFinclEntry {
 
 #[cfg(test)]
 mod tests {
+    use alpen_chain_types::SubjectDepositData;
     use proptest::prelude::*;
     use strata_acct_types::{BitcoinAmount, SubjectId};
-    use strata_ee_chain_types::SubjectDepositData;
     use strata_predicate::{PredicateKey, PredicateTypeId};
     use strata_test_utils_ssz::ssz_proptest;
 

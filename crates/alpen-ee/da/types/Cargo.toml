@@ -1,6 +1,6 @@
 [package]
 edition.workspace = true
-name = "alpen-ee-da-types"
+name = "alpen-da-types"
 version.workspace = true
 license.workspace = true
 repository.workspace = true

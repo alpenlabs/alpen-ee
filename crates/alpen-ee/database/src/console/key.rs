@@ -8,7 +8,7 @@
 //! whose key is already covered gets its `get` for free.
 
 use alloy_primitives::B256;
-use alpen_ee_common::{BatchId, ChunkId};
+use alpen_common::{BatchId, ChunkId};
 use alpen_store_mdbx::KeyCodec;
 use strata_acct_types::Hash;
 use strata_db_types::fee_bump::TxNodeId;
@@ -268,7 +268,7 @@ impl ConsoleKey for DBOLBlockId {
 mod tests {
     use std::fmt::Debug;
 
-    use alpen_ee_params::AlpenSpecId;
+    use alpen_params::AlpenSpecId;
     use alpen_reth_db::mdbx::BlockStateChangesSchema;
 
     use super::*;

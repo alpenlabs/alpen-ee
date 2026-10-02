@@ -2,7 +2,7 @@
 //! chunk sealing.
 
 use alloy_consensus::BlockHeader;
-use alpen_ee_sequencer::sealing_policy::{
+use alpen_sequencer::sealing_policy::{
     max_value_policy::ValueAccumulatorPolicy as GasLimitPolicy, BlockDataProvider,
 };
 use async_trait::async_trait;

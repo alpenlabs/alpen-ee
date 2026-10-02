@@ -1,6 +1,6 @@
 //! Toplevel proof logic using no-copy input types.
 
-use strata_ee_acct_types::{EnvError, EnvResult, ExecutionEnvironment};
+use alpen_acct_types::{EnvError, EnvResult, ExecutionEnvironment};
 
 use crate::{ArchivedPrivateInput, Chunk, ChunkBlock, verify_chunk_transition};
 

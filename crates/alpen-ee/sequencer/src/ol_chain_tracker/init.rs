@@ -1,4 +1,4 @@
-use alpen_ee_common::{get_inbox_messages_checked, ExecBlockStorage, SequencerOLClient};
+use alpen_common::{get_inbox_messages_checked, ExecBlockStorage, SequencerOLClient};
 use eyre::eyre;
 use tracing::error;
 
@@ -91,7 +91,7 @@ mod tests {
     use super::*;
 
     mod init_ol_chain_tracker_state_tests {
-        use alpen_ee_common::{
+        use alpen_common::{
             MockExecBlockStorage, MockSequencerOLClient, OLChainStatus, OLClientError,
         };
 
@@ -108,7 +108,7 @@ mod tests {
         /// Sets up mock storage to return the given exec record as best finalized block.
         fn setup_mock_storage_finalized(
             mock_storage: &mut MockExecBlockStorage,
-            exec_record: alpen_ee_common::ExecBlockRecord,
+            exec_record: alpen_common::ExecBlockRecord,
         ) {
             mock_storage
                 .expect_best_finalized_block()
@@ -130,7 +130,7 @@ mod tests {
         /// Sets up mock OL client to return inbox messages for the given block data.
         fn setup_mock_client_inbox_messages(
             mock_client: &mut MockSequencerOLClient,
-            block_data: Vec<alpen_ee_common::OLBlockData>,
+            block_data: Vec<alpen_common::OLBlockData>,
         ) {
             mock_client
                 .expect_get_inbox_messages()

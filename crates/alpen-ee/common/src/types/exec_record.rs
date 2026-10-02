@@ -1,7 +1,7 @@
-use alpen_ee_params::AlpenSpecId;
+use alpen_acct_types::EeAccountState;
+use alpen_chain_types::ExecBlockPackage;
+use alpen_params::AlpenSpecId;
 use strata_acct_types::{Hash, MessageEntry};
-use strata_ee_acct_types::EeAccountState;
-use strata_ee_chain_types::ExecBlockPackage;
 use strata_identifiers::OLBlockCommitment;
 
 use crate::BlockNumHash;

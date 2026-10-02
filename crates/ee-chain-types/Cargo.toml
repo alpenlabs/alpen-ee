@@ -1,5 +1,5 @@
 [package]
-name = "strata-ee-chain-types"
+name = "alpen-chain-types"
 version.workspace = true
 edition = "2024"
 license.workspace = true

@@ -3,8 +3,8 @@
 use std::{fmt, sync::Arc};
 
 use alloy_primitives::B256;
-use alpen_ee_common::{BatchId, BatchStorage, HeaderSummaryProvider};
-use alpen_ee_da_types::DaBlob;
+use alpen_common::{BatchId, BatchStorage, HeaderSummaryProvider};
+use alpen_da_types::DaBlob;
 use alpen_reth_db::{EeDaContext, StateDiffProvider};
 use alpen_reth_statediff::BatchBuilder;
 use async_trait::async_trait;
@@ -21,7 +21,7 @@ use crate::DaBlobSource;
 /// 3. Aggregates them into a [`BatchStateDiff`](alpen_reth_statediff::BatchStateDiff) via
 ///    [`BatchBuilder`].
 /// 4. Reads the last block's header to build
-///    [`EvmHeaderSummary`](alpen_ee_da_types::EvmHeaderSummary).
+///    [`EvmHeaderSummary`](alpen_da_types::EvmHeaderSummary).
 /// 5. Returns the assembled [`DaBlob`].
 pub struct StateDiffBlobProvider<S, D, H> {
     batch_storage: Arc<S>,

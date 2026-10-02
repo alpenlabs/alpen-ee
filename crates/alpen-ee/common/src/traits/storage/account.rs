@@ -1,5 +1,5 @@
+use alpen_acct_types::EeAccountState;
 use async_trait::async_trait;
-use strata_ee_acct_types::EeAccountState;
 use strata_identifiers::{EpochCommitment, OLBlockId};
 
 use super::StorageError;
@@ -107,7 +107,7 @@ macro_rules! storage_tests {
 
 #[cfg(feature = "test-utils")]
 pub mod tests {
-    use strata_ee_acct_types::EeAccountState;
+    use alpen_acct_types::EeAccountState;
     use strata_identifiers::{Buf32, EpochCommitment, OLBlockId};
 
     use super::*;

@@ -4,13 +4,13 @@ use std::collections::BTreeMap;
 
 use alloy_consensus::{BlockHeader, Header, Sealable, Sealed};
 use alloy_rpc_types_debug::ExecutionWitness;
+use alpen_acct_types::{EnvResult, ExecPartialState};
 use itertools::Itertools;
 use revm::state::Bytecode;
 use revm_primitives::{B256, Bytes, keccak256, map::HashMap};
 use rsp_mpt::EthereumState;
 use strata_acct_types::Hash;
 use strata_codec::{Codec, CodecError};
-use strata_ee_acct_types::{EnvResult, ExecPartialState};
 
 use crate::{
     codec_shims::{

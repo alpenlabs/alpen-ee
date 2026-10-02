@@ -34,7 +34,7 @@ pub(crate) fn install(session: &mut Session) -> eyre::Result<()> {
 mod tests {
     use std::sync::{atomic::AtomicBool, Arc};
 
-    use alpen_ee_database::{
+    use alpen_database::{
         console::{ConsoleDb, StagedOp},
         test_db::TempDatadir,
     };

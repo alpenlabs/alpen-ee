@@ -1,7 +1,7 @@
 //! Chunk data structures.
 
-use strata_ee_acct_types::ExecutionEnvironment;
-use strata_ee_chain_types::{ExecInputs, ExecOutputs};
+use alpen_acct_types::ExecutionEnvironment;
+use alpen_chain_types::{ExecInputs, ExecOutputs};
 
 /// Chunk of decoded exec env blocks.
 #[expect(missing_debug_implementations, reason = "impossible")]

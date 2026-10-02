@@ -1,7 +1,7 @@
 [package]
 description = "Consolidated top-level Alpen chain params artifact."
 edition.workspace = true
-name = "alpen-ee-params"
+name = "alpen-params"
 version.workspace = true
 license.workspace = true
 repository.workspace = true

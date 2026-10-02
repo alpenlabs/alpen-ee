@@ -1,8 +1,8 @@
-use strata_ee_acct_types::{
+use alpen_acct_types::{
     EnvError, EnvResult, ExecBlock, ExecHeader, ExecPartialState, ExecPayload,
     ExecutionEnvironment, Hash,
 };
-use strata_ee_chain_types::{
+use alpen_chain_types::{
     ChunkTransition, ExecInputs, ExecOutputs, OutputMessage, OutputTransfer, SequenceTracker,
     SubjectDepositData,
 };
@@ -238,11 +238,9 @@ pub fn verify_chunk_transition<E: ExecutionEnvironment>(
 mod tests {
     use std::collections::BTreeMap;
 
-    use strata_ee_acct_types::{
-        BlockAssembler, ExecBlock, ExecBlockOutput, ExecHeader, ExecPayload,
-    };
-    use strata_ee_chain_types::{ExecHeaderSummary, ExecInputs, ExecOutputs};
-    use strata_simple_ee::{
+    use alpen_acct_types::{BlockAssembler, ExecBlock, ExecBlockOutput, ExecHeader, ExecPayload};
+    use alpen_chain_types::{ExecHeaderSummary, ExecInputs, ExecOutputs};
+    use alpen_simple_ee::{
         SimpleBlock, SimpleBlockBody, SimpleExecutionEnvironment, SimpleHeader,
         SimpleHeaderIntrinsics, SimplePartialState, SimpleTransaction,
     };

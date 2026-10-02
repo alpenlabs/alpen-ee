@@ -2,7 +2,7 @@ use std::future::Future;
 
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::ForkchoiceState;
-use alpen_ee_common::{BlockNumHash, ConsensusHeads, ExecutionEngine};
+use alpen_common::{BlockNumHash, ConsensusHeads, ExecutionEngine};
 use reth_node_builder::NodeTypesWithDB;
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},

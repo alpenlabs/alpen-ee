@@ -642,7 +642,7 @@ sequenceDiagram
 
 ## Key Abstractions
 
-All traits and types below are re-exported flat from the `alpen_ee_common` crate.
+All traits and types below are re-exported flat from the `alpen_common` crate.
 
 ### Core Traits
 

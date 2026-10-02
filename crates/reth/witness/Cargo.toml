@@ -10,10 +10,10 @@ workspace = true
 
 [dependencies]
 # Internal
-alpen-ee-common.workspace = true
+alpen-common.workspace = true
+alpen-evm-ee.workspace = true
 strata-acct-types.workspace = true
 strata-codec.workspace = true
-strata-evm-ee.workspace = true
 
 # External
 alloy-consensus.workspace = true

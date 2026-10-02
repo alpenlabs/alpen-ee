@@ -148,7 +148,7 @@ class TestEeLiveForkUpgrade(BaseTest):
         # rotation's inbox message without waiting on the L1 checkpoint round
         # trip, and a small `batch_sealing_block_count` keeps the
         # rotation-consuming block's forced batch seal (see
-        # alpen-ee-sequencer's force-seal-after-rotation behavior) from
+        # alpen-sequencer's force-seal-after-rotation behavior) from
         # stalling the test.
         ctx.set_env(
             EeOLEnv(

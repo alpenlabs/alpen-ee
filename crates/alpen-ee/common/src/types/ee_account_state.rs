@@ -1,5 +1,5 @@
+use alpen_acct_types::EeAccountState;
 use strata_acct_types::Hash;
-use strata_ee_acct_types::EeAccountState;
 use strata_identifiers::{Epoch, EpochCommitment, OLBlockId};
 
 /// EE account internal state corresponding to OL block.

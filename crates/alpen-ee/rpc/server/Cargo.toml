@@ -1,6 +1,6 @@
 [package]
 edition.workspace = true
-name = "alpen-ee-rpc-server"
+name = "alpen-rpc-server"
 version.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -9,8 +9,8 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-alpen-ee-common.workspace = true
-alpen-ee-rpc-api.workspace = true
+alpen-common.workspace = true
+alpen-rpc-api.workspace = true
 
 alloy-primitives.workspace = true
 async-trait.workspace = true
@@ -23,7 +23,7 @@ tokio.workspace = true
 tower.workspace = true
 
 [dev-dependencies]
-alpen-ee-rpc-api = { workspace = true, features = ["client"] }
+alpen-rpc-api = { workspace = true, features = ["client"] }
 http.workspace = true
 jsonrpsee = { workspace = true, features = ["http-client"] }
 tempfile.workspace = true

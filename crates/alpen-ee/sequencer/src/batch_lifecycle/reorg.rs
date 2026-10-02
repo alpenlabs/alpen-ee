@@ -4,7 +4,7 @@
 //! manager must detect when its in-flight operations have been invalidated by comparing
 //! batch identity (BatchId), not just index.
 
-use alpen_ee_common::{require_genesis_batch, Batch, BatchStorage, StorageError};
+use alpen_common::{require_genesis_batch, Batch, BatchStorage, StorageError};
 use tracing::warn;
 
 use super::state::{recover_from_storage, BatchLifecycleState};

@@ -1,6 +1,6 @@
 use std::{fmt, iter};
 
-use alpen_ee_params::AlpenSpecId;
+use alpen_params::AlpenSpecId;
 use bitcoin::{Txid, Wtxid};
 use strata_acct_types::Hash;
 use strata_codec::Codec;

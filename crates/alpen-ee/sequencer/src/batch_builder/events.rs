@@ -12,7 +12,7 @@
 //! FIFO ordering conveys that relationship, so there's no need to bundle
 //! them into one struct with positional fields.
 
-use alpen_ee_common::{BatchId, BlockNumHash};
+use alpen_common::{BatchId, BlockNumHash};
 
 /// Event emitted by the batch builder after processing a block or
 /// handling a reorg.
@@ -35,7 +35,7 @@ pub enum BatchBuilderEvent {
     /// this is self-describing regardless of what comes before or after
     /// it in the event stream. The chunk builder must force-seal its
     /// current chunk at this boundary and call
-    /// [`ChunkStorage::set_batch_chunks`](alpen_ee_common::ChunkStorage::set_batch_chunks).
+    /// [`ChunkStorage::set_batch_chunks`](alpen_common::ChunkStorage::set_batch_chunks).
     BatchSealed {
         /// The batch that was just sealed.
         batch_id: BatchId,

@@ -8,16 +8,16 @@
 
 mod common;
 
+use alpen_acct_runtime::{EeVerificationInput, UpdateBuilder};
+use alpen_chain_types::{ExecOutputs, OutputMessage};
+use alpen_simple_ee::SimpleExecutionEnvironment;
 use common::{
     apply_unconditionally, assert_both_paths_succeed, assert_verified_chunks_succeed,
     assert_verified_path_succeeds, build_update_operation, create_deposit_message,
     create_initial_state, empty_exec_header_summary, simple_chunk,
 };
 use strata_acct_types::{AccountId, BitcoinAmount, Hash, MsgPayload, SubjectId};
-use strata_ee_acct_runtime::{EeVerificationInput, UpdateBuilder};
-use strata_ee_chain_types::{ExecOutputs, OutputMessage};
 use strata_predicate::PredicateKey;
-use strata_simple_ee::SimpleExecutionEnvironment;
 
 #[test]
 fn test_empty_update_no_chunks() {
@@ -110,7 +110,7 @@ fn test_single_deposit_with_chunk() {
 
     // Create a matching chunk using the builder's state
     let deposit = match &builder.remaining_pending_inputs()[0] {
-        strata_ee_acct_types::PendingInputEntry::Deposit(d) => d.clone(),
+        alpen_acct_types::PendingInputEntry::Deposit(d) => d.clone(),
         other => panic!("expected a deposit, got {other:?}"),
     };
     let parent = builder.cur_tip_blkid();
@@ -159,7 +159,7 @@ fn test_chunk_output_does_not_change_inner_tracked_balance() {
     builder.add_messages(vec![message]).expect("add message");
 
     let deposit = match &builder.remaining_pending_inputs()[0] {
-        strata_ee_acct_types::PendingInputEntry::Deposit(d) => d.clone(),
+        alpen_acct_types::PendingInputEntry::Deposit(d) => d.clone(),
         other => panic!("expected a deposit, got {other:?}"),
     };
 
@@ -217,7 +217,7 @@ fn test_multiple_deposits_multiple_chunks() {
 
     // First chunk: consume first deposit
     let d1 = match &builder.remaining_pending_inputs()[0] {
-        strata_ee_acct_types::PendingInputEntry::Deposit(d) => d.clone(),
+        alpen_acct_types::PendingInputEntry::Deposit(d) => d.clone(),
         other => panic!("expected a deposit, got {other:?}"),
     };
     let tip1 = Hash::new([0xBB; 32]);
@@ -238,7 +238,7 @@ fn test_multiple_deposits_multiple_chunks() {
 
     // Second chunk: consume second deposit
     let d2 = match &builder.remaining_pending_inputs()[0] {
-        strata_ee_acct_types::PendingInputEntry::Deposit(d) => d.clone(),
+        alpen_acct_types::PendingInputEntry::Deposit(d) => d.clone(),
         other => panic!("expected a deposit, got {other:?}"),
     };
     let tip2 = Hash::new([0xCC; 32]);

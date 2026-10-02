@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 
-use alpen_ee_common::ExecBlockStorage;
-use alpen_ee_exec_chain::ExecChainHandle;
+use alpen_common::ExecBlockStorage;
+use alpen_exec_chain::ExecChainHandle;
 use async_trait::async_trait;
 use eyre::Result;
 use strata_acct_types::Hash;

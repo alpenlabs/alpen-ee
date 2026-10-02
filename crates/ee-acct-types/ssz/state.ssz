@@ -1,5 +1,5 @@
 import strata_acct_types
-import strata_ee_chain_types
+import alpen_chain_types
 import strata_predicate
 
 MAX_PENDING_INPUTS = 1 << 16
@@ -10,7 +10,7 @@ MAX_CHUNK_PRED_LEN = 1024
 class PendingInputEntry(Union):
     ### Pending deposit
     #~# external_kind: container
-    Deposit: strata_ee_chain_types.SubjectDepositData
+    Deposit: alpen_chain_types.SubjectDepositData
 
     ### A queued predicate-key rotation, in true inbox order relative to
     ### deposits. Consuming it (draining it from the front of the queue)

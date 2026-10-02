@@ -1,10 +1,10 @@
-use alpen_ee_common::{
+use alpen_acct_runtime::process_update_unconditionally;
+use alpen_acct_types::EeAccountState;
+use alpen_common::{
     chain_status_checked, EeAccountStateAtEpoch, OLChainStatus, OLClient, SnarkAccountUpdateInfo,
     Storage,
 };
-use strata_ee_acct_runtime::process_update_unconditionally;
-use strata_ee_acct_types::EeAccountState;
-use strata_evm_ee::EvmExecutionEnvironment;
+use alpen_evm_ee::EvmExecutionEnvironment;
 use strata_identifiers::{EpochCommitment, Hash};
 use strata_predicate::PredicateKey;
 use strata_snark_acct_runtime::IInnerState;
@@ -270,7 +270,7 @@ pub(crate) async fn handle_extend_ee_state<TStorage: Storage>(
 
 #[cfg(test)]
 mod tests {
-    use alpen_ee_common::{MockOLClient, OLChainStatus, SnarkAccountEpochSummary};
+    use alpen_common::{MockOLClient, OLChainStatus, SnarkAccountEpochSummary};
 
     use super::*;
     use crate::test_utils::*;
@@ -651,7 +651,7 @@ mod tests {
             mock_client
                 .expect_chain_status()
                 .times(1)
-                .returning(|| Err(alpen_ee_common::OLClientError::network("network error")));
+                .returning(|| Err(alpen_common::OLClientError::network("network error")));
 
             let result =
                 track_ol_state(&state, &mock_client, 10, EpochTrackingMode::Confirmed).await;

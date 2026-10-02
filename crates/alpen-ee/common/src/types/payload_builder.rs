@@ -1,5 +1,5 @@
 use alloy_primitives::{Address, B256};
-use alpen_ee_params::AlpenSpecId;
+use alpen_params::AlpenSpecId;
 use strata_acct_types::BitcoinAmount;
 
 /// Inputs to control evm block builder.

@@ -11,7 +11,7 @@ DEFAULT_OL_BLOCK_TIME_MS = 5_000
 PREDICATE_FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "predicates"
 CHECKPOINT_TEST_PREDICATE_FILE = PREDICATE_FIXTURES_DIR / "checkpoint-bip340-schnorr-test.predicate"
 
-# Matches DEFAULT_ALPEN_EE_ACCOUNT_ID in alpen-ee-params.
+# Matches DEFAULT_ALPEN_EE_ACCOUNT_ID in alpen-params.
 ALPEN_EE_ACCOUNT_ID = "01" * 32
 
 # Genesis inner state root of the EE account per params/<network>.json. Keep in
@@ -210,7 +210,7 @@ def write_genesis_accounts(datadir: Path, predicate: str, chain: str = "dev") ->
     """Writes the genesis snark account entry for the EE and returns its path.
 
     The inner state root is the SSZ tree hash of the EE genesis account state,
-    so it cannot be computed here. ``alpen-ee-genesis`` pins the same values in
+    so it cannot be computed here. ``alpen-genesis`` pins the same values in
     ``genesis_inner_state_roots_are_stable`` and fails if EE genesis moves.
     """
     accounts_path = datadir / "genesis-accounts.json"

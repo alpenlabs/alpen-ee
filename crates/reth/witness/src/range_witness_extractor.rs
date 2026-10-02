@@ -17,7 +17,8 @@ use alloy_primitives::{
     map::{B256Set, DefaultHashBuilder, HashMap},
     Address, B256, U256,
 };
-use alpen_ee_common::AccessedStateStore;
+use alpen_common::AccessedStateStore;
+use alpen_evm_ee::EvmPartialState;
 use eyre::{eyre, Result};
 use reth_ethereum_primitives::Block;
 use reth_provider::{BlockReader, StateProvider, StateProviderFactory};
@@ -27,7 +28,6 @@ use reth_trie_common::KeccakKeyHasher;
 use rsp_mpt::EthereumState;
 use strata_acct_types::Hash;
 use strata_codec::encode_to_vec;
-use strata_evm_ee::EvmPartialState;
 use tokio::runtime::Handle;
 use tracing::debug;
 

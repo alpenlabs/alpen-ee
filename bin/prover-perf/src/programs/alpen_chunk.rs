@@ -6,18 +6,18 @@
 
 use std::{fs, path::PathBuf, sync::Arc};
 
-use alpen_ee_params::{AlpenParams, AlpenSpecId, DEV_PARAMS_JSON};
+use alpen_acct_types::{ExecBlock, ExecHeader, ExecPayload, ExecutionEnvironment};
+use alpen_chain_types::ExecInputs;
+use alpen_chunk_runtime::{PrivateInput, RawBlockData, RawChunkData};
+use alpen_evm_ee::{EvmBlock, EvmBlockBody, EvmExecutionEnvironment, EvmHeader, EvmPartialState};
+use alpen_params::{AlpenParams, AlpenSpecId, DEV_PARAMS_JSON};
+use alpen_proof_chunk::{EeChunkProgram, EeChunkProofInput};
 use alpen_reth_evm::evm::AlpenEvmFactory;
 use reth_primitives_traits::Block as _;
 use rsp_client_executor::io::EthClientExecutorInput;
 use serde::Deserialize;
 use strata_acct_types::Hash;
 use strata_codec::encode_to_vec;
-use strata_ee_acct_types::{ExecBlock, ExecHeader, ExecPayload, ExecutionEnvironment};
-use strata_ee_chain_types::ExecInputs;
-use strata_ee_chunk_runtime::{PrivateInput, RawBlockData, RawChunkData};
-use strata_evm_ee::{EvmBlock, EvmBlockBody, EvmExecutionEnvironment, EvmHeader, EvmPartialState};
-use strata_proofimpl_alpen_chunk::{EeChunkProgram, EeChunkProofInput};
 use tracing::info;
 use zkaleido::{ExecutionSummary, ZkVmHost, ZkVmProgram};
 
@@ -100,7 +100,7 @@ pub(super) fn prepare_input() -> EeChunkProofInput {
         .expect("block execution should succeed");
     let outputs = output.outputs().clone();
 
-    let chunk_transition = strata_ee_chain_types::ChunkTransition::new(
+    let chunk_transition = alpen_chain_types::ChunkTransition::new(
         parent_blkid,
         tip_blkid,
         tip_state_root,

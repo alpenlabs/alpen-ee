@@ -4,8 +4,8 @@ mod dummy;
 mod rpc;
 
 #[cfg(feature = "sequencer")]
-use alpen_ee_common::{OLAccountStateView, OLBlockData, SequencerOLClient};
-use alpen_ee_common::{OLChainStatus, OLClient, OLClientError, SnarkAccountEpochSummary};
+use alpen_common::{OLAccountStateView, OLBlockData, SequencerOLClient};
+use alpen_common::{OLChainStatus, OLClient, OLClientError, SnarkAccountEpochSummary};
 use async_trait::async_trait;
 use strata_identifiers::{Epoch, EpochCommitment};
 #[cfg(feature = "sequencer")]

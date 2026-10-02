@@ -1,6 +1,6 @@
 [package]
 edition.workspace = true
-name = "alpen-ee-database"
+name = "alpen-database"
 version.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -22,13 +22,15 @@ test-utils = [
   "dep:alloy-primitives",
   "dep:alpen-reth-statediff",
   "dep:strata-l1-txfmt",
-  "alpen-ee-common/test-utils",
+  "alpen-common/test-utils",
 ]
 
 [dependencies]
 alloy-primitives = { workspace = true, optional = true }
-alpen-ee-common.workspace = true
-alpen-ee-params.workspace = true
+alpen-acct-types.workspace = true
+alpen-chain-types.workspace = true
+alpen-common.workspace = true
+alpen-params.workspace = true
 alpen-reth-db.workspace = true
 alpen-reth-statediff = { workspace = true, optional = true }
 alpen-store-mdbx.workspace = true
@@ -39,8 +41,6 @@ serde_bytes.workspace = true
 strata-acct-types.workspace = true
 strata-db-macros.workspace = true
 strata-db-types = { workspace = true, features = ["proxies"] }
-strata-ee-acct-types.workspace = true
-strata-ee-chain-types.workspace = true
 strata-identifiers.workspace = true
 strata-l1-txfmt = { workspace = true, optional = true }
 strata-paas.workspace = true
@@ -65,5 +65,5 @@ alloy-primitives.workspace = true
 alpen-reth-statediff.workspace = true
 proptest.workspace = true
 strata-l1-txfmt.workspace = true
-alpen-ee-common = { workspace = true, features = ["test-utils"] }
+alpen-common = { workspace = true, features = ["test-utils"] }
 strata-db-tests.workspace = true

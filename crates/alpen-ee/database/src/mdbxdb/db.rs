@@ -1,12 +1,12 @@
 use std::{path::Path, sync::Arc};
 
-use alpen_ee_common::{
+use alpen_acct_types::EeAccountState;
+use alpen_common::{
     AccessedStateRecord, Batch, BatchId, BatchStatus, Chunk, ChunkId, ChunkStatus,
     EeAccountStateAtEpoch, ExecBlockRecord,
 };
 use alpen_store_mdbx::{MdbxConfig, MdbxEnv};
 use strata_acct_types::Hash;
-use strata_ee_acct_types::EeAccountState;
 use strata_identifiers::{EpochCommitment, OLBlockId};
 use tracing::{error, trace, warn};
 
@@ -719,7 +719,7 @@ mod tests {
         },
     };
 
-    use alpen_ee_common::{
+    use alpen_common::{
         batch_storage_tests, chunk_storage_tests, exec_block_storage_test_fns::create_exec_block,
         exec_block_storage_tests, storage_tests,
     };

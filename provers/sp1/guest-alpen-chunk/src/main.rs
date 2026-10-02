@@ -1,14 +1,14 @@
 #![no_main]
 zkaleido_sp1_guest_env::entrypoint!(main);
 
-use alpen_ee_params::{AlpenParams, AlpenSpecId};
-use strata_proofimpl_alpen_chunk::process_ee_chunk;
+use alpen_params::{AlpenParams, AlpenSpecId};
+use alpen_proof_chunk::process_ee_chunk;
 use zkaleido_sp1_guest_env::Sp1ZkVmEnv;
 
 /// Compile-time-baked build artifact: the `AlpenParams` JSON, embedded by
 /// `build.rs` from the file at `SP1_ALPEN_PARAMS_PATH`. Not zkVM input — see
-/// `strata_proofimpl_alpen_chunk::process_ee_chunk` for why.
-mod alpen_params {
+/// `alpen_proof_chunk::process_ee_chunk` for why.
+mod embedded_params {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../generated/alpen_params.rs"
@@ -16,7 +16,7 @@ mod alpen_params {
 }
 
 fn embedded_alpen_params() -> AlpenParams {
-    serde_json::from_str(alpen_params::ALPEN_PARAMS_JSON).expect("embedded alpen params must parse")
+    serde_json::from_str(embedded_params::ALPEN_PARAMS_JSON).expect("embedded alpen params must parse")
 }
 
 /// The spec version this guest proves under. Hardcoded, not read from zkVM

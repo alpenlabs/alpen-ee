@@ -7,7 +7,7 @@
 
 use std::{any::type_name, fmt::Debug};
 
-use alpen_ee_common::BlockNumHash;
+use alpen_common::BlockNumHash;
 use async_trait::async_trait;
 use strata_acct_types::Hash;
 

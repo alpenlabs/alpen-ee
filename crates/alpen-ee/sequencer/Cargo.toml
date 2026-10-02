@@ -1,6 +1,6 @@
 [package]
 edition.workspace = true
-name = "alpen-ee-sequencer"
+name = "alpen-sequencer"
 version.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -12,14 +12,14 @@ workspace = true
 default = []
 
 [dependencies]
-alpen-ee-block-assembly.workspace = true
-alpen-ee-common.workspace = true
-alpen-ee-exec-chain.workspace = true
-alpen-ee-params.workspace = true
+alpen-acct-types.workspace = true
+alpen-block-assembly.workspace = true
+alpen-chain-types.workspace = true
+alpen-common.workspace = true
+alpen-exec-chain.workspace = true
+alpen-params.workspace = true
 strata-acct-types.workspace = true
 strata-codec.workspace = true
-strata-ee-acct-types.workspace = true
-strata-ee-chain-types.workspace = true
 strata-identifiers.workspace = true
 strata-service.workspace = true
 strata-snark-acct-types.workspace = true
@@ -34,7 +34,7 @@ tokio.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-alpen-ee-common = { workspace = true, features = ["test-utils"] }
+alpen-common = { workspace = true, features = ["test-utils"] }
 mockall.workspace = true
 strata-predicate.workspace = true
 bitcoin.workspace = true

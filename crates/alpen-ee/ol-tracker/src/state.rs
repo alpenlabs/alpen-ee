@@ -1,7 +1,7 @@
-use alpen_ee_common::{
+use alpen_acct_types::EeAccountState;
+use alpen_common::{
     ConsensusHeads, EeAccountStateAtEpoch, OLChainStatus, OLFinalizedStatus, Storage,
 };
-use strata_ee_acct_types::EeAccountState;
 use strata_identifiers::EpochCommitment;
 use tracing::info;
 
@@ -124,7 +124,7 @@ async fn effective_account_state(
 
 #[cfg(test)]
 mod tests {
-    use alpen_ee_common::{MockStorage, OLBlockOrEpoch, OLChainStatus, StorageError};
+    use alpen_common::{MockStorage, OLBlockOrEpoch, OLChainStatus, StorageError};
 
     use super::*;
     use crate::test_utils::*;
@@ -258,7 +258,7 @@ mod tests {
     }
 
     mod build_tracker_state_tests {
-        use alpen_ee_common::ConsensusHeads;
+        use alpen_common::ConsensusHeads;
         use strata_acct_types::Hash;
         use strata_identifiers::{Epoch, Slot};
         use tokio::sync::watch;

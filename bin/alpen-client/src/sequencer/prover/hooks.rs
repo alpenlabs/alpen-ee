@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use alpen_ee_common::{BatchStatus, BatchStorage, ChunkStatus, ChunkStorage};
+use alpen_common::{BatchStatus, BatchStorage, ChunkStatus, ChunkStorage};
 use async_trait::async_trait;
 use strata_paas::{ProverError, ProverResult, ReceiptHook};
 use tracing::{info, warn};

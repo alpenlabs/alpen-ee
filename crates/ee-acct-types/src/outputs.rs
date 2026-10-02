@@ -1,4 +1,4 @@
-use strata_ee_chain_types::ExecOutputs;
+use alpen_chain_types::ExecOutputs;
 
 use crate::traits::ExecutionEnvironment;
 

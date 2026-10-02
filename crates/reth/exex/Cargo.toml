@@ -9,7 +9,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-alpen-ee-common.workspace = true
+alpen-common.workspace = true
 alpen-reth-db.workspace = true
 alpen-reth-statediff.workspace = true
 alpen-reth-witness.workspace = true

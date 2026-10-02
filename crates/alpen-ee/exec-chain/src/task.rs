@@ -1,4 +1,4 @@
-use alpen_ee_common::{BlockNumHash, ConsensusHeads, ExecBlockStorage, StorageError};
+use alpen_common::{BlockNumHash, ConsensusHeads, ExecBlockStorage, StorageError};
 use strata_acct_types::Hash;
 use thiserror::Error;
 use tokio::sync::watch;
@@ -100,7 +100,7 @@ pub(crate) async fn handle_ol_update<TStorage: ExecBlockStorage>(
 
 #[cfg(test)]
 mod tests {
-    use alpen_ee_common::{
+    use alpen_common::{
         exec_block_storage_test_fns::create_exec_block, ConsensusHeads, MockExecBlockStorage,
     };
     use strata_acct_types::Hash;

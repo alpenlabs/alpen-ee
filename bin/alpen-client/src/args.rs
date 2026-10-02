@@ -9,7 +9,7 @@
 use std::{env, fs, path::Path, sync::Arc};
 
 use alloy_genesis::Genesis;
-use alpen_ee_params::AlpenParams;
+use alpen_params::AlpenParams;
 use clap::ArgAction;
 use eyre::{ensure, Context};
 use reth_chainspec::ChainSpec;

@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use alpen_ee_common::{BatchDaProvider, BatchId, BatchProver, BatchStorage};
+use alpen_common::{BatchDaProvider, BatchId, BatchProver, BatchStorage};
 use tokio::sync::watch;
 
 /// Context holding all dependencies for the batch lifecycle task.

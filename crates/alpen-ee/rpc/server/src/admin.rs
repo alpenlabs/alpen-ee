@@ -1,6 +1,6 @@
 //! Alpen EE admin RPC handler implementation.
 
-use alpen_ee_rpc_api::{AdminStatusResponse, AlpenAdminRpcServer};
+use alpen_rpc_api::{AdminStatusResponse, AlpenAdminRpcServer};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 

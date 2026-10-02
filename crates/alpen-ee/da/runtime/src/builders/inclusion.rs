@@ -5,8 +5,8 @@
 //! This layer is execution-environment agnostic — it deals only with published
 //! byte blobs in L1 transactions, not with what those blobs decode into.
 
-use alpen_ee_common::L1DaBlockRef;
-use alpen_ee_da_types::{
+use alpen_common::L1DaBlockRef;
+use alpen_da_types::{
     compute_bitcoin_inclusion_proof, extract_da_chunks, reassemble_da_blob, wtxid_leaves,
     wtxids_root_from_txs, BitcoinMerkleProof, DaBlob, DaBlockWitness, DaTxWitness,
     L1DaBlockInclusion,
@@ -98,7 +98,7 @@ pub(crate) async fn collect_l1_inclusion_blocks(
 /// position `idx` within `txs`.
 ///
 /// Per BIP-141, the coinbase wtxid leaf is 32 zero bytes (see
-/// [`wtxid_leaves`](alpen_ee_da_types::wtxid_leaves)).
+/// [`wtxid_leaves`](alpen_da_types::wtxid_leaves)).
 pub(crate) fn build_wtxid_inclusion_proof(txs: &[Transaction], idx: usize) -> BitcoinMerkleProof {
     let leaves = wtxid_leaves(txs);
     let siblings = compute_bitcoin_inclusion_proof(&leaves, idx as u32);
@@ -115,7 +115,7 @@ pub(crate) fn reassemble_da_blob_from_txs(
 
 #[cfg(test)]
 mod tests {
-    use alpen_ee_da_types::{
+    use alpen_da_types::{
         compute_bitcoin_merkle_root_from_leaves, compute_bitcoin_merkle_root_from_proof,
     };
     use bitcoin::{

@@ -35,7 +35,7 @@
 //! chain, which is what proves each rule produced what the table reads.
 
 use alloy_primitives::B256;
-use alpen_ee_params::AlpenSpecId;
+use alpen_params::AlpenSpecId;
 use alpen_reth_db::mdbx::BlockHashByNumber;
 #[cfg(any(test, feature = "test-utils"))]
 use alpen_store_mdbx::UpgradeCtx;
@@ -755,7 +755,7 @@ fn rule_for(table: &str) -> eyre::Result<SledTree> {
 
 #[cfg(test)]
 mod tests {
-    use alpen_ee_common::ChunkId;
+    use alpen_common::ChunkId;
     use alpen_reth_db::mdbx::BlockStateChangesSchema;
     use alpen_reth_statediff::BlockStateChanges;
     use alpen_store_mdbx::{KeyCodec, VersionedTable};
@@ -1077,12 +1077,12 @@ mod tests {
     /// adds an empty rotation and the inverse removes it.
     #[test]
     fn the_package_reencode_adds_the_empty_predicate_rotation() {
+        use alpen_chain_types::{ExecBlockCommitment, ExecInputs, ExecOutputs};
         use ssz::Encode;
-        use strata_ee_chain_types::{ExecBlockCommitment, ExecInputs, ExecOutputs};
 
         use crate::serialization_types::{package_from_sled_era, package_to_sled_era};
 
-        let package = strata_ee_chain_types::ExecBlockPackage::new(
+        let package = alpen_chain_types::ExecBlockPackage::new(
             ExecBlockCommitment::new([1; 32].into(), [2; 32].into()),
             ExecInputs::new_empty(),
             ExecOutputs::new_empty(),

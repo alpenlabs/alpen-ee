@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use alpen_ee_common::{require_latest_batch, BatchDaProvider, BatchProver, BatchStorage};
+use alpen_common::{require_latest_batch, BatchDaProvider, BatchProver, BatchStorage};
 use eyre::Result;
 use tokio::time;
 use tracing::{error, warn};
@@ -101,7 +101,7 @@ where
 mod tests {
     use std::sync::Arc;
 
-    use alpen_ee_common::{
+    use alpen_common::{
         DaStatus, InMemoryStorage, MockBatchDaProvider, MockBatchProver, ProofGenerationStatus,
     };
     use eyre::eyre;

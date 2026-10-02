@@ -5,7 +5,7 @@
 //!   and sealing chunks.
 //! - `handle_reorg`: called on `TickMsg::Msg(Reorg { .. })`.
 
-use alpen_ee_common::{BatchId, BatchStorage, BlockNumHash, Chunk, ChunkStorage, ExecBlockStorage};
+use alpen_common::{BatchId, BatchStorage, BlockNumHash, Chunk, ChunkStorage, ExecBlockStorage};
 use eyre::{eyre, Result};
 use strata_acct_types::Hash;
 use tracing::{debug, warn};

@@ -3,8 +3,8 @@
 use std::{fmt, future::Future, sync::Arc};
 
 use alloy_primitives::B256;
-use alpen_ee_common::{ChunkStatus, ChunkStorage, ConsensusHeads, OLBlockOrEpoch, Storage};
-use alpen_ee_rpc_api::{
+use alpen_common::{ChunkStatus, ChunkStorage, ConsensusHeads, OLBlockOrEpoch, Storage};
+use alpen_rpc_api::{
     AlpenEeRpcServer, BlockStatus, BlockStatusResponse, ChunkProofCoverageResponse,
 };
 use async_trait::async_trait;

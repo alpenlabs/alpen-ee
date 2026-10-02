@@ -1,16 +1,16 @@
 use std::sync::Arc;
 
-use alpen_ee_block_assembly::{build_next_exec_block, BlockAssemblyInputs, BlockAssemblyOutputs};
-use alpen_ee_common::{
+use alpen_acct_types::EeAccountState;
+use alpen_block_assembly::{build_next_exec_block, BlockAssemblyInputs, BlockAssemblyOutputs};
+use alpen_chain_types::ExecBlockPackage;
+use alpen_common::{
     Clock, EnginePayload, ExecBlockPayload, ExecBlockRecord, ExecBlockStorage,
     PayloadBuilderEngine, SystemClock,
 };
-use alpen_ee_exec_chain::ExecChainHandle;
-use alpen_ee_params::AlpenSpecId;
+use alpen_exec_chain::ExecChainHandle;
+use alpen_params::AlpenSpecId;
 use eyre::Context;
 use strata_acct_types::{Hash, MessageEntry};
-use strata_ee_acct_types::EeAccountState;
-use strata_ee_chain_types::ExecBlockPackage;
 use strata_identifiers::{OLBlockCommitment, OLBlockId};
 use thiserror::Error;
 use tracing::{debug, error, warn};
@@ -365,8 +365,8 @@ async fn build_next_block(
 mod tests {
     use std::vec;
 
+    use alpen_chain_types::{ExecBlockCommitment, ExecInputs, ExecOutputs};
     use strata_acct_types::BitcoinAmount;
-    use strata_ee_chain_types::{ExecBlockCommitment, ExecInputs, ExecOutputs};
     use strata_identifiers::Buf32;
 
     use super::*;

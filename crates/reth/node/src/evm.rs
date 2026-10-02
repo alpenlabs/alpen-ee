@@ -1,4 +1,4 @@
-use alpen_ee_params::EvmSpec;
+use alpen_params::EvmSpec;
 use alpen_reth_evm::evm::AlpenEvmFactory;
 use reth_chainspec::ChainSpec;
 use reth_ethereum_primitives::EthPrimitives;

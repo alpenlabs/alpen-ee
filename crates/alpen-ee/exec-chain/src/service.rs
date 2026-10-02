@@ -2,7 +2,7 @@
 
 use std::{fmt, marker::PhantomData, sync::Arc};
 
-use alpen_ee_common::{BlockNumHash, ConsensusHeads, ExecBlockRecord, ExecBlockStorage};
+use alpen_common::{BlockNumHash, ConsensusHeads, ExecBlockRecord, ExecBlockStorage};
 use serde::Serialize;
 use strata_acct_types::Hash;
 use strata_service::{AsyncService, CommandCompletionSender, Response, Service, ServiceState};

@@ -6,7 +6,11 @@
 use std::sync::Arc;
 
 use alloy_consensus::Block as AlloyBlock;
-use alpen_ee_params::HeaderExtra;
+use alpen_acct_types::{
+    EnvError, EnvResult, ExecBlock, ExecBlockOutput, ExecPayload, ExecutionEnvironment,
+};
+use alpen_chain_types::{ExecInputs, ExecOutputs, OutputMessage};
+use alpen_params::HeaderExtra;
 use alpen_reth_evm::{
     config::AlpenEvmConfig,
     da_fee::{stamped_da_rate_from_extra_data, validate_da_rate_against_parent},
@@ -25,10 +29,6 @@ use revm::database::WrapDatabaseRef;
 use rsp_client_executor::BlockValidator;
 use strata_acct_types::{BRIDGE_GATEWAY_ACCT_ID, BitcoinAmount, MsgPayload};
 use strata_codec::encode_to_vec;
-use strata_ee_acct_types::{
-    EnvError, EnvResult, ExecBlock, ExecBlockOutput, ExecPayload, ExecutionEnvironment,
-};
-use strata_ee_chain_types::{ExecInputs, ExecOutputs, OutputMessage};
 use strata_msg_fmt::{Msg as MsgTrait, OwnedMsg};
 use strata_ol_msg_types::{DEFAULT_OPERATOR_FEE, WITHDRAWAL_MSG_TYPE_ID, WithdrawalMsgData};
 
@@ -218,7 +218,7 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
 
     fn verify_outputs_against_header(
         &self,
-        header: &<Self::Block as strata_ee_acct_types::ExecBlock>::Header,
+        header: &<Self::Block as alpen_acct_types::ExecBlock>::Header,
         outputs: &ExecBlockOutput<Self>,
     ) -> EnvResult<()> {
         let header = header.header();
@@ -263,13 +263,13 @@ mod tests {
     use std::{collections::BTreeMap, fs, path::PathBuf};
 
     use alloy_consensus::{Header, Sealable};
-    use alpen_ee_params::AlpenSpecId;
+    use alpen_acct_types::{ExecBlock, ExecHeader, ExecPartialState};
+    use alpen_params::AlpenSpecId;
     use reth_primitives_traits::Block as RethBlockTrait;
     use revm::{DatabaseRef, state::Bytecode};
     use revm_primitives::{B256, alloy_primitives::Bloom};
     use rsp_client_executor::io::EthClientExecutorInput;
     use serde::Deserialize;
-    use strata_ee_acct_types::{ExecBlock, ExecHeader, ExecPartialState};
     use strata_msg_fmt::{Msg, MsgRef};
     use strata_ol_bridge_types::OperatorSelection;
     use strata_ol_msg_types::OLMessageExt;

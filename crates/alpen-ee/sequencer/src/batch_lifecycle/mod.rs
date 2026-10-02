@@ -20,7 +20,7 @@
 //! # Usage
 //!
 //! ```ignore
-//! use alpen_ee_sequencer::{create_batch_lifecycle_task, init_lifecycle_state};
+//! use alpen_sequencer::{create_batch_lifecycle_task, init_lifecycle_state};
 //!
 //! // Initialize state from storage
 //! let state = init_lifecycle_state(&batch_storage).await?;
@@ -49,9 +49,9 @@
 //! index (from sealed_batch notifications) moves backwards, the lifecycle manager
 //! detects this and resets its internal state accordingly.
 //!
-//! [`BatchDaProvider`]: alpen_ee_common::BatchDaProvider
-//! [`BatchProver`]: alpen_ee_common::BatchProver
-//! [`BatchStorage`]: alpen_ee_common::BatchStorage
+//! [`BatchDaProvider`]: alpen_common::BatchDaProvider
+//! [`BatchProver`]: alpen_common::BatchProver
+//! [`BatchStorage`]: alpen_common::BatchStorage
 
 mod ctx;
 mod handle;
