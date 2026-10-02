@@ -5,6 +5,8 @@
 .ruff_cache/
 .vscode/
 docker/.data
+docker/.env.da-verifier
+docker/configs/da-verifier-staging-v2.toml
 
 # Ignore build artifacts and cache
 target/
@@ -23,6 +25,7 @@ functional-tests/
 *.pyc
 *.pyo
 *.pyd
+**/*.snapshot
 
 # Additional files
 

@@ -1,0 +1,17 @@
+# Local Docker configuration for verifying staging-v2 through port-forwards on
+# the host. Copy this file without the `.example` suffix. Bitcoin RPC credentials
+# are supplied through the verifier process environment, not this file.
+
+l1_reorg_safe_depth = 3
+verification_interval_ms = 3_600_000
+max_l1_scan_window_size = 500
+sequencer_pubkey = "459e4958b9f684657efab3364023ca3fd06c163db1da4c12aa2c415488432921"
+block_fetch_concurrency = 8
+
+ol_rpc_url = "http://host.docker.internal:57708"
+
+[bitcoind]
+rpc_url = "http://host.docker.internal:62744"
+network = "signet"
+retry_count = 3
+retry_interval = 1_000
