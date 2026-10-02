@@ -83,6 +83,11 @@ impl Repl {
     /// with an error, so a `commit()` further down can never apply a batch
     /// that was only half staged. At the prompt the error is shown and the
     /// operator decides; here nobody is watching.
+    ///
+    /// The error says only what holds: later lines did not run. What earlier
+    /// lines committed stands, and a `commit()` that failed part-way across
+    /// environments reports itself what landed; the exit notice counts what
+    /// is still staged.
     fn run_reader(&mut self, reader: impl BufRead) -> eyre::Result<()> {
         let parser = Engine::new();
         let mut pending = String::new();
@@ -109,14 +114,15 @@ impl Repl {
                 Ok(false) => {}
                 Err(err) => eyre::bail!(
                     "line {line_number}: {err}\nstopped there; the rest of the input was not \
-                     run and nothing staged was committed"
+                     run. What earlier lines committed stands; what is still staged was not \
+                     applied"
                 ),
             }
         }
         if !pending.trim().is_empty() {
             eyre::bail!(
-                "input ended inside an unfinished expression, which was not run; nothing \
-                 staged was committed"
+                "input ended inside an unfinished expression, which was not run. What earlier \
+                 lines committed stands; what is still staged was not applied"
             );
         }
         Ok(())
@@ -520,6 +526,40 @@ mod tests {
             )
             .unwrap();
         assert_ne!(stored.as_int().unwrap(), 7);
+    }
+
+    /// A failure after an earlier line committed must not claim that nothing
+    /// was committed: the earlier commit stands, and the error says so.
+    #[test]
+    fn a_piped_run_that_fails_after_a_commit_does_not_deny_the_commit() {
+        let datadir = TempDatadir::seeded();
+        let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
+        let mut session = Session::new(db, Arc::new(AtomicBool::new(false)));
+        recipes::install(&mut session).unwrap();
+        let mut repl = Repl::new(session);
+
+        let input = "let k = first(\"ChunkProverTaskSchema\").key;\n\
+                     set(\"ChunkProverTaskSchema\", k, \"updated_at_secs\", 7);\n\
+                     commit()\n\
+                     nope()\n";
+        let err = repl.run_reader(Cursor::new(input)).unwrap_err();
+        let text = err.to_string();
+        assert!(text.starts_with("line 4:"), "{text}");
+        assert!(!text.contains("nothing staged was committed"), "{text}");
+        assert!(text.contains("earlier lines committed stands"), "{text}");
+
+        assert!(repl.session.db().staged().is_empty());
+        let stored = repl
+            .session
+            .eval(
+                "get(\"ChunkProverTaskSchema\", first(\"ChunkProverTaskSchema\").key).value.updated_at_secs",
+            )
+            .unwrap();
+        assert_eq!(
+            stored.as_int().unwrap(),
+            7,
+            "the commit before the failure stands"
+        );
     }
 
     /// A `.load` that stages edits and then fails is a failed input too:
