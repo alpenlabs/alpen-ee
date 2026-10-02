@@ -131,6 +131,7 @@ jobs:
             artifacts/elfs/sp1/
 
           ls -la artifacts/ artifacts/elfs/sp1/
+          sha256sum artifacts/elfs/sp1/*.elf # TEMP
 
       - name: Upload SP1 artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -145,7 +146,8 @@ jobs:
   build-and-push:
     name: Build alpen-client
     needs: [build-sp1-artifacts]
-    if: always() && needs.build-sp1-artifacts.result == 'success'
+    if: false # TEMP: skip image push while verifying ELFs
+    # if: always() && needs.build-sp1-artifacts.result == 'success'
     runs-on: ubuntu-latest
     environment: prod
     permissions:
