@@ -1,0 +1,21 @@
+[package]
+edition = "2021"
+name = "alpen-ee-l1-reconstruction"
+version = "0.3.0-alpha.1"
+
+[lints]
+workspace = true
+
+[dependencies]
+alpen-ee-batch-replay.workspace = true
+alpen-ee-da-l1-extraction.workspace = true
+alpen-ee-da-types.workspace = true
+alpen-reth-statediff.workspace = true
+strata-snark-acct-types.workspace = true
+
+alloy-primitives.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+bitcoin.workspace = true
+strata-identifiers.workspace = true

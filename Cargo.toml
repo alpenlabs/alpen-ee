@@ -2,15 +2,19 @@
 resolver = "2"
 
 members = [
+  "crates/alpen-ee/acct-state",
+  "crates/alpen-ee/batch-replay",
   "crates/alpen-ee/block-assembly",
   "crates/alpen-ee/exec-chain",
   "crates/alpen-ee/common",
+  "crates/alpen-ee/da/l1-extraction",
   "crates/alpen-ee/da/provider",
   "crates/alpen-ee/da/runtime",
   "crates/alpen-ee/da/types",
   "crates/alpen-ee/database",
   "crates/alpen-ee/engine",
   "crates/alpen-ee/genesis",
+  "crates/alpen-ee/l1-reconstruction",
   "crates/alpen-ee/ol-tracker",
   "crates/alpen-ee/params",
   "crates/alpen-ee/rpc/api",
@@ -40,6 +44,7 @@ members = [
 
   # binaries listed separately
   "bin/alpen-client",
+  "bin/alpen-ee-da-tool",
   "bin/prover-perf",
 ]
 
@@ -63,8 +68,11 @@ rustdoc.all = "warn"
 
 [workspace.dependencies]
 alpen-chainspec = { path = "crates/reth/chainspec" }
+alpen-ee-acct-state = { path = "crates/alpen-ee/acct-state" }
+alpen-ee-batch-replay = { path = "crates/alpen-ee/batch-replay" }
 alpen-ee-block-assembly = { path = "crates/alpen-ee/block-assembly" }
 alpen-ee-common = { path = "crates/alpen-ee/common" }
+alpen-ee-da-l1-extraction = { path = "crates/alpen-ee/da/l1-extraction" }
 alpen-ee-da-provider = { path = "crates/alpen-ee/da/provider" }
 alpen-ee-da-runtime = { path = "crates/alpen-ee/da/runtime" }
 alpen-ee-da-types = { path = "crates/alpen-ee/da/types" }
@@ -72,6 +80,7 @@ alpen-ee-database = { path = "crates/alpen-ee/database", default-features = fals
 alpen-ee-engine = { path = "crates/alpen-ee/engine" }
 alpen-ee-exec-chain = { path = "crates/alpen-ee/exec-chain" }
 alpen-ee-genesis = { path = "crates/alpen-ee/genesis" }
+alpen-ee-l1-reconstruction = { path = "crates/alpen-ee/l1-reconstruction" }
 alpen-ee-ol-tracker = { path = "crates/alpen-ee/ol-tracker" }
 alpen-ee-params = { path = "crates/alpen-ee/params" }
 alpen-ee-rpc-api = { path = "crates/alpen-ee/rpc/api" }
@@ -322,6 +331,7 @@ hex = { version = "0.4", features = ["serde"] }
 hex-literal = "0.4"
 http = "1.0.0"
 hyper = "1.9.0"
+indicatif = { version = "0.18.4", features = ["improved_unicode", "tokio"] }
 int-enum = "1.2"
 itertools = "0.14"
 jsonrpsee = { version = "0.26.0" }
