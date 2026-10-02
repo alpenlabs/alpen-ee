@@ -31,7 +31,21 @@ SRC_DIR="${STRATA_SRC_DIR:-$ROOT_DIR/target/strata-git}"
 echo "strata source: $STRATA_GIT_URL @ $STRATA_GIT_REV" >&2
 echo "checkout dir:  $SRC_DIR" >&2
 
+# Never let git discovery climb out of the checkout. CI's Rust cache saves
+# `target/` with every file stripped and the directories kept, so a restored
+# checkout is a skeleton whose `.git` is not a repository; without a ceiling,
+# every `git -C "$SRC_DIR"` below would silently act on this workspace's own
+# repository instead (rewriting its remote and checking strata out over it).
+export GIT_CEILING_DIRECTORIES="$ROOT_DIR"
+
 mkdir -p "$SRC_DIR"
+SRC_DIR="$(cd "$SRC_DIR" && pwd -P)"
+if [ -e "$SRC_DIR/.git" ] \
+    && [ "$(git -C "$SRC_DIR" rev-parse --show-toplevel 2>/dev/null || true)" != "$SRC_DIR" ]; then
+    echo "stale checkout at $SRC_DIR (not a repository); recreating it" >&2
+    rm -rf "$SRC_DIR"
+    mkdir -p "$SRC_DIR"
+fi
 if [ ! -e "$SRC_DIR/.git" ]; then
     git init -q "$SRC_DIR"
     git -C "$SRC_DIR" remote add origin "$STRATA_GIT_URL"
@@ -44,6 +58,10 @@ if ! git -C "$SRC_DIR" rev-parse --quiet --verify "$STRATA_GIT_REV^{commit}" >/d
         || git -C "$SRC_DIR" fetch origin "$STRATA_GIT_REV" >&2
 fi
 git -C "$SRC_DIR" checkout -q --detach "$STRATA_GIT_REV"
+if [ ! -f "$SRC_DIR/Cargo.toml" ]; then
+    echo "error: $SRC_DIR holds no Cargo.toml after checking out $STRATA_GIT_REV" >&2
+    exit 1
+fi
 
 PROFILE_DIR="debug"
 PROFILE_ARGS=""
