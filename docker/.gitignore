@@ -6,3 +6,5 @@ elfs/
 .env.alpen
 .env.alpen-client
 .env.alpen-fullnode
+.env.da-verifier
+configs/da-verifier-staging-v2.toml
