@@ -129,7 +129,9 @@ fn sp1_predicate(program: &str) -> Vec<u8> {
     let pk = prover
         .setup(elf.into())
         .unwrap_or_else(|e| panic!("sp1 key setup for {program}: {e}"));
-    let vkey_hash = pk.verifying_key().bytes32_raw();
+    let vk = pk.verifying_key();
+    println!("cargo:warning={program} vkey: {}", vk.bytes32());
+    let vkey_hash = vk.bytes32_raw();
 
     let verifier = SP1Groth16Verifier::load(&GROTH16_VK_BYTES, vkey_hash, *VK_ROOT_BYTES, true)
         .unwrap_or_else(|e| panic!("load SP1 Groth16 verifier: {e}"));
