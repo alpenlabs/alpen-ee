@@ -2,44 +2,44 @@
 resolver = "2"
 
 members = [
-  "crates/alpen-ee/block-assembly",
-  "crates/alpen-ee/exec-chain",
-  "crates/alpen-ee/common",
-  "crates/alpen-ee/da/provider",
-  "crates/alpen-ee/da/runtime",
-  "crates/alpen-ee/da/types",
-  "crates/alpen-ee/database",
-  "crates/alpen-ee/engine",
-  "crates/alpen-ee/genesis",
-  "crates/alpen-ee/ol-tracker",
-  "crates/alpen-ee/params",
-  "crates/alpen-ee/rpc/api",
-  "crates/alpen-ee/rpc/server",
-  "crates/alpen-ee/rpc/types",
-  "crates/alpen-ee/sequencer",
-  "crates/ee-acct-runtime",
-  "crates/ee-acct-types",
-  "crates/ee-chain-types",
-  "crates/ee-chunk-runtime",
+  "crates/acct-runtime",
+  "crates/acct-types",
+  "crates/block-assembly",
+  "crates/chain-types",
+  "crates/chunk-runtime",
+  "crates/common",
+  "crates/da/provider",
+  "crates/da/runtime",
+  "crates/da/types",
+  "crates/database",
+  "crates/engine",
   "crates/evm-ee",
-  "crates/proof-impl/alpen-chunk",
-  "crates/proof-impl/alpen-acct",
+  "crates/exec-chain",
+  "crates/exex",
+  "crates/genesis",
+  "crates/ol-tracker",
+  "crates/params",
+  "crates/proof/acct",
+  "crates/proof/chunk",
   "crates/reth/db",
   "crates/reth/evm",
-  "crates/reth/exex",
   "crates/reth/node",
   "crates/reth/primitives",
   "crates/reth/rpc",
   "crates/reth/statediff",
-  "crates/reth/witness",
-  "crates/rpc/open-rpc-spec",
-  "crates/simple-ee",
+  "crates/rpc/api",
+  "crates/rpc/server",
+  "crates/rpc/types",
+  "crates/sequencer",
   "crates/store-mdbx",
+  "crates/test-utils/simple-ee",
+  "crates/witness",
   "provers/sp1",
 
   # binaries listed separately
   "bin/alpen-client",
   "bin/dbconsole",
+  "bin/openrpc-spec",
   "bin/prover-perf",
 ]
 
@@ -68,37 +68,37 @@ clippy.absolute_paths = "warn"
 rustdoc.all = "warn"
 
 [workspace.dependencies]
-alpen-acct-runtime = { path = "crates/ee-acct-runtime" }
-alpen-acct-types = { path = "crates/ee-acct-types" }
-alpen-block-assembly = { path = "crates/alpen-ee/block-assembly" }
-alpen-chain-types = { path = "crates/ee-chain-types" }
-alpen-chunk-runtime = { path = "crates/ee-chunk-runtime" }
-alpen-common = { path = "crates/alpen-ee/common" }
-alpen-da-provider = { path = "crates/alpen-ee/da/provider" }
-alpen-da-runtime = { path = "crates/alpen-ee/da/runtime" }
-alpen-da-types = { path = "crates/alpen-ee/da/types" }
-alpen-database = { path = "crates/alpen-ee/database", default-features = false }
-alpen-engine = { path = "crates/alpen-ee/engine" }
+alpen-acct-runtime = { path = "crates/acct-runtime" }
+alpen-acct-types = { path = "crates/acct-types" }
+alpen-block-assembly = { path = "crates/block-assembly" }
+alpen-chain-types = { path = "crates/chain-types" }
+alpen-chunk-runtime = { path = "crates/chunk-runtime" }
+alpen-common = { path = "crates/common" }
+alpen-da-provider = { path = "crates/da/provider" }
+alpen-da-runtime = { path = "crates/da/runtime" }
+alpen-da-types = { path = "crates/da/types" }
+alpen-database = { path = "crates/database", default-features = false }
+alpen-engine = { path = "crates/engine" }
 alpen-evm-ee = { path = "crates/evm-ee" }
-alpen-exec-chain = { path = "crates/alpen-ee/exec-chain" }
-alpen-genesis = { path = "crates/alpen-ee/genesis" }
-alpen-ol-tracker = { path = "crates/alpen-ee/ol-tracker" }
-alpen-params = { path = "crates/alpen-ee/params" }
-alpen-proof-acct = { path = "crates/proof-impl/alpen-acct" }
-alpen-proof-chunk = { path = "crates/proof-impl/alpen-chunk" }
+alpen-exec-chain = { path = "crates/exec-chain" }
+alpen-genesis = { path = "crates/genesis" }
+alpen-ol-tracker = { path = "crates/ol-tracker" }
+alpen-params = { path = "crates/params" }
+alpen-proof-acct = { path = "crates/proof/acct" }
+alpen-proof-chunk = { path = "crates/proof/chunk" }
 alpen-reth-db = { path = "crates/reth/db" }
 alpen-reth-evm = { path = "crates/reth/evm" }
-alpen-reth-exex = { path = "crates/reth/exex" }
+alpen-exex = { path = "crates/exex" }
 alpen-reth-node = { path = "crates/reth/node" }
 alpen-reth-primitives = { path = "crates/reth/primitives" }
 alpen-reth-rpc = { path = "crates/reth/rpc" }
 alpen-reth-statediff = { path = "crates/reth/statediff", default-features = false }
-alpen-reth-witness = { path = "crates/reth/witness" }
-alpen-rpc-api = { path = "crates/alpen-ee/rpc/api" }
-alpen-rpc-server = { path = "crates/alpen-ee/rpc/server" }
-alpen-rpc-types = { path = "crates/alpen-ee/rpc/types" }
-alpen-sequencer = { path = "crates/alpen-ee/sequencer" }
-alpen-simple-ee = { path = "crates/simple-ee" }
+alpen-witness = { path = "crates/witness" }
+alpen-rpc-api = { path = "crates/rpc/api" }
+alpen-rpc-server = { path = "crates/rpc/server" }
+alpen-rpc-types = { path = "crates/rpc/types" }
+alpen-sequencer = { path = "crates/sequencer" }
+alpen-simple-ee = { path = "crates/test-utils/simple-ee" }
 alpen-store-mdbx = { path = "crates/store-mdbx" }
 
 # strata dependencies, pinned to the pre-split repo's main so the EE stays in

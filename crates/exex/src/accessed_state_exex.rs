@@ -26,7 +26,7 @@ use std::sync::Arc;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
 use alpen_common::{AccessedAccount, AccessedStateRecord, AccessedStateStore};
-use alpen_reth_witness::CacheDBProvider;
+use alpen_witness::CacheDBProvider;
 use futures_util::TryStreamExt;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm::{

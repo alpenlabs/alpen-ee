@@ -1,6 +1,6 @@
 [package]
 edition.workspace = true
-name = "alpen-reth-exex"
+name = "alpen-witness"
 version.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -9,24 +9,23 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+# Internal
 alpen-common.workspace = true
-alpen-reth-db.workspace = true
-alpen-reth-statediff.workspace = true
-alpen-reth-witness.workspace = true
+alpen-evm-ee.workspace = true
 strata-acct-types.workspace = true
+strata-codec.workspace = true
 
-alloy-eips.workspace = true
+# External
+alloy-consensus.workspace = true
 alloy-primitives.workspace = true
-alloy-rpc-types.workspace = true
 eyre.workspace = true
-futures-util.workspace = true
 reth-ethereum-primitives.workspace = true
-reth-evm.workspace = true
-reth-exex.workspace = true
-reth-node-api.workspace = true
-reth-primitives-traits.workspace = true
 reth-provider.workspace = true
 reth-revm.workspace = true
+reth-trie.workspace = true
+reth-trie-common = { workspace = true, features = ["eip1186"] }
+revm-primitives.workspace = true
+rsp-mpt.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 

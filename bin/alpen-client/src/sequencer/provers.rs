@@ -19,7 +19,7 @@ use std::sync::Arc;
 use alpen_common::{BatchStorage, ChunkStorage, SequencerOLClient};
 use alpen_database::{EeNodeStorage, SequencerDatabases};
 use alpen_params::{AlpenParams, AlpenSpecId};
-use alpen_reth_witness::RangeWitnessExtractor;
+use alpen_witness::RangeWitnessExtractor;
 use bitcoind_async_client::Client as BtcClient;
 use reth_provider::{BlockReader, StateProviderFactory};
 use strata_paas::{ProverBuilder, ReceiptStore, RetryConfig};

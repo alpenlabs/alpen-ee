@@ -18,7 +18,7 @@ pub const DEFAULT_ALPEN_EE_ACCOUNT_ID: AccountId = AccountId::new([1u8; 32]);
 
 /// JSON of the dev network's params, `params/dev.json` at the repo root.
 #[cfg(any(test, feature = "test-utils"))]
-pub const DEV_PARAMS_JSON: &str = include_str!("../../../../params/dev.json");
+pub const DEV_PARAMS_JSON: &str = include_str!("../../../params/dev.json");
 
 /// Top-level Alpen chain params.
 ///

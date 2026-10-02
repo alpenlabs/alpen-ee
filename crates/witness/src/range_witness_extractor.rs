@@ -1,7 +1,7 @@
 //! Range witness extraction for arbitrary block ranges.
 //!
 //! Reads per-block accessed-state records produced at production time by
-//! [`alpen_reth_exex::AccessedStateGenerator`] (see phase 2 of the EE
+//! [`alpen_exex::AccessedStateGenerator`] (see phase 2 of the EE
 //! prover redesign), unions them into a chunk-level accessed-state set,
 //! and runs the two pre/post multiproofs. No block re-execution happens
 //! here — that work happens once per produced block inside the exex.
@@ -31,7 +31,7 @@ use strata_codec::encode_to_vec;
 use tokio::runtime::Handle;
 use tracing::debug;
 
-/// Storage key — kept locally; `alpen_reth_exex::StorageKey` is the
+/// Storage key — kept locally; `alpen_exex::StorageKey` is the
 /// runtime cache type which we no longer depend on here.
 type StorageKey = U256;
 

@@ -23,9 +23,9 @@ use alpen_common::{require_latest_batch, BlockNumHash, SequencerOLClient};
 use alpen_database::{EeDb, EeNodeStorage, SequencerDatabases};
 use alpen_engine::{sync_chainstate_to_engine, AlpenRethExecEngine};
 use alpen_exec_chain::{init_exec_chain_state_from_storage, ExecChainState};
+use alpen_exex::{AccessedStateGenerator, StateDiffGenerator};
 use alpen_genesis::{ensure_batch_genesis, ensure_finalized_exec_chain_genesis};
 use alpen_reth_evm::evm::AlpenEvmFactory;
-use alpen_reth_exex::{AccessedStateGenerator, StateDiffGenerator};
 use alpen_reth_node::{
     AlpenEngineTypes, AlpenEthereumNode, AlpenGossipProtocolHandler, AlpenGossipState,
     AlpenNodeMode,

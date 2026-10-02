@@ -112,7 +112,7 @@ mod tests {
     /// release build.
     #[test]
     fn genesis_inner_state_roots_are_stable() {
-        let params_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../params");
+        let params_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../params");
         let mut networks: Vec<String> = fs::read_dir(&params_dir)
             .expect("params dir should be readable")
             .map(|entry| entry.expect("params dir entry should be readable").path())

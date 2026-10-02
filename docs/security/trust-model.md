@@ -35,13 +35,13 @@ Main components, for locating the code a finding touches:
 |-----------|-------------|---------------|
 | `alpen-client` | Node binary. Wires reth, the OL tracker and gossip, plus block building, batching, proving, DA and update submission in sequencer mode. | `bin/alpen-client` |
 | Alpen Reth node | Reth with the Alpen chainspec, a custom EVM with the bridge-out precompile (`0x54…0001`) and Schnorr verification precompile (`0x54…0002`), the `alpen_gossip` RLPx subprotocol, `alpen_*` RPC methods and a state-diff exex. | `crates/reth/*` |
-| OL tracker | Follows the paired OL node: epochs, checkpoints, finalization, inbox messages. | `crates/alpen-ee/ol-tracker`, `bin/alpen-client/src/ol` |
-| Engine and exec chain | Drives the reth engine API and tracks the execution chain, including orphans. | `crates/alpen-ee/engine`, `crates/alpen-ee/exec-chain` |
-| Block, chunk and batch assembly | Builds blocks, including deposit minting, and the chunk and batch packages the prover consumes. | `crates/alpen-ee/block-assembly`, `crates/alpen-ee/sequencer` |
-| Prover | Chunk and account (batch) proofs via SP1 remote proving, or a signature-based native backend for tests. | `bin/alpen-client/src/sequencer/prover`, `crates/proof-impl/*`, `crates/ee-chunk-runtime`, `crates/ee-acct-runtime` |
-| DA pipeline | Aggregates batch state diffs into blobs, posts them as SPS-51 chunked envelopes on Bitcoin, builds and verifies DA witnesses. | `crates/alpen-ee/da/{types,provider,runtime}` |
-| Update submitter | Submits proven batches to the OL as snark account updates over the authenticated submit RPC. | `crates/alpen-ee/sequencer/src/update_submitter` |
-| EE database | MDBX storage for EE account state, batches, chunks, proofs, DA envelopes and broadcast state. | `crates/alpen-ee/database`, `crates/db/*` |
+| OL tracker | Follows the paired OL node: epochs, checkpoints, finalization, inbox messages. | `crates/ol-tracker`, `bin/alpen-client/src/ol` |
+| Engine and exec chain | Drives the reth engine API and tracks the execution chain, including orphans. | `crates/engine`, `crates/exec-chain` |
+| Block, chunk and batch assembly | Builds blocks, including deposit minting, and the chunk and batch packages the prover consumes. | `crates/block-assembly`, `crates/sequencer` |
+| Prover | Chunk and account (batch) proofs via SP1 remote proving, or a signature-based native backend for tests. | `bin/alpen-client/src/sequencer/prover`, `crates/proof/*`, `crates/chunk-runtime`, `crates/acct-runtime` |
+| DA pipeline | Aggregates batch state diffs into blobs, posts them as SPS-51 chunked envelopes on Bitcoin, builds and verifies DA witnesses. | `crates/da/{types,provider,runtime}` |
+| Update submitter | Submits proven batches to the OL as snark account updates over the authenticated submit RPC. | `crates/sequencer/src/update_submitter` |
+| EE database | MDBX storage for EE account state, batches, chunks, proofs, DA envelopes and broadcast state. | `crates/database`, `crates/db/*` |
 
 The EE trusts its OL node the same way it trusts bitcoind: as an honest view of the layer
 below. The recommended deployment runs the OL and EE clients paired, under one operator.

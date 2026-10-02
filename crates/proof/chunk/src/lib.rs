@@ -1,4 +1,4 @@
-//! EE chunk proof implementation wrapping `ee-chunk-runtime` with zkaleido proof IO.
+//! EE chunk proof implementation wrapping `chunk-runtime` with zkaleido proof IO.
 
 use std::sync::Arc;
 

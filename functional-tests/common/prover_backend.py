@@ -83,7 +83,7 @@ ROTATION_SPEC_VERSIONS = ("v0", "v1")
 # secrets (unlike SEQUENCER_PRIVATE_KEY), just fixed publicly-known values.
 #
 # v1 runs `EeAcctProgram::test_signing_key` / `EeChunkProgram::test_signing_key`
-# from crates/proof-impl/alpen-{acct,chunk}. It has to: the dummy OL client
+# from crates/proof/{acct,chunk}. It has to: the dummy OL client
 # reports `EeAcctProgram::test_predicate_key()` as the expected update_vk, and
 # the sequencer refuses to start unless a resident program matches it. So the
 # default program is the one an env with no real OL already expects. v0's key

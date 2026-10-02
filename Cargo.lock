@@ -1251,6 +1251,7 @@ dependencies = [
  "alpen-engine",
  "alpen-evm-ee",
  "alpen-exec-chain",
+ "alpen-exex",
  "alpen-genesis",
  "alpen-ol-tracker",
  "alpen-params",
@@ -1258,13 +1259,12 @@ dependencies = [
  "alpen-proof-chunk",
  "alpen-reth-db",
  "alpen-reth-evm",
- "alpen-reth-exex",
  "alpen-reth-node",
  "alpen-reth-rpc",
  "alpen-reth-statediff",
- "alpen-reth-witness",
  "alpen-rpc-server",
  "alpen-sequencer",
+ "alpen-witness",
  "anyhow",
  "async-trait",
  "bitcoind-async-client",
@@ -1559,6 +1559,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "alpen-exex"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alloy-eips 2.0.4",
+ "alloy-primitives",
+ "alloy-rpc-types",
+ "alpen-common",
+ "alpen-reth-db",
+ "alpen-reth-statediff",
+ "alpen-witness",
+ "eyre",
+ "futures-util",
+ "reth-ethereum-primitives",
+ "reth-evm",
+ "reth-exex",
+ "reth-node-api",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-revm",
+ "strata-acct-types",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "alpen-genesis"
 version = "0.3.0-alpha.1"
 dependencies = [
@@ -1750,31 +1775,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "alpen-reth-exex"
-version = "0.3.0-alpha.1"
-dependencies = [
- "alloy-eips 2.0.4",
- "alloy-primitives",
- "alloy-rpc-types",
- "alpen-common",
- "alpen-reth-db",
- "alpen-reth-statediff",
- "alpen-reth-witness",
- "eyre",
- "futures-util",
- "reth-ethereum-primitives",
- "reth-evm",
- "reth-exex",
- "reth-node-api",
- "reth-primitives-traits",
- "reth-provider",
- "reth-revm",
- "strata-acct-types",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "alpen-reth-node"
 version = "0.3.0-alpha.1"
 dependencies = [
@@ -1892,28 +1892,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "alpen-reth-witness"
-version = "0.3.0-alpha.1"
-dependencies = [
- "alloy-consensus 2.0.4",
- "alloy-primitives",
- "alpen-common",
- "alpen-evm-ee",
- "eyre",
- "reth-ethereum-primitives",
- "reth-provider",
- "reth-revm",
- "reth-trie",
- "reth-trie-common",
- "revm-primitives",
- "rsp-mpt",
- "strata-acct-types",
- "strata-codec",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "alpen-rpc-api"
 version = "0.3.0-alpha.1"
 dependencies = [
@@ -2018,6 +1996,28 @@ dependencies = [
  "strata-codec",
  "tempfile",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "alpen-witness"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alloy-consensus 2.0.4",
+ "alloy-primitives",
+ "alpen-common",
+ "alpen-evm-ee",
+ "eyre",
+ "reth-ethereum-primitives",
+ "reth-provider",
+ "reth-revm",
+ "reth-trie",
+ "reth-trie-common",
+ "revm-primitives",
+ "rsp-mpt",
+ "strata-acct-types",
+ "strata-codec",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

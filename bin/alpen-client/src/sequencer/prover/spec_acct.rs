@@ -24,7 +24,7 @@ use alpen_da_runtime::builders::{build_da_witness, DaDedupResolver, DaWitnessBui
 use alpen_database::EeNodeStorage;
 use alpen_proof_acct::{EeAcctProgram, EeAcctProofInput};
 use alpen_reth_db::StateDiffProvider;
-use alpen_reth_witness::RangeWitnessData;
+use alpen_witness::RangeWitnessData;
 use async_trait::async_trait;
 use bitcoind_async_client::Client as BtcClient;
 use ssz::{Decode, Encode as _};

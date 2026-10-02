@@ -140,7 +140,7 @@ Two halves, split on purpose:
                             |
                             | Record / FieldValue  (engine-neutral)
                             v
-  crates/alpen-ee/database/src/console/   the core — codecs, transactions
+  crates/database/src/console/   the core — codecs, transactions
       db.rs        ConsoleDb: attach every env, route, read, stage, commit
       registry.rs  TableReflect: per-table get/scan/put; the envs and their tables
       reflect.rs   ValueReflector: value <-> FieldValue, both ways

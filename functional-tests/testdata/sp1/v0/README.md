@@ -30,7 +30,7 @@ so moving between them is a predicate rotation rather than a redeploy.
 
 See `provers/sp1/guest-alpen-chunk/src/main.rs` and
 `provers/sp1/guest-alpen-acct/src/main.rs` for the constant, and
-`crates/proof-impl/alpen-chunk/src/lib.rs` for why it is an out-of-band
+`crates/proof/chunk/src/lib.rs` for why it is an out-of-band
 argument instead of zkVM input.
 
 ## Provenance

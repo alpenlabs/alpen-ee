@@ -49,9 +49,9 @@ sequencer = [
   "dep:alpen-exec-chain",
   "dep:alpen-sequencer",
   "dep:alpen-reth-db",
-  "dep:alpen-reth-exex",
+  "dep:alpen-exex",
   "dep:alpen-reth-statediff",
-  "dep:alpen-reth-witness",
+  "dep:alpen-witness",
   "dep:bitcoind-async-client",
   "dep:k256",
   "dep:metrics",
@@ -105,6 +105,7 @@ alpen-database.workspace = true
 alpen-engine.workspace = true
 alpen-evm-ee = { workspace = true, optional = true }
 alpen-exec-chain = { workspace = true, optional = true }
+alpen-exex = { workspace = true, optional = true }
 alpen-genesis.workspace = true
 alpen-ol-tracker.workspace = true
 alpen-params.workspace = true
@@ -112,13 +113,12 @@ alpen-proof-acct = { workspace = true, optional = true }
 alpen-proof-chunk = { workspace = true, optional = true }
 alpen-reth-db = { workspace = true, optional = true }
 alpen-reth-evm.workspace = true
-alpen-reth-exex = { workspace = true, optional = true }
 alpen-reth-node.workspace = true
 alpen-reth-rpc.workspace = true
 alpen-reth-statediff = { workspace = true, optional = true }
-alpen-reth-witness = { workspace = true, optional = true }
 alpen-rpc-server.workspace = true
 alpen-sequencer = { workspace = true, optional = true }
+alpen-witness = { workspace = true, optional = true }
 bitcoind-async-client = { workspace = true, optional = true }
 k256 = { workspace = true, optional = true }
 metrics = { workspace = true, optional = true }

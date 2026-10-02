@@ -104,7 +104,7 @@ def _sign_clz_call(rpc, *, nonce: int, probe_address: str, gas: int) -> str:
 def _spec_version_from_extra_data(extra_data_hex: str) -> int:
     """Decode the big-endian AlpenSpecId prefix from a block's `extraData`.
 
-    Mirrors `peek_spec_version` in `crates/alpen-ee/params/src/extra_data.rs`.
+    Mirrors `peek_spec_version` in `crates/params/src/extra_data.rs`.
     """
     hex_body = extra_data_hex[2:] if extra_data_hex.startswith("0x") else extra_data_hex
     raw = bytes.fromhex(hex_body)

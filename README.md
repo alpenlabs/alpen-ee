@@ -76,8 +76,8 @@ stack: the `alpen-client` EE node, its crates, and the EE proof programs.
 The strata (OL) node lives in its own repository and is consumed here as
 pinned git dependencies.
 
-- `bin/`: binary crates for various clients and CLIs
-- `crates/`: library crates, provides types and functionalities
+- `bin/`: the binaries: `alpen-client` (the EE node), `dbconsole` (operator console over the EE store), `prover-perf`, `openrpc-spec`
+- `crates/`: library crates, one `alpen-*` package per directory; `da/`, `rpc/`, `reth/`, `proof/` and `test-utils/` group crates of one role
 - `docker/`: supporting files for our dockerized applications
 - `functional-tests/`: end-to-end functional tests
 - `provers/`: libraries and binaries related to zero-knowledge proofs

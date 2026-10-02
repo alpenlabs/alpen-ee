@@ -15,7 +15,7 @@ CHECKPOINT_TEST_PREDICATE_FILE = PREDICATE_FIXTURES_DIR / "checkpoint-bip340-sch
 ALPEN_EE_ACCOUNT_ID = "01" * 32
 
 # Genesis inner state root of the EE account per params/<network>.json. Keep in
-# sync with GENESIS_INNER_STATE_ROOTS in crates/alpen-ee/genesis/src/utils.rs,
+# sync with GENESIS_INNER_STATE_ROOTS in crates/genesis/src/utils.rs,
 # which pins the same values against the real computation.
 GENESIS_INNER_STATE_ROOTS = {
     "dev": "a0a5f13344251d480f42dc85cabe0ca6dffa168e67ad32a9224970383baa63be",
