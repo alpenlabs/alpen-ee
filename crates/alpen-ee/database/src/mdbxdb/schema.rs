@@ -45,6 +45,8 @@ use crate::serialization_types::{
 macro_rules! impl_node_id_key_codec {
     ($schema:ty) => {
         impl KeyCodec<$schema> for TxNodeId {
+            const ORDERED: bool = true;
+
             fn encode_key(&self) -> Result<Vec<u8>, CodecError> {
                 Ok(self.0 .0.to_vec())
             }
@@ -179,6 +181,10 @@ define_table! {
 impl_versioned_value_codec!(AcctProverTaskSchema { 1 => TaskRecordData as cbor });
 
 impl KeyCodec<ChunkProverTaskSchema> for ChunkTaskKey {
+    // The version is big-endian and the hashes are raw, so byte order is key
+    // order: a range or prefix walk over the table is sound.
+    const ORDERED: bool = true;
+
     fn encode_key(&self) -> Result<Vec<u8>, CodecError> {
         Ok(encode_versioned_range(
             self.spec_version(),
@@ -198,6 +204,10 @@ impl KeyCodec<ChunkProverTaskSchema> for ChunkTaskKey {
 }
 
 impl KeyCodec<AcctProverTaskSchema> for BatchTaskKey {
+    // The version is big-endian and the hashes are raw, so byte order is key
+    // order: a range or prefix walk over the table is sound.
+    const ORDERED: bool = true;
+
     fn encode_key(&self) -> Result<Vec<u8>, CodecError> {
         Ok(encode_versioned_range(
             self.spec_version(),

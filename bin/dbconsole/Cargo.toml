@@ -1,0 +1,33 @@
+[package]
+edition = "2021"
+name = "alpen-dbconsole"
+version = "0.3.0-alpha.1"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "dbconsole"
+path = "src/main.rs"
+
+[dependencies]
+alpen-ee-database = { workspace = true, features = ["console"] }
+
+clap = { workspace = true, features = [
+  "derive",
+  "std",
+  "help",
+  "usage",
+  "error-context",
+  "suggestions",
+  "color",
+] }
+dirs.workspace = true
+eyre.workspace = true
+libc.workspace = true
+rhai = { workspace = true, features = ["metadata"] }
+rustyline = { workspace = true, features = ["derive"] }
+signal-hook.workspace = true
+
+[dev-dependencies]
+alpen-ee-database = { workspace = true, features = ["test-utils"] }

@@ -1,6 +1,7 @@
 use alpen_ee_common::ExecBlockRecord;
 use alpen_ee_params::AlpenSpecId;
 use borsh::{BorshDeserialize, BorshSerialize};
+use serde::{Deserialize, Serialize};
 use ssz::{Decode, Encode};
 use strata_acct_types::{BitcoinAmount, Hash, MessageEntry, MsgPayload};
 use strata_ee_acct_types::EeAccountState;
@@ -9,13 +10,14 @@ use strata_identifiers::OLBlockCommitment;
 
 use super::account_state::DBEeAccountState;
 
-#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq)]
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
 pub(crate) struct DBExecBlockRecord {
     pub(crate) blocknum: u64,
     parent_blockhash: Hash,
     timestamp_ms: u64,
     ol_block: OLBlockCommitment,
     /// ExecBlockPackage serialized using SSZ, then wrapped in a Vec<u8> for Borsh
+    #[serde(with = "serde_bytes")]
     package_ssz: Vec<u8>,
     account_state: DBEeAccountState,
     next_inbox_msg_idx: u64,
@@ -79,11 +81,13 @@ impl TryFrom<DBExecBlockRecord> for ExecBlockRecord {
     }
 }
 
-#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq)]
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
 struct DBMessageEntry {
+    #[serde(with = "hex::serde")]
     source: [u8; 32],
     incl_epoch: u32,
     payload_value_sats: u64,
+    #[serde(with = "serde_bytes")]
     payload_data: Vec<u8>,
 }
 

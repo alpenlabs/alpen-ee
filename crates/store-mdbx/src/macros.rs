@@ -26,6 +26,19 @@ macro_rules! define_table {
             type Value = $value;
         }
     };
+    // `(pub Name)` makes the marker public, for a schema another crate
+    // addresses by type — the operator console reflecting a store's tables.
+    ($(#[$docs:meta])* (pub $name:ident) $key:ty => $value:ty) => {
+        $(#[$docs])*
+        #[derive(Clone, Copy, Debug, Default)]
+        pub struct $name;
+
+        impl $crate::Schema for $name {
+            const NAME: &'static str = ::core::stringify!($name);
+            type Key = $key;
+            type Value = $value;
+        }
+    };
 }
 
 /// Builds a `Vec<TableSpec>` from a list of [`Schema`](crate::Schema) types, for
@@ -170,6 +183,8 @@ macro_rules! impl_bincode_value_codec {
 macro_rules! impl_be_key_codec {
     ($schema:ty, $key:ty) => {
         impl $crate::KeyCodec<$schema> for $key {
+            const ORDERED: bool = true;
+
             fn encode_key(
                 &self,
             ) -> ::core::result::Result<::std::vec::Vec<u8>, $crate::CodecError> {
@@ -271,6 +286,11 @@ macro_rules! define_table_bincode_be_key {
         $crate::impl_be_key_codec!($name, $key);
         $crate::impl_bincode_value_codec!($name, $value);
     };
+    ($(#[$docs:meta])* (pub $name:ident) $key:ty => $value:ty) => {
+        $crate::define_table!($(#[$docs])* (pub $name) $key => $value);
+        $crate::impl_be_key_codec!($name, $key);
+        $crate::impl_bincode_value_codec!($name, $value);
+    };
 }
 
 /// CBOR [`ValueCodec`](crate::ValueCodec) via `ciborium`, for values that are
@@ -311,6 +331,8 @@ macro_rules! impl_cbor_value_codec {
 macro_rules! impl_raw_key_codec {
     ($schema:ty) => {
         impl $crate::KeyCodec<$schema> for ::std::vec::Vec<u8> {
+            const ORDERED: bool = true;
+
             fn encode_key(
                 &self,
             ) -> ::core::result::Result<::std::vec::Vec<u8>, $crate::CodecError> {
@@ -586,6 +608,17 @@ macro_rules! define_table_versioned_be_key {
     ) => {
         $crate::define_table!(
             $(#[$docs])* ($name)
+            $key => $crate::impl_versioned_value_codec!(@last_ty $($ver),+)
+        );
+        $crate::impl_be_key_codec!($name, $key);
+        $crate::impl_versioned_value_codec!($name { $($tag => $ver $(as $codec)?),+ });
+    };
+    (
+        $(#[$docs:meta])* (pub $name:ident)
+        $key:ty => { $( $tag:literal => $ver:ty $(as $codec:ident)? ),+ $(,)? }
+    ) => {
+        $crate::define_table!(
+            $(#[$docs])* (pub $name)
             $key => $crate::impl_versioned_value_codec!(@last_ty $($ver),+)
         );
         $crate::impl_be_key_codec!($name, $key);
