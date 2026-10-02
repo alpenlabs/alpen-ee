@@ -111,14 +111,8 @@ jobs:
       - name: Install SP1 core runner override
         uses: $/.github/actions/sp1-core-runner-override
 
-      - name: Install SP1 toolchain
-        run: |
-          curl -fsSL --proto '=https' --tlsv1.2 https://sp1.succinct.xyz | bash
-          ~/.sp1/bin/sp1up
-          echo "$HOME/.sp1/bin" >> "$GITHUB_PATH"
-          export PATH="$HOME/.sp1/bin:$PATH"
-          cargo prove --version
-
+      # Guests compile inside the ghcr.io/succinctlabs/sp1 image (tag pinned by
+      # the sp1-build version) for reproducible ELFs.
       - name: Build SP1 guest ELFs
         env:
           # Canonical dev-network params baked into the guest ELFs. Without this,
@@ -127,9 +121,9 @@ jobs:
           # the repo root, so a relative path here would resolve against the wrong base.
           SP1_ALPEN_PARAMS_PATH: ${{ github.workspace }}/bin/alpen-client/tests/res/alpen-params.json
         run: |
-          # The guest builder's build script compiles the guest programs and
-          # writes the ELFs to provers/sp1/generated/.
-          cargo build --release -p strata-sp1-guest-builder
+          # Builds the guests in Docker (`docker-build`) and writes the ELFs to
+          # provers/sp1/generated/.
+          cargo build --locked --release -p strata-sp1-guest-builder --features docker-build
 
           mkdir -p artifacts/elfs/sp1
           cp -v provers/sp1/generated/guest-alpen-chunk.elf \

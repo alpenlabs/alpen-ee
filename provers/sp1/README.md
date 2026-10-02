@@ -29,5 +29,7 @@ embedded.
 
 ## Features and environment variables
 
-- `docker-build` — compile the guests inside Docker for reproducible ELFs.
+- `docker-build` — compile the guests inside Docker for reproducible ELFs. Guests
+  build with `--locked`, so each guest's `Cargo.lock` must be up to date. CI uses
+  this for the ELFs shipped in the `alpen-client` image.
 - `SP1_SKIP_PROGRAM_BUILD=true` — skip guest compilation.

@@ -19,7 +19,8 @@
 //! # Features
 //!
 //! - **`docker-build`** — compile the guests inside Docker via `build_program_with_args` for
-//!   reproducible ELFs. The output location is unchanged.
+//!   reproducible ELFs, with `--locked` against each guest's committed `Cargo.lock`. The output
+//!   location is unchanged.
 //!
 //! # Environment variables
 //!
@@ -107,6 +108,10 @@ fn build_guest(program: &str) {
         // mounts the entire workspace and the guest can import local crates.
         #[cfg(feature = "docker-build")]
         workspace_directory: Some("../../".to_owned()),
+        // Without `--locked`, a stale guest `Cargo.lock` is silently re-resolved,
+        // so the ELF (and its VK) would depend on build time, not the commit.
+        #[cfg(feature = "docker-build")]
+        locked: true,
         ..Default::default()
     };
     build_program_with_args(program, build_args);
