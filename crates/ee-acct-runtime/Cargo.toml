@@ -1,7 +1,9 @@
 [package]
 name = "strata-ee-acct-runtime"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
+license.workspace = true
+repository.workspace = true
 
 [features]
 default = ["builders"]

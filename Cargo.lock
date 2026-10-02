@@ -1772,7 +1772,7 @@ dependencies = [
 
 [[package]]
 name = "alpen-store-mdbx"
-version = "0.1.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "bincode",
  "borsh",
@@ -14996,7 +14996,7 @@ dependencies = [
 
 [[package]]
 name = "strata-ee-acct-runtime"
-version = "0.1.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "rkyv",
  "rkyv_impl 0.2.2",
@@ -15016,7 +15016,7 @@ dependencies = [
 
 [[package]]
 name = "strata-ee-acct-types"
-version = "0.1.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "proptest",
  "ssz",
@@ -15040,7 +15040,7 @@ dependencies = [
 
 [[package]]
 name = "strata-ee-chain-types"
-version = "0.1.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "proptest",
  "ssz",
@@ -15059,7 +15059,7 @@ dependencies = [
 
 [[package]]
 name = "strata-ee-chunk-runtime"
-version = "0.1.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "rkyv",
  "rkyv_impl 0.2.2",
@@ -15074,7 +15074,7 @@ dependencies = [
 
 [[package]]
 name = "strata-evm-ee"
-version = "0.1.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "alloy-consensus 2.0.4",
  "alloy-eips 2.0.4",
@@ -15673,7 +15673,7 @@ dependencies = [
 
 [[package]]
 name = "strata-proofimpl-alpen-acct"
-version = "0.1.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "alpen-ee-da-runtime",
  "alpen-ee-da-types",
@@ -15697,7 +15697,7 @@ dependencies = [
 
 [[package]]
 name = "strata-proofimpl-alpen-chunk"
-version = "0.1.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "alpen-ee-params",
  "alpen-reth-evm",
@@ -15775,7 +15775,7 @@ dependencies = [
 
 [[package]]
 name = "strata-rpc-openrpc-spec"
-version = "0.1.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "alpen-ee-rpc-api",
  "serde_json",
@@ -15814,7 +15814,7 @@ dependencies = [
 
 [[package]]
 name = "strata-simple-ee"
-version = "0.1.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "digest 0.10.7",
  "sha2",
