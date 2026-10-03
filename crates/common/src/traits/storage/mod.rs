@@ -26,7 +26,7 @@ pub use block_witness::MockBlockWitnessStore;
 pub use chunk::ChunkStorage;
 #[cfg(feature = "test-utils")]
 pub use chunk::{tests as chunk_storage_test_fns, MockChunkStorage};
-pub use da_context::EeDaContext;
+pub use da_context::DaContext;
 pub use errors::StorageError;
 pub use exec_block::ExecBlockStorage;
 #[cfg(feature = "test-utils")]

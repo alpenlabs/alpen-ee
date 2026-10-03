@@ -17,19 +17,19 @@ pub use error::{DbError, DbResult};
 #[cfg(feature = "test-utils")]
 pub use init::open_da_ops;
 pub use init::{
-    create_ee_envs, open_ee_db, BroadcastDbOps, ChunkedEnvelopeOps, EeDb, SequencerDatabases,
+    create_ee_envs, open_stores, BroadcastDbOps, ChunkedEnvelopeOps, SequencerDatabases, Stores,
 };
 pub use mdbxdb::{
-    BatchTaskKey, ChunkTaskKey, EeDaContextDbMdbx, EeNodeDbMdbx, EeProverDbMdbx, ProverTaskKey,
+    BatchTaskKey, ChunkTaskKey, DaContextDbMdbx, NodeDbMdbx, ProverDbMdbx, ProverTaskKey,
     WitnessDbMdbx,
 };
-pub use storage::EeNodeStorage;
+pub use storage::NodeStorage;
 
 /// The store's on-disk model, for tooling and tests: every table marker and
 /// the table list each environment is opened with.
 ///
 /// This is not a service API. The node reads and writes through
-/// [`EeNodeStorage`] and the traits in `alpen-common`; the operator console
+/// [`NodeStorage`] and the traits in `alpen-common`; the operator console
 /// (`alpen-storage-console`) reflects the tables through the codecs these
 /// markers carry, which is the one reason they are public.
 pub mod schema {

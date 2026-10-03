@@ -2,8 +2,8 @@
 //!
 //! Opens the EE stores under `<datadir>/mdbx` as MDBX environments, mirroring
 //! the role split of the previous layout: every node opens the node store
-//! via [`EeDb::node_storage`], and only a sequencer additionally opens the
-//! DA/witness/prover stores via [`EeDb::sequencer_databases`]. Each store is an
+//! via [`Stores::node_storage`], and only a sequencer additionally opens the
+//! DA/witness/prover stores via [`Stores::sequencer_databases`]. Each store is an
 //! isolated environment (independent write-locks); the DA-context filter shares
 //! the witness environment, and the L1 broadcast and chunked-envelope stores
 //! share the DA environment.
@@ -22,34 +22,34 @@ use tokio::runtime::Handle;
 
 use crate::{
     mdbxdb::{
-        da_tables, witness_tables, EeDaContextDbMdbx, EeNodeDbMdbx, EeProverDbMdbx,
-        L1BroadcastDbMdbx, L1ChunkedEnvelopeDbMdbx, WitnessDbMdbx,
+        da_tables, witness_tables, DaContextDbMdbx, L1BroadcastDbMdbx, L1ChunkedEnvelopeDbMdbx,
+        NodeDbMdbx, ProverDbMdbx, WitnessDbMdbx,
     },
-    storage::EeNodeStorage,
+    storage::NodeStorage,
 };
 
 /// An opened set of EE MDBX environments, from which databases are created per
 /// role.
 ///
 /// The node store is opened eagerly (every node keeps chain state); the
-/// sequencer stores are opened on demand in [`EeDb::sequencer_databases`], so a
+/// sequencer stores are opened on demand in [`Stores::sequencer_databases`], so a
 /// full node never materializes them.
 #[derive(Debug)]
-pub struct EeDb {
+pub struct Stores {
     mdbx_dir: PathBuf,
     config: MdbxConfig,
-    node_db: Arc<EeNodeDbMdbx>,
+    node_db: Arc<NodeDbMdbx>,
 }
 
 /// Opens the EE MDBX environments under `<datadir>/mdbx`.
 ///
 /// Returns a handle from which each role takes the databases it needs:
-/// [`EeDb::node_storage`] for chain state, and [`EeDb::sequencer_databases`] for
+/// [`Stores::node_storage`] for chain state, and [`Stores::sequencer_databases`] for
 /// the DA and prover databases only a sequencer uses.
 ///
 /// `_db_retry_count` is accepted for compatibility with the previous layout but
 /// unused: MDBX serializes writers, so there is no optimistic-retry backoff.
-pub fn open_ee_db(datadir: &Path, _db_retry_count: u16) -> Result<EeDb> {
+pub fn open_stores(datadir: &Path, _db_retry_count: u16) -> Result<Stores> {
     // A datadir the sled binary wrote and the MDBX binary has not yet migrated.
     // Starting empty next to a month of history is the one mistake this
     // upgrade must make impossible, so refuse and say what to run.
@@ -61,20 +61,20 @@ pub fn open_ee_db(datadir: &Path, _db_retry_count: u16) -> Result<EeDb> {
             datadir.display()
         ));
     }
-    open_ee_db_unchecked(datadir)
+    open_stores_unchecked(datadir)
 }
 
 /// Opens the environments without the unmigrated-datadir check, for the
 /// migration itself, which is the one caller that creates `mdbx/` next to
 /// `sled/` on purpose.
-fn open_ee_db_unchecked(datadir: &Path) -> Result<EeDb> {
+fn open_stores_unchecked(datadir: &Path) -> Result<Stores> {
     let mdbx_dir = datadir.join("mdbx");
     let config = MdbxConfig::default();
     let node_db = Arc::new(
-        EeNodeDbMdbx::open(&mdbx_dir.join("node"), &config)
+        NodeDbMdbx::open(&mdbx_dir.join("node"), &config)
             .map_err(|e| eyre!("failed to open EE node db: {e}"))?,
     );
-    Ok(EeDb {
+    Ok(Stores {
         mdbx_dir,
         config,
         node_db,
@@ -84,18 +84,18 @@ fn open_ee_db_unchecked(datadir: &Path) -> Result<EeDb> {
 /// Creates every EE environment and table under `<datadir>/mdbx`, empty, for a
 /// tool that fills a fresh store from another one.
 pub fn create_ee_envs(datadir: &Path) -> Result<()> {
-    let db = open_ee_db_unchecked(datadir)?;
+    let db = open_stores_unchecked(datadir)?;
     db.sequencer_databases()?;
     Ok(())
 }
 
-impl EeDb {
-    /// Creates [`EeNodeStorage`] over the EE node database, dispatching blocking
+impl Stores {
+    /// Creates [`NodeStorage`] over the EE node database, dispatching blocking
     /// work via the given runtime handle.
     ///
     /// This is the chain state every node keeps, whatever its role.
-    pub fn node_storage(&self, handle: Handle) -> Result<EeNodeStorage> {
-        Ok(EeNodeStorage::new(handle, self.node_db.clone()))
+    pub fn node_storage(&self, handle: Handle) -> Result<NodeStorage> {
+        Ok(NodeStorage::new(handle, self.node_db.clone()))
     }
 
     /// Opens and returns the databases only a sequencer uses.
@@ -103,7 +103,7 @@ impl EeDb {
     /// A full node should not call this, so its environments are never created.
     pub fn sequencer_databases(&self) -> Result<SequencerDatabases> {
         let prover_db = Arc::new(
-            EeProverDbMdbx::open(&self.mdbx_dir.join("prover"), &self.config)
+            ProverDbMdbx::open(&self.mdbx_dir.join("prover"), &self.config)
                 .map_err(|e| eyre!("failed to open EE prover db: {e}"))?,
         );
 
@@ -116,7 +116,7 @@ impl EeDb {
             .map_err(|e| eyre!("failed to open EE witness env: {e}"))?,
         );
         let witness_db = Arc::new(WitnessDbMdbx::new(witness_env.clone()));
-        let da_context_db = Arc::new(EeDaContextDbMdbx::new(witness_env, witness_db.clone()));
+        let da_context_db = Arc::new(DaContextDbMdbx::new(witness_env, witness_db.clone()));
 
         // L1 broadcast + chunked-envelope share one DA environment.
         let da_env = Arc::new(
@@ -140,7 +140,7 @@ impl EeDb {
 /// chunked-envelope queues, the cross-batch DA dedup context, and prover-side
 /// persistence.
 ///
-/// Separate from the node state in [`EeDb::node_storage`] so a full node neither
+/// Separate from the node state in [`Stores::node_storage`] so a full node neither
 /// holds nor creates them.
 #[derive(Debug)]
 pub struct SequencerDatabases {
@@ -151,9 +151,9 @@ pub struct SequencerDatabases {
     /// Chunked envelope database.
     chunked_envelope_db: Arc<L1ChunkedEnvelopeDbMdbx>,
     /// DA filter for cross-batch deduplication (shares the witness env).
-    da_context_db: Arc<EeDaContextDbMdbx<WitnessDbMdbx>>,
+    da_context_db: Arc<DaContextDbMdbx<WitnessDbMdbx>>,
     /// Prover-side persistence: shared task store + chunk receipts + acct proofs.
-    prover_db: Arc<EeProverDbMdbx>,
+    prover_db: Arc<ProverDbMdbx>,
 }
 
 impl SequencerDatabases {
@@ -173,13 +173,13 @@ impl SequencerDatabases {
     }
 
     /// Returns a clone of the DA context database.
-    pub fn da_context_db(&self) -> Arc<EeDaContextDbMdbx<WitnessDbMdbx>> {
+    pub fn da_context_db(&self) -> Arc<DaContextDbMdbx<WitnessDbMdbx>> {
         self.da_context_db.clone()
     }
 
     /// Returns a clone of the prover database (shared task store + chunk
     /// receipts + acct proofs).
-    pub fn prover_db(&self) -> Arc<EeProverDbMdbx> {
+    pub fn prover_db(&self) -> Arc<ProverDbMdbx> {
         self.prover_db.clone()
     }
 }

@@ -18,11 +18,11 @@ mod witness_db;
 pub(crate) mod witness_schema;
 
 pub(crate) use broadcast_db::L1BroadcastDbMdbx;
-pub use db::EeNodeDbMdbx;
+pub use db::NodeDbMdbx;
 pub(crate) use envelope_db::L1ChunkedEnvelopeDbMdbx;
-pub use prover_db::EeProverDbMdbx;
+pub use prover_db::ProverDbMdbx;
 pub use task_key::{BatchTaskKey, ChunkTaskKey, ProverTaskKey};
-pub use witness_db::{EeDaContextDbMdbx, WitnessDbMdbx};
+pub use witness_db::{DaContextDbMdbx, WitnessDbMdbx};
 
 /// Maps a storage-engine error into the database error type.
 fn to_db_error(err: MdbxError) -> DbError {

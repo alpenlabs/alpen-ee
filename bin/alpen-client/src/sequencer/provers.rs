@@ -11,14 +11,14 @@
 //! - `chunk_receipts` — chunk prover writes (via paas auto-store); acct `fetch_input` reads back.
 //! - `batch_proofs` — outer-proof store keyed by `BatchId`; outer hook writes, OL submission reads.
 //!
-//! All backed by `EeProverDbMdbx`; see `alpen_storage_db::mdbxdb`
+//! All backed by `ProverDbMdbx`; see `alpen_storage_db::mdbxdb`
 //! for schemas.
 
 use std::sync::Arc;
 
 use alpen_common::{BatchStorage, ChunkStorage, SequencerOLClient};
 use alpen_params::{AlpenParams, AlpenSpecId};
-use alpen_storage_db::{EeNodeStorage, SequencerDatabases};
+use alpen_storage_db::{NodeStorage, SequencerDatabases};
 use alpen_witness::RangeWitnessExtractor;
 use bitcoind_async_client::Client as BtcClient;
 use reth_provider::{BlockReader, StateProviderFactory};
@@ -35,7 +35,7 @@ use crate::{config::ProverBackendConfig, service_executor::ServiceExecutor};
 /// Everything [`launch`] needs to build and launch the EE chunk + acct
 /// provers.
 pub(crate) struct EeProverInputs<P> {
-    pub(crate) storage: Arc<EeNodeStorage>,
+    pub(crate) storage: Arc<NodeStorage>,
     pub(crate) node_provider: P,
     pub(crate) btc_client: Arc<BtcClient>,
     pub(crate) backend: ProverBackendConfig,

@@ -23,7 +23,7 @@ use alpen_common::{
 };
 use alpen_da_runtime::builders::{build_da_witness, DaDedupResolver, DaWitnessBuildError};
 use alpen_proof_acct::{EeAcctProgram, EeAcctProofInput};
-use alpen_storage_db::EeNodeStorage;
+use alpen_storage_db::NodeStorage;
 use alpen_witness::RangeWitnessData;
 use async_trait::async_trait;
 use bitcoind_async_client::Client as BtcClient;
@@ -113,7 +113,7 @@ impl From<AcctProofInputError> for PaasError {
 ///
 /// Holds the shared paas `ReceiptStore` (chunk receipts the chunk
 /// prover wrote), `Arc<dyn BatchStorage>` for batch metadata,
-/// `Arc<EeNodeStorage>` for `ExecBlockRecord` + `EeAccountState`
+/// `Arc<NodeStorage>` for `ExecBlockRecord` + `EeAccountState`
 /// reads, and `Arc<EeBatchProofDbManager>` so the struct can be
 /// shared with the receipt hook (which writes outer proofs there).
 #[derive(Clone)]
@@ -121,7 +121,7 @@ pub(crate) struct AcctSpec {
     chunk_receipts: Arc<dyn ReceiptStore>,
     batch_storage: Arc<dyn BatchStorage>,
     chunk_storage: Arc<dyn ChunkStorage>,
-    storage: Arc<EeNodeStorage>,
+    storage: Arc<NodeStorage>,
     btc_client: Arc<BtcClient>,
     state_diff_provider: Arc<dyn StateDiffProvider>,
     range_witness_fn: Arc<AcctRangeWitnessFn>,
@@ -132,7 +132,7 @@ impl AcctSpec {
         chunk_receipts: Arc<dyn ReceiptStore>,
         batch_storage: Arc<dyn BatchStorage>,
         chunk_storage: Arc<dyn ChunkStorage>,
-        storage: Arc<EeNodeStorage>,
+        storage: Arc<NodeStorage>,
         btc_client: Arc<BtcClient>,
         state_diff_provider: Arc<dyn StateDiffProvider>,
         range_witness_fn: Arc<AcctRangeWitnessFn>,

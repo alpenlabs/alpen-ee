@@ -592,7 +592,7 @@ impl fmt::Debug for EnvSpec {
 
 /// The EE store's environments, in the order `.tables` lists them.
 ///
-/// Mirrors the layout `open_ee_db` creates: `node` for chain state every node
+/// Mirrors the layout `open_stores` creates: `node` for chain state every node
 /// keeps, and `prover`, `witness`, `da` for the sequencer-only stores. A full
 /// node's datadir has only `node`, so the attach treats a missing directory as
 /// an absent environment rather than an error.

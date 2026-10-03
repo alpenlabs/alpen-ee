@@ -20,7 +20,7 @@ use alpen_common::{
 use alpen_evm_ee::{EvmBlock, EvmBlockBody, EvmExecutionEnvironment, EvmHeader, EvmPartialState};
 use alpen_proof_chunk::{EeChunkProgram, EeChunkProofInput};
 use alpen_reth_node::BlockWitnessRecord;
-use alpen_storage_db::EeNodeStorage;
+use alpen_storage_db::NodeStorage;
 use async_trait::async_trait;
 use reth_ethereum_primitives::Block;
 use reth_primitives_traits::Block as _;
@@ -79,11 +79,11 @@ impl TryFrom<Vec<u8>> for ChunkTask {
 /// the normal path.
 pub(crate) struct ChunkSpec {
     chunk_storage: Arc<dyn ChunkStorage>,
-    storage: Arc<EeNodeStorage>,
+    storage: Arc<NodeStorage>,
 }
 
 impl ChunkSpec {
-    pub(crate) fn new(chunk_storage: Arc<dyn ChunkStorage>, storage: Arc<EeNodeStorage>) -> Self {
+    pub(crate) fn new(chunk_storage: Arc<dyn ChunkStorage>, storage: Arc<NodeStorage>) -> Self {
         Self {
             chunk_storage,
             storage,

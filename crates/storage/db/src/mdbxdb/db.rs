@@ -17,7 +17,7 @@ use super::schema::{
     ExecBlockSchema, ExecBlocksAtHeightSchema, OLBlockAtEpochSchema,
 };
 use crate::{
-    database::EeNodeDb,
+    database::NodeDb,
     serialization_types::{
         DBAccountStateAtEpoch, DBBatchId, DBBatchWithStatus, DBChunkId, DBChunkWithStatus,
         DBExecBlockRecord, DBOLBlockId,
@@ -25,16 +25,16 @@ use crate::{
     DbError, DbResult,
 };
 
-/// MDBX-backed `EeNodeDb` over a single [`MdbxEnv`].
+/// MDBX-backed `NodeDb` over a single [`MdbxEnv`].
 ///
 /// The environment may be shared with other EE stores (one write-lock, atomic
 /// cross-table commits); this type registers and uses only the node tables.
 #[derive(Debug)]
-pub struct EeNodeDbMdbx {
+pub struct NodeDbMdbx {
     env: Arc<MdbxEnv>,
 }
 
-impl EeNodeDbMdbx {
+impl NodeDbMdbx {
     /// Wraps an already-open environment whose tables include the node tables.
     pub fn new(env: Arc<MdbxEnv>) -> Self {
         Self { env }
@@ -54,7 +54,7 @@ fn decode_block(db_block: DBExecBlockRecord) -> DbResult<ExecBlockRecord> {
         .map_err(|err| DbError::Other(format!("Failed to decode block: {err:?}")))
 }
 
-impl EeNodeDb for EeNodeDbMdbx {
+impl NodeDb for NodeDbMdbx {
     fn store_ee_account_state(
         &self,
         ol_epoch: EpochCommitment,
@@ -727,16 +727,16 @@ mod tests {
     use tokio::runtime::{Handle, Runtime};
 
     use super::*;
-    use crate::storage::EeNodeStorage;
+    use crate::storage::NodeStorage;
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
 
     /// Opens a fresh MDBX-backed node db under a unique temp path.
-    fn temp_db() -> EeNodeDbMdbx {
+    fn temp_db() -> NodeDbMdbx {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let mut path = env::temp_dir();
         path.push(format!("ee-mdbx-node-test-{}-{n}", process::id()));
-        EeNodeDbMdbx::open(&path, &MdbxConfig::small()).unwrap()
+        NodeDbMdbx::open(&path, &MdbxConfig::small()).unwrap()
     }
 
     /// A process-wide tokio runtime handle for the storage tests.
@@ -748,8 +748,8 @@ mod tests {
             .clone()
     }
 
-    fn setup_storage() -> EeNodeStorage {
-        EeNodeStorage::new(test_runtime_handle(), Arc::new(temp_db()))
+    fn setup_storage() -> NodeStorage {
+        NodeStorage::new(test_runtime_handle(), Arc::new(temp_db()))
     }
 
     storage_tests!(setup_storage());
@@ -764,7 +764,7 @@ mod tests {
         Hash::from(bytes)
     }
 
-    fn save_block(db: &EeNodeDbMdbx, block: ExecBlockRecord) {
+    fn save_block(db: &NodeDbMdbx, block: ExecBlockRecord) {
         db.save_exec_block(block, vec![]).unwrap();
     }
 

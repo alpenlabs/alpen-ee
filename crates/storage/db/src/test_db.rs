@@ -21,7 +21,7 @@ use alloy_primitives::B256;
 use alpen_acct_types::EeAccountState;
 use alpen_common::{
     exec_block_storage_test_fns::create_exec_block, AccessedAccount, AccessedStateRecord, Batch,
-    Chunk, EeDaContext, StateDiffStore,
+    Chunk, DaContext, StateDiffStore,
 };
 use alpen_params::AlpenSpecId;
 use alpen_reth_statediff::BlockStateChanges;
@@ -41,11 +41,11 @@ use zkaleido::{
 };
 
 use crate::{
-    database::EeNodeDb,
+    database::NodeDb,
     mdbxdb::{
         da_tables, prover_tables, witness_tables, AcctProofIdIndexSchema, AcctProofReceiptSchema,
         AcctProverTaskSchema, BatchTaskKey, ChunkProofReceiptSchema, ChunkProverTaskSchema,
-        ChunkTaskKey, EeDaContextDbMdbx, EeNodeDbMdbx, L1BroadcastDbMdbx, L1ChunkedEnvelopeDbMdbx,
+        ChunkTaskKey, DaContextDbMdbx, L1BroadcastDbMdbx, L1ChunkedEnvelopeDbMdbx, NodeDbMdbx,
         WitnessDbMdbx,
     },
     serialization_types::{DBBatchId, DBChunkId},
@@ -107,7 +107,7 @@ fn hash(seed: u8) -> Hash {
 
 /// The node environment, through the node's own storage trait.
 pub fn seed_node(datadir: &Path) {
-    let db = EeNodeDbMdbx::open(&datadir.join("mdbx").join("node"), &MdbxConfig::small()).unwrap();
+    let db = NodeDbMdbx::open(&datadir.join("mdbx").join("node"), &MdbxConfig::small()).unwrap();
     let (h0, h1, h2) = (hash(1), hash(2), hash(3));
 
     db.save_exec_block(create_exec_block(0, Hash::default(), h0, 0), vec![0xaa; 8])
@@ -183,7 +183,7 @@ pub fn seed_witness(datadir: &Path) {
     witness
         .put_state_diff(B256::from([6u8; 32]), 6, &BlockStateChanges::default())
         .unwrap();
-    EeDaContextDbMdbx::new(env, witness)
+    DaContextDbMdbx::new(env, witness)
         .mark_code_hashes_published(&[B256::from([7u8; 32])])
         .unwrap();
 }

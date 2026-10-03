@@ -218,7 +218,7 @@ written once, not per table.
 
 ### Environments
 
-The EE store is four MDBX environments, laid out by `open_ee_db`:
+The EE store is four MDBX environments, laid out by `open_stores`:
 
 | Environment | Tables | Holds | Present on |
 |---|---|---|---|

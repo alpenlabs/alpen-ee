@@ -23,7 +23,7 @@ use alpen_reth_node::{AlpenEngineTypes, AlpenGossipEvent};
 use alpen_rpc_server::{
     get_or_create_jwt_secret, start_authenticated_rpc_server, AdminRpcServer, AlpenAdminRpcServer,
 };
-use alpen_storage_db::{open_ee_db, EeNodeStorage};
+use alpen_storage_db::{open_stores, NodeStorage};
 use eyre::Context;
 use jsonrpsee::server::ServerHandle;
 use reth_chainspec::ChainSpec;
@@ -116,7 +116,7 @@ pub(crate) struct NodeBootstrap {
     /// server. `None` when `[admin_rpc]` is not configured.
     _admin_rpc_handle: Option<ServerHandle>,
     pub(crate) params: Arc<AlpenParams>,
-    pub(crate) storage: Arc<EeNodeStorage>,
+    pub(crate) storage: Arc<NodeStorage>,
     /// Kept as the handle (not pre-extracted watchers) so each mode pulls
     /// exactly the watchers it needs, where it needs them — a full node
     /// never reads `ol_status_watcher` at all, for instance.
@@ -180,7 +180,7 @@ async fn bootstrap_node(
     // MDBX locks its directory exclusively, so this is the one place the
     // instance is opened. A sequencer takes its extra databases off the same
     // handle in `sequencer::run`; a full node never creates those trees.
-    let db = open_ee_db(&datadir, alpen_config.db_retry_count)
+    let db = open_stores(&datadir, alpen_config.db_retry_count)
         .context("failed to load alpen database")?;
 
     let storage: Arc<_> = db

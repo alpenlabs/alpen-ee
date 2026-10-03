@@ -31,7 +31,7 @@ pub use traits::{
     storage::{
         require_best_ee_account_state, require_best_finalized_block, require_genesis_batch,
         require_latest_batch, AccessedStateStore, BatchStorage, BlockWitnessStore, ChunkStorage,
-        EeDaContext, ExecBlockStorage, OLBlockOrEpoch, StateDiffProvider, StateDiffStore, Storage,
+        DaContext, ExecBlockStorage, OLBlockOrEpoch, StateDiffProvider, StateDiffStore, Storage,
         StorageError,
     },
 };

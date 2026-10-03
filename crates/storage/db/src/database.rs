@@ -11,7 +11,7 @@ use crate::{DbError, DbResult};
 
 /// Database interface for EE node account state management.
 #[gen_proxy(error = DbError, tracing_component = "storage:ee_node")]
-pub(crate) trait EeNodeDb: Send + Sync + 'static {
+pub(crate) trait NodeDb: Send + Sync + 'static {
     /// Stores EE account state for a given OL epoch commitment.
     fn store_ee_account_state(
         &self,
@@ -154,5 +154,5 @@ pub(crate) trait EeNodeDb: Send + Sync + 'static {
 }
 
 pub(crate) mod ops {
-    pub(crate) use super::EeNodeDbProxy as EeNodeOps;
+    pub(crate) use super::NodeDbProxy as NodeOps;
 }

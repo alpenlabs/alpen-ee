@@ -394,7 +394,7 @@ mod tests {
     fn the_node_refuses_to_start_on_an_unmigrated_datadir() {
         let datadir = TempDatadir::new();
         fs::create_dir_all(sled_dir(&datadir)).unwrap();
-        let err = alpen_storage_db::open_ee_db(&datadir, 0).unwrap_err();
+        let err = alpen_storage_db::open_stores(&datadir, 0).unwrap_err();
         assert!(err.to_string().contains("migrate-sled"), "{err}");
     }
 }

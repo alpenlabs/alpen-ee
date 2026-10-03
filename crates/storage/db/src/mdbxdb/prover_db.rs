@@ -31,11 +31,11 @@ fn proof_id_for(batch_id: BatchId) -> ProofId {
 /// listing accessors take the spec version whose tasks to return, since every
 /// resident prover program owns its own tasks.
 #[derive(Debug)]
-pub struct EeProverDbMdbx {
+pub struct ProverDbMdbx {
     env: Arc<MdbxEnv>,
 }
 
-impl EeProverDbMdbx {
+impl ProverDbMdbx {
     /// Wraps an already-open environment holding the prover tables.
     pub fn new(env: Arc<MdbxEnv>) -> Self {
         Self { env }
@@ -269,11 +269,11 @@ mod tests {
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-    fn setup_db() -> EeProverDbMdbx {
+    fn setup_db() -> ProverDbMdbx {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let mut path = env::temp_dir();
         path.push(format!("ee-mdbx-prover-test-{}-{n}", process::id()));
-        EeProverDbMdbx::open(&path, &MdbxConfig::small()).unwrap()
+        ProverDbMdbx::open(&path, &MdbxConfig::small()).unwrap()
     }
 
     fn dummy_receipt() -> ProofReceiptWithMetadata {

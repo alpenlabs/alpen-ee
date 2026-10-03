@@ -3,7 +3,7 @@
 use std::{fmt, sync::Arc};
 
 use alloy_primitives::B256;
-use alpen_common::{BatchId, BatchStorage, EeDaContext, HeaderSummaryProvider, StateDiffProvider};
+use alpen_common::{BatchId, BatchStorage, DaContext, HeaderSummaryProvider, StateDiffProvider};
 use alpen_da_types::DaBlob;
 use alpen_reth_statediff::BatchBuilder;
 use async_trait::async_trait;
@@ -26,7 +26,7 @@ pub struct StateDiffBlobProvider<S, D, H> {
     batch_storage: Arc<S>,
     state_diff_provider: Arc<D>,
     header_summary: Arc<H>,
-    da_ctx: Arc<dyn EeDaContext + Send + Sync>,
+    da_ctx: Arc<dyn DaContext + Send + Sync>,
 }
 
 impl<S, D, H> fmt::Debug for StateDiffBlobProvider<S, D, H> {
@@ -41,7 +41,7 @@ impl<S, D, H> StateDiffBlobProvider<S, D, H> {
         batch_storage: Arc<S>,
         state_diff_provider: Arc<D>,
         header_summary: Arc<H>,
-        da_ctx: Arc<dyn EeDaContext + Send + Sync>,
+        da_ctx: Arc<dyn DaContext + Send + Sync>,
     ) -> Self {
         Self {
             batch_storage,

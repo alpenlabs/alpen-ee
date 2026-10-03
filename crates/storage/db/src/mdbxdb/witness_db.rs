@@ -1,7 +1,7 @@
 use std::{path::Path, sync::Arc};
 
 use alloy_primitives::B256;
-use alpen_common::{EeDaContext, StateDiffProvider, StateDiffStore};
+use alpen_common::{DaContext, StateDiffProvider, StateDiffStore};
 use alpen_reth_statediff::BlockStateChanges;
 use alpen_storage_mdbx::{DbError as MdbxError, MdbxConfig, MdbxEnv};
 use strata_db_types::{errors::DbError, DbResult};
@@ -86,12 +86,12 @@ impl StateDiffStore for WitnessDbMdbx {
 /// Tracks which data items (currently contract bytecodes) have already been
 /// published to DA so that future batches can omit them.
 #[derive(Debug, Clone)]
-pub struct EeDaContextDbMdbx<S> {
+pub struct DaContextDbMdbx<S> {
     env: Arc<MdbxEnv>,
     state_diff_provider: Arc<S>,
 }
 
-impl<S> EeDaContextDbMdbx<S> {
+impl<S> DaContextDbMdbx<S> {
     /// Wraps an environment whose tables include the published-code-hash table,
     /// reading state diffs through `state_diff_provider`.
     pub fn new(env: Arc<MdbxEnv>, state_diff_provider: Arc<S>) -> Self {
@@ -102,7 +102,7 @@ impl<S> EeDaContextDbMdbx<S> {
     }
 }
 
-impl<S: StateDiffProvider + 'static> EeDaContextDbMdbx<S> {
+impl<S: StateDiffProvider + 'static> DaContextDbMdbx<S> {
     /// Collects deployed bytecodes from block state diffs and marks them in the
     /// filter so future batches can omit them.
     fn update_bytecode_filter(&self, block_hashes: &[B256]) -> DbResult<()> {
@@ -123,7 +123,7 @@ impl<S: StateDiffProvider + 'static> EeDaContextDbMdbx<S> {
     }
 }
 
-impl<S: StateDiffProvider + 'static> EeDaContext for EeDaContextDbMdbx<S> {
+impl<S: StateDiffProvider + 'static> DaContext for DaContextDbMdbx<S> {
     fn is_code_hash_published(&self, code_hash: &B256) -> DbResult<bool> {
         let exists = self
             .env
@@ -253,10 +253,10 @@ mod tests {
         ));
     }
 
-    fn setup_da_context() -> EeDaContextDbMdbx<WitnessDbMdbx> {
+    fn setup_da_context() -> DaContextDbMdbx<WitnessDbMdbx> {
         let env = temp_env();
         let witness_db = Arc::new(WitnessDbMdbx::new(env.clone()));
-        EeDaContextDbMdbx::new(env, witness_db)
+        DaContextDbMdbx::new(env, witness_db)
     }
 
     #[test]

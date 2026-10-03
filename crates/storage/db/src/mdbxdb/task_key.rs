@@ -99,7 +99,7 @@ mod sealed {
 ///
 /// Implemented by [`ChunkTaskKey`] and [`BatchTaskKey`] only; each reads and
 /// writes its own table, so the typed accessors on
-/// [`EeProverDbMdbx`](super::EeProverDbMdbx) cannot cross them.
+/// [`ProverDbMdbx`](super::ProverDbMdbx) cannot cross them.
 pub trait ProverTaskKey: sealed::Sealed + Copy + Send + Sync + 'static {
     /// The spec version whose prover owns the task.
     fn spec_version(&self) -> AlpenSpecId;

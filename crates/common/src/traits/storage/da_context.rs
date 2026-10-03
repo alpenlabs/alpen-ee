@@ -9,7 +9,7 @@ use strata_db_types::DbResult;
 /// Tracks which data items have already been published to DA so that future
 /// batches can omit them. Currently tracks deployed contract bytecodes;
 /// extensible for address dedup and other filtering logic.
-pub trait EeDaContext {
+pub trait DaContext {
     /// Returns `true` if the bytecode identified by `code_hash` was included
     /// in a previously confirmed batch's DA.
     fn is_code_hash_published(&self, code_hash: &B256) -> DbResult<bool>;

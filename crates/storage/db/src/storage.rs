@@ -13,7 +13,7 @@ use strata_storage_common::cache::CacheTable;
 use tokio::runtime::Handle;
 
 use crate::{
-    database::{ops, EeNodeDb},
+    database::{ops, NodeDb},
     DbError,
 };
 
@@ -22,15 +22,15 @@ use crate::{
     missing_debug_implementations,
     reason = "Some inner types don't have Debug implementation"
 )]
-pub struct EeNodeStorage {
-    ops: ops::EeNodeOps,
+pub struct NodeStorage {
+    ops: ops::NodeOps,
     blockid_cache: CacheTable<u32, Option<OLBlockId>, DbError>,
     account_state_cache: CacheTable<OLBlockId, Option<EeAccountStateAtEpoch>, DbError>,
 }
 
-impl EeNodeStorage {
-    pub(crate) fn new(handle: Handle, db: Arc<impl EeNodeDb + 'static>) -> Self {
-        let ops = ops::EeNodeOps::new(handle, db);
+impl NodeStorage {
+    pub(crate) fn new(handle: Handle, db: Arc<impl NodeDb + 'static>) -> Self {
+        let ops = ops::NodeOps::new(handle, db);
         let blockid_cache = CacheTable::new(NonZeroUsize::new(64).expect("64 is always NonZero"));
         let account_state_cache =
             CacheTable::new(NonZeroUsize::new(64).expect("64 is always NonZero"));
@@ -44,7 +44,7 @@ impl EeNodeStorage {
 }
 
 #[async_trait]
-impl Storage for EeNodeStorage {
+impl Storage for NodeStorage {
     /// Get EE account internal state corresponding to a given OL epoch.
     async fn ee_account_state(
         &self,
@@ -110,7 +110,7 @@ impl Storage for EeNodeStorage {
 }
 
 #[async_trait]
-impl ExecBlockStorage for EeNodeStorage {
+impl ExecBlockStorage for NodeStorage {
     /// Save block data and payload for a given block hash
     async fn save_exec_block(
         &self,
@@ -220,7 +220,7 @@ impl ExecBlockStorage for EeNodeStorage {
 }
 
 #[async_trait]
-impl BatchStorage for EeNodeStorage {
+impl BatchStorage for NodeStorage {
     async fn save_genesis_batch(&self, genesis_batch: Batch) -> Result<(), StorageError> {
         self.ops
             .save_genesis_batch_async(genesis_batch)
@@ -279,7 +279,7 @@ impl BatchStorage for EeNodeStorage {
 }
 
 #[async_trait]
-impl ChunkStorage for EeNodeStorage {
+impl ChunkStorage for NodeStorage {
     async fn save_next_chunk(&self, chunk: Chunk) -> Result<(), StorageError> {
         self.ops
             .save_next_chunk_async(chunk)
@@ -352,7 +352,7 @@ impl ChunkStorage for EeNodeStorage {
 }
 
 #[async_trait]
-impl BlockWitnessStore for EeNodeStorage {
+impl BlockWitnessStore for NodeStorage {
     async fn put_block_witness(
         &self,
         block_id: Hash,
@@ -380,7 +380,7 @@ impl BlockWitnessStore for EeNodeStorage {
 }
 
 #[async_trait]
-impl AccessedStateStore for EeNodeStorage {
+impl AccessedStateStore for NodeStorage {
     async fn put_block_accessed_state(
         &self,
         block_id: Hash,
@@ -425,5 +425,5 @@ impl AccessedStateStore for EeNodeStorage {
 }
 
 // The storage-layer acceptance suite (`storage_tests!`, `exec_block_storage_tests!`,
-// `batch_storage_tests!`, `chunk_storage_tests!`) runs against `EeNodeStorage`
-// over the MDBX-backed `EeNodeDbMdbx` in `crate::mdbxdb::db`.
+// `batch_storage_tests!`, `chunk_storage_tests!`) runs against `NodeStorage`
+// over the MDBX-backed `NodeDbMdbx` in `crate::mdbxdb::db`.
