@@ -1,0 +1,41 @@
+[package]
+edition.workspace = true
+name = "alpen-storage-console"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# The inverses of the migration rules, for tests that build a sled store from
+# an MDBX one.
+test-utils = ["alpen-storage-db/test-utils"]
+
+[dependencies]
+alloy-primitives.workspace = true
+alpen-common.workspace = true
+alpen-params.workspace = true
+alpen-storage-db = { workspace = true, features = ["migration"] }
+alpen-storage-mdbx.workspace = true
+borsh.workspace = true
+ciborium.workspace = true
+eyre.workspace = true
+hex.workspace = true
+serde.workspace = true
+serde_bytes.workspace = true
+strata-acct-types.workspace = true
+strata-db-types.workspace = true
+strata-identifiers.workspace = true
+strata-l1-txfmt.workspace = true
+strata-paas.workspace = true
+thiserror.workspace = true
+zkaleido.workspace = true
+
+[dev-dependencies]
+alpen-chain-types.workspace = true
+alpen-reth-statediff.workspace = true
+alpen-storage-db = { workspace = true, features = ["test-utils"] }
+proptest.workspace = true
+ssz.workspace = true

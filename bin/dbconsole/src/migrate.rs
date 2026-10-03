@@ -2,7 +2,7 @@
 //! store a previous binary wrote, offline.
 //!
 //! The mapping of trees to tables and the per-table value rules live in the
-//! console core (`alpen_storage_db::console::migrate`); this command reads
+//! console core (`alpen_storage_console::migrate`); this command reads
 //! sled as raw bytes, hands them to the core's raw import, and then runs the
 //! console's own checks over the result. The node's crates never see sled.
 //!
@@ -20,13 +20,11 @@ use std::{
     time::Instant,
 };
 
-use alpen_storage_db::{
-    console::{
-        migrate::{sled_trees, SledTree},
-        ConsoleDb,
-    },
-    create_ee_envs,
+use alpen_storage_console::{
+    migrate::{sled_trees, SledTree},
+    ConsoleDb,
 };
+use alpen_storage_db::create_ee_envs;
 use clap::Args;
 use tracing_subscriber::EnvFilter;
 
@@ -223,10 +221,8 @@ fn copy_tree(
 mod tests {
     use std::{env, path::Path};
 
-    use alpen_storage_db::{
-        console::migrate::{to_sled_form, to_sled_key},
-        test_db::TempDatadir,
-    };
+    use alpen_storage_console::migrate::{to_sled_form, to_sled_key};
+    use alpen_storage_db::test_db::TempDatadir;
 
     use super::*;
 

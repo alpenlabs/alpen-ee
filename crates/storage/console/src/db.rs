@@ -865,6 +865,11 @@ mod tests {
 
     use alpen_common::ChunkId;
     use alpen_params::AlpenSpecId;
+    use alpen_storage_db::{
+        schema::{ChunkProverTaskSchema, ExecBlockFinalizedSchema},
+        test_db::TempDatadir,
+        ChunkTaskKey,
+    };
     use alpen_storage_mdbx::{DbError, Direction, MdbxConfig, MdbxEnv, TableSpec};
     use strata_acct_types::Hash;
     use strata_paas::{TaskRecordData, TaskStatus};
@@ -877,11 +882,7 @@ mod tests {
         },
         AttachMode, ConsoleDb, StagedSummary,
     };
-    use crate::{
-        console::key::ConsoleKey,
-        mdbxdb::{ChunkProverTaskSchema, ChunkTaskKey, ExecBlockFinalizedSchema},
-        test_db::TempDatadir,
-    };
+    use crate::key::ConsoleKey;
 
     /// The V0 prover's task over the chunk whose hashes are filled with
     /// `prev` and `last`.

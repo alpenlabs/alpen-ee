@@ -29,6 +29,7 @@ members = [
   "crates/rpc/server",
   "crates/rpc/types",
   "crates/sequencer",
+  "crates/storage/console",
   "crates/storage/db",
   "crates/storage/mdbx",
   "crates/test-utils/simple-ee",
@@ -95,6 +96,7 @@ alpen-rpc-server = { path = "crates/rpc/server" }
 alpen-rpc-types = { path = "crates/rpc/types" }
 alpen-sequencer = { path = "crates/sequencer" }
 alpen-simple-ee = { path = "crates/test-utils/simple-ee" }
+alpen-storage-console = { path = "crates/storage/console" }
 alpen-storage-db = { path = "crates/storage/db", default-features = false }
 alpen-storage-mdbx = { path = "crates/storage/mdbx" }
 alpen-witness = { path = "crates/witness" }

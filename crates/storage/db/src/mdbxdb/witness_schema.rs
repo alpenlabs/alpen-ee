@@ -38,7 +38,7 @@ impl_be_key_codec!(PublishedCodeHashSchema, B256);
 impl_unit_value_codec!(PublishedCodeHashSchema);
 
 /// The full set of tables backing the state-diff / DA-context store.
-pub(crate) fn witness_tables() -> Vec<TableSpec> {
+pub fn witness_tables() -> Vec<TableSpec> {
     tables![
         BlockStateChangesSchema,
         BlockHashByNumber,

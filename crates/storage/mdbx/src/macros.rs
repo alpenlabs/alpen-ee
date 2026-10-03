@@ -28,10 +28,11 @@ macro_rules! define_table {
     };
     // `(pub Name)` makes the marker public, for a schema another crate
     // addresses by type — the operator console reflecting a store's tables.
-    ($(#[$docs:meta])* (pub $name:ident) $key:ty => $value:ty) => {
+    // Any visibility goes; a bare `(Name)` stays crate-private.
+    ($(#[$docs:meta])* ($vis:vis $name:ident) $key:ty => $value:ty) => {
         $(#[$docs])*
         #[derive(Clone, Copy, Debug, Default)]
-        pub struct $name;
+        $vis struct $name;
 
         impl $crate::Schema for $name {
             const NAME: &'static str = ::core::stringify!($name);
@@ -263,6 +264,11 @@ macro_rules! define_table_borsh {
         $crate::impl_borsh_key_codec!($name, $key);
         $crate::impl_borsh_value_codec!($name, $value);
     };
+    ($(#[$docs:meta])* ($vis:vis $name:ident) $key:ty => $value:ty) => {
+        $crate::define_table!($(#[$docs])* ($vis $name) $key => $value);
+        $crate::impl_borsh_key_codec!($name, $key);
+        $crate::impl_borsh_value_codec!($name, $value);
+    };
 }
 
 /// Defines a table with a big-endian integer key and a borsh value — the
@@ -271,6 +277,11 @@ macro_rules! define_table_borsh {
 macro_rules! define_table_be_key {
     ($(#[$docs:meta])* ($name:ident) $key:ty => $value:ty) => {
         $crate::define_table!($(#[$docs])* ($name) $key => $value);
+        $crate::impl_be_key_codec!($name, $key);
+        $crate::impl_borsh_value_codec!($name, $value);
+    };
+    ($(#[$docs:meta])* ($vis:vis $name:ident) $key:ty => $value:ty) => {
+        $crate::define_table!($(#[$docs])* ($vis $name) $key => $value);
         $crate::impl_be_key_codec!($name, $key);
         $crate::impl_borsh_value_codec!($name, $value);
     };
@@ -286,8 +297,8 @@ macro_rules! define_table_bincode_be_key {
         $crate::impl_be_key_codec!($name, $key);
         $crate::impl_bincode_value_codec!($name, $value);
     };
-    ($(#[$docs:meta])* (pub $name:ident) $key:ty => $value:ty) => {
-        $crate::define_table!($(#[$docs])* (pub $name) $key => $value);
+    ($(#[$docs:meta])* ($vis:vis $name:ident) $key:ty => $value:ty) => {
+        $crate::define_table!($(#[$docs])* ($vis $name) $key => $value);
         $crate::impl_be_key_codec!($name, $key);
         $crate::impl_bincode_value_codec!($name, $value);
     };
@@ -597,6 +608,17 @@ macro_rules! define_table_versioned {
         $crate::impl_borsh_key_codec!($name, $key);
         $crate::impl_versioned_value_codec!($name { $($tag => $ver $(as $codec)?),+ });
     };
+    (
+        $(#[$docs:meta])* ($vis:vis $name:ident)
+        $key:ty => { $( $tag:literal => $ver:ty $(as $codec:ident)? ),+ $(,)? }
+    ) => {
+        $crate::define_table!(
+            $(#[$docs])* ($vis $name)
+            $key => $crate::impl_versioned_value_codec!(@last_ty $($ver),+)
+        );
+        $crate::impl_borsh_key_codec!($name, $key);
+        $crate::impl_versioned_value_codec!($name { $($tag => $ver $(as $codec)?),+ });
+    };
 }
 
 /// Defines a table with a big-endian integer key and a version-dispatched value.
@@ -614,11 +636,11 @@ macro_rules! define_table_versioned_be_key {
         $crate::impl_versioned_value_codec!($name { $($tag => $ver $(as $codec)?),+ });
     };
     (
-        $(#[$docs:meta])* (pub $name:ident)
+        $(#[$docs:meta])* ($vis:vis $name:ident)
         $key:ty => { $( $tag:literal => $ver:ty $(as $codec:ident)? ),+ $(,)? }
     ) => {
         $crate::define_table!(
-            $(#[$docs])* (pub $name)
+            $(#[$docs])* ($vis $name)
             $key => $crate::impl_versioned_value_codec!(@last_ty $($ver),+)
         );
         $crate::impl_be_key_codec!($name, $key);

@@ -10,7 +10,7 @@ use alpen_common::{
 };
 use alpen_params::AlpenSpecId;
 use bitcoin::{hashes::Hash as _, Txid, Wtxid};
-#[cfg(feature = "console")]
+#[cfg(feature = "migration")]
 use borsh::io;
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
@@ -23,7 +23,7 @@ use super::hex_list;
 ///
 /// Uses named fields to avoid confusion between the two identically-typed 32-byte arrays.
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
-pub(crate) struct DBTxidPair {
+pub struct DBTxidPair {
     #[serde(with = "hex::serde")]
     txid: [u8; 32],
     #[serde(with = "hex::serde")]
@@ -44,7 +44,7 @@ impl DBTxidPair {
 #[derive(
     Debug, Clone, PartialEq, Eq, Hash, BorshSerialize, BorshDeserialize, Serialize, Deserialize,
 )]
-pub(crate) struct DBBatchId {
+pub struct DBBatchId {
     // Hex rather than a 32-element byte list wherever this type is reflected
     // (the console); serde is not this type's storage codec, so the on-disk
     // borsh encoding is untouched.
@@ -71,7 +71,7 @@ impl From<DBBatchId> for BatchId {
 
 /// Database representation of a Batch.
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
-pub(crate) struct DBBatch {
+pub struct DBBatch {
     idx: u64,
     #[serde(with = "hex::serde")]
     prev_block: [u8; 32],
@@ -127,7 +127,7 @@ impl TryFrom<DBBatch> for Batch {
 
 /// Database representation of L1DaBlockRef.
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
-pub(crate) struct DBL1DaBlockRef {
+pub struct DBL1DaBlockRef {
     /// L1BlockCommitment serialized via its Borsh impl.
     block: L1BlockCommitment,
     /// Witness transaction Merkle root for the L1 block.
@@ -175,7 +175,7 @@ impl From<DBL1DaBlockRef> for L1DaBlockRef {
 
 /// Database representation of BatchStatus.
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
-pub(crate) enum DBBatchStatus {
+pub enum DBBatchStatus {
     Genesis,
     Sealed,
     DaPending {
@@ -236,7 +236,7 @@ impl From<DBBatchStatus> for BatchStatus {
 
 /// Database representation of a Batch with its status, stored together.
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
-pub(crate) struct DBBatchWithStatus {
+pub struct DBBatchWithStatus {
     batch: DBBatch,
     status: DBBatchStatus,
 }
@@ -260,7 +260,7 @@ impl DBBatchWithStatus {
 #[derive(
     Debug, Clone, PartialEq, Eq, Hash, BorshSerialize, BorshDeserialize, Serialize, Deserialize,
 )]
-pub(crate) struct DBChunkId {
+pub struct DBChunkId {
     // Hex rather than a 32-element byte list wherever this type is reflected
     // (the console); serde is not this type's storage codec, so the on-disk
     // borsh encoding is untouched.
@@ -287,7 +287,7 @@ impl From<DBChunkId> for ChunkId {
 
 /// Database representation of a Chunk.
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
-pub(crate) struct DBChunk {
+pub struct DBChunk {
     idx: u64,
     #[serde(with = "hex::serde")]
     prev_block: [u8; 32],
@@ -328,7 +328,7 @@ impl From<DBChunk> for Chunk {
 
 /// Database representation of ChunkStatus.
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
-pub(crate) enum DBChunkStatus {
+pub enum DBChunkStatus {
     ProvingNotStarted,
     ProofPending(String),
     ProofReady(#[serde(with = "hex::serde")] [u8; 32]),
@@ -356,7 +356,7 @@ impl From<DBChunkStatus> for ChunkStatus {
 
 /// Database representation of a Chunk with its status, stored together.
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
-pub(crate) struct DBChunkWithStatus {
+pub struct DBChunkWithStatus {
     chunk: DBChunk,
     status: DBChunkStatus,
 }
@@ -378,7 +378,7 @@ impl DBChunkWithStatus {
 
 /// The batch as the sled binary (alpen 0.3.0) stored it: every field of
 /// [`DBBatch`] except `spec_version`, which did not exist.
-#[cfg(feature = "console")]
+#[cfg(feature = "migration")]
 #[derive(BorshSerialize, BorshDeserialize)]
 struct SledEraBatch {
     idx: u64,
@@ -389,18 +389,18 @@ struct SledEraBatch {
 }
 
 /// [`DBBatchWithStatus`] in the sled binary's layout; the status is unchanged.
-#[cfg(feature = "console")]
+#[cfg(feature = "migration")]
 #[derive(BorshSerialize, BorshDeserialize)]
 struct SledEraBatchEntry {
     batch: SledEraBatch,
     status: DBBatchStatus,
 }
 
-#[cfg(feature = "console")]
+#[cfg(feature = "migration")]
 impl DBBatchWithStatus {
     /// Decodes the sled binary's layout, giving the batch the spec version in
     /// force when it was written, [`AlpenSpecId::V0`].
-    pub(crate) fn from_sled_era(bytes: &[u8]) -> io::Result<Self> {
+    pub fn from_sled_era(bytes: &[u8]) -> io::Result<Self> {
         let old = SledEraBatchEntry::try_from_slice(bytes)?;
         Ok(Self {
             batch: DBBatch {
@@ -419,7 +419,7 @@ impl DBBatchWithStatus {
     /// spec version that layout could not express.
     /// Only the tests and the sled export need the inverse.
     #[cfg(any(test, feature = "test-utils"))]
-    pub(crate) fn to_sled_era(&self) -> Option<Vec<u8>> {
+    pub fn to_sled_era(&self) -> Option<Vec<u8>> {
         if self.batch.spec_version != u16::from(AlpenSpecId::V0) {
             return None;
         }

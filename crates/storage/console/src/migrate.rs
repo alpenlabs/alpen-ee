@@ -36,6 +36,13 @@
 
 use alloy_primitives::B256;
 use alpen_params::AlpenSpecId;
+use alpen_storage_db::{
+    records::{DBBatchWithStatus, DBExecBlockRecord},
+    schema::{
+        BatchByIdxSchema, BlockHashByNumber, ChunkProverTaskSchema, ExecBlockSchema,
+        L1BroadcastTxSchema, L1ChunkedEnvelopeSchema,
+    },
+};
 #[cfg(any(test, feature = "test-utils"))]
 use alpen_storage_mdbx::UpgradeCtx;
 use alpen_storage_mdbx::ValueCodec;
@@ -48,14 +55,6 @@ use strata_db_types::{
 use strata_identifiers::{Buf32, RBuf32};
 use strata_l1_txfmt::MagicBytes;
 use strata_paas::{AttemptCounts, TaskRecordData, TaskStatus};
-
-use crate::{
-    mdbxdb::{
-        BatchByIdxSchema, BlockHashByNumber, ChunkProverTaskSchema, ExecBlockSchema,
-        L1BroadcastTxSchema, L1ChunkedEnvelopeSchema,
-    },
-    serialization_types::{DBBatchWithStatus, DBExecBlockRecord},
-};
 
 /// The tag the sled binary's payloads carry once imported: every version
 /// chain starts at 1, which the store's macro asserts at compile time.
@@ -756,17 +755,15 @@ fn rule_for(table: &str) -> eyre::Result<SledTree> {
 mod tests {
     use alpen_common::ChunkId;
     use alpen_reth_statediff::BlockStateChanges;
+    use alpen_storage_db::{
+        records::DBChunkId,
+        schema::{BlockStateChangesSchema, ChunkProofReceiptSchema, L1BroadcastActiveTxNodeSchema},
+        ChunkTaskKey,
+    };
     use alpen_storage_mdbx::{KeyCodec, VersionedTable};
     use strata_acct_types::Hash;
 
     use super::{super::registry::ee_envs, *};
-    use crate::{
-        mdbxdb::{
-            BlockStateChangesSchema, ChunkProofReceiptSchema, ChunkTaskKey,
-            L1BroadcastActiveTxNodeSchema,
-        },
-        serialization_types::DBChunkId,
-    };
 
     /// Every table the store has is fed by exactly one tree, and no tree
     /// names a table the store does not have.
@@ -1079,9 +1076,8 @@ mod tests {
     #[test]
     fn the_package_reencode_adds_the_empty_predicate_rotation() {
         use alpen_chain_types::{ExecBlockCommitment, ExecInputs, ExecOutputs};
+        use alpen_storage_db::records::{package_from_sled_era, package_to_sled_era};
         use ssz::Encode;
-
-        use crate::serialization_types::{package_from_sled_era, package_to_sled_era};
 
         let package = alpen_chain_types::ExecBlockPackage::new(
             ExecBlockCommitment::new([1; 32].into(), [2; 32].into()),

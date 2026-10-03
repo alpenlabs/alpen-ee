@@ -1,6 +1,6 @@
 use alpen_acct_types::EeAccountState;
 use alpen_chain_types::ExecBlockPackage;
-#[cfg(feature = "console")]
+#[cfg(feature = "migration")]
 use alpen_chain_types::{
     ExecBlockCommitment, ExecInputs, ExecOutputs, OutputMessage, OutputTransfer,
 };
@@ -15,12 +15,12 @@ use strata_identifiers::OLBlockCommitment;
 use super::account_state::DBEeAccountState;
 
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
-pub(crate) struct DBExecBlockRecord {
+pub struct DBExecBlockRecord {
     pub(crate) blocknum: u64,
     parent_blockhash: Hash,
     timestamp_ms: u64,
     ol_block: OLBlockCommitment,
-    /// ExecBlockPackage serialized using SSZ, then wrapped in a Vec<u8> for Borsh
+    /// `ExecBlockPackage` serialized using SSZ, then wrapped in a `Vec<u8>` for Borsh
     #[serde(with = "serde_bytes")]
     package_ssz: Vec<u8>,
     account_state: DBEeAccountState,
@@ -126,7 +126,7 @@ impl From<DBMessageEntry> for MessageEntry {
 ///
 /// Kept for the offline migration only. A record read in this layout gets
 /// the spec version that was in force then, [`AlpenSpecId::V0`].
-#[cfg(feature = "console")]
+#[cfg(feature = "migration")]
 #[derive(BorshSerialize, BorshDeserialize)]
 struct SledEraExecBlockRecord {
     blocknum: u64,
@@ -142,7 +142,7 @@ struct SledEraExecBlockRecord {
 
 /// The exec outputs as the sled binary's SSZ schema had them: no
 /// `new_predicate` field yet. The other package containers are unchanged.
-#[cfg(feature = "console")]
+#[cfg(feature = "migration")]
 #[derive(ssz_derive::Encode, ssz_derive::Decode)]
 #[ssz(struct_behaviour = "container")]
 struct SledEraExecOutputs {
@@ -151,7 +151,7 @@ struct SledEraExecOutputs {
 }
 
 /// [`ExecBlockPackage`] as the sled binary's SSZ schema had it.
-#[cfg(feature = "console")]
+#[cfg(feature = "migration")]
 #[derive(ssz_derive::Encode, ssz_derive::Decode)]
 #[ssz(struct_behaviour = "container")]
 struct SledEraExecBlockPackage {
@@ -163,8 +163,8 @@ struct SledEraExecBlockPackage {
 /// Re-encodes a package from the sled binary's SSZ schema to the current one:
 /// the same commitment, inputs, transfers and messages, and no predicate
 /// rotation, which is what an empty `new_predicate` says.
-#[cfg(feature = "console")]
-pub(crate) fn package_from_sled_era(bytes: &[u8]) -> eyre::Result<Vec<u8>> {
+#[cfg(feature = "migration")]
+pub fn package_from_sled_era(bytes: &[u8]) -> eyre::Result<Vec<u8>> {
     let old = SledEraExecBlockPackage::from_ssz_bytes(bytes)
         .map_err(|e| eyre::eyre!("exec block package is not the sled binary's SSZ: {e:?}"))?;
     let mut outputs = ExecOutputs::new_empty();
@@ -179,8 +179,8 @@ pub(crate) fn package_from_sled_era(bytes: &[u8]) -> eyre::Result<Vec<u8>> {
 
 /// The inverse of [`package_from_sled_era`]; `None` when the package declares
 /// a predicate rotation, which the sled binary's schema could not express.
-#[cfg(all(feature = "console", any(test, feature = "test-utils")))]
-pub(crate) fn package_to_sled_era(bytes: &[u8]) -> eyre::Result<Option<Vec<u8>>> {
+#[cfg(feature = "migration")]
+pub fn package_to_sled_era(bytes: &[u8]) -> eyre::Result<Option<Vec<u8>>> {
     let package = ExecBlockPackage::from_ssz_bytes(bytes)
         .map_err(|e| eyre::eyre!("exec block package is not the current SSZ: {e:?}"))?;
     if package.outputs().new_predicate().is_some() {
@@ -208,12 +208,12 @@ pub(crate) fn package_to_sled_era(bytes: &[u8]) -> eyre::Result<Option<Vec<u8>>>
     Ok(Some(old.as_ssz_bytes()))
 }
 
-#[cfg(feature = "console")]
+#[cfg(feature = "migration")]
 impl DBExecBlockRecord {
     /// Decodes the sled binary's layout, giving the record the spec version
     /// in force when it was written and re-encoding its package to the
     /// current SSZ schema.
-    pub(crate) fn from_sled_era(bytes: &[u8]) -> eyre::Result<Self> {
+    pub fn from_sled_era(bytes: &[u8]) -> eyre::Result<Self> {
         let old = SledEraExecBlockRecord::try_from_slice(bytes)
             .map_err(|e| eyre::eyre!("exec block record is not the sled binary's layout: {e}"))?;
         Ok(Self {
@@ -235,7 +235,7 @@ impl DBExecBlockRecord {
     /// predicate rotation that layout could not express.
     /// Only the tests and the sled export need the inverse.
     #[cfg(any(test, feature = "test-utils"))]
-    pub(crate) fn to_sled_era(&self) -> eyre::Result<Option<Vec<u8>>> {
+    pub fn to_sled_era(&self) -> eyre::Result<Option<Vec<u8>>> {
         if self.next_spec_version != u16::from(AlpenSpecId::V0) {
             return Ok(None);
         }

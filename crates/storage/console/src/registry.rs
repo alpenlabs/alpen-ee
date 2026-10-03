@@ -16,6 +16,16 @@
 
 use std::{fmt, marker::PhantomData, ops::ControlFlow};
 
+use alpen_storage_db::schema::{
+    AccountStateAtOLEpochSchema, AcctProofIdIndexSchema, AcctProofReceiptSchema,
+    AcctProverTaskSchema, BatchByIdxSchema, BatchChunksSchema, BatchIdToIdxSchema,
+    BlockAccessedStateSchema, BlockHashByNumber, BlockStateChangesSchema, BlockWitnessSchema,
+    BytecodeSchema, ChunkByIdxSchema, ChunkIdToIdxSchema, ChunkProofReceiptSchema,
+    ChunkProverTaskSchema, ExecBlockFinalizedSchema, ExecBlockPayloadSchema, ExecBlockSchema,
+    ExecBlocksAtHeightSchema, L1BroadcastActiveTxNodeSchema, L1BroadcastTxIdSchema,
+    L1BroadcastTxNodeSchema, L1BroadcastTxSchema, L1ChunkedEnvelopeSchema, OLBlockAtEpochSchema,
+    PublishedCodeHashSchema,
+};
 use alpen_storage_mdbx::{
     Direction, KeyCodec, MdbxEnv, Reader, Schema, UpgradeCtx, ValueCodec, Writer,
 };
@@ -25,16 +35,6 @@ use super::{
     mirrors::ProofReceiptMirror,
     reflect::{BytesReflector, MirrorReflector, SerdeReflector, ValueReflector},
     value::{FieldValue, Record},
-};
-use crate::mdbxdb::{
-    AccountStateAtOLEpochSchema, AcctProofIdIndexSchema, AcctProofReceiptSchema,
-    AcctProverTaskSchema, BatchByIdxSchema, BatchChunksSchema, BatchIdToIdxSchema,
-    BlockAccessedStateSchema, BlockHashByNumber, BlockStateChangesSchema, BlockWitnessSchema,
-    BytecodeSchema, ChunkByIdxSchema, ChunkIdToIdxSchema, ChunkProofReceiptSchema,
-    ChunkProverTaskSchema, ExecBlockFinalizedSchema, ExecBlockPayloadSchema, ExecBlockSchema,
-    ExecBlocksAtHeightSchema, L1BroadcastActiveTxNodeSchema, L1BroadcastTxIdSchema,
-    L1BroadcastTxNodeSchema, L1BroadcastTxSchema, L1ChunkedEnvelopeSchema, OLBlockAtEpochSchema,
-    PublishedCodeHashSchema,
 };
 
 /// Which keys a walk covers.

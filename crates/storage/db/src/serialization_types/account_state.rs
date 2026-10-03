@@ -6,7 +6,7 @@ use strata_acct_types::{BitcoinAmount, Hash, SubjectId};
 use strata_predicate::PredicateKey;
 
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
-pub(crate) struct DBAccountStateAtEpoch {
+pub struct DBAccountStateAtEpoch {
     epoch: u32,
     slot: u64,
     account_state: DBEeAccountState,
@@ -30,7 +30,7 @@ impl DBAccountStateAtEpoch {
 // mirror and store the SSZ account-state type directly, including any needed
 // DB compatibility/versioning path for existing local data.
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
-pub(crate) struct DBEeAccountState {
+pub struct DBEeAccountState {
     last_exec_blkid: Hash,
     last_exec_state_root: Hash,
     pending_inputs: Vec<DBPendingInputEntry>,

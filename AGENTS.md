@@ -144,7 +144,8 @@ The services that make up the EE node, each a workspace crate at the top level.
 | Crate | Description |
 |-------|-------------|
 | `storage/mdbx` | Generic MDBX typed table store: environments, codecs, versioned values |
-| `storage/db` | The EE store: node, prover, witness and DA-pipeline tables, the trait impls and store opening; the operator console core behind the `console` feature |
+| `storage/db` | The EE store: node, prover, witness and DA-pipeline tables, the trait impls and store opening; its `schema` and `records` modules publish the on-disk model for tooling |
+| `storage/console` | Operator console core: table registry, row reflection through the production codecs, staged writes; the `dbconsole` binary is its shell |
 
 ### Protocol Types and Runtimes (`crates/`)
 

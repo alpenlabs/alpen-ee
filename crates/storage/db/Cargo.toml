@@ -9,9 +9,9 @@ repository.workspace = true
 workspace = true
 
 [features]
-# Exposes the operator-console core (table registry, row reflection, class
-# model) consumed by the `dbconsole` binary.
-console = ["dep:ssz_derive", "dep:ssz_types", "dep:strata-l1-txfmt"]
+# The sled-era layouts the offline migration decodes and the test exporter
+# writes; enabled by alpen-storage-console, which holds the migration rules.
+migration = ["dep:ssz_derive", "dep:ssz_types"]
 # Exposes helpers for constructing and seeding EE stores in downstream tests.
 test-utils = ["dep:strata-l1-txfmt", "alpen-common/test-utils"]
 
@@ -50,7 +50,6 @@ tokio.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-proptest.workspace = true
 strata-l1-txfmt.workspace = true
 alpen-common = { workspace = true, features = ["test-utils"] }
 strata-db-tests.workspace = true

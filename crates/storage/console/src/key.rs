@@ -9,16 +9,17 @@
 
 use alloy_primitives::B256;
 use alpen_common::{BatchId, ChunkId};
+use alpen_storage_db::{
+    records::{DBBatchId, DBChunkId, DBOLBlockId},
+    schema::{AcctProverTaskSchema, ChunkProverTaskSchema},
+    BatchTaskKey, ChunkTaskKey,
+};
 use alpen_storage_mdbx::KeyCodec;
 use strata_acct_types::Hash;
 use strata_db_types::fee_bump::TxNodeId;
 use strata_identifiers::{Buf32, OLBlockId};
 
 use super::value::{hex, parse_hex};
-use crate::{
-    mdbxdb::{AcctProverTaskSchema, BatchTaskKey, ChunkProverTaskSchema, ChunkTaskKey},
-    serialization_types::{DBBatchId, DBChunkId, DBOLBlockId},
-};
 
 /// A key type the console can parse from user text and render back.
 ///
@@ -269,9 +270,9 @@ mod tests {
     use std::fmt::Debug;
 
     use alpen_params::AlpenSpecId;
+    use alpen_storage_db::schema::BlockStateChangesSchema;
 
     use super::*;
-    use crate::mdbxdb::BlockStateChangesSchema;
 
     /// Whatever `render` prints must parse back to the same key, or a key
     /// copied out of a scan cannot be pasted into a `get`.

@@ -3,13 +3,6 @@
 // Referenced only from `#[serde(with = "hex::serde")]` attributes, which the
 // unused-crate-dependencies lint cannot see.
 use hex as _;
-// Only the console's reflection tests use it, but it is a dev-dependency of
-// every test build.
-#[cfg(all(test, not(feature = "console")))]
-use proptest as _;
-
-#[cfg(feature = "console")]
-pub mod console;
 pub mod database;
 pub mod error;
 mod init;
@@ -31,3 +24,40 @@ pub use mdbxdb::{
     WitnessDbMdbx,
 };
 pub use storage::EeNodeStorage;
+
+/// The store's on-disk model, for tooling and tests: every table marker and
+/// the table list each environment is opened with.
+///
+/// This is not a service API. The node reads and writes through
+/// [`EeNodeStorage`] and the traits in `alpen-common`; the operator console
+/// (`alpen-storage-console`) reflects the tables through the codecs these
+/// markers carry, which is the one reason they are public.
+pub mod schema {
+    pub use crate::mdbxdb::{
+        schema::{
+            da_tables, node_tables, prover_tables, AccountStateAtOLEpochSchema,
+            AcctProofIdIndexSchema, AcctProofReceiptSchema, AcctProverTaskSchema, BatchByIdxSchema,
+            BatchChunksSchema, BatchIdToIdxSchema, BlockAccessedStateSchema, BlockWitnessSchema,
+            BytecodeSchema, ChunkByIdxSchema, ChunkIdToIdxSchema, ChunkProofReceiptSchema,
+            ChunkProverTaskSchema, ExecBlockFinalizedSchema, ExecBlockPayloadSchema,
+            ExecBlockSchema, ExecBlocksAtHeightSchema, L1BroadcastActiveTxNodeSchema,
+            L1BroadcastTxIdSchema, L1BroadcastTxNodeSchema, L1BroadcastTxSchema,
+            L1ChunkedEnvelopeSchema, OLBlockAtEpochSchema,
+        },
+        witness_schema::{
+            witness_tables, BlockHashByNumber, BlockStateChangesSchema, PublishedCodeHashSchema,
+        },
+    };
+}
+
+/// The database representations of the node's types, exactly as the tables
+/// store them. Public for the same reason as [`schema`].
+pub mod records {
+    #[cfg(feature = "migration")]
+    pub use crate::serialization_types::{package_from_sled_era, package_to_sled_era};
+    pub use crate::serialization_types::{
+        DBAccountStateAtEpoch, DBBatch, DBBatchId, DBBatchStatus, DBBatchWithStatus, DBChunk,
+        DBChunkId, DBChunkStatus, DBChunkWithStatus, DBEeAccountState, DBExecBlockRecord,
+        DBL1DaBlockRef, DBOLBlockId, DBTxidPair,
+    };
+}

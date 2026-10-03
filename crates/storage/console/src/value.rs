@@ -29,7 +29,7 @@
 //! * Integers widen on the way in and are range-checked on the way out, which is lossless because
 //!   the widened value came from the narrower type.
 //!
-//! [`crate::console::reflect`] proves the round-trip rather than asserting it.
+//! [`crate::reflect`] proves the round-trip rather than asserting it.
 
 use std::fmt;
 

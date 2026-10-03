@@ -1425,6 +1425,7 @@ dependencies = [
 name = "alpen-dbconsole"
 version = "0.3.0-alpha.1"
 dependencies = [
+ "alpen-storage-console",
  "alpen-storage-db",
  "clap",
  "dirs",
@@ -1932,6 +1933,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "alpen-storage-console"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alloy-primitives",
+ "alpen-chain-types",
+ "alpen-common",
+ "alpen-params",
+ "alpen-reth-statediff",
+ "alpen-storage-db",
+ "alpen-storage-mdbx",
+ "borsh",
+ "ciborium",
+ "eyre",
+ "hex",
+ "proptest",
+ "serde",
+ "serde_bytes",
+ "ssz",
+ "strata-acct-types",
+ "strata-db-types",
+ "strata-identifiers",
+ "strata-l1-txfmt",
+ "strata-paas",
+ "thiserror 2.0.20",
+ "zkaleido",
+]
+
+[[package]]
 name = "alpen-storage-db"
 version = "0.3.0-alpha.1"
 dependencies = [
@@ -1949,7 +1978,6 @@ dependencies = [
  "ciborium",
  "eyre",
  "hex",
- "proptest",
  "serde",
  "serde_bytes",
  "ssz",

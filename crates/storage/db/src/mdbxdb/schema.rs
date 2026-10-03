@@ -66,12 +66,12 @@ macro_rules! impl_node_id_key_codec {
 
 define_table_be_key! {
     /// Canonical final OL block id at OL epoch.
-    (OLBlockAtEpochSchema) u32 => DBOLBlockId
+    (pub OLBlockAtEpochSchema) u32 => DBOLBlockId
 }
 
 define_table_versioned! {
     /// EE account state at a specific OL block.
-    (AccountStateAtOLEpochSchema) DBOLBlockId => {
+    (pub AccountStateAtOLEpochSchema) DBOLBlockId => {
         1 => DBAccountStateAtEpoch as borsh,
     }
 }
@@ -81,19 +81,19 @@ define_table_versioned! {
     ///
     /// Content-addressed and inserted once: `save_exec_block` skips a hash it
     /// already holds, so the record is fixed for the life of the block.
-    (ExecBlockSchema) Hash => {
+    (pub ExecBlockSchema) Hash => {
         1 => DBExecBlockRecord as borsh,
     }
 }
 
 define_table_be_key! {
     /// All exec block hashes at a given height (supports forks).
-    (ExecBlocksAtHeightSchema) u64 => Vec<Hash>
+    (pub ExecBlocksAtHeightSchema) u64 => Vec<Hash>
 }
 
 define_table_be_key! {
     /// Canonical finalized chain: height to block hash.
-    (ExecBlockFinalizedSchema) u64 => Hash
+    (pub ExecBlockFinalizedSchema) u64 => Hash
 }
 
 define_table_borsh! {
@@ -102,41 +102,41 @@ define_table_borsh! {
     /// An opaque engine payload, written alongside its exec block and never
     /// rewritten. The blob's own framing is the engine's, not this store's, so
     /// it carries no version tag.
-    (ExecBlockPayloadSchema) Hash => Vec<u8>
+    (pub ExecBlockPayloadSchema) Hash => Vec<u8>
 }
 
 define_table_versioned_be_key! {
     /// Batch by sequential idx to `(Batch, Status)`.
-    (BatchByIdxSchema) u64 => {
+    (pub BatchByIdxSchema) u64 => {
         1 => DBBatchWithStatus as borsh,
     }
 }
 
 define_table_borsh! {
     /// `BatchId` to idx lookup.
-    (BatchIdToIdxSchema) DBBatchId => u64
+    (pub BatchIdToIdxSchema) DBBatchId => u64
 }
 
 define_table_versioned_be_key! {
     /// Chunk by sequential idx to `(Chunk, Status)`.
-    (ChunkByIdxSchema) u64 => {
+    (pub ChunkByIdxSchema) u64 => {
         1 => DBChunkWithStatus as borsh,
     }
 }
 
 define_table_borsh! {
     /// `ChunkId` to idx lookup.
-    (ChunkIdToIdxSchema) DBChunkId => u64
+    (pub ChunkIdToIdxSchema) DBChunkId => u64
 }
 
 define_table_borsh! {
     /// Batch-to-chunks association.
-    (BatchChunksSchema) DBBatchId => Vec<DBChunkId>
+    (pub BatchChunksSchema) DBBatchId => Vec<DBChunkId>
 }
 
 define_table_versioned! {
     /// Per-block accessed-state record, keyed by execution block hash.
-    (BlockAccessedStateSchema) Hash => {
+    (pub BlockAccessedStateSchema) Hash => {
         1 => AccessedStateRecord as borsh,
     }
 }
@@ -146,7 +146,7 @@ define_table_borsh! {
     ///
     /// The key is the hash of the value, so a stored entry can never legitimately
     /// change. Bytecode has no framing of its own to version.
-    (BytecodeSchema) Hash => Vec<u8>
+    (pub BytecodeSchema) Hash => Vec<u8>
 }
 
 define_table_borsh! {
@@ -157,7 +157,7 @@ define_table_borsh! {
     /// it, so versioning it is that producer's concern, not this table's. It
     /// stays mutable because a re-derived witness may legitimately differ once
     /// that encoding changes.
-    (BlockWitnessSchema) Hash => Vec<u8>
+    (pub BlockWitnessSchema) Hash => Vec<u8>
 }
 
 // --- Prover-side tables (per-kind task stores + proof receipts) ---
@@ -167,7 +167,7 @@ define_table! {
     /// that owns the task, then the chunk's block range.
     ///
     /// The record is serde-only, hence the CBOR payload.
-    (ChunkProverTaskSchema) ChunkTaskKey => TaskRecordData
+    (pub ChunkProverTaskSchema) ChunkTaskKey => TaskRecordData
 }
 impl_versioned_value_codec!(ChunkProverTaskSchema { 1 => TaskRecordData as cbor });
 
@@ -176,7 +176,7 @@ define_table! {
     /// that owns the task, then the batch's block range.
     ///
     /// The record is serde-only, hence the CBOR payload.
-    (AcctProverTaskSchema) BatchTaskKey => TaskRecordData
+    (pub AcctProverTaskSchema) BatchTaskKey => TaskRecordData
 }
 impl_versioned_value_codec!(AcctProverTaskSchema { 1 => TaskRecordData as cbor });
 
@@ -228,14 +228,14 @@ impl KeyCodec<AcctProverTaskSchema> for BatchTaskKey {
 
 define_table_versioned! {
     /// Chunk proof receipts keyed by [`DBChunkId`].
-    (ChunkProofReceiptSchema) DBChunkId => {
+    (pub ChunkProofReceiptSchema) DBChunkId => {
         1 => ProofReceiptWithMetadata as borsh,
     }
 }
 
 define_table_versioned! {
     /// Acct (outer/update) proof receipts keyed by [`DBBatchId`].
-    (AcctProofReceiptSchema) DBBatchId => {
+    (pub AcctProofReceiptSchema) DBBatchId => {
         1 => ProofReceiptWithMetadata as borsh,
     }
 }
@@ -243,19 +243,19 @@ define_table_versioned! {
 define_table_borsh! {
     /// Secondary index: `ProofId` to `BatchId`, so a receipt resolves without
     /// scanning.
-    (AcctProofIdIndexSchema) Hash => DBBatchId
+    (pub AcctProofIdIndexSchema) Hash => DBBatchId
 }
 
 // --- DA-pipeline tables (L1 broadcast + chunked envelope) ---
 
 define_table_be_key! {
     /// L1 broadcast: sequential index to transaction id.
-    (L1BroadcastTxIdSchema) u64 => Buf32
+    (pub L1BroadcastTxIdSchema) u64 => Buf32
 }
 
 define_table_versioned! {
     /// L1 broadcast: transaction id to its entry.
-    (L1BroadcastTxSchema) Buf32 => {
+    (pub L1BroadcastTxSchema) Buf32 => {
         1 => L1TxEntry as cbor,
     }
 }
@@ -263,7 +263,7 @@ define_table_versioned! {
 define_table! {
     /// L1 broadcast: logical transaction replacement chains, keyed by the
     /// chain's [`TxNodeId`].
-    (L1BroadcastTxNodeSchema) TxNodeId => TxNodeRecord
+    (pub L1BroadcastTxNodeSchema) TxNodeId => TxNodeRecord
 }
 impl_node_id_key_codec!(L1BroadcastTxNodeSchema);
 impl_versioned_value_codec!(L1BroadcastTxNodeSchema { 1 => TxNodeRecord as cbor });
@@ -274,21 +274,21 @@ define_table! {
     /// The replacement pass scans this set instead of the whole node table,
     /// whose records are kept forever for crash-recovery point lookups.
     /// Membership is the whole record, so the value occupies no bytes.
-    (L1BroadcastActiveTxNodeSchema) TxNodeId => ()
+    (pub L1BroadcastActiveTxNodeSchema) TxNodeId => ()
 }
 impl_node_id_key_codec!(L1BroadcastActiveTxNodeSchema);
 impl_unit_value_codec!(L1BroadcastActiveTxNodeSchema);
 
 define_table! {
     /// Chunked-envelope entry by sequential index.
-    (L1ChunkedEnvelopeSchema) u64 => ChunkedEnvelopeEntry
+    (pub L1ChunkedEnvelopeSchema) u64 => ChunkedEnvelopeEntry
 }
 impl_be_key_codec!(L1ChunkedEnvelopeSchema, u64);
 impl_versioned_value_codec!(L1ChunkedEnvelopeSchema { 1 => ChunkedEnvelopeEntry as cbor });
 
 /// The full set of tables backing the EE node database, for
 /// [`MdbxEnv::open`](alpen_storage_mdbx::MdbxEnv::open).
-pub(crate) fn node_tables() -> Vec<TableSpec> {
+pub fn node_tables() -> Vec<TableSpec> {
     tables![
         OLBlockAtEpochSchema,
         AccountStateAtOLEpochSchema,
@@ -308,7 +308,7 @@ pub(crate) fn node_tables() -> Vec<TableSpec> {
 }
 
 /// The full set of tables backing the EE prover database.
-pub(crate) fn prover_tables() -> Vec<TableSpec> {
+pub fn prover_tables() -> Vec<TableSpec> {
     tables![
         ChunkProverTaskSchema,
         AcctProverTaskSchema,
@@ -320,7 +320,7 @@ pub(crate) fn prover_tables() -> Vec<TableSpec> {
 
 /// The full set of tables backing the EE DA pipeline (L1 broadcast + chunked
 /// envelope).
-pub(crate) fn da_tables() -> Vec<TableSpec> {
+pub fn da_tables() -> Vec<TableSpec> {
     tables![
         L1BroadcastTxIdSchema,
         L1BroadcastTxSchema,

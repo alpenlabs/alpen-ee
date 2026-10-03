@@ -12,47 +12,25 @@ mod broadcast_db;
 mod db;
 mod envelope_db;
 mod prover_db;
-mod schema;
+pub(crate) mod schema;
 mod task_key;
 mod witness_db;
-mod witness_schema;
+pub(crate) mod witness_schema;
 
 pub(crate) use broadcast_db::L1BroadcastDbMdbx;
 pub use db::EeNodeDbMdbx;
 pub(crate) use envelope_db::L1ChunkedEnvelopeDbMdbx;
 pub use prover_db::EeProverDbMdbx;
-pub(crate) use schema::da_tables;
 pub use task_key::{BatchTaskKey, ChunkTaskKey, ProverTaskKey};
 pub use witness_db::{EeDaContextDbMdbx, WitnessDbMdbx};
-pub(crate) use witness_schema::witness_tables;
-#[cfg(feature = "console")]
-pub(crate) use witness_schema::{
-    BlockHashByNumber, BlockStateChangesSchema, PublishedCodeHashSchema,
-};
 
 /// Maps a storage-engine error into the database error type.
 fn to_db_error(err: MdbxError) -> DbError {
     DbError::Other(format!("mdbx: {err}"))
 }
 
-// The prover tables, for the seeding helpers in `test_db`.
-#[cfg(any(test, feature = "test-utils"))]
-pub(crate) use schema::{
-    prover_tables, AcctProofIdIndexSchema, AcctProofReceiptSchema, AcctProverTaskSchema,
-    ChunkProofReceiptSchema, ChunkProverTaskSchema,
-};
-// Re-exported for the operator console (`console` feature), which reflects
-// these tables through the production codecs.
-#[cfg(feature = "console")]
-pub(crate) use schema::{
-    AccountStateAtOLEpochSchema, BatchByIdxSchema, BatchChunksSchema, BatchIdToIdxSchema,
-    BlockAccessedStateSchema, BlockWitnessSchema, BytecodeSchema, ChunkByIdxSchema,
-    ChunkIdToIdxSchema, ExecBlockFinalizedSchema, ExecBlockPayloadSchema, ExecBlockSchema,
-    ExecBlocksAtHeightSchema, L1BroadcastActiveTxNodeSchema, L1BroadcastTxIdSchema,
-    L1BroadcastTxNodeSchema, L1BroadcastTxSchema, L1ChunkedEnvelopeSchema, OLBlockAtEpochSchema,
-};
-#[cfg(all(feature = "console", not(any(test, feature = "test-utils"))))]
-pub(crate) use schema::{
-    AcctProofIdIndexSchema, AcctProofReceiptSchema, AcctProverTaskSchema, ChunkProofReceiptSchema,
-    ChunkProverTaskSchema,
-};
+// The schema modules are re-exported whole: `init` and `test_db` open
+// environments by their table lists, and the crate root's `schema` module
+// publishes the markers for tooling.
+pub(crate) use schema::*;
+pub(crate) use witness_schema::*;

@@ -26,7 +26,7 @@ use std::{
     },
 };
 
-use alpen_storage_db::console::ConsoleDb;
+use alpen_storage_console::ConsoleDb;
 use rhai::{Dynamic, Engine, EvalAltResult, ParseErrorType, Scope, AST};
 
 use super::engine;
