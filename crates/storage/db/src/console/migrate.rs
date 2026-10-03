@@ -36,10 +36,9 @@
 
 use alloy_primitives::B256;
 use alpen_params::AlpenSpecId;
-use alpen_reth_db::mdbx::BlockHashByNumber;
 #[cfg(any(test, feature = "test-utils"))]
-use alpen_store_mdbx::UpgradeCtx;
-use alpen_store_mdbx::ValueCodec;
+use alpen_storage_mdbx::UpgradeCtx;
+use alpen_storage_mdbx::ValueCodec;
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::Serialize;
 use strata_db_types::{
@@ -52,8 +51,8 @@ use strata_paas::{AttemptCounts, TaskRecordData, TaskStatus};
 
 use crate::{
     mdbxdb::{
-        BatchByIdxSchema, ChunkProverTaskSchema, ExecBlockSchema, L1BroadcastTxSchema,
-        L1ChunkedEnvelopeSchema,
+        BatchByIdxSchema, BlockHashByNumber, ChunkProverTaskSchema, ExecBlockSchema,
+        L1BroadcastTxSchema, L1ChunkedEnvelopeSchema,
     },
     serialization_types::{DBBatchWithStatus, DBExecBlockRecord},
 };
@@ -756,14 +755,16 @@ fn rule_for(table: &str) -> eyre::Result<SledTree> {
 #[cfg(test)]
 mod tests {
     use alpen_common::ChunkId;
-    use alpen_reth_db::mdbx::BlockStateChangesSchema;
     use alpen_reth_statediff::BlockStateChanges;
-    use alpen_store_mdbx::{KeyCodec, VersionedTable};
+    use alpen_storage_mdbx::{KeyCodec, VersionedTable};
     use strata_acct_types::Hash;
 
     use super::{super::registry::ee_envs, *};
     use crate::{
-        mdbxdb::{ChunkProofReceiptSchema, ChunkTaskKey, L1BroadcastActiveTxNodeSchema},
+        mdbxdb::{
+            BlockStateChangesSchema, ChunkProofReceiptSchema, ChunkTaskKey,
+            L1BroadcastActiveTxNodeSchema,
+        },
         serialization_types::DBChunkId,
     };
 

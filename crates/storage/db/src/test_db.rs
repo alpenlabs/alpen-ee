@@ -24,9 +24,8 @@ use alpen_common::{
     Chunk, EeDaContext, StateDiffStore,
 };
 use alpen_params::AlpenSpecId;
-use alpen_reth_db::mdbx::{witness_tables, EeDaContextDbMdbx, WitnessDbMdbx};
 use alpen_reth_statediff::BlockStateChanges;
-use alpen_store_mdbx::{MdbxConfig, MdbxEnv};
+use alpen_storage_mdbx::{MdbxConfig, MdbxEnv};
 use strata_acct_types::Hash;
 use strata_db_types::{
     chunked_envelope::{ChunkedEnvelopeEntry, L1ChunkedEnvelopeDatabase},
@@ -44,9 +43,10 @@ use zkaleido::{
 use crate::{
     database::EeNodeDb,
     mdbxdb::{
-        da_tables, prover_tables, AcctProofIdIndexSchema, AcctProofReceiptSchema,
+        da_tables, prover_tables, witness_tables, AcctProofIdIndexSchema, AcctProofReceiptSchema,
         AcctProverTaskSchema, BatchTaskKey, ChunkProofReceiptSchema, ChunkProverTaskSchema,
-        ChunkTaskKey, EeNodeDbMdbx, L1BroadcastDbMdbx, L1ChunkedEnvelopeDbMdbx,
+        ChunkTaskKey, EeDaContextDbMdbx, EeNodeDbMdbx, L1BroadcastDbMdbx, L1ChunkedEnvelopeDbMdbx,
+        WitnessDbMdbx,
     },
     serialization_types::{DBBatchId, DBChunkId},
 };

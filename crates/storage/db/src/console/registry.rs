@@ -16,8 +16,7 @@
 
 use std::{fmt, marker::PhantomData, ops::ControlFlow};
 
-use alpen_reth_db::mdbx::{BlockHashByNumber, BlockStateChangesSchema, PublishedCodeHashSchema};
-use alpen_store_mdbx::{
+use alpen_storage_mdbx::{
     Direction, KeyCodec, MdbxEnv, Reader, Schema, UpgradeCtx, ValueCodec, Writer,
 };
 
@@ -30,11 +29,12 @@ use super::{
 use crate::mdbxdb::{
     AccountStateAtOLEpochSchema, AcctProofIdIndexSchema, AcctProofReceiptSchema,
     AcctProverTaskSchema, BatchByIdxSchema, BatchChunksSchema, BatchIdToIdxSchema,
-    BlockAccessedStateSchema, BlockWitnessSchema, BytecodeSchema, ChunkByIdxSchema,
-    ChunkIdToIdxSchema, ChunkProofReceiptSchema, ChunkProverTaskSchema, ExecBlockFinalizedSchema,
-    ExecBlockPayloadSchema, ExecBlockSchema, ExecBlocksAtHeightSchema,
-    L1BroadcastActiveTxNodeSchema, L1BroadcastTxIdSchema, L1BroadcastTxNodeSchema,
-    L1BroadcastTxSchema, L1ChunkedEnvelopeSchema, OLBlockAtEpochSchema,
+    BlockAccessedStateSchema, BlockHashByNumber, BlockStateChangesSchema, BlockWitnessSchema,
+    BytecodeSchema, ChunkByIdxSchema, ChunkIdToIdxSchema, ChunkProofReceiptSchema,
+    ChunkProverTaskSchema, ExecBlockFinalizedSchema, ExecBlockPayloadSchema, ExecBlockSchema,
+    ExecBlocksAtHeightSchema, L1BroadcastActiveTxNodeSchema, L1BroadcastTxIdSchema,
+    L1BroadcastTxNodeSchema, L1BroadcastTxSchema, L1ChunkedEnvelopeSchema, OLBlockAtEpochSchema,
+    PublishedCodeHashSchema,
 };
 
 /// Which keys a walk covers.
@@ -684,8 +684,7 @@ console_tables! {
 }
 
 console_tables! {
-    /// Builds the console's view of the witness environment's tables, whose
-    /// schemas live in `alpen-reth-db`.
+    /// Builds the console's view of the witness environment's tables.
     pub(crate) fn witness_env_tables() in "witness" {
         BlockStateChangesSchema => {
             key: "reth block hash (32-byte hex)",

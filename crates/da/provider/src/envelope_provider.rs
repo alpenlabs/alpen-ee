@@ -4,7 +4,6 @@ use std::{collections::HashMap, fmt, sync::Arc};
 
 use alpen_common::{BatchDaProvider, BatchId, DaStatus, L1DaBlockInfo, L1DaBlockRef};
 use alpen_da_types::{wtxids_root_from_txs, DA_BLOB_VERSION, EE_DA_MAGIC_BYTES};
-use alpen_database::BroadcastDbOps;
 use async_trait::async_trait;
 use bitcoin::{Block, BlockHash, Txid, Wtxid};
 use bitcoind_async_client::{traits::Reader, Client as BtcClient};
@@ -14,7 +13,7 @@ use strata_btcio::writer::chunked_envelope::ChunkedEnvelopeHandle;
 use strata_db_types::{
     chunked_envelope::{ChunkedEnvelopeEntry, ChunkedEnvelopeStatus},
     common::{L1TxId, L1WtxId},
-    l1_broadcast::L1TxStatus,
+    l1_broadcast::{L1BroadcastDatabaseProxy as BroadcastDbOps, L1TxStatus},
 };
 use strata_identifiers::{Buf32, L1BlockCommitment, L1Height, WtxidsRoot};
 use strata_l1_envelope_fmt::MAX_ENVELOPE_PAYLOAD_SIZE;
@@ -360,7 +359,7 @@ mod tests {
     };
 
     use alpen_da_types::DaBlob;
-    use alpen_database::{open_da_ops, BroadcastDbOps, ChunkedEnvelopeOps};
+    use alpen_storage_db::{open_da_ops, BroadcastDbOps, ChunkedEnvelopeOps};
     use async_trait::async_trait;
     use bitcoin::{
         absolute::LockTime,

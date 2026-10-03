@@ -22,8 +22,8 @@ use alpen_common::{
     StateDiffProvider, Storage,
 };
 use alpen_da_runtime::builders::{build_da_witness, DaDedupResolver, DaWitnessBuildError};
-use alpen_database::EeNodeStorage;
 use alpen_proof_acct::{EeAcctProgram, EeAcctProofInput};
+use alpen_storage_db::EeNodeStorage;
 use alpen_witness::RangeWitnessData;
 use async_trait::async_trait;
 use bitcoind_async_client::Client as BtcClient;

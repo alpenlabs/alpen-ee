@@ -13,8 +13,7 @@ use std::{
     sync::Arc,
 };
 
-use alpen_reth_db::mdbx::{witness_tables, EeDaContextDbMdbx, WitnessDbMdbx};
-use alpen_store_mdbx::{MdbxConfig, MdbxEnv};
+use alpen_storage_mdbx::{MdbxConfig, MdbxEnv};
 use eyre::{eyre, Result};
 /// Re-export the async ops proxies so callers do not need `strata-storage`.
 pub use strata_db_types::chunked_envelope::L1ChunkedEnvelopeDatabaseProxy as ChunkedEnvelopeOps;
@@ -22,7 +21,10 @@ pub use strata_db_types::l1_broadcast::L1BroadcastDatabaseProxy as BroadcastDbOp
 use tokio::runtime::Handle;
 
 use crate::{
-    mdbxdb::{da_tables, EeNodeDbMdbx, EeProverDbMdbx, L1BroadcastDbMdbx, L1ChunkedEnvelopeDbMdbx},
+    mdbxdb::{
+        da_tables, witness_tables, EeDaContextDbMdbx, EeNodeDbMdbx, EeProverDbMdbx,
+        L1BroadcastDbMdbx, L1ChunkedEnvelopeDbMdbx, WitnessDbMdbx,
+    },
     storage::EeNodeStorage,
 };
 

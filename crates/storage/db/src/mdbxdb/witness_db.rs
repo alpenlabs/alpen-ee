@@ -1,15 +1,15 @@
 use std::{path::Path, sync::Arc};
 
+use alloy_primitives::B256;
 use alpen_common::{EeDaContext, StateDiffProvider, StateDiffStore};
 use alpen_reth_statediff::BlockStateChanges;
-use alpen_store_mdbx::{DbError as MdbxError, MdbxConfig, MdbxEnv};
-use revm_primitives::alloy_primitives::B256;
+use alpen_storage_mdbx::{DbError as MdbxError, MdbxConfig, MdbxEnv};
+use strata_db_types::{errors::DbError, DbResult};
 use tracing::warn;
 
-use super::schema::{
+use super::witness_schema::{
     witness_tables, BlockHashByNumber, BlockStateChangesSchema, PublishedCodeHashSchema,
 };
-use crate::{errors::DbError, DbResult};
 
 /// Maps a storage-engine error into the reth state-diff database error type.
 fn to_db_error(err: MdbxError) -> DbError {
@@ -156,10 +156,12 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
     };
 
+    use alloy_primitives::{
+        address, fixed_bytes, FixedBytes, KECCAK256_EMPTY as KECCAK_EMPTY, U256,
+    };
     use alpen_reth_statediff::{
         AccountSnapshot, BlockAccountChange, BlockStateChanges, BlockStorageDiff,
     };
-    use revm_primitives::{address, fixed_bytes, FixedBytes, KECCAK_EMPTY, U256};
 
     use super::*;
 

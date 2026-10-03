@@ -26,5 +26,8 @@ pub use init::open_da_ops;
 pub use init::{
     create_ee_envs, open_ee_db, BroadcastDbOps, ChunkedEnvelopeOps, EeDb, SequencerDatabases,
 };
-pub use mdbxdb::{BatchTaskKey, ChunkTaskKey, EeNodeDbMdbx, EeProverDbMdbx, ProverTaskKey};
+pub use mdbxdb::{
+    BatchTaskKey, ChunkTaskKey, EeDaContextDbMdbx, EeNodeDbMdbx, EeProverDbMdbx, ProverTaskKey,
+    WitnessDbMdbx,
+};
 pub use storage::EeNodeStorage;

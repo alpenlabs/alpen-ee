@@ -1,6 +1,6 @@
 [package]
 edition.workspace = true
-name = "alpen-database"
+name = "alpen-storage-db"
 version.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -11,29 +11,18 @@ workspace = true
 [features]
 # Exposes the operator-console core (table registry, row reflection, class
 # model) consumed by the `dbconsole` binary.
-console = [
-  "dep:alloy-primitives",
-  "dep:ssz_derive",
-  "dep:ssz_types",
-  "dep:strata-l1-txfmt",
-]
+console = ["dep:ssz_derive", "dep:ssz_types", "dep:strata-l1-txfmt"]
 # Exposes helpers for constructing and seeding EE stores in downstream tests.
-test-utils = [
-  "dep:alloy-primitives",
-  "dep:alpen-reth-statediff",
-  "dep:strata-l1-txfmt",
-  "alpen-common/test-utils",
-]
+test-utils = ["dep:strata-l1-txfmt", "alpen-common/test-utils"]
 
 [dependencies]
-alloy-primitives = { workspace = true, optional = true }
+alloy-primitives.workspace = true
 alpen-acct-types.workspace = true
 alpen-chain-types.workspace = true
 alpen-common.workspace = true
 alpen-params.workspace = true
-alpen-reth-db.workspace = true
-alpen-reth-statediff = { workspace = true, optional = true }
-alpen-store-mdbx.workspace = true
+alpen-reth-statediff.workspace = true
+alpen-storage-mdbx.workspace = true
 bitcoin.workspace = true
 hex.workspace = true
 serde.workspace = true
@@ -61,8 +50,6 @@ tokio.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-alloy-primitives.workspace = true
-alpen-reth-statediff.workspace = true
 proptest.workspace = true
 strata-l1-txfmt.workspace = true
 alpen-common = { workspace = true, features = ["test-utils"] }

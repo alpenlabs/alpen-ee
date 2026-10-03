@@ -1,15 +1,16 @@
-//! MDBX table definitions for the reth state-diff / DA-context store.
+//! MDBX table definitions for the witness environment: per-block state diffs,
+//! block hashes by number and the DA-published code hash filter.
 //!
 //! Keys are `B256`/`u64` in big-endian form. Values go through the table's
-//! [`ValueCodec`](alpen_store_mdbx::ValueCodec), so callers store and read
+//! [`ValueCodec`](alpen_storage_mdbx::ValueCodec), so callers store and read
 //! domain types and never touch the encoding.
 
+use alloy_primitives::B256;
 use alpen_reth_statediff::BlockStateChanges;
-use alpen_store_mdbx::{
+use alpen_storage_mdbx::{
     define_table, define_table_bincode_be_key, define_table_versioned_be_key, impl_be_key_codec,
     impl_unit_value_codec, tables, TableSpec,
 };
-use revm_primitives::alloy_primitives::B256;
 
 define_table_versioned_be_key! {
     /// Block state-diff data.
@@ -37,7 +38,7 @@ impl_be_key_codec!(PublishedCodeHashSchema, B256);
 impl_unit_value_codec!(PublishedCodeHashSchema);
 
 /// The full set of tables backing the state-diff / DA-context store.
-pub fn witness_tables() -> Vec<TableSpec> {
+pub(crate) fn witness_tables() -> Vec<TableSpec> {
     tables![
         BlockStateChangesSchema,
         BlockHashByNumber,

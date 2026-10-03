@@ -17,7 +17,7 @@ use alpen_common::{
     BatchId, ChunkId, ProverTaskKeyDecodeError, RANGE_TASK_KEY_BYTES,
 };
 use alpen_params::AlpenSpecId;
-use alpen_store_mdbx::{CodecError, DbResult, Reader, Writer};
+use alpen_storage_mdbx::{CodecError, DbResult, Reader, Writer};
 use strata_acct_types::Hash;
 use strata_paas::TaskRecordData;
 
@@ -78,7 +78,7 @@ impl BatchTaskKey {
 }
 
 mod sealed {
-    use alpen_store_mdbx::{DbResult, Reader, Writer};
+    use alpen_storage_mdbx::{DbResult, Reader, Writer};
     use strata_paas::TaskRecordData;
 
     /// The table operations behind a key type, so the table itself stays
@@ -241,7 +241,7 @@ pub(super) fn decode_versioned_range(
 
 #[cfg(test)]
 mod tests {
-    use alpen_store_mdbx::KeyCodec;
+    use alpen_storage_mdbx::KeyCodec;
 
     use super::*;
 

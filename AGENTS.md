@@ -130,8 +130,6 @@ The services that make up the EE node, each a workspace crate at the top level.
 |-------|-------------|
 | `params` | Consolidated Alpen chain parameters, spec version schedule |
 | `common` | Shared EE types and the trait families (engine, storage, DA, OL client, prover) |
-| `database` | EE storage on MDBX: node, prover and DA-pipeline tables; the operator console core behind the `console` feature |
-| `store-mdbx` | Generic MDBX typed table store with versioned values |
 | `engine` | Execution engine control: drives the reth engine API |
 | `exec-chain` | In-memory view of the canonical execution chain, orphan tracking |
 | `ol-tracker` | Follows the paired OL node: epochs, checkpoints, finalization, inbox messages |
@@ -140,6 +138,13 @@ The services that make up the EE node, each a workspace crate at the top level.
 | `sequencer` | Sequencer workers: block, chunk and batch builders, batch lifecycle, update submitter |
 | `witness` | Block range witness extraction for EVM proof generation |
 | `exex` | Reth execution extensions: per-block state-diff persistence and accessed-state capture |
+
+### Storage (`crates/storage/`)
+
+| Crate | Description |
+|-------|-------------|
+| `storage/mdbx` | Generic MDBX typed table store: environments, codecs, versioned values |
+| `storage/db` | The EE store: node, prover, witness and DA-pipeline tables, the trait impls and store opening; the operator console core behind the `console` feature |
 
 ### Protocol Types and Runtimes (`crates/`)
 
@@ -180,7 +185,6 @@ Alpen's configuration of reth. These sit below `common` in the dependency graph.
 | `reth/rpc` | Custom reth RPC endpoints |
 | `reth/node` | Alpen Reth node implementation and gossip |
 | `reth/statediff` | State diff generation |
-| `reth/db` | Witness and DA-context tables, state diff store traits |
 
 ### Proofs (`crates/proof/`, `provers/sp1/`)
 

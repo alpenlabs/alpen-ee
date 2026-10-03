@@ -16,8 +16,8 @@
 //! script could not be trusted to be byte-identical in the fields nobody meant
 //! to touch.
 
-pub(crate) use alpen_database::console::hex;
-use alpen_database::console::{FieldValue, Record, KEY_FIELD};
+pub(crate) use alpen_storage_db::console::hex;
+use alpen_storage_db::console::{FieldValue, Record, KEY_FIELD};
 use rhai::{Array, Blob, Dynamic, Map};
 
 use super::handle::ValueHandle;

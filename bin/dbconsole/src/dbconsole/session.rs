@@ -26,7 +26,7 @@ use std::{
     },
 };
 
-use alpen_database::console::ConsoleDb;
+use alpen_storage_db::console::ConsoleDb;
 use rhai::{Dynamic, Engine, EvalAltResult, ParseErrorType, Scope, AST};
 
 use super::engine;
@@ -218,7 +218,7 @@ impl Session {
 mod tests {
     use std::{fs, thread, time::Duration};
 
-    use alpen_database::test_db::TempDatadir;
+    use alpen_storage_db::test_db::TempDatadir;
 
     use super::*;
 

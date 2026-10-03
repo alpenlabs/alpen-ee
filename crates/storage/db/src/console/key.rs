@@ -2,14 +2,14 @@
 //!
 //! A console user types keys as text (`get("ExecBlockSchema", "0x1a2b…")`), so
 //! every reflected table needs a way from that text to its real
-//! [`Schema::Key`](alpen_store_mdbx::Schema::Key) and back. [`ConsoleKey`]
+//! [`Schema::Key`](alpen_storage_mdbx::Schema::Key) and back. [`ConsoleKey`]
 //! is that conversion, implemented once per key type rather than once per
 //! table: the EE schema draws its keys from a small closed set, so a table
 //! whose key is already covered gets its `get` for free.
 
 use alloy_primitives::B256;
 use alpen_common::{BatchId, ChunkId};
-use alpen_store_mdbx::KeyCodec;
+use alpen_storage_mdbx::KeyCodec;
 use strata_acct_types::Hash;
 use strata_db_types::fee_bump::TxNodeId;
 use strata_identifiers::{Buf32, OLBlockId};
@@ -269,9 +269,9 @@ mod tests {
     use std::fmt::Debug;
 
     use alpen_params::AlpenSpecId;
-    use alpen_reth_db::mdbx::BlockStateChangesSchema;
 
     use super::*;
+    use crate::mdbxdb::BlockStateChangesSchema;
 
     /// Whatever `render` prints must parse back to the same key, or a key
     /// copied out of a scan cannot be pasted into a `get`.

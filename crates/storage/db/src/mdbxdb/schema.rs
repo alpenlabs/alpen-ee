@@ -8,7 +8,7 @@
 //!
 //! A table storing a structured record names its shipped versions inline,
 //! ascending, the last one current. Adding a version means adding the struct,
-//! one [`UpConvert`](alpen_store_mdbx::UpConvert) impl from the previous
+//! one [`UpConvert`](alpen_storage_mdbx::UpConvert) impl from the previous
 //! version, and one entry here; nothing else moves, and no other table's stored
 //! bytes change.
 //!
@@ -19,7 +19,7 @@
 //! this store.
 
 use alpen_common::{AccessedStateRecord, BatchId, ChunkId};
-use alpen_store_mdbx::{
+use alpen_storage_mdbx::{
     define_table, define_table_be_key, define_table_borsh, define_table_versioned,
     define_table_versioned_be_key, impl_be_key_codec, impl_unit_value_codec,
     impl_versioned_value_codec, tables, CodecError, KeyCodec, Schema, TableSpec,
@@ -287,7 +287,7 @@ impl_be_key_codec!(L1ChunkedEnvelopeSchema, u64);
 impl_versioned_value_codec!(L1ChunkedEnvelopeSchema { 1 => ChunkedEnvelopeEntry as cbor });
 
 /// The full set of tables backing the EE node database, for
-/// [`MdbxEnv::open`](alpen_store_mdbx::MdbxEnv::open).
+/// [`MdbxEnv::open`](alpen_storage_mdbx::MdbxEnv::open).
 pub(crate) fn node_tables() -> Vec<TableSpec> {
     tables![
         OLBlockAtEpochSchema,
@@ -332,7 +332,7 @@ pub(crate) fn da_tables() -> Vec<TableSpec> {
 
 #[cfg(test)]
 mod tests {
-    use alpen_store_mdbx::{CodecError, UpgradeCtx, VersionedTable};
+    use alpen_storage_mdbx::{CodecError, UpgradeCtx, VersionedTable};
 
     use super::*;
 

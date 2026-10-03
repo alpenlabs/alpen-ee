@@ -121,8 +121,8 @@ impl From<JoinError> for DbError {
     }
 }
 
-impl From<alpen_store_mdbx::DbError> for DbError {
-    fn from(err: alpen_store_mdbx::DbError) -> Self {
+impl From<alpen_storage_mdbx::DbError> for DbError {
+    fn from(err: alpen_storage_mdbx::DbError) -> Self {
         DbError::Mdbx(err.to_string())
     }
 }

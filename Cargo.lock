@@ -1247,7 +1247,6 @@ dependencies = [
  "alpen-da-provider",
  "alpen-da-runtime",
  "alpen-da-types",
- "alpen-database",
  "alpen-engine",
  "alpen-evm-ee",
  "alpen-exec-chain",
@@ -1263,6 +1262,7 @@ dependencies = [
  "alpen-reth-statediff",
  "alpen-rpc-server",
  "alpen-sequencer",
+ "alpen-storage-db",
  "alpen-witness",
  "anyhow",
  "async-trait",
@@ -1362,8 +1362,8 @@ dependencies = [
  "alloy-primitives",
  "alpen-common",
  "alpen-da-types",
- "alpen-database",
  "alpen-reth-statediff",
+ "alpen-storage-db",
  "async-trait",
  "bitcoin",
  "bitcoind-async-client",
@@ -1422,50 +1422,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "alpen-database"
-version = "0.3.0-alpha.1"
-dependencies = [
- "alloy-primitives",
- "alpen-acct-types",
- "alpen-chain-types",
- "alpen-common",
- "alpen-params",
- "alpen-reth-db",
- "alpen-reth-statediff",
- "alpen-store-mdbx",
- "async-trait",
- "bincode",
- "bitcoin",
- "borsh",
- "ciborium",
- "eyre",
- "hex",
- "proptest",
- "serde",
- "serde_bytes",
- "ssz",
- "ssz_derive",
- "ssz_types",
- "strata-acct-types",
- "strata-db-macros",
- "strata-db-tests",
- "strata-db-types",
- "strata-identifiers",
- "strata-l1-txfmt",
- "strata-paas",
- "strata-predicate",
- "strata-storage-common",
- "thiserror 2.0.20",
- "tokio",
- "tracing",
- "zkaleido",
-]
-
-[[package]]
 name = "alpen-dbconsole"
 version = "0.3.0-alpha.1"
 dependencies = [
- "alpen-database",
+ "alpen-storage-db",
  "clap",
  "dirs",
  "eyre",
@@ -1733,19 +1693,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "alpen-reth-db"
-version = "0.3.0-alpha.1"
-dependencies = [
- "alpen-common",
- "alpen-reth-statediff",
- "alpen-store-mdbx",
- "bincode",
- "revm-primitives",
- "strata-db-types",
- "tracing",
-]
-
-[[package]]
 name = "alpen-reth-evm"
 version = "0.3.0-alpha.1"
 dependencies = [
@@ -1985,7 +1932,46 @@ dependencies = [
 ]
 
 [[package]]
-name = "alpen-store-mdbx"
+name = "alpen-storage-db"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alloy-primitives",
+ "alpen-acct-types",
+ "alpen-chain-types",
+ "alpen-common",
+ "alpen-params",
+ "alpen-reth-statediff",
+ "alpen-storage-mdbx",
+ "async-trait",
+ "bincode",
+ "bitcoin",
+ "borsh",
+ "ciborium",
+ "eyre",
+ "hex",
+ "proptest",
+ "serde",
+ "serde_bytes",
+ "ssz",
+ "ssz_derive",
+ "ssz_types",
+ "strata-acct-types",
+ "strata-db-macros",
+ "strata-db-tests",
+ "strata-db-types",
+ "strata-identifiers",
+ "strata-l1-txfmt",
+ "strata-paas",
+ "strata-predicate",
+ "strata-storage-common",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "zkaleido",
+]
+
+[[package]]
+name = "alpen-storage-mdbx"
 version = "0.3.0-alpha.1"
 dependencies = [
  "bincode",

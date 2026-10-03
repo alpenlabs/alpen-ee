@@ -27,7 +27,7 @@ use std::{
     path::Path,
 };
 
-use alpen_store_mdbx::{Direction, MdbxConfig, MdbxEnv};
+use alpen_storage_mdbx::{Direction, MdbxConfig, MdbxEnv};
 
 use super::{
     registry::{ee_envs, EnvSpec, Range, RawVisitor, TableInfo, TableReflect, KEY_FIELD},
@@ -865,7 +865,7 @@ mod tests {
 
     use alpen_common::ChunkId;
     use alpen_params::AlpenSpecId;
-    use alpen_store_mdbx::{DbError, Direction, MdbxConfig, MdbxEnv, TableSpec};
+    use alpen_storage_mdbx::{DbError, Direction, MdbxConfig, MdbxEnv, TableSpec};
     use strata_acct_types::Hash;
     use strata_paas::{TaskRecordData, TaskStatus};
 

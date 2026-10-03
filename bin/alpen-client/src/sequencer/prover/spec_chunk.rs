@@ -17,10 +17,10 @@ use alpen_common::{
     decode_chunk_task_key, encode_chunk_task_key, BlockWitnessStore, ChunkId, ChunkStorage,
     ExecBlockStorage, ProverTaskKeyDecodeError,
 };
-use alpen_database::EeNodeStorage;
 use alpen_evm_ee::{EvmBlock, EvmBlockBody, EvmExecutionEnvironment, EvmHeader, EvmPartialState};
 use alpen_proof_chunk::{EeChunkProgram, EeChunkProofInput};
 use alpen_reth_node::BlockWitnessRecord;
+use alpen_storage_db::EeNodeStorage;
 use async_trait::async_trait;
 use reth_ethereum_primitives::Block;
 use reth_primitives_traits::Block as _;

@@ -11,7 +11,6 @@ workspace = true
 [dependencies]
 alpen-common.workspace = true
 alpen-da-types.workspace = true
-alpen-database.workspace = true
 alpen-reth-statediff.workspace = true
 
 alloy-primitives.workspace = true
@@ -22,12 +21,12 @@ eyre.workspace = true
 strata-btc-types.workspace = true
 strata-btcio.workspace = true
 strata-codec.workspace = true
-strata-db-types.workspace = true
+strata-db-types = { workspace = true, features = ["proxies"] }
 strata-identifiers.workspace = true
 strata-l1-envelope-fmt.workspace = true
 strata-l1-txfmt.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-alpen-database = { workspace = true, features = ["test-utils"] }
+alpen-storage-db = { workspace = true, features = ["test-utils"] }
 tokio.workspace = true
