@@ -18,12 +18,12 @@ use alpen_acct_types::UpdateExtraData;
 use alpen_chain_types::ChunkTransition;
 use alpen_common::{
     build_ledger_refs_from_da, decode_batch_task_key, encode_batch_task_key, BatchId, BatchStatus,
-    BatchStorage, ChunkStorage, ExecBlockStorage, L1DaBlockRef, ProverTaskKeyDecodeError, Storage,
+    BatchStorage, ChunkStorage, ExecBlockStorage, L1DaBlockRef, ProverTaskKeyDecodeError,
+    StateDiffProvider, Storage,
 };
 use alpen_da_runtime::builders::{build_da_witness, DaDedupResolver, DaWitnessBuildError};
 use alpen_database::EeNodeStorage;
 use alpen_proof_acct::{EeAcctProgram, EeAcctProofInput};
-use alpen_reth_db::StateDiffProvider;
 use alpen_witness::RangeWitnessData;
 use async_trait::async_trait;
 use bitcoind_async_client::Client as BtcClient;

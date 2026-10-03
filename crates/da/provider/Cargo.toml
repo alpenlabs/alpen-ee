@@ -12,7 +12,6 @@ workspace = true
 alpen-common.workspace = true
 alpen-da-types.workspace = true
 alpen-database.workspace = true
-alpen-reth-db.workspace = true
 alpen-reth-statediff.workspace = true
 
 alloy-primitives.workspace = true

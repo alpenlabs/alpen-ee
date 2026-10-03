@@ -21,13 +21,10 @@ use alloy_primitives::B256;
 use alpen_acct_types::EeAccountState;
 use alpen_common::{
     exec_block_storage_test_fns::create_exec_block, AccessedAccount, AccessedStateRecord, Batch,
-    Chunk,
+    Chunk, EeDaContext, StateDiffStore,
 };
 use alpen_params::AlpenSpecId;
-use alpen_reth_db::{
-    mdbx::{witness_tables, EeDaContextDbMdbx, WitnessDbMdbx},
-    EeDaContext, StateDiffStore,
-};
+use alpen_reth_db::mdbx::{witness_tables, EeDaContextDbMdbx, WitnessDbMdbx};
 use alpen_reth_statediff::BlockStateChanges;
 use alpen_store_mdbx::{MdbxConfig, MdbxEnv};
 use strata_acct_types::Hash;

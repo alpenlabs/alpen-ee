@@ -3,9 +3,8 @@
 use std::{fmt, sync::Arc};
 
 use alloy_primitives::B256;
-use alpen_common::{BatchId, BatchStorage, HeaderSummaryProvider};
+use alpen_common::{BatchId, BatchStorage, EeDaContext, HeaderSummaryProvider, StateDiffProvider};
 use alpen_da_types::DaBlob;
-use alpen_reth_db::{EeDaContext, StateDiffProvider};
 use alpen_reth_statediff::BatchBuilder;
 use async_trait::async_trait;
 use tracing::*;

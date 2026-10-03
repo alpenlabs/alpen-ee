@@ -6,9 +6,8 @@
 use std::collections::BTreeSet;
 
 use alloy_primitives::{keccak256, B256};
-use alpen_common::AccessedStateStore;
+use alpen_common::{AccessedStateStore, StateDiffProvider};
 use alpen_da_types::{BytecodePreimage, DaBlob, DedupWitness};
-use alpen_reth_db::StateDiffProvider;
 use alpen_reth_statediff::{AccountChange, BatchBuilder, BatchStateDiff};
 use async_trait::async_trait;
 use strata_acct_types::Hash;

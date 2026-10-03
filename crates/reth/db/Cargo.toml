@@ -9,6 +9,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+alpen-common.workspace = true
 alpen-reth-statediff.workspace = true
 alpen-store-mdbx.workspace = true
 strata-db-types.workspace = true

@@ -14,7 +14,6 @@ workspace = true
 default = []
 builders = [
   "dep:alpen-common",
-  "dep:alpen-reth-db",
   "dep:async-trait",
   "dep:bitcoind-async-client",
   "dep:strata-identifiers",
@@ -24,7 +23,6 @@ builders = [
 [dependencies]
 alpen-common = { workspace = true, optional = true }
 alpen-da-types.workspace = true
-alpen-reth-db = { workspace = true, optional = true }
 alpen-reth-statediff.workspace = true
 
 alloy-primitives.workspace = true

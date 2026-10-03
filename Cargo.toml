@@ -81,6 +81,7 @@ alpen-database = { path = "crates/database", default-features = false }
 alpen-engine = { path = "crates/engine" }
 alpen-evm-ee = { path = "crates/evm-ee" }
 alpen-exec-chain = { path = "crates/exec-chain" }
+alpen-exex = { path = "crates/exex" }
 alpen-genesis = { path = "crates/genesis" }
 alpen-ol-tracker = { path = "crates/ol-tracker" }
 alpen-params = { path = "crates/params" }
@@ -88,18 +89,17 @@ alpen-proof-acct = { path = "crates/proof/acct" }
 alpen-proof-chunk = { path = "crates/proof/chunk" }
 alpen-reth-db = { path = "crates/reth/db" }
 alpen-reth-evm = { path = "crates/reth/evm" }
-alpen-exex = { path = "crates/exex" }
 alpen-reth-node = { path = "crates/reth/node" }
 alpen-reth-primitives = { path = "crates/reth/primitives" }
 alpen-reth-rpc = { path = "crates/reth/rpc" }
 alpen-reth-statediff = { path = "crates/reth/statediff", default-features = false }
-alpen-witness = { path = "crates/witness" }
 alpen-rpc-api = { path = "crates/rpc/api" }
 alpen-rpc-server = { path = "crates/rpc/server" }
 alpen-rpc-types = { path = "crates/rpc/types" }
 alpen-sequencer = { path = "crates/sequencer" }
 alpen-simple-ee = { path = "crates/test-utils/simple-ee" }
 alpen-store-mdbx = { path = "crates/store-mdbx" }
+alpen-witness = { path = "crates/witness" }
 
 # strata dependencies, pinned to the pre-split repo's main so the EE stays in
 # lockstep with the OL side. The strata-common, asm, and zkaleido pins below

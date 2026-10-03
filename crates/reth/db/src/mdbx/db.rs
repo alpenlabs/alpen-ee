@@ -1,5 +1,6 @@
 use std::{path::Path, sync::Arc};
 
+use alpen_common::{EeDaContext, StateDiffProvider, StateDiffStore};
 use alpen_reth_statediff::BlockStateChanges;
 use alpen_store_mdbx::{DbError as MdbxError, MdbxConfig, MdbxEnv};
 use revm_primitives::alloy_primitives::B256;
@@ -8,7 +9,7 @@ use tracing::warn;
 use super::schema::{
     witness_tables, BlockHashByNumber, BlockStateChangesSchema, PublishedCodeHashSchema,
 };
-use crate::{errors::DbError, DbResult, EeDaContext, StateDiffProvider, StateDiffStore};
+use crate::{errors::DbError, DbResult};
 
 /// Maps a storage-engine error into the reth state-diff database error type.
 fn to_db_error(err: MdbxError) -> DbError {

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use alloy_rpc_types::BlockNumHash;
-use alpen_reth_db::StateDiffStore;
+use alpen_common::StateDiffStore;
 use alpen_reth_statediff::BlockStateChanges;
 use futures_util::TryStreamExt;
 use reth_ethereum_primitives::EthPrimitives;

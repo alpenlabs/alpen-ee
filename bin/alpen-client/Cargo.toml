@@ -48,7 +48,6 @@ sequencer = [
   "dep:alpen-da-types",
   "dep:alpen-exec-chain",
   "dep:alpen-sequencer",
-  "dep:alpen-reth-db",
   "dep:alpen-exex",
   "dep:alpen-reth-statediff",
   "dep:alpen-witness",
@@ -111,7 +110,6 @@ alpen-ol-tracker.workspace = true
 alpen-params.workspace = true
 alpen-proof-acct = { workspace = true, optional = true }
 alpen-proof-chunk = { workspace = true, optional = true }
-alpen-reth-db = { workspace = true, optional = true }
 alpen-reth-evm.workspace = true
 alpen-reth-node.workspace = true
 alpen-reth-rpc.workspace = true

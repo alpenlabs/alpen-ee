@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use alpen_reth_db::StateDiffProvider;
+use alpen_common::StateDiffProvider;
 use alpen_reth_statediff::{estimate_da_size, BatchBuilder, BlockStateChanges};
 use alpen_sequencer::sealing_policy::{
     AccumulationPolicy, BlockDataProvider, SealReason, SealingPolicy,
