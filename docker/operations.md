@@ -85,6 +85,22 @@ and any other Reth flag — goes in the container's `command`. See
 [`docker-compose-p2p-test.yml`](docker-compose-p2p-test.yml) for working
 examples, with their configs in [`configs/`](configs/).
 
+The image also ships `dbconsole`, a console over the node's database. To
+read a running node's store, run it inside the node's container:
+
+```bash
+docker exec -it <container> dbconsole --datadir /app/data
+```
+
+Write commands (`--write`) need the node stopped. Start a one-off container
+over the same data volume instead, overriding the entrypoint, which always
+starts the node:
+
+```bash
+docker run --rm -it --entrypoint dbconsole \
+  -v <data-volume>:/app/data <image> --datadir /app/data --write
+```
+
 ---
 
 ## Running the binary directly
