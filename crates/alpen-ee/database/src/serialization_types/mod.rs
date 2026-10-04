@@ -6,6 +6,8 @@ mod olblockid;
 pub(crate) use account_state::DBAccountStateAtEpoch;
 pub(crate) use batch::{DBBatchId, DBBatchWithStatus, DBChunkId, DBChunkWithStatus};
 pub(crate) use exec_block::DBExecBlockRecord;
+#[cfg(all(feature = "console", test))]
+pub(crate) use exec_block::{package_from_sled_era, package_to_sled_era};
 pub(crate) use olblockid::DBOLBlockId;
 
 /// Serde for a list of 32-byte hashes as a list of hex strings.

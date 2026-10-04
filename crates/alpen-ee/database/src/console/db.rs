@@ -30,7 +30,7 @@ use std::{
 use alpen_store_mdbx::{Direction, MdbxConfig, MdbxEnv};
 
 use super::{
-    registry::{ee_envs, EnvSpec, Range, TableInfo, TableReflect, KEY_FIELD},
+    registry::{ee_envs, EnvSpec, Range, RawVisitor, TableInfo, TableReflect, KEY_FIELD},
     value::{FieldValue, Record},
 };
 
@@ -450,6 +450,80 @@ impl ConsoleDb {
         resolved
             .table
             .keys(resolved.env, range, direction, limit, visit)
+    }
+
+    /// Walks a table's raw entries in key order without decoding them.
+    pub fn walk_raw(&self, name: &str, visit: &mut RawVisitor<'_>) -> eyre::Result<()> {
+        let resolved = self.table(name)?;
+        resolved
+            .env
+            .view(|reader| resolved.table.walk_raw(reader, visit))
+    }
+
+    /// Writes already-encoded rows into `name`, `batch` rows per transaction,
+    /// bypassing staging, and returns how many were written.
+    ///
+    /// For a bulk import from a store whose bytes are known to be this table's
+    /// encoding. Nothing here decodes them; [`Self::check_table`] does, after,
+    /// by decoding every row. Not staged, so nothing to preview or abort: this
+    /// is for filling a store that was empty, not for editing one.
+    pub fn import_raw(
+        &self,
+        name: &str,
+        rows: impl IntoIterator<Item = eyre::Result<(Vec<u8>, Vec<u8>)>>,
+        batch: usize,
+    ) -> eyre::Result<usize> {
+        let resolved = self.table(name)?;
+        let table = resolved.table.info().name;
+        self.check_writable()?;
+        let batch = batch.max(1);
+
+        let mut written = 0;
+        let mut pending: Vec<(Vec<u8>, Vec<u8>)> = Vec::with_capacity(batch);
+        let mut rows = rows.into_iter();
+        loop {
+            pending.clear();
+            for row in rows.by_ref().take(batch) {
+                pending.push(row?);
+            }
+            if pending.is_empty() {
+                break;
+            }
+            resolved.env.update(|writer| -> eyre::Result<()> {
+                for (key, value) in &pending {
+                    writer.put_raw(table, key, value)?;
+                }
+                Ok(())
+            })?;
+            written += pending.len();
+        }
+        Ok(written)
+    }
+
+    /// Decodes every row of a table through its production codec and checks
+    /// each value survives the canonical round trip a write is gated on, and
+    /// that its rendered key reads back. Returns the row count; the first
+    /// failure names the key.
+    pub fn check_table(&self, name: &str) -> eyre::Result<usize> {
+        let mut rows = 0;
+        let mut visit = |record: &Record| {
+            rows += 1;
+            let canonical = self.canonicalize(name, &record.value)?;
+            if canonical != record.value {
+                eyre::bail!("key {} changes in the round trip", record.key);
+            }
+            if self.get(name, &record.key)?.is_none() {
+                eyre::bail!(
+                    "key {} renders in a form that does not read back",
+                    record.key
+                );
+            }
+            Ok(true)
+        };
+        match self.scan(name, &Range::All, Direction::Forward, None, &mut visit) {
+            Ok(_) => Ok(rows),
+            Err(err) => Err(eyre::eyre!("`{name}` row {rows}: {err}")),
+        }
     }
 
     // --- Staged writes ----------------------------------------------------

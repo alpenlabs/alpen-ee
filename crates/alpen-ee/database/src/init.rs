@@ -48,6 +48,24 @@ pub struct EeDb {
 /// `_db_retry_count` is accepted for compatibility with the previous layout but
 /// unused: MDBX serializes writers, so there is no optimistic-retry backoff.
 pub fn open_ee_db(datadir: &Path, _db_retry_count: u16) -> Result<EeDb> {
+    // A datadir the sled binary wrote and the MDBX binary has not yet migrated.
+    // Starting empty next to a month of history is the one mistake this
+    // upgrade must make impossible, so refuse and say what to run.
+    if datadir.join("sled").is_dir() && !datadir.join("mdbx").is_dir() {
+        return Err(eyre!(
+            "{} holds a sled store and no MDBX store; run `dbconsole migrate-sled --datadir {}` \
+             with the node stopped before starting this version",
+            datadir.display(),
+            datadir.display()
+        ));
+    }
+    open_ee_db_unchecked(datadir)
+}
+
+/// Opens the environments without the unmigrated-datadir check, for the
+/// migration itself, which is the one caller that creates `mdbx/` next to
+/// `sled/` on purpose.
+fn open_ee_db_unchecked(datadir: &Path) -> Result<EeDb> {
     let mdbx_dir = datadir.join("mdbx");
     let config = MdbxConfig::default();
     let node_db = Arc::new(
@@ -59,6 +77,14 @@ pub fn open_ee_db(datadir: &Path, _db_retry_count: u16) -> Result<EeDb> {
         config,
         node_db,
     })
+}
+
+/// Creates every EE environment and table under `<datadir>/mdbx`, empty, for a
+/// tool that fills a fresh store from another one.
+pub fn create_ee_envs(datadir: &Path) -> Result<()> {
+    let db = open_ee_db_unchecked(datadir)?;
+    db.sequencer_databases()?;
+    Ok(())
 }
 
 impl EeDb {
