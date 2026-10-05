@@ -167,7 +167,7 @@ mod tests {
 
     fn base_argv<'a>(args: &[&'a str]) -> Vec<&'a str> {
         let params_fixture: &'static str =
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/res/alpen-params.json");
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../../params/dev.json");
         let config_fixture: &'static str = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/testdata/config.full_node.toml"

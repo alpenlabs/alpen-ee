@@ -1,0 +1,51 @@
+{
+  "strata_exec_account_id": "0101010101010101010101010101010101010101010101010101010101010101",
+  "bridge_params": {
+    "denomination": 200000000,
+    "max_withdrawal_amount": 1000000000,
+    "max_withdrawal_descriptor_len": 81
+  },
+  "blob_spec": {
+    "magic_bytes": "ALPN"
+  },
+  "spec_schedule": {
+    "v0": 0
+  },
+  "evm_spec": {
+    "nonce": "0x0",
+    "timestamp": "0x0",
+    "extraData": "0x746573746e65742e616c70656e6c616273",
+    "gasLimit": "0x1c9c380",
+    "difficulty": "0x0",
+    "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "coinbase": "0x5400000000000000000000000000000000000011",
+    "number": "0x0",
+    "gasUsed": "0x0",
+    "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "config": {
+      "chainId": 2892,
+      "homesteadBlock": 0,
+      "eip150Block": 0,
+      "eip155Block": 0,
+      "eip158Block": 0,
+      "byzantiumBlock": 0,
+      "constantinopleBlock": 0,
+      "petersburgBlock": 0,
+      "istanbulBlock": 0,
+      "berlinBlock": 0,
+      "londonBlock": 0,
+      "terminalTotalDifficulty": 0,
+      "terminalTotalDifficultyPassed": true,
+      "shanghaiTime": 0,
+      "cancunTime": 0,
+      "pragueTime": 0,
+      "mergeNetsplitBlock": 0
+    }
+  },
+  "fee_spec": {
+    "base_fee_floor": {
+      "v0": 0,
+      "v1": 1000000000
+    }
+  }
+}

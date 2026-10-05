@@ -125,7 +125,7 @@ jobs:
           # the build script skips guest compilation entirely (see provers/sp1/build.rs).
           # Must be absolute — build scripts run with CWD set to provers/sp1/, not
           # the repo root, so a relative path here would resolve against the wrong base.
-          SP1_ALPEN_PARAMS_PATH: ${{ github.workspace }}/bin/alpen-client/tests/res/alpen-params.json
+          SP1_ALPEN_PARAMS_PATH: ${{ github.workspace }}/params/dev.json
         run: |
           # The guest builder's build script compiles the guest programs and
           # writes the ELFs to provers/sp1/generated/.
