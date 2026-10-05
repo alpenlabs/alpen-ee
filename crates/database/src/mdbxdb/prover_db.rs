@@ -2,8 +2,8 @@
 
 use std::{path::Path, sync::Arc};
 
-use alpen_common::{BatchId, ChunkId, ProofId};
-use alpen_mdbx::{MdbxConfig, MdbxEnv};
+use alpen_common::{BatchId, ChunkId, ProofId, ProverTaskKeyDecodeError};
+use alpen_mdbx::{MdbxConfig, MdbxEnv, Schema};
 use alpen_params::AlpenSpecId;
 use strata_db_types::{errors::DbError, DbResult};
 use strata_paas::TaskRecordData;
@@ -11,12 +11,84 @@ use zkaleido::ProofReceiptWithMetadata;
 
 use super::{
     schema::{
-        prover_tables, AcctProofIdIndexSchema, AcctProofReceiptSchema, ChunkProofReceiptSchema,
+        prover_tables, AcctProofIdIndexSchema, AcctProofReceiptSchema, AcctProverTaskSchema,
+        ChunkProofReceiptSchema, ChunkProverTaskSchema,
     },
-    task_key::ProverTaskKey,
     to_db_error,
 };
-use crate::serialization_types::{DBBatchId, DBChunkId};
+use crate::serialization_types::{BatchTaskKey, ChunkTaskKey, DBBatchId, DBChunkId};
+
+mod sealed {
+    /// Closed: the set of task tables is the two below.
+    pub trait Sealed {}
+}
+
+/// A key of one of the prover task tables, which names the table it lives in.
+///
+/// Implemented by [`ChunkTaskKey`] and [`BatchTaskKey`] only. The store's
+/// task accessors are generic over this, so one implementation serves both
+/// kinds while `K::Table` keeps a chunk key out of the acct table and vice
+/// versa. The paas-bytes conversions are the key types' own; the trait only
+/// exposes them to generic code. See the `task_key` module of the record
+/// types for the layout and the reasoning.
+pub trait ProverTaskKey: sealed::Sealed + Copy + Send + Sync + 'static {
+    /// The table holding this kind's tasks.
+    type Table: Schema<Key = Self, Value = TaskRecordData>;
+
+    /// The spec version whose prover owns the task.
+    fn spec_version(&self) -> AlpenSpecId;
+
+    /// Adds `spec_version` to a paas task key (the bare range bytes).
+    fn from_task_bytes(
+        spec_version: AlpenSpecId,
+        bytes: &[u8],
+    ) -> Result<Self, ProverTaskKeyDecodeError>;
+
+    /// The paas task key: the bare range bytes, without the version.
+    fn task_bytes(&self) -> Vec<u8>;
+}
+
+impl sealed::Sealed for ChunkTaskKey {}
+
+impl ProverTaskKey for ChunkTaskKey {
+    type Table = ChunkProverTaskSchema;
+
+    fn spec_version(&self) -> AlpenSpecId {
+        ChunkTaskKey::spec_version(self)
+    }
+
+    fn from_task_bytes(
+        spec_version: AlpenSpecId,
+        bytes: &[u8],
+    ) -> Result<Self, ProverTaskKeyDecodeError> {
+        ChunkTaskKey::from_task_bytes(spec_version, bytes)
+    }
+
+    fn task_bytes(&self) -> Vec<u8> {
+        ChunkTaskKey::task_bytes(self)
+    }
+}
+
+impl sealed::Sealed for BatchTaskKey {}
+
+impl ProverTaskKey for BatchTaskKey {
+    type Table = AcctProverTaskSchema;
+
+    fn spec_version(&self) -> AlpenSpecId {
+        BatchTaskKey::spec_version(self)
+    }
+
+    fn from_task_bytes(
+        spec_version: AlpenSpecId,
+        bytes: &[u8],
+    ) -> Result<Self, ProverTaskKeyDecodeError> {
+        BatchTaskKey::from_task_bytes(spec_version, bytes)
+    }
+
+    fn task_bytes(&self) -> Vec<u8> {
+        BatchTaskKey::task_bytes(self)
+    }
+}
 
 fn proof_id_for(batch_id: BatchId) -> ProofId {
     batch_id.last_block()
@@ -25,9 +97,9 @@ fn proof_id_for(batch_id: BatchId) -> ProofId {
 /// EE prover storage: chunk and acct task tables, chunk receipts, and acct
 /// proofs with their id index.
 ///
-/// The task accessors are generic over [`ProverTaskKey`], which selects the
-/// table: a [`ChunkTaskKey`](super::ChunkTaskKey) reads and writes the chunk
-/// task table, a [`BatchTaskKey`](super::BatchTaskKey) the acct one. The
+/// The task accessors are generic over [`ProverTaskKey`], whose `Table`
+/// selects the table: a [`ChunkTaskKey`] reads and writes the chunk task
+/// table, a [`BatchTaskKey`] the acct one. The
 /// listing accessors take the spec version whose tasks to return, since every
 /// resident prover program owns its own tasks.
 #[derive(Debug)]
@@ -51,7 +123,9 @@ impl ProverDbMdbx {
 
     /// Reads the task stored under `key`.
     pub fn get_task<K: ProverTaskKey>(&self, key: &K) -> DbResult<Option<TaskRecordData>> {
-        self.env.view(|r| K::get(r, key)).map_err(to_db_error)
+        self.env
+            .view(|r| r.get::<K::Table>(key))
+            .map_err(to_db_error)
     }
 
     /// Stores a new task, refusing to overwrite one already under `key`.
@@ -61,10 +135,10 @@ impl ProverDbMdbx {
         let inserted = self
             .env
             .update(|w| {
-                if K::get_in_write(w, key)?.is_some() {
+                if w.get::<K::Table>(key)?.is_some() {
                     return Ok(false);
                 }
-                K::put(w, key, &record)?;
+                w.put::<K::Table>(key, &record)?;
                 Ok(true)
             })
             .map_err(to_db_error)?;
@@ -79,7 +153,7 @@ impl ProverDbMdbx {
     pub fn put_task<K: ProverTaskKey>(&self, key: &K, record: TaskRecordData) -> DbResult<()> {
         self.env
             .update(|w| {
-                K::put(w, key, &record)?;
+                w.put::<K::Table>(key, &record)?;
                 Ok(())
             })
             .map_err(to_db_error)
@@ -87,7 +161,9 @@ impl ProverDbMdbx {
 
     /// Removes the task under `key`, reporting whether one was there.
     pub fn delete_task<K: ProverTaskKey>(&self, key: &K) -> DbResult<bool> {
-        self.env.update(|w| K::delete(w, key)).map_err(to_db_error)
+        self.env
+            .update(|w| w.delete::<K::Table>(key))
+            .map_err(to_db_error)
     }
 
     /// Lists `spec_version`'s tasks that want a rescan and whose retry time
@@ -124,7 +200,7 @@ impl ProverDbMdbx {
         self.env
             .view(|r| {
                 let mut count = 0usize;
-                K::for_each(r, |key, _| {
+                r.for_each::<K::Table>(|key, _| {
                     if key.spec_version() == spec_version {
                         count += 1;
                     }
@@ -142,7 +218,7 @@ impl ProverDbMdbx {
         self.env
             .view(|r| {
                 let mut out = Vec::new();
-                K::for_each(r, |key, record| {
+                r.for_each::<K::Table>(|key, record| {
                     if keep(&key, &record) {
                         out.push((key, record));
                     }
@@ -265,7 +341,6 @@ mod tests {
     use zkaleido::{ProgramId, Proof, ProofMetadata, ProofReceipt, ProofType, PublicValues, ZkVm};
 
     use super::*;
-    use crate::mdbxdb::{BatchTaskKey, ChunkTaskKey};
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
 

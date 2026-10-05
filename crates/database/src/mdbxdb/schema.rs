@@ -37,8 +37,8 @@ use strata_identifiers::Buf32;
 use strata_paas::TaskRecordData;
 use zkaleido::ProofReceiptWithMetadata;
 
-use super::task_key::{decode_versioned_range, encode_versioned_range, BatchTaskKey, ChunkTaskKey};
 use crate::serialization_types::{
+    decode_versioned_range, encode_versioned_range, BatchTaskKey, ChunkTaskKey,
     DBAccountStateAtEpoch, DBBatchId, DBBatchWithStatus, DBChunkId, DBChunkWithStatus,
     DBExecBlockRecord, DBOLBlockId,
 };

@@ -44,11 +44,10 @@ use crate::{
     database::NodeDb,
     mdbxdb::{
         da_tables, prover_tables, witness_tables, AcctProofIdIndexSchema, AcctProofReceiptSchema,
-        AcctProverTaskSchema, BatchTaskKey, ChunkProofReceiptSchema, ChunkProverTaskSchema,
-        ChunkTaskKey, DaContextDbMdbx, L1BroadcastDbMdbx, L1ChunkedEnvelopeDbMdbx, NodeDbMdbx,
-        WitnessDbMdbx,
+        AcctProverTaskSchema, ChunkProofReceiptSchema, ChunkProverTaskSchema, DaContextDbMdbx,
+        L1BroadcastDbMdbx, L1ChunkedEnvelopeDbMdbx, NodeDbMdbx, WitnessDbMdbx,
     },
-    serialization_types::{DBBatchId, DBChunkId},
+    serialization_types::{BatchTaskKey, ChunkTaskKey, DBBatchId, DBChunkId},
 };
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);

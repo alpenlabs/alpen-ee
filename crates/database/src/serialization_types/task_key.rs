@@ -1,27 +1,61 @@
-//! Typed keys for the two prover task tables.
+//! The keys of the two prover task tables, and the three forms one task
+//! identity takes on its way between paas and the store.
 //!
-//! Every resident prover program runs its own paas `Prover`, and paas's
-//! tick/recovery loop re-spawns whatever unfinished task it finds in its
-//! store. A task therefore has to be owned by the spec version whose prover
-//! submitted it, or one version's loop could claim and sign a task meant
-//! for another. The owning version is part of the key, ahead of the range,
-//! so a version's tasks sit together in cursor order.
+//! # What a task is
 //!
-//! On disk a key is `[spec_version: u16 BE][prev_block][last_block]`,
-//! 66 bytes. The paas-facing form is the bare 64-byte range from
-//! [`encode_chunk_task_key`] / [`encode_batch_task_key`]; the version is
-//! added and removed at the storage boundary.
+//! A prover task names a block range: `prev_block` to `last_block`. A chunk
+//! task proves the chunk over that range, an acct task the batch over it.
+//! The two kinds have the same shape, and the same range can be both a chunk
+//! and a batch, so a key has to carry its kind somewhere. It carries it in
+//! *which table* it lives in: [`ChunkTaskKey`] is only ever stored in
+//! `ChunkProverTaskSchema`, [`BatchTaskKey`] only in `AcctProverTaskSchema`,
+//! and the typed accessors on the prover store cannot cross them.
+//!
+//! # Why the owning spec version is part of the key
+//!
+//! During a protocol upgrade the node runs one `strata-paas` `Prover` per
+//! resident [`AlpenSpecId`], each with its own program and verifying key.
+//! paas's tick and recovery loops re-spawn whatever unfinished tasks the
+//! store lists, with no notion of which prover submitted them. If two
+//! versions' provers shared rows, one version's loop would claim a task
+//! meant for the other and prove it with the wrong key. So every row is
+//! owned by a spec version, the version is the first thing in the key, and
+//! the listing accessors on the store take the version whose rows to return.
+//! Putting the version first also makes one version's tasks a contiguous
+//! run in cursor order, which is what a prefix walk (`0000` for V0) relies
+//! on.
+//!
+//! # The three representations
+//!
+//! | Form | Bytes | Who holds it |
+//! | --- | --- | --- |
+//! | paas task bytes | `prev ‖ last`, 64 | `strata-paas`: its `TaskStore` is keyed by opaque bytes, and `ProofSpec::Task` (`ChunkTask`, `BatchTask` in the node) converts to and from exactly this through `encode_chunk_task_key` and friends in `alpen-common`. paas never sees the version. |
+//! | typed key | [`ChunkTaskKey`] / [`BatchTaskKey`] | the store's API and everything above it: the node's task-store adapter, the console. |
+//! | stored key | `version(u16 BE) ‖ prev ‖ last`, 66 | the MDBX row, through the [`KeyCodec`](alpen_mdbx::KeyCodec) impls in the schema module, which call [`encode_versioned_range`] and [`decode_versioned_range`]. |
+//!
+//! The conversions sit where the knowledge is. [`ChunkTaskKey::from_task_bytes`]
+//! and [`ChunkTaskKey::task_bytes`] (and their batch twins) add and strip the
+//! version at the boundary between paas and the store; the node's task-store
+//! adapter, which is instantiated once per resident version, is the one place
+//! that knows which version to add. The stored form is the codec's business
+//! and nothing else reads it, except the operator console, which renders a
+//! key as the hex of its stored bytes so that a version's tasks share a
+//! prefix.
+//!
+//! # Where the kind goes
+//!
+//! Earlier layouts kept both kinds in one table and put a kind tag byte into
+//! the paas bytes themselves, which leaked storage layout into paas's key and
+//! made each prover's listing trip over the other kind's rows. The kind now
+//! lives only in the table choice, and the paas bytes are the bare range.
 
 use alpen_common::{
     decode_batch_task_key, decode_chunk_task_key, encode_batch_task_key, encode_chunk_task_key,
     BatchId, ChunkId, ProverTaskKeyDecodeError, RANGE_TASK_KEY_BYTES,
 };
-use alpen_mdbx::{CodecError, DbResult, Reader, Writer};
+use alpen_mdbx::CodecError;
 use alpen_params::AlpenSpecId;
 use strata_acct_types::Hash;
-use strata_paas::TaskRecordData;
-
-use super::schema::{AcctProverTaskSchema, ChunkProverTaskSchema};
 
 /// Key of a chunk prover task: the owning spec version and the chunk range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -47,6 +81,20 @@ impl ChunkTaskKey {
     /// The chunk this task proves.
     pub fn chunk_id(&self) -> ChunkId {
         self.chunk_id
+    }
+
+    /// The key of the task paas identifies by `bytes` (the bare range),
+    /// owned by `spec_version`.
+    pub fn from_task_bytes(
+        spec_version: AlpenSpecId,
+        bytes: &[u8],
+    ) -> Result<Self, ProverTaskKeyDecodeError> {
+        decode_chunk_task_key(bytes).map(|chunk_id| Self::new(spec_version, chunk_id))
+    }
+
+    /// The paas task key: the bare range bytes, without the version.
+    pub fn task_bytes(&self) -> Vec<u8> {
+        encode_chunk_task_key(self.chunk_id)
     }
 }
 
@@ -75,125 +123,18 @@ impl BatchTaskKey {
     pub fn batch_id(&self) -> BatchId {
         self.batch_id
     }
-}
 
-mod sealed {
-    use alpen_mdbx::{DbResult, Reader, Writer};
-    use strata_paas::TaskRecordData;
-
-    /// The table operations behind a key type, so the table itself stays
-    /// crate-private. Private so the set of task tables is closed.
-    pub trait Sealed: Sized {
-        fn get(reader: &Reader<'_>, key: &Self) -> DbResult<Option<TaskRecordData>>;
-        fn get_in_write(writer: &Writer<'_>, key: &Self) -> DbResult<Option<TaskRecordData>>;
-        fn put(writer: &Writer<'_>, key: &Self, record: &TaskRecordData) -> DbResult<()>;
-        fn delete(writer: &Writer<'_>, key: &Self) -> DbResult<bool>;
-        fn for_each(
-            reader: &Reader<'_>,
-            f: impl FnMut(Self, TaskRecordData) -> DbResult<()>,
-        ) -> DbResult<()>;
-    }
-}
-
-/// A key of one of the prover task tables.
-///
-/// Implemented by [`ChunkTaskKey`] and [`BatchTaskKey`] only; each reads and
-/// writes its own table, so the typed accessors on
-/// [`ProverDbMdbx`](super::ProverDbMdbx) cannot cross them.
-pub trait ProverTaskKey: sealed::Sealed + Copy + Send + Sync + 'static {
-    /// The spec version whose prover owns the task.
-    fn spec_version(&self) -> AlpenSpecId;
-
-    /// Adds `spec_version` to a paas task key (the bare range bytes).
-    fn from_task_bytes(
-        spec_version: AlpenSpecId,
-        bytes: &[u8],
-    ) -> Result<Self, ProverTaskKeyDecodeError>;
-
-    /// The paas task key: the bare range bytes, without the version.
-    fn task_bytes(&self) -> Vec<u8>;
-}
-
-impl sealed::Sealed for ChunkTaskKey {
-    fn get(reader: &Reader<'_>, key: &Self) -> DbResult<Option<TaskRecordData>> {
-        reader.get::<ChunkProverTaskSchema>(key)
-    }
-
-    fn get_in_write(writer: &Writer<'_>, key: &Self) -> DbResult<Option<TaskRecordData>> {
-        writer.get::<ChunkProverTaskSchema>(key)
-    }
-
-    fn put(writer: &Writer<'_>, key: &Self, record: &TaskRecordData) -> DbResult<()> {
-        writer.put::<ChunkProverTaskSchema>(key, record)
-    }
-
-    fn delete(writer: &Writer<'_>, key: &Self) -> DbResult<bool> {
-        writer.delete::<ChunkProverTaskSchema>(key)
-    }
-
-    fn for_each(
-        reader: &Reader<'_>,
-        f: impl FnMut(Self, TaskRecordData) -> DbResult<()>,
-    ) -> DbResult<()> {
-        reader.for_each::<ChunkProverTaskSchema>(f)
-    }
-}
-
-impl ProverTaskKey for ChunkTaskKey {
-    fn spec_version(&self) -> AlpenSpecId {
-        self.spec_version
-    }
-
-    fn from_task_bytes(
-        spec_version: AlpenSpecId,
-        bytes: &[u8],
-    ) -> Result<Self, ProverTaskKeyDecodeError> {
-        decode_chunk_task_key(bytes).map(|chunk_id| Self::new(spec_version, chunk_id))
-    }
-
-    fn task_bytes(&self) -> Vec<u8> {
-        encode_chunk_task_key(self.chunk_id)
-    }
-}
-
-impl sealed::Sealed for BatchTaskKey {
-    fn get(reader: &Reader<'_>, key: &Self) -> DbResult<Option<TaskRecordData>> {
-        reader.get::<AcctProverTaskSchema>(key)
-    }
-
-    fn get_in_write(writer: &Writer<'_>, key: &Self) -> DbResult<Option<TaskRecordData>> {
-        writer.get::<AcctProverTaskSchema>(key)
-    }
-
-    fn put(writer: &Writer<'_>, key: &Self, record: &TaskRecordData) -> DbResult<()> {
-        writer.put::<AcctProverTaskSchema>(key, record)
-    }
-
-    fn delete(writer: &Writer<'_>, key: &Self) -> DbResult<bool> {
-        writer.delete::<AcctProverTaskSchema>(key)
-    }
-
-    fn for_each(
-        reader: &Reader<'_>,
-        f: impl FnMut(Self, TaskRecordData) -> DbResult<()>,
-    ) -> DbResult<()> {
-        reader.for_each::<AcctProverTaskSchema>(f)
-    }
-}
-
-impl ProverTaskKey for BatchTaskKey {
-    fn spec_version(&self) -> AlpenSpecId {
-        self.spec_version
-    }
-
-    fn from_task_bytes(
+    /// The key of the task paas identifies by `bytes` (the bare range),
+    /// owned by `spec_version`.
+    pub fn from_task_bytes(
         spec_version: AlpenSpecId,
         bytes: &[u8],
     ) -> Result<Self, ProverTaskKeyDecodeError> {
         decode_batch_task_key(bytes).map(|batch_id| Self::new(spec_version, batch_id))
     }
 
-    fn task_bytes(&self) -> Vec<u8> {
+    /// The paas task key: the bare range bytes, without the version.
+    pub fn task_bytes(&self) -> Vec<u8> {
         encode_batch_task_key(self.batch_id)
     }
 }
@@ -201,7 +142,9 @@ impl ProverTaskKey for BatchTaskKey {
 /// Bytes of a stored task key: the version, big-endian, then the range.
 const VERSIONED_RANGE_KEY_BYTES: usize = 2 + RANGE_TASK_KEY_BYTES;
 
-pub(super) fn encode_versioned_range(
+/// The stored form of a task key: `spec_version` as a big-endian `u16`, then
+/// the two hashes raw, so that byte order is key order.
+pub(crate) fn encode_versioned_range(
     spec_version: AlpenSpecId,
     prev_block: Hash,
     last_block: Hash,
@@ -215,7 +158,10 @@ pub(super) fn encode_versioned_range(
     buf
 }
 
-pub(super) fn decode_versioned_range(
+/// The inverse of [`encode_versioned_range`]; `table` names the table in the
+/// error. A key of another length, or of a version this binary does not
+/// know, is a decode error rather than a guess.
+pub(crate) fn decode_versioned_range(
     table: &'static str,
     bytes: &[u8],
 ) -> Result<(AlpenSpecId, Hash, Hash), CodecError> {

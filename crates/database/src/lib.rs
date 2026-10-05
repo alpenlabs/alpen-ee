@@ -19,10 +19,8 @@ pub use init::open_da_ops;
 pub use init::{
     create_ee_envs, open_stores, BroadcastDbOps, ChunkedEnvelopeOps, SequencerDatabases, Stores,
 };
-pub use mdbxdb::{
-    BatchTaskKey, ChunkTaskKey, DaContextDbMdbx, NodeDbMdbx, ProverDbMdbx, ProverTaskKey,
-    WitnessDbMdbx,
-};
+pub use mdbxdb::{DaContextDbMdbx, NodeDbMdbx, ProverDbMdbx, ProverTaskKey, WitnessDbMdbx};
+pub use serialization_types::{BatchTaskKey, ChunkTaskKey};
 pub use storage::NodeStorage;
 
 /// The store's on-disk model, for tooling and tests: every table marker and
@@ -52,8 +50,8 @@ pub mod records {
     #[cfg(feature = "migration")]
     pub use crate::serialization_types::{package_from_sled_era, package_to_sled_era};
     pub use crate::serialization_types::{
-        DBAccountStateAtEpoch, DBBatch, DBBatchId, DBBatchStatus, DBBatchWithStatus, DBChunk,
-        DBChunkId, DBChunkStatus, DBChunkWithStatus, DBEeAccountState, DBExecBlockRecord,
-        DBL1DaBlockRef, DBOLBlockId, DBTxidPair,
+        BatchTaskKey, ChunkTaskKey, DBAccountStateAtEpoch, DBBatch, DBBatchId, DBBatchStatus,
+        DBBatchWithStatus, DBChunk, DBChunkId, DBChunkStatus, DBChunkWithStatus, DBEeAccountState,
+        DBExecBlockRecord, DBL1DaBlockRef, DBOLBlockId, DBTxidPair,
     };
 }
