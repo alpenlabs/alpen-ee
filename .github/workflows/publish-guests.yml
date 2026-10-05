@@ -1,9 +1,9 @@
-# Builds the SP1 guests for one network in SP1's Docker image and uploads them
-# as a workflow artifact. The guests bake in that network's params, so each
-# network gets its own ELFs and account predicate.
+# Builds the SP1 guests for one network in SP1's Docker image and publishes
+# them. The guests bake in that network's params, so each network gets its own
+# ELFs and account predicate.
 #
-# Run it by hand with params_url to build with params that are not in the repo
-# yet.
+# release.yml calls this once per params/<network>.json on a version tag. Run
+# it by hand with params_url to build with params that are not in the repo yet.
 
 name: Publish SP1 Guests
 
@@ -27,6 +27,10 @@ on:
         description: Git ref to build. Defaults to the branch or tag selected in the UI.
         required: false
         type: string
+      release_tag:
+        description: Also attach the files to this tag's GitHub Release. The release must still be a draft.
+        required: false
+        type: string
   workflow_call:
     inputs:
       network:
@@ -39,6 +43,10 @@ on:
         type: string
       ref:
         description: Git ref to build. Defaults to the caller's ref.
+        required: false
+        type: string
+      release_tag:
+        description: Also attach the files to this tag's GitHub Release. The release must still be a draft.
         required: false
         type: string
 
@@ -57,7 +65,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
-      contents: read
+      contents: write # attach files to a draft GitHub Release
     steps:
       # Inline cleanup before checkout. The repo is too large to clone without
       # freeing space first, so the local cleanup action can't be used here.
@@ -82,7 +90,23 @@ jobs:
           INPUT_NETWORK: ${{ inputs.network }}
           INPUT_PARAMS_URL: ${{ inputs.params_url }}
           INPUT_REF: ${{ inputs.ref }}
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
         run: python3 .github/scripts/guest_publish.py validate
+
+      # Fail before the long build rather than after it.
+      - name: Check release is a draft
+        if: inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          is_draft="$(gh release view "$TAG" --json isDraft --jq .isDraft)" \
+            || { echo "::error::no GitHub Release for $TAG"; exit 1; }
+          if [ "$is_draft" != "true" ]; then
+            echo "::error::release $TAG is already published; files cannot be attached to an immutable release"
+            exit 1
+          fi
 
       - name: Fetch params
         id: params
@@ -136,3 +160,10 @@ jobs:
           path: dist/
           if-no-files-found: error
           retention-days: 90
+
+      - name: Attach to GitHub Release
+        if: inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.release_tag }}
+        run: gh release upload "$TAG" --clobber dist/*

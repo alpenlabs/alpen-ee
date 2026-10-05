@@ -9,6 +9,8 @@ Subcommands:
                 params/<network>.json in the repo, to $OUTPUT_PATH.
     stage       Copy the built guests, predicate and params into $DIST_DIR under
                 network-prefixed names.
+    notes       Put each network's account predicate and the rebuild command at
+                the top of the draft release's notes.
 
 Each subcommand reads its inputs from the environment variables listed on its
 function.
@@ -20,6 +22,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import urllib.request
 from pathlib import Path
@@ -30,6 +33,7 @@ from typing import NoReturn
 NETWORKS = ("dev", "staging", "testnet", "mainnet")
 
 REF_RE = re.compile(r"^[A-Za-z0-9._/@:-]+$")
+TAG_RE = re.compile(r"^[A-Za-z0-9._-]{1,200}$")
 # github.com /blob/ URLs serve an HTML page, not the raw JSON.
 BLOB_URL_RE = re.compile(r"^https://github\.com/[^/]+/[^/]+/blob/")
 
@@ -48,6 +52,13 @@ def set_outputs(**outputs: str) -> None:
 def append_summary(lines: list[str]) -> None:
     with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
+
+
+def gh(*args: str) -> str:
+    """Runs the GitHub CLI and returns stdout. `gh` reads GH_TOKEN itself."""
+    return subprocess.run(
+        ["gh", *args], check=True, stdout=subprocess.PIPE, text=True
+    ).stdout
 
 
 def sha256_hex(path: Path) -> str:
@@ -87,8 +98,8 @@ def guest_version(commit: str, params_digest: str) -> str:
 
 
 def cmd_validate() -> None:
-    """Env: INPUT_NETWORK, INPUT_PARAMS_URL, INPUT_REF (all but the network may
-    be empty)."""
+    """Env: INPUT_NETWORK, INPUT_PARAMS_URL, INPUT_REF, INPUT_RELEASE_TAG (all but
+    the network may be empty)."""
     validate_network(os.environ["INPUT_NETWORK"])
 
     params_url = os.environ.get("INPUT_PARAMS_URL", "")
@@ -104,6 +115,10 @@ def cmd_validate() -> None:
     ref = os.environ.get("INPUT_REF", "")
     if ref and not REF_RE.fullmatch(ref):
         fail("ref contains unsupported characters")
+
+    release_tag = os.environ.get("INPUT_RELEASE_TAG", "")
+    if release_tag and not TAG_RE.fullmatch(release_tag):
+        fail("release_tag contains unsupported characters (allowed: [A-Za-z0-9._-])")
 
 
 # ---- params ----------------------------------------------------------------
@@ -189,12 +204,81 @@ def cmd_stage() -> None:
     )
 
 
+# ---- notes -----------------------------------------------------------------
+
+PREDICATE_SUFFIX = "-alpen-acct.predicate"
+# Wrap the guests section so a rerun replaces it instead of adding a second copy.
+NOTES_START = "<!-- sp1-guests -->"
+NOTES_END = "<!-- /sp1-guests -->"
+
+
+def cmd_notes() -> None:
+    """Env: TAG, WORK_DIR, GH_TOKEN, GITHUB_REPOSITORY.
+
+    The predicates go in the notes so they can be read without downloading
+    anything.
+    """
+    tag = os.environ["TAG"]
+    repo = os.environ["GITHUB_REPOSITORY"]
+    work_dir = Path(os.environ["WORK_DIR"])
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    gh(
+        "release",
+        "download",
+        tag,
+        "--repo",
+        repo,
+        "--dir",
+        str(work_dir),
+        "--pattern",
+        f"*{PREDICATE_SUFFIX}",
+    )
+    predicates = {
+        validate_network(path.name.removesuffix(PREDICATE_SUFFIX)): path.read_text(
+            encoding="utf-8"
+        ).strip()
+        for path in sorted(work_dir.glob(f"*{PREDICATE_SUFFIX}"))
+    }
+    if not predicates:
+        fail(f"release {tag} has no *{PREDICATE_SUFFIX} assets")
+
+    lines = [
+        NOTES_START,
+        "## SP1 guests",
+        "",
+        (
+            "Each network's guests bake in its `<network>-alpen-params.json`. To check a"
+            " network's files, rebuild at this tag with those params and compare digests:"
+        ),
+        "",
+        "```sh",
+        "SP1_ALPEN_PARAMS_PATH=/abs/path/to/<network>-alpen-params.json \\",
+        "  cargo build --release --locked -p alpen-sp1-guest-builder --features docker-build",
+        "```",
+        "",
+        "The build writes the ELFs and the account predicate to `provers/sp1/generated/`.",
+        "",
+    ]
+    for network, predicate in predicates.items():
+        lines += [f"### `{network}` account predicate", "", "```", predicate, "```", ""]
+    lines.append(NOTES_END)
+
+    body = gh("release", "view", tag, "--repo", repo, "--json", "body", "--jq", ".body")
+    if NOTES_END in body:
+        body = body.split(NOTES_END, 1)[1]
+    notes = work_dir / "notes.md"
+    notes.write_text("\n".join(lines) + "\n\n" + body.lstrip("\n"), encoding="utf-8")
+    gh("release", "edit", tag, "--repo", repo, "--notes-file", str(notes))
+
+
 # ---- entry point -----------------------------------------------------------
 
 COMMANDS = {
     "validate": cmd_validate,
     "params": cmd_params,
     "stage": cmd_stage,
+    "notes": cmd_notes,
 }
 
 
