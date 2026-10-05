@@ -596,6 +596,10 @@ The datadir will be the outputted by the test framework and will be named after 
 
 ## Configuration
 
+### Network Params
+
+`params/<network>.json` holds the full `AlpenParams` of each network (`dev`, `staging`, `testnet`, `mainnet`). It is the file `alpen-client --alpen-params` loads and the file the SP1 guests bake in through `SP1_ALPEN_PARAMS_PATH`, so changing it changes that network's guest ELFs. Tests and CI use `dev.json`. The `genesis_inner_state_roots_are_stable` test in `alpen-ee-genesis` parses every file and pins its genesis root.
+
 ### Key Dependencies
 
 | Dependency | Purpose |

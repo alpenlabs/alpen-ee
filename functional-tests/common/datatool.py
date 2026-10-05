@@ -14,14 +14,14 @@ CHECKPOINT_TEST_PREDICATE_FILE = PREDICATE_FIXTURES_DIR / "checkpoint-bip340-sch
 # Matches DEFAULT_ALPEN_EE_ACCOUNT_ID in alpen-ee-params.
 ALPEN_EE_ACCOUNT_ID = "01" * 32
 
-# Genesis inner state root of the EE account per chain spec. Keep in sync with
-# GENESIS_INNER_STATE_ROOTS in crates/alpen-ee/genesis/src/utils.rs, which
-# pins the same values against the real computation.
+# Genesis inner state root of the EE account per params/<network>.json. Keep in
+# sync with GENESIS_INNER_STATE_ROOTS in crates/alpen-ee/genesis/src/utils.rs,
+# which pins the same values against the real computation.
 GENESIS_INNER_STATE_ROOTS = {
     "dev": "a0a5f13344251d480f42dc85cabe0ca6dffa168e67ad32a9224970383baa63be",
-    "devnet": "185eea4e22a815a87a512843c279e42f87f9b57432d29abfe35b4ccfc0da1a1e",
-    "testnet": "2a82d8daab762ffd91786783f47ca123d7d2206982533748697413e21c05f4b2",
-    "testnet3": "87da9f8fd94022e63d24f05207dffd8a513136d1b07d68c0a350c47190085036",
+    "mainnet": "308ce726a90fd45d3638fd86dec816cca262edc0d5acee9b130cfa33dbb740b0",
+    "staging": "2a82d8daab762ffd91786783f47ca123d7d2206982533748697413e21c05f4b2",
+    "testnet": "87da9f8fd94022e63d24f05207dffd8a513136d1b07d68c0a350c47190085036",
 }
 
 
