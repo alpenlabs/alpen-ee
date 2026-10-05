@@ -11,11 +11,14 @@ members = [
   "crates/da/provider",
   "crates/da/runtime",
   "crates/da/types",
+  "crates/database",
+  "crates/dbconsole-core",
   "crates/engine",
   "crates/evm-ee",
   "crates/exec-chain",
   "crates/exex",
   "crates/genesis",
+  "crates/mdbx",
   "crates/ol-tracker",
   "crates/params",
   "crates/proof/acct",
@@ -29,9 +32,6 @@ members = [
   "crates/rpc/server",
   "crates/rpc/types",
   "crates/sequencer",
-  "crates/storage/console",
-  "crates/storage/db",
-  "crates/storage/mdbx",
   "crates/test-utils/simple-ee",
   "crates/witness",
   "provers/sp1",
@@ -77,11 +77,14 @@ alpen-common = { path = "crates/common" }
 alpen-da-provider = { path = "crates/da/provider" }
 alpen-da-runtime = { path = "crates/da/runtime" }
 alpen-da-types = { path = "crates/da/types" }
+alpen-database = { path = "crates/database", default-features = false }
+alpen-dbconsole-core = { path = "crates/dbconsole-core" }
 alpen-engine = { path = "crates/engine" }
 alpen-evm-ee = { path = "crates/evm-ee" }
 alpen-exec-chain = { path = "crates/exec-chain" }
 alpen-exex = { path = "crates/exex" }
 alpen-genesis = { path = "crates/genesis" }
+alpen-mdbx = { path = "crates/mdbx" }
 alpen-ol-tracker = { path = "crates/ol-tracker" }
 alpen-params = { path = "crates/params" }
 alpen-proof-acct = { path = "crates/proof/acct" }
@@ -96,9 +99,6 @@ alpen-rpc-server = { path = "crates/rpc/server" }
 alpen-rpc-types = { path = "crates/rpc/types" }
 alpen-sequencer = { path = "crates/sequencer" }
 alpen-simple-ee = { path = "crates/test-utils/simple-ee" }
-alpen-storage-console = { path = "crates/storage/console" }
-alpen-storage-db = { path = "crates/storage/db", default-features = false }
-alpen-storage-mdbx = { path = "crates/storage/mdbx" }
 alpen-witness = { path = "crates/witness" }
 
 # strata dependencies, pinned to the pre-split repo's main so the EE stays in

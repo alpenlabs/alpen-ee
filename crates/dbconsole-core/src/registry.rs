@@ -16,7 +16,7 @@
 
 use std::{fmt, marker::PhantomData, ops::ControlFlow};
 
-use alpen_storage_db::schema::{
+use alpen_database::schema::{
     AccountStateAtOLEpochSchema, AcctProofIdIndexSchema, AcctProofReceiptSchema,
     AcctProverTaskSchema, BatchByIdxSchema, BatchChunksSchema, BatchIdToIdxSchema,
     BlockAccessedStateSchema, BlockHashByNumber, BlockStateChangesSchema, BlockWitnessSchema,
@@ -26,9 +26,7 @@ use alpen_storage_db::schema::{
     L1BroadcastTxNodeSchema, L1BroadcastTxSchema, L1ChunkedEnvelopeSchema, OLBlockAtEpochSchema,
     PublishedCodeHashSchema,
 };
-use alpen_storage_mdbx::{
-    Direction, KeyCodec, MdbxEnv, Reader, Schema, UpgradeCtx, ValueCodec, Writer,
-};
+use alpen_mdbx::{Direction, KeyCodec, MdbxEnv, Reader, Schema, UpgradeCtx, ValueCodec, Writer};
 
 use super::{
     key::ConsoleKey,

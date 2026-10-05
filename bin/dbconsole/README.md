@@ -140,7 +140,7 @@ Two halves, split on purpose:
                             |
                             | Record / FieldValue  (engine-neutral)
                             v
-  crates/storage/console/src/      the core — codecs, transactions
+  crates/dbconsole-core/src/      the core — codecs, transactions
       db.rs        ConsoleDb: attach every env, route, read, stage, commit
       registry.rs  TableReflect: per-table get/scan/put; the envs and their tables
       reflect.rs   ValueReflector: value <-> FieldValue, both ways
@@ -156,7 +156,7 @@ different shell could sit on the same core.
 
 Four traits carry the whole design.
 
-**`Schema`** (from `alpen-storage-mdbx`) is what a table already declares for the
+**`Schema`** (from `alpen-mdbx`) is what a table already declares for the
 node: a name, a key type, a value type. The console adds nothing to it — it
 consumes the same schema the node writes through, which is what keeps the two
 from drifting.
@@ -224,7 +224,7 @@ The EE store is four MDBX environments, laid out by `open_stores`:
 |---|---|---|---|
 | `node` | 14 | chain state: exec blocks, heights, payloads, batches, chunks, account state per OL epoch, the accessed-state and witness caches | every node |
 | `prover` | 4 | prover tasks and proof receipts | sequencer |
-| `witness` | 3 | reth state diffs per block, block hashes by number, published code hashes (schemas in `alpen-storage-db`'s witness module) | sequencer |
+| `witness` | 3 | reth state diffs per block, block hashes by number, published code hashes (schemas in `alpen-database`'s witness module) | sequencer |
 | `da` | 5 | L1 broadcast queue, replacement chains, chunked envelopes | sequencer |
 
 Every table each environment creates is registered, and a test compares the

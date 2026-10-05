@@ -23,9 +23,9 @@ use alpen_common::{
     exec_block_storage_test_fns::create_exec_block, AccessedAccount, AccessedStateRecord, Batch,
     Chunk, DaContext, StateDiffStore,
 };
+use alpen_mdbx::{MdbxConfig, MdbxEnv};
 use alpen_params::AlpenSpecId;
 use alpen_reth_statediff::BlockStateChanges;
-use alpen_storage_mdbx::{MdbxConfig, MdbxEnv};
 use strata_acct_types::Hash;
 use strata_db_types::{
     chunked_envelope::{ChunkedEnvelopeEntry, L1ChunkedEnvelopeDatabase},

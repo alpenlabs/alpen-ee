@@ -2,19 +2,19 @@
 //!
 //! A console user types keys as text (`get("ExecBlockSchema", "0x1a2b…")`), so
 //! every reflected table needs a way from that text to its real
-//! [`Schema::Key`](alpen_storage_mdbx::Schema::Key) and back. [`ConsoleKey`]
+//! [`Schema::Key`](alpen_mdbx::Schema::Key) and back. [`ConsoleKey`]
 //! is that conversion, implemented once per key type rather than once per
 //! table: the EE schema draws its keys from a small closed set, so a table
 //! whose key is already covered gets its `get` for free.
 
 use alloy_primitives::B256;
 use alpen_common::{BatchId, ChunkId};
-use alpen_storage_db::{
+use alpen_database::{
     records::{DBBatchId, DBChunkId, DBOLBlockId},
     schema::{AcctProverTaskSchema, ChunkProverTaskSchema},
     BatchTaskKey, ChunkTaskKey,
 };
-use alpen_storage_mdbx::KeyCodec;
+use alpen_mdbx::KeyCodec;
 use strata_acct_types::Hash;
 use strata_db_types::fee_bump::TxNodeId;
 use strata_identifiers::{Buf32, OLBlockId};
@@ -269,8 +269,8 @@ impl ConsoleKey for DBOLBlockId {
 mod tests {
     use std::fmt::Debug;
 
+    use alpen_database::schema::BlockStateChangesSchema;
     use alpen_params::AlpenSpecId;
-    use alpen_storage_db::schema::BlockStateChangesSchema;
 
     use super::*;
 

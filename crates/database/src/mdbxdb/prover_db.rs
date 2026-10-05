@@ -3,8 +3,8 @@
 use std::{path::Path, sync::Arc};
 
 use alpen_common::{BatchId, ChunkId, ProofId};
+use alpen_mdbx::{MdbxConfig, MdbxEnv};
 use alpen_params::AlpenSpecId;
-use alpen_storage_mdbx::{MdbxConfig, MdbxEnv};
 use strata_db_types::{errors::DbError, DbResult};
 use strata_paas::TaskRecordData;
 use zkaleido::ProofReceiptWithMetadata;

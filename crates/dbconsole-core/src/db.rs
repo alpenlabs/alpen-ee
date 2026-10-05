@@ -27,7 +27,7 @@ use std::{
     path::Path,
 };
 
-use alpen_storage_mdbx::{Direction, MdbxConfig, MdbxEnv};
+use alpen_mdbx::{Direction, MdbxConfig, MdbxEnv};
 
 use super::{
     registry::{ee_envs, EnvSpec, Range, RawVisitor, TableInfo, TableReflect, KEY_FIELD},
@@ -864,13 +864,13 @@ mod tests {
     use std::path::Path;
 
     use alpen_common::ChunkId;
-    use alpen_params::AlpenSpecId;
-    use alpen_storage_db::{
+    use alpen_database::{
         schema::{ChunkProverTaskSchema, ExecBlockFinalizedSchema},
         test_db::TempDatadir,
         ChunkTaskKey,
     };
-    use alpen_storage_mdbx::{DbError, Direction, MdbxConfig, MdbxEnv, TableSpec};
+    use alpen_mdbx::{DbError, Direction, MdbxConfig, MdbxEnv, TableSpec};
+    use alpen_params::AlpenSpecId;
     use strata_acct_types::Hash;
     use strata_paas::{TaskRecordData, TaskStatus};
 

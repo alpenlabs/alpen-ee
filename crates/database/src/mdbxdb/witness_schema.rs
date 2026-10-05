@@ -2,15 +2,15 @@
 //! block hashes by number and the DA-published code hash filter.
 //!
 //! Keys are `B256`/`u64` in big-endian form. Values go through the table's
-//! [`ValueCodec`](alpen_storage_mdbx::ValueCodec), so callers store and read
+//! [`ValueCodec`](alpen_mdbx::ValueCodec), so callers store and read
 //! domain types and never touch the encoding.
 
 use alloy_primitives::B256;
-use alpen_reth_statediff::BlockStateChanges;
-use alpen_storage_mdbx::{
+use alpen_mdbx::{
     define_table, define_table_bincode_be_key, define_table_versioned_be_key, impl_be_key_codec,
     impl_unit_value_codec, tables, TableSpec,
 };
+use alpen_reth_statediff::BlockStateChanges;
 
 define_table_versioned_be_key! {
     /// Block state-diff data.

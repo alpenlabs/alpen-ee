@@ -1,6 +1,6 @@
 [package]
 edition.workspace = true
-name = "alpen-storage-console"
+name = "alpen-dbconsole-core"
 version.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -11,14 +11,14 @@ workspace = true
 [features]
 # The inverses of the migration rules, for tests that build a sled store from
 # an MDBX one.
-test-utils = ["alpen-storage-db/test-utils"]
+test-utils = ["alpen-database/test-utils"]
 
 [dependencies]
 alloy-primitives.workspace = true
 alpen-common.workspace = true
+alpen-database = { workspace = true, features = ["migration"] }
+alpen-mdbx.workspace = true
 alpen-params.workspace = true
-alpen-storage-db = { workspace = true, features = ["migration"] }
-alpen-storage-mdbx.workspace = true
 borsh.workspace = true
 ciborium.workspace = true
 eyre.workspace = true
@@ -36,6 +36,6 @@ zkaleido.workspace = true
 [dev-dependencies]
 alpen-chain-types.workspace = true
 alpen-reth-statediff.workspace = true
-alpen-storage-db = { workspace = true, features = ["test-utils"] }
+alpen-database = { workspace = true, features = ["test-utils"] }
 proptest.workspace = true
 ssz.workspace = true

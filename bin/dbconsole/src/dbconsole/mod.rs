@@ -3,14 +3,14 @@
 //! Attaches to the EE store and drives an interactive prompt, a single `-c`
 //! expression, or a `--script` file. The scripting engine (rhai), the session
 //! that persists functions between inputs, and value conversion live here;
-//! the codec-owning core lives in `alpen_storage_console`.
+//! the codec-owning core lives in `alpen_dbconsole_core`.
 
 use std::{
     path::PathBuf,
     sync::{atomic::AtomicBool, Arc},
 };
 
-use alpen_storage_console::{AttachMode, ConsoleDb};
+use alpen_dbconsole_core::{AttachMode, ConsoleDb};
 use clap::Args;
 use signal_hook::{consts::SIGINT, flag};
 

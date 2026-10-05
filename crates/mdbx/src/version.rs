@@ -30,7 +30,7 @@
 //! other table's stored bytes untouched.
 //!
 //! ```
-//! use alpen_storage_mdbx::{define_table_versioned, CodecError, UpConvert, UpgradeCtx};
+//! use alpen_mdbx::{define_table_versioned, CodecError, UpConvert, UpgradeCtx};
 //! use borsh::{BorshDeserialize, BorshSerialize};
 //!
 //! #[derive(BorshSerialize, BorshDeserialize)]

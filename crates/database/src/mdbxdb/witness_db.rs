@@ -2,8 +2,8 @@ use std::{path::Path, sync::Arc};
 
 use alloy_primitives::B256;
 use alpen_common::{DaContext, StateDiffProvider, StateDiffStore};
+use alpen_mdbx::{DbError as MdbxError, MdbxConfig, MdbxEnv};
 use alpen_reth_statediff::BlockStateChanges;
-use alpen_storage_mdbx::{DbError as MdbxError, MdbxConfig, MdbxEnv};
 use strata_db_types::{errors::DbError, DbResult};
 use tracing::warn;
 

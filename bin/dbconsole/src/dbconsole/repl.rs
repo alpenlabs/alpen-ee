@@ -497,8 +497,8 @@ mod tests {
         sync::{atomic::AtomicBool, Arc},
     };
 
-    use alpen_storage_console::ConsoleDb;
-    use alpen_storage_db::test_db::TempDatadir;
+    use alpen_database::test_db::TempDatadir;
+    use alpen_dbconsole_core::ConsoleDb;
 
     use super::*;
     use crate::dbconsole::recipes;

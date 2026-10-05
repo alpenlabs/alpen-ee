@@ -1247,6 +1247,7 @@ dependencies = [
  "alpen-da-provider",
  "alpen-da-runtime",
  "alpen-da-types",
+ "alpen-database",
  "alpen-engine",
  "alpen-evm-ee",
  "alpen-exec-chain",
@@ -1262,7 +1263,6 @@ dependencies = [
  "alpen-reth-statediff",
  "alpen-rpc-server",
  "alpen-sequencer",
- "alpen-storage-db",
  "alpen-witness",
  "anyhow",
  "async-trait",
@@ -1362,8 +1362,8 @@ dependencies = [
  "alloy-primitives",
  "alpen-common",
  "alpen-da-types",
+ "alpen-database",
  "alpen-reth-statediff",
- "alpen-storage-db",
  "async-trait",
  "bitcoin",
  "bitcoind-async-client",
@@ -1422,11 +1422,49 @@ dependencies = [
 ]
 
 [[package]]
+name = "alpen-database"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alloy-primitives",
+ "alpen-acct-types",
+ "alpen-chain-types",
+ "alpen-common",
+ "alpen-mdbx",
+ "alpen-params",
+ "alpen-reth-statediff",
+ "async-trait",
+ "bincode",
+ "bitcoin",
+ "borsh",
+ "ciborium",
+ "eyre",
+ "hex",
+ "serde",
+ "serde_bytes",
+ "ssz",
+ "ssz_derive",
+ "ssz_types",
+ "strata-acct-types",
+ "strata-db-macros",
+ "strata-db-tests",
+ "strata-db-types",
+ "strata-identifiers",
+ "strata-l1-txfmt",
+ "strata-paas",
+ "strata-predicate",
+ "strata-storage-common",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "zkaleido",
+]
+
+[[package]]
 name = "alpen-dbconsole"
 version = "0.3.0-alpha.1"
 dependencies = [
- "alpen-storage-console",
- "alpen-storage-db",
+ "alpen-database",
+ "alpen-dbconsole-core",
  "clap",
  "dirs",
  "eyre",
@@ -1437,6 +1475,34 @@ dependencies = [
  "signal-hook",
  "sled",
  "tracing-subscriber 0.3.23",
+]
+
+[[package]]
+name = "alpen-dbconsole-core"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alloy-primitives",
+ "alpen-chain-types",
+ "alpen-common",
+ "alpen-database",
+ "alpen-mdbx",
+ "alpen-params",
+ "alpen-reth-statediff",
+ "borsh",
+ "ciborium",
+ "eyre",
+ "hex",
+ "proptest",
+ "serde",
+ "serde_bytes",
+ "ssz",
+ "strata-acct-types",
+ "strata-db-types",
+ "strata-identifiers",
+ "strata-l1-txfmt",
+ "strata-paas",
+ "thiserror 2.0.20",
+ "zkaleido",
 ]
 
 [[package]]
@@ -1556,6 +1622,19 @@ dependencies = [
  "strata-acct-types",
  "strata-identifiers",
  "tracing",
+]
+
+[[package]]
+name = "alpen-mdbx"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "bincode",
+ "borsh",
+ "ciborium",
+ "signet-libmdbx",
+ "strata-codec",
+ "tempfile",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -1930,85 +2009,6 @@ dependencies = [
  "sp1-sdk",
  "sp1-verifier",
  "zkaleido-sp1-groth16-verifier",
-]
-
-[[package]]
-name = "alpen-storage-console"
-version = "0.3.0-alpha.1"
-dependencies = [
- "alloy-primitives",
- "alpen-chain-types",
- "alpen-common",
- "alpen-params",
- "alpen-reth-statediff",
- "alpen-storage-db",
- "alpen-storage-mdbx",
- "borsh",
- "ciborium",
- "eyre",
- "hex",
- "proptest",
- "serde",
- "serde_bytes",
- "ssz",
- "strata-acct-types",
- "strata-db-types",
- "strata-identifiers",
- "strata-l1-txfmt",
- "strata-paas",
- "thiserror 2.0.20",
- "zkaleido",
-]
-
-[[package]]
-name = "alpen-storage-db"
-version = "0.3.0-alpha.1"
-dependencies = [
- "alloy-primitives",
- "alpen-acct-types",
- "alpen-chain-types",
- "alpen-common",
- "alpen-params",
- "alpen-reth-statediff",
- "alpen-storage-mdbx",
- "async-trait",
- "bincode",
- "bitcoin",
- "borsh",
- "ciborium",
- "eyre",
- "hex",
- "serde",
- "serde_bytes",
- "ssz",
- "ssz_derive",
- "ssz_types",
- "strata-acct-types",
- "strata-db-macros",
- "strata-db-tests",
- "strata-db-types",
- "strata-identifiers",
- "strata-l1-txfmt",
- "strata-paas",
- "strata-predicate",
- "strata-storage-common",
- "thiserror 2.0.20",
- "tokio",
- "tracing",
- "zkaleido",
-]
-
-[[package]]
-name = "alpen-storage-mdbx"
-version = "0.3.0-alpha.1"
-dependencies = [
- "bincode",
- "borsh",
- "ciborium",
- "signet-libmdbx",
- "strata-codec",
- "tempfile",
- "thiserror 2.0.20",
 ]
 
 [[package]]

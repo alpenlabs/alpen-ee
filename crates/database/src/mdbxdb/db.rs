@@ -5,7 +5,7 @@ use alpen_common::{
     AccessedStateRecord, Batch, BatchId, BatchStatus, Chunk, ChunkId, ChunkStatus,
     EeAccountStateAtEpoch, ExecBlockRecord,
 };
-use alpen_storage_mdbx::{MdbxConfig, MdbxEnv};
+use alpen_mdbx::{MdbxConfig, MdbxEnv};
 use strata_acct_types::Hash;
 use strata_identifiers::{EpochCommitment, OLBlockId};
 use tracing::{error, trace, warn};
@@ -723,7 +723,7 @@ mod tests {
         batch_storage_tests, chunk_storage_tests, exec_block_storage_test_fns::create_exec_block,
         exec_block_storage_tests, storage_tests,
     };
-    use alpen_storage_mdbx::MdbxConfig;
+    use alpen_mdbx::MdbxConfig;
     use tokio::runtime::{Handle, Runtime};
 
     use super::*;

@@ -359,7 +359,7 @@ mod tests {
     };
 
     use alpen_da_types::DaBlob;
-    use alpen_storage_db::{open_da_ops, BroadcastDbOps, ChunkedEnvelopeOps};
+    use alpen_database::{open_da_ops, BroadcastDbOps, ChunkedEnvelopeOps};
     use async_trait::async_trait;
     use bitcoin::{
         absolute::LockTime,

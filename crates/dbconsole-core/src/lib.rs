@@ -21,7 +21,7 @@ mod reflect;
 mod registry;
 mod value;
 
-pub use alpen_storage_mdbx::Direction;
+pub use alpen_mdbx::Direction;
 pub use db::{AttachMode, CommitReport, ConsoleDb, EnvStatus, StagedOp, StagedSummary};
 pub use key::ConsoleKey;
 pub use mirrors::ProofReceiptMirror;

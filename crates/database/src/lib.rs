@@ -30,7 +30,7 @@ pub use storage::NodeStorage;
 ///
 /// This is not a service API. The node reads and writes through
 /// [`NodeStorage`] and the traits in `alpen-common`; the operator console
-/// (`alpen-storage-console`) reflects the tables through the codecs these
+/// (`alpen-dbconsole-core`) reflects the tables through the codecs these
 /// markers carry, which is the one reason they are public.
 pub mod schema {
     pub use crate::mdbxdb::{

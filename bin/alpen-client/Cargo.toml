@@ -100,6 +100,7 @@ alpen-da-runtime = { workspace = true, optional = true, features = [
   "builders",
 ] }
 alpen-da-types = { workspace = true, optional = true }
+alpen-database.workspace = true
 alpen-engine.workspace = true
 alpen-evm-ee = { workspace = true, optional = true }
 alpen-exec-chain = { workspace = true, optional = true }
@@ -115,7 +116,6 @@ alpen-reth-rpc.workspace = true
 alpen-reth-statediff = { workspace = true, optional = true }
 alpen-rpc-server.workspace = true
 alpen-sequencer = { workspace = true, optional = true }
-alpen-storage-db.workspace = true
 alpen-witness = { workspace = true, optional = true }
 bitcoind-async-client = { workspace = true, optional = true }
 k256 = { workspace = true, optional = true }
