@@ -8,9 +8,12 @@
 
 use std::{env, fs, path::Path, sync::Arc};
 
+use alloy_genesis::Genesis;
 use alpen_ee_params::AlpenParams;
 use clap::ArgAction;
-use eyre::Context;
+use eyre::{ensure, Context};
+use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 #[cfg(feature = "sequencer")]
 use strata_primitives::buf::Buf32;
 
@@ -106,6 +109,36 @@ impl DisplayArgs {
     }
 }
 
+/// The only value [`AlpenChainSpecParser`] accepts, and the `--chain` default.
+const CHAIN_FROM_PARAMS: &str = "from-alpen-params";
+
+/// Parser for reth's `--chain` flag.
+///
+/// The chain always comes from `--alpen-params`, and `main` replaces whatever
+/// this returns. Only the placeholder default parses, so a `--chain` value
+/// fails instead of being ignored.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub(crate) struct AlpenChainSpecParser;
+
+impl ChainSpecParser for AlpenChainSpecParser {
+    type ChainSpec = ChainSpec;
+
+    const SUPPORTED_CHAINS: &'static [&'static str] = &[CHAIN_FROM_PARAMS];
+
+    fn parse(s: &str) -> eyre::Result<Arc<ChainSpec>> {
+        ensure!(
+            s == CHAIN_FROM_PARAMS,
+            "--chain is not supported; the chain comes from --alpen-params"
+        );
+        Ok(Arc::new(Genesis::default().into()))
+    }
+
+    fn help_message() -> String {
+        "Not used. The chain comes from --alpen-params.".to_owned()
+    }
+}
+
 /// Reads `SEQUENCER_PRIVATE_KEY`, required when running with sequencer mode.
 ///
 /// Read exactly once per startup in [`crate::node::launch`], before common
@@ -158,7 +191,6 @@ fn alpen_config_value_parser(path: &str) -> eyre::Result<Arc<AlpenClientConfig>>
 
 #[cfg(test)]
 mod tests {
-    use alpen_chainspec::AlpenChainSpecParser;
     use clap::{CommandFactory, Parser};
     use reth_cli_commands::node::NodeCommand;
 
@@ -204,5 +236,13 @@ mod tests {
     #[test]
     fn node_command_args_do_not_conflict() {
         NodeCommand::<AlpenChainSpecParser, AdditionalConfig>::command().debug_assert();
+    }
+
+    #[test]
+    fn chain_flag_is_rejected() {
+        type Command = NodeCommand<AlpenChainSpecParser, AdditionalConfig>;
+
+        assert!(Command::try_parse_from(base_argv(&[])).is_ok());
+        assert!(Command::try_parse_from(base_argv(&["--chain", "dev"])).is_err());
     }
 }

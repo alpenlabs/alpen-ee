@@ -10,8 +10,6 @@ workspace = true
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-trie.workspace = true
-alpen-chainspec = { workspace = true, optional = true }
-eyre = { workspace = true, optional = true }
 revm.workspace = true
 revm-primitives.workspace = true
 rsp-mpt.workspace = true
@@ -27,6 +25,4 @@ proptest.workspace = true
 serde_json.workspace = true
 
 [features]
-default = ["chainspec"]
-chainspec = ["dep:alpen-chainspec", "dep:eyre"]
 serde = []

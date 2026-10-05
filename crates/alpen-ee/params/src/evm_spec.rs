@@ -177,18 +177,25 @@ impl Eq for EvmSpec {}
 
 #[cfg(test)]
 mod tests {
-    use alpen_chainspec::DEV_CHAIN_SPEC;
     use reth_chainspec::{EthereumHardfork, EthereumHardforks, ForkCondition};
+    use serde_json::Value;
 
     use super::EvmSpec;
     use crate::{
         genesis_info::ee_genesis_block_info_from_json, spec_activations::known_versions,
-        AlpenSpecId,
+        AlpenSpecId, DEV_PARAMS_JSON,
     };
+
+    /// The `evm_spec` document of the dev network's params.
+    fn dev_evm_spec_json() -> String {
+        let params: Value = serde_json::from_str(DEV_PARAMS_JSON).expect("dev params should parse");
+        params["evm_spec"].to_string()
+    }
 
     #[test]
     fn json_roundtrip_preserves_evm_spec() {
-        let spec: EvmSpec = serde_json::from_str(DEV_CHAIN_SPEC).expect("dev chain should parse");
+        let spec: EvmSpec =
+            serde_json::from_str(&dev_evm_spec_json()).expect("dev chain should parse");
 
         let json = serde_json::to_string(&spec).expect("evm spec should serialize");
         let decoded: EvmSpec = serde_json::from_str(&json).expect("evm spec should reparse");
@@ -199,9 +206,10 @@ mod tests {
 
     #[test]
     fn genesis_info_matches_chainspec_derivation() {
-        let spec: EvmSpec = serde_json::from_str(DEV_CHAIN_SPEC).expect("dev chain should parse");
+        let spec: EvmSpec =
+            serde_json::from_str(&dev_evm_spec_json()).expect("dev chain should parse");
         let expected =
-            ee_genesis_block_info_from_json(DEV_CHAIN_SPEC).expect("dev chain should parse");
+            ee_genesis_block_info_from_json(&dev_evm_spec_json()).expect("dev chain should parse");
 
         assert_eq!(spec.genesis_info(), expected);
         assert_eq!(
@@ -229,7 +237,8 @@ mod tests {
     /// rules, never the chain's genesis identity.
     #[test]
     fn every_version_shares_the_genesis_identity() {
-        let spec: EvmSpec = serde_json::from_str(DEV_CHAIN_SPEC).expect("dev chain should parse");
+        let spec: EvmSpec =
+            serde_json::from_str(&dev_evm_spec_json()).expect("dev chain should parse");
         let v0 = spec.chain_spec(AlpenSpecId::V0);
 
         for version in known_versions().skip(1) {
@@ -247,7 +256,8 @@ mod tests {
     /// from v0's.
     #[test]
     fn v1_activates_osaka_from_genesis() {
-        let spec: EvmSpec = serde_json::from_str(DEV_CHAIN_SPEC).expect("dev chain should parse");
+        let spec: EvmSpec =
+            serde_json::from_str(&dev_evm_spec_json()).expect("dev chain should parse");
 
         assert!(!spec
             .chain_spec(AlpenSpecId::V0)

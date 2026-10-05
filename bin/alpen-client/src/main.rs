@@ -43,7 +43,6 @@ mod services;
 
 use std::{env, process};
 
-use alpen_chainspec::AlpenChainSpecParser;
 use alpen_ee_params::AlpenSpecId;
 use clap::Parser;
 use reth_chainspec::ChainSpec;
@@ -56,7 +55,7 @@ use strata_logging::{init_logging_from_config, LoggingInitConfigRef};
 use tracing::error;
 use tracing::info;
 
-use crate::args::AdditionalConfig;
+use crate::args::{AdditionalConfig, AlpenChainSpecParser};
 #[cfg(feature = "sequencer")]
 use crate::config::{NodeMode, ProverBackendConfig};
 

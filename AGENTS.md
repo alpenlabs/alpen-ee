@@ -262,7 +262,6 @@ Custom Reth node components.
 | `reth/evm` | Custom EVM with Alpen precompiles |
 | `reth/exex` | Execution extensions |
 | `reth/rpc` | Custom RPC endpoints |
-| `reth/chainspec` | Chain specification |
 | `reth/statediff` | State diff generation |
 | `reth/db` | Reth database glue |
 | `reth/primitives` | Reth primitive type bindings |

@@ -19,12 +19,10 @@ zkaleido.workspace = true
 zkaleido-native-adapter.workspace = true
 
 [dev-dependencies]
-alpen-chainspec.workspace = true
+alpen-ee-params = { workspace = true, features = ["test-utils"] }
 strata-acct-types.workspace = true
-strata-bridge-params.workspace = true
 strata-codec.workspace = true
 strata-ee-acct-types.workspace = true
-strata-l1-txfmt.workspace = true
 
 reth-primitives-traits.workspace = true
 rsp-client-executor.workspace = true

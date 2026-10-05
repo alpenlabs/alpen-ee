@@ -313,8 +313,8 @@ mod tests {
 
     use super::AlpenConsensus;
 
-    /// Mirrors the fork set every real Alpen chain spec ships (see
-    /// `crates/reth/chainspec/src/res/*.json`): London, Shanghai, Cancun and
+    /// Mirrors the fork set every real Alpen network ships (see the `evm_spec`
+    /// in `params/*.json`): London, Shanghai, Cancun and
     /// Prague all at 0, with v1's Osaka layered on by its own delta. A
     /// stripped-down document would leave Osaka sitting on no Cancun, a
     /// combination no chain has and no header can satisfy.

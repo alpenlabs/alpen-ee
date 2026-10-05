@@ -64,8 +64,6 @@ pub use batch::{
 };
 pub use block::{AccountSnapshot, BlockAccountChange, BlockStateChanges, BlockStorageDiff};
 pub use da_sizing::{estimate_da_size, DaEntry, DaSizable};
-#[cfg(feature = "chainspec")]
-pub use reconstruct::ethereum_state_from_chain_spec;
 pub use reconstruct::{
     apply_batch_state_diff_to_ethereum_state, ethereum_state_from_genesis_accounts,
     EthereumStateExt, GenesisAccount, ReconstructError,

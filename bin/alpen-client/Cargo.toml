@@ -89,7 +89,6 @@ path = "src/main.rs"
 [dependencies]
 alloy-consensus = { workspace = true, optional = true }
 alloy-rlp = { workspace = true, optional = true }
-alpen-chainspec.workspace = true
 alpen-ee-common.workspace = true
 alpen-ee-da-provider = { workspace = true, optional = true }
 alpen-ee-da-runtime = { workspace = true, optional = true, features = [
@@ -144,6 +143,7 @@ zkaleido-sp1-host = { workspace = true, optional = true }
 
 
 alloy-eips = { workspace = true, optional = true }
+alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-engine = { workspace = true, optional = true }
 anyhow.workspace = true
@@ -153,6 +153,7 @@ eyre.workspace = true
 http.workspace = true
 jsonrpsee = { workspace = true, features = ["http-client", "server", "macros"] }
 reth-chainspec.workspace = true
+reth-cli.workspace = true
 reth-cli-commands.workspace = true
 reth-cli-runner.workspace = true
 reth-cli-util.workspace = true

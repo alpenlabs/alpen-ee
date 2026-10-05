@@ -110,16 +110,12 @@ impl EeChunkProgram {
 mod tests {
     use std::{fs, path::PathBuf, sync::Arc};
 
-    use alpen_ee_params::{
-        AlpenSpecId, AlpenSpecSchedule, BlobSpec, DEFAULT_ALPEN_EE_ACCOUNT_ID, EvmSpec, FeeSpec,
-        SpecVersioned,
-    };
+    use alpen_ee_params::{AlpenSpecId, DEV_PARAMS_JSON};
     use alpen_reth_evm::evm::AlpenEvmFactory;
     use reth_primitives_traits::Block as _;
     use rsp_client_executor::io::EthClientExecutorInput;
     use serde::Deserialize;
     use strata_acct_types::Hash;
-    use strata_bridge_params::BridgeParams;
     use strata_codec::encode_to_vec;
     use strata_ee_acct_types::{ExecBlock, ExecHeader, ExecPayload, ExecutionEnvironment};
     use strata_ee_chain_types::{ChunkTransition, ExecInputs};
@@ -127,7 +123,6 @@ mod tests {
     use strata_evm_ee::{
         EvmBlock, EvmBlockBody, EvmExecutionEnvironment, EvmHeader, EvmPartialState,
     };
-    use strata_l1_txfmt::MagicBytes;
 
     use super::*;
 
@@ -148,17 +143,7 @@ mod tests {
     /// against — chosen because `witness_params.json`'s embedded genesis
     /// (chain id 2892, all hardforks active from genesis) matches it.
     fn dev_alpen_params() -> AlpenParams {
-        let evm_spec: EvmSpec =
-            serde_json::from_str(alpen_chainspec::DEV_CHAIN_SPEC).expect("dev chain should parse");
-        AlpenParams::new(
-            DEFAULT_ALPEN_EE_ACCOUNT_ID,
-            BridgeParams::new_with_descriptor_limit(100_000_000, Some(1_000_000_000), 81)
-                .expect("valid bridge params"),
-            BlobSpec::new(MagicBytes::new(*b"ALPN")),
-            AlpenSpecSchedule::genesis(),
-            evm_spec,
-            FeeSpec::new(SpecVersioned::new(0)),
-        )
+        serde_json::from_str(DEV_PARAMS_JSON).expect("dev params should parse")
     }
 
     /// The spec version the RSP witness fixture was produced under. Shared by
