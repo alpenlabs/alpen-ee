@@ -66,6 +66,8 @@ mod tests {
             "alpen_getBlockStatus",
             "alpen_getChunkProofCoverage",
             "alpenadmin_getAdminStatus",
+            "alpenadmin_startBlockProduction",
+            "alpenadmin_stopBlockProduction",
         ] {
             assert!(
                 method_names.contains(&expected_method),
