@@ -31,7 +31,7 @@ use alpen_reth_node::{
     AlpenNodeMode,
 };
 use alpen_reth_rpc::AlpenFeeApiServer;
-use alpen_rpc_server::{AlpenEeRpcServer, EeRpcServer};
+use alpen_rpc_server::{AlpenEeRpcServer, EeRpcServer, RpcBlockProductionControl};
 use alpen_sequencer::{
     block_builder_task, build_ol_chain_tracker, compose_policy, create_batch_builder,
     create_batch_lifecycle_task, create_update_submitter_task, init_batch_builder_state,
@@ -80,8 +80,8 @@ use crate::{
 
 /// What the sequencer path needs from [`crate::node`]'s bootstrap that a
 /// full node has no use for: the MDBX handle its extra databases come from,
-/// the OL client behind the tracker, and the genesis epoch both were seeded
-/// from.
+/// the OL client behind the tracker, the genesis epoch both were seeded
+/// from, and the block production control.
 ///
 /// Held behind the `sequencer` feature on [`NodeBootstrap`] so a
 /// full-node-only build never carries them.
@@ -90,6 +90,7 @@ pub(crate) struct BootstrapResources {
     pub(crate) db: Stores,
     pub(crate) ol_client: Arc<OLClientKind>,
     pub(crate) genesis_epoch: EpochCommitment,
+    pub(crate) block_production: Arc<RpcBlockProductionControl>,
 }
 
 // Alias for readability
@@ -444,6 +445,7 @@ where
             BootstrapResources {
                 service_executor,
                 ol_client,
+                block_production,
                 ..
             },
         ..
@@ -603,6 +605,7 @@ where
             ol_chain_tracker,
             payload_engine,
             storage.clone(),
+            block_production.clone(),
         )
         .instrument(info_span!("block_assembly", component = "alpen")),
     );

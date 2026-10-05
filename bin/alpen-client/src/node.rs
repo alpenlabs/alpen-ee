@@ -227,6 +227,7 @@ async fn bootstrap_node(
             db,
             ol_client,
             genesis_epoch,
+            block_production: Default::default(),
         },
     })
 }
