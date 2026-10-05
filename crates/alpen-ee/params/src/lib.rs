@@ -13,6 +13,7 @@ mod extra_data;
 mod genesis_info;
 mod params;
 mod spec_activations;
+mod spec_versioned;
 
 pub use blob_spec::BlobSpec;
 pub use evm_spec::EvmSpec;
@@ -22,3 +23,4 @@ pub use extra_data::{
 pub use genesis_info::{ee_genesis_block_info, AlpenEeGenesisBlockInfo};
 pub use params::{AlpenParams, DEFAULT_ALPEN_EE_ACCOUNT_ID, DEFAULT_BASE_FEE_FLOOR};
 pub use spec_activations::{AlpenSpecId, AlpenSpecSchedule, AlpenSpecScheduleError};
+pub use spec_versioned::{MissingV0Entry, SpecVersioned};
