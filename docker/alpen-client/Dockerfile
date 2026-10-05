@@ -45,6 +45,14 @@ RUN --mount=type=cache,target=/usr/local/cargo/git \
     cargo build --locked --release --bin alpen-client && \
     install -m 0555 /app/target/release/alpen-client /usr/local/bin/alpen-client
 
+# A separate cargo run, so the `console` feature dbconsole enables on
+# alpen-ee-database is not compiled into alpen-client.
+RUN --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,sharing=private,target=/app/target \
+    cargo build --locked --release -p alpen-dbconsole --bin dbconsole && \
+    install -m 0555 /app/target/release/dbconsole /usr/local/bin/dbconsole
+
 
 # ---- runtime ----
 FROM debian:13-slim AS runtime
@@ -65,11 +73,12 @@ RUN mkdir -p /app/data /app/.cache /app/.local/share && \
     chown -R alpen:alpen /app
 
 COPY --from=builder /usr/local/bin/alpen-client /usr/local/bin/alpen-client
+COPY --from=builder /usr/local/bin/dbconsole /usr/local/bin/dbconsole
 COPY docker/alpen-client/entrypoint.sh /usr/local/bin/entrypoint.sh
 # SP1 guest ELFs staged by CI (build-sp1-artifacts job).
 # For local builds use Dockerfile.local instead (no ELFs, uses the native prover backend).
 COPY docker/alpen-client/artifacts/elfs /app/elfs
-RUN chmod 0555 /usr/local/bin/alpen-client /usr/local/bin/entrypoint.sh
+RUN chmod 0555 /usr/local/bin/alpen-client /usr/local/bin/dbconsole /usr/local/bin/entrypoint.sh
 
 USER alpen
 
