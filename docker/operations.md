@@ -92,13 +92,13 @@ read a running node's store, run it inside the node's container:
 docker exec -it <container> dbconsole --datadir /app/data
 ```
 
-Write commands (`--write`) need the node stopped. Start a one-off container
-over the same data volume instead, overriding the entrypoint, which always
-starts the node:
+Write commands (`--allow-writes`) need the node stopped. Start a one-off
+container over the same data volume instead, overriding the entrypoint, which
+always starts the node:
 
 ```bash
 docker run --rm -it --entrypoint dbconsole \
-  -v <data-volume>:/app/data <image> --datadir /app/data --write
+  -v <data-volume>:/app/data <image> --datadir /app/data --allow-writes
 ```
 
 ---
