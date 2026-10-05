@@ -10,6 +10,7 @@
 mod blob_spec;
 mod evm_spec;
 mod extra_data;
+mod fee_spec;
 mod genesis_info;
 mod params;
 mod spec_activations;
@@ -20,7 +21,8 @@ pub use evm_spec::EvmSpec;
 pub use extra_data::{
     header_spec_version, peek_spec_version, spec_version_for_block, HeaderExtra, HeaderExtraError,
 };
+pub use fee_spec::FeeSpec;
 pub use genesis_info::{ee_genesis_block_info, AlpenEeGenesisBlockInfo};
-pub use params::{AlpenParams, DEFAULT_ALPEN_EE_ACCOUNT_ID, DEFAULT_BASE_FEE_FLOOR};
+pub use params::{AlpenParams, DEFAULT_ALPEN_EE_ACCOUNT_ID};
 pub use spec_activations::{AlpenSpecId, AlpenSpecSchedule, AlpenSpecScheduleError};
 pub use spec_versioned::{MissingV0Entry, SpecVersioned};

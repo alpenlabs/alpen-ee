@@ -285,7 +285,7 @@ pub(crate) async fn run(
         common.params.evm_spec().clone(),
         AlpenNodeMode::sequencer(),
         da_fee_rate_handle,
-        common.params.base_fee_floor(),
+        common.params.fee_spec().clone(),
     );
 
     let consensus_watcher = common.ol_tracker.consensus_watcher();

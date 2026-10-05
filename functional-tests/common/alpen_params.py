@@ -26,8 +26,12 @@ CHAIN_SPEC_FILES = {
     "testnet3": _CHAINSPEC_DIR / "testnet3-chain.json",
 }
 
-DEFAULT_BASE_FEE_FLOOR = 1_000_000_000
-EEST_BASE_FEE_FLOOR = 0
+#: Base-fee floor of each spec version, in wei. A version with no entry keeps
+#: its predecessor's floor. Matches the deployed networks: plain EIP-1559 under
+#: v0, and the 1 gwei floor from v1 on.
+DEFAULT_BASE_FEE_FLOOR = {"v0": 0, "v1": 1_000_000_000}
+#: EEST runs the standard Ethereum recurrence under every version.
+EEST_BASE_FEE_FLOOR = {"v0": 0}
 
 
 #: Spec schedule a chain launched from current source runs: every known
@@ -46,7 +50,7 @@ def compose_alpen_params(
     max_withdrawal_descriptor_len: int = 81,
     da_magic_bytes: str = "ALPN",
     spec_schedule: dict[str, int] | None = None,
-    base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR,
+    base_fee_floor: dict[str, int] = DEFAULT_BASE_FEE_FLOOR,
 ) -> Path:
     """Writes ``alpen-params.json`` into ``datadir`` and returns its path.
 
@@ -63,16 +67,20 @@ def compose_alpen_params(
             Comes from the prover
             backend, which owns the version-to-program mapping the chain has
             to agree with -- see common/prover_backend.py.
-        base_fee_floor: minimum EIP-1559 base fee in wei. Production tests
-            retain the 1 gwei floor; EEST sets this to zero to exercise the
-            standard Ethereum recurrence.
+        base_fee_floor: spec version -> minimum EIP-1559 base fee in wei. A
+            version with no entry keeps its predecessor's floor, so v0 must be
+            set. Defaults to the deployed networks' floors. EEST sets every
+            version to zero to exercise the standard Ethereum recurrence.
     """
     if max_withdrawal_amount == 0:
         raise ValueError("max_withdrawal_amount=0 is not a valid cap; pass None to disable it")
-    if isinstance(base_fee_floor, bool) or not isinstance(base_fee_floor, int):
-        raise TypeError("base_fee_floor must be an integer")
-    if not 0 <= base_fee_floor <= 2**64 - 1:
-        raise ValueError("base_fee_floor must be between 0 and 2**64 - 1")
+    if "v0" not in base_fee_floor:
+        raise ValueError("base_fee_floor must set v0; later versions inherit its floor")
+    for version, floor in base_fee_floor.items():
+        if isinstance(floor, bool) or not isinstance(floor, int):
+            raise TypeError(f"base_fee_floor[{version!r}] must be an integer")
+        if not 0 <= floor <= 2**64 - 1:
+            raise ValueError(f"base_fee_floor[{version!r}] must be between 0 and 2**64 - 1")
 
     ee_params = json.loads(Path(ee_params_path).read_text())
     evm_spec = json.loads(CHAIN_SPEC_FILES[chain].read_text())
@@ -87,7 +95,7 @@ def compose_alpen_params(
         "blob_spec": {"magic_bytes": da_magic_bytes},
         "spec_schedule": LAUNCH_SPEC_SCHEDULE if spec_schedule is None else spec_schedule,
         "evm_spec": evm_spec,
-        "base_fee_floor": base_fee_floor,
+        "fee_spec": {"base_fee_floor": base_fee_floor},
     }
 
     out_path = Path(datadir) / "alpen-params.json"
