@@ -32,7 +32,11 @@
 //!   set to this crate's own directory, not the invocation directory, so a relative path would
 //!   resolve against the wrong base.
 
-use std::{env, fs, path::Path};
+use std::{
+    env, fs,
+    path::Path,
+    process::{Command, Stdio},
+};
 
 use sp1_build::{build_program_with_args, BuildArgs};
 use sp1_sdk::{
@@ -98,6 +102,8 @@ fn main() {
 }
 
 fn build_guest(program: &str) {
+    ensure_guest_lockfile_current(program);
+
     let build_args = BuildArgs {
         output_directory: Some(GENERATED_DIR.to_owned()),
         elf_name: Some(format!("{program}.elf")),
@@ -113,6 +119,39 @@ fn build_guest(program: &str) {
         ..Default::default()
     };
     build_program_with_args(program, build_args);
+}
+
+/// Fails the build if `program`'s `Cargo.lock` is out of date.
+///
+/// Before compiling, sp1-build resolves the guest on the host with a plain
+/// `cargo metadata`, which silently rewrites a stale lockfile and leaves
+/// `--locked` nothing to catch. Checking first keeps the ELF (and its VK) tied
+/// to the committed lockfile.
+fn ensure_guest_lockfile_current(program: &str) {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(program)
+        .join("Cargo.toml");
+    let cargo = env::var_os("CARGO").expect("cargo sets CARGO for build scripts");
+    let status = Command::new(cargo)
+        .args([
+            "metadata",
+            "--locked",
+            "--format-version",
+            "1",
+            "--manifest-path",
+        ])
+        .arg(&manifest)
+        .stdout(Stdio::null())
+        .status()
+        .unwrap_or_else(|e| panic!("run cargo metadata for {program}: {e}"));
+    if !status.success() {
+        panic!(
+            "cargo metadata --locked failed for {program} (see error above); if Cargo.lock is \
+             out of date, sync it with `cargo update --workspace --manifest-path {}` and commit \
+             the result",
+            manifest.display()
+        );
+    }
 }
 
 /// Derives the condition bytes of `program`'s `Sp1Groth16` predicate from its
