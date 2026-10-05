@@ -31,3 +31,26 @@ embedded.
 
 - `docker-build` — compile the guests inside Docker for reproducible ELFs.
 - `SP1_SKIP_PROGRAM_BUILD=true` — skip guest compilation.
+- `SP1_ALPEN_PARAMS_PATH` — absolute path to the params JSON baked into both
+  guests, for example `$PWD/params/dev.json`. The guests are only built when
+  this is set.
+
+## Publishing
+
+The params are baked into the guests, so each network has its own ELFs and
+account predicate. Each network's params live in `params/<network>.json`.
+
+`.github/workflows/publish-guests.yml` builds the guests for one network with
+`docker-build` and uploads these files as a workflow artifact:
+
+- `<network>-guest-alpen-chunk.elf` and `<network>-guest-alpen-acct.elf`
+- `<network>-alpen-acct.predicate`, the account guest's `Sp1Groth16` predicate
+  that the OL uses to check account proofs
+- `<network>-alpen-params.json`, the params baked into both guests
+
+To build with params that are not in the repo yet, run it by hand with
+`params_url`.
+
+To check published files, rebuild at the same commit with
+`--features docker-build` and `SP1_ALPEN_PARAMS_PATH` pointing at the published
+params, then compare digests.
