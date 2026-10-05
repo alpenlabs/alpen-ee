@@ -104,11 +104,11 @@ jobs:
       - name: Install SP1 core runner override
         uses: $/.github/actions/sp1-core-runner-override
         with:
-          version: "6.5.0" # sp1-core-executor-runner-binary in Cargo.lock
+          version: "6.8.1" # sp1-core-executor-runner-binary in Cargo.lock
 
       - name: Install SP1 toolchain
         env:
-          SP1_VERSION: "v6.5.0"
+          SP1_VERSION: "v6.8.1"
         run: |
           curl -fsSL --proto '=https' --tlsv1.2 https://sp1.succinct.xyz | bash
           "$HOME/.sp1/bin/sp1up" -v "$SP1_VERSION" -c
