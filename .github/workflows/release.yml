@@ -1,5 +1,5 @@
-# On a version tag, builds the SP1 guests for every network in params/ and
-# attaches them to the tag's GitHub Release.
+# On a version tag, builds the SP1 guests for every network in params/,
+# attaches them to the tag's GitHub Release and then copies them to S3.
 #
 # Releases are immutable once published, so the release is created as a draft,
 # every network attaches its files, and only then is it published.
@@ -103,3 +103,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+
+  s3:
+    name: Guests to S3
+    needs: publish
+    uses: $/.github/workflows/publish-guests-s3.yml
+    permissions:
+      contents: read # download release files
+      attestations: read # check them against the release attestation
+      id-token: write # assume the S3 upload role via OIDC
+    with:
+      tag: ${{ github.ref_name }}

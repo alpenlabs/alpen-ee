@@ -1,0 +1,93 @@
+# Copies the SP1 guest files of a published GitHub Release to S3. It never
+# builds: the release is the one build, and this copies those exact bytes after
+# checking each against the release's signed attestation.
+#
+# Called as the last job of release.yml. `on: release` is not used because
+# release.yml publishes the release with GITHUB_TOKEN, and events made with that
+# token do not start other workflows. To retry, re-run the failed job. To
+# backfill, dispatch with a v* tag selected as the ref and the target tag as
+# input.
+#
+# The ELFs depend on the commit and the params, so each network's files are
+# keyed by both:
+#   s3://$ALPEN_GUESTS_S3_BUCKET/alpen-guests/<network>/<commit sha8>-<params sha8>/
+#     <network>-guest-alpen-chunk.elf  <network>-guest-alpen-acct.elf
+#     <network>-alpen-acct.predicate   <network>-alpen-params.json
+#     (+ a .sha256 sidecar each)       manifest.json
+# manifest.json is written last and marks a completed publish. A rerun with the
+# same digests is a no-op, different digests fail, and objects without a
+# manifest are uploaded again.
+#
+# The upload is skipped until infra sets the ALPEN_GUESTS_S3_BUCKET and
+# ALPEN_GUESTS_S3_ROLE_ARN repo variables. The attestation check still runs.
+
+name: Publish SP1 Guests to S3
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag whose guest files to copy.
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag whose guest files to copy (e.g. v0.1.0).
+        required: true
+        type: string
+
+env:
+  AWS_REGION: us-east-1
+  S3_PREFIX: alpen-guests
+
+# One global group: tags on the same commit share S3 keys, and the commit isn't
+# known until the job runs.
+concurrency:
+  group: publish-guests-s3
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  publish:
+    name: Copy released SP1 guests to S3
+    # Only release tags may publish.
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read # download release files
+      attestations: read # check them against the release attestation
+      id-token: write # assume the S3 upload role via OIDC
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - name: Fetch and verify release files
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+          OUTPUT_DIR: ${{ runner.temp }}/alpen-guests
+        run: python3 .github/scripts/guest_publish.py fetch
+
+      - name: Note skipped S3 upload
+        if: vars.ALPEN_GUESTS_S3_BUCKET == '' || vars.ALPEN_GUESTS_S3_ROLE_ARN == ''
+        run: echo "::warning::ALPEN_GUESTS_S3_BUCKET or ALPEN_GUESTS_S3_ROLE_ARN is not set; skipping S3 upload"
+
+      - name: Configure AWS credentials (OIDC)
+        if: vars.ALPEN_GUESTS_S3_BUCKET != '' && vars.ALPEN_GUESTS_S3_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.ALPEN_GUESTS_S3_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Upload to S3
+        if: vars.ALPEN_GUESTS_S3_BUCKET != '' && vars.ALPEN_GUESTS_S3_ROLE_ARN != ''
+        env:
+          OUTPUT_DIR: ${{ runner.temp }}/alpen-guests
+          S3_BUCKET: ${{ vars.ALPEN_GUESTS_S3_BUCKET }}
+        run: python3 .github/scripts/guest_publish.py upload

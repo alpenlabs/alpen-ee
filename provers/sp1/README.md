@@ -54,6 +54,13 @@ The files always go to a workflow artifact. Pushing a `v*` tag runs
 then puts each network's account predicate in the release notes and publishes
 the release.
 
+After the release is published, `.github/workflows/publish-guests-s3.yml`
+checks each file against the release attestation and copies it to
+`s3://$ALPEN_GUESTS_S3_BUCKET/alpen-guests/<network>/<version>/`, with a
+`.sha256` file next to each and a `manifest.json`. The copy is skipped until
+the `ALPEN_GUESTS_S3_BUCKET` and `ALPEN_GUESTS_S3_ROLE_ARN` repo variables are
+set.
+
 To build with params that are not in the repo yet, run `publish-guests.yml` by
 hand with `params_url`. Releases are immutable once published, so `release_tag`
 only works while that release is still a draft.

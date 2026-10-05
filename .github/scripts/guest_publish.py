@@ -11,6 +11,13 @@ Subcommands:
                 network-prefixed names.
     notes       Put each network's account predicate and the rebuild command at
                 the top of the draft release's notes.
+    fetch       Download a published release's guest files into
+                $OUTPUT_DIR/<network>/, check each against the release
+                attestation and write a manifest.json per network.
+    upload      Copy each network's files to
+                s3://<bucket>/<prefix>/<network>/<version>/, each with a
+                `<name>.sha256` sidecar, then manifest.json last as the
+                completion marker.
 
 Each subcommand reads its inputs from the environment variables listed on its
 function.
@@ -34,6 +41,8 @@ NETWORKS = ("dev", "staging", "testnet", "mainnet")
 
 REF_RE = re.compile(r"^[A-Za-z0-9._/@:-]+$")
 TAG_RE = re.compile(r"^[A-Za-z0-9._-]{1,200}$")
+SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
+VERSION_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{8}$")
 # github.com /blob/ URLs serve an HTML page, not the raw JSON.
 BLOB_URL_RE = re.compile(r"^https://github\.com/[^/]+/[^/]+/blob/")
 
@@ -58,6 +67,14 @@ def gh(*args: str) -> str:
     """Runs the GitHub CLI and returns stdout. `gh` reads GH_TOKEN itself."""
     return subprocess.run(
         ["gh", *args], check=True, stdout=subprocess.PIPE, text=True
+    ).stdout
+
+
+def aws(*args: str) -> str:
+    """Runs the AWS CLI and returns stdout. check=True so an AWS error fails the
+    step instead of reading as an empty result."""
+    return subprocess.run(
+        ["aws", *args], check=True, stdout=subprocess.PIPE, text=True
     ).stdout
 
 
@@ -86,6 +103,10 @@ def published_names(network: str) -> dict[str, str]:
 
 def params_name(network: str) -> str:
     return f"{network}-alpen-params.json"
+
+
+def release_files(network: str) -> list[str]:
+    return [*published_names(network).values(), params_name(network)]
 
 
 def guest_version(commit: str, params_digest: str) -> str:
@@ -272,6 +293,166 @@ def cmd_notes() -> None:
     gh("release", "edit", tag, "--repo", repo, "--notes-file", str(notes))
 
 
+# ---- fetch -----------------------------------------------------------------
+
+
+def cmd_fetch() -> None:
+    """Env: TAG, OUTPUT_DIR, GH_TOKEN, GITHUB_REPOSITORY, GITHUB_STEP_SUMMARY."""
+    tag = os.environ["TAG"]
+    if not TAG_RE.fullmatch(tag):
+        fail("tag contains unsupported characters (allowed: [A-Za-z0-9._-])")
+    repo = os.environ["GITHUB_REPOSITORY"]
+    output_dir = Path(os.environ["OUTPUT_DIR"])
+    download_dir = output_dir / "release"
+
+    gh("release", "download", tag, "--repo", repo, "--dir", str(download_dir))
+    networks = [n for n in NETWORKS if (download_dir / params_name(n)).is_file()]
+    if not networks:
+        fail(f"release {tag} has no <network>-alpen-params.json assets")
+    found = sorted(path.name for path in download_dir.iterdir())
+    expected = sorted(name for network in networks for name in release_files(network))
+    if found != expected:
+        fail(f"release {tag} has {found}, expected {expected}")
+    for name in found:
+        # Checks the file's digest against the attestation GitHub signed when
+        # the release was published.
+        gh("release", "verify-asset", tag, str(download_dir / name), "--repo", repo)
+
+    # The commits endpoint resolves both lightweight and annotated tags.
+    commit = gh("api", f"repos/{repo}/commits/{tag}", "--jq", ".sha").strip()
+    if not SHA1_RE.fullmatch(commit):
+        fail(f"could not resolve {repo} tag {tag} to a commit sha (got {commit!r})")
+
+    release_url = f"https://github.com/{repo}/releases/tag/{tag}"
+    summary = [
+        "## SP1 guests to S3",
+        "",
+        f"- release: [`{tag}`]({release_url}) @ `{commit}`",
+        "",
+    ]
+    for network in networks:
+        net_dir = output_dir / network
+        net_dir.mkdir(parents=True, exist_ok=True)
+        for name in release_files(network):
+            shutil.move(download_dir / name, net_dir / name)
+        digests = {name: sha256_hex(net_dir / name) for name in release_files(network)}
+        predicate_name = published_names(network)["alpen-acct.predicate"]
+        manifest = {
+            "tag": tag,
+            "commit": commit,
+            "network": network,
+            "version": guest_version(commit, digests[params_name(network)]),
+            "release_url": release_url,
+            "alpen_acct_predicate": (net_dir / predicate_name).read_text().strip(),
+            "sha256": digests,
+        }
+        (net_dir / "manifest.json").write_text(
+            json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+        )
+        summary += [
+            f"### `{network}`: `{manifest['version']}`",
+            "",
+            "```",
+            *(f"{digest}  {name}" for name, digest in digests.items()),
+            "```",
+            "",
+        ]
+    append_summary(summary)
+
+
+# ---- upload ----------------------------------------------------------------
+
+
+def s3_cp(src: Path, dst: str) -> None:
+    if not src.is_file() or src.stat().st_size == 0:
+        fail(f"expected upload file missing or empty: {src}")
+    print(f"uploading {src} -> {dst}")
+    aws("s3", "cp", "--no-progress", str(src), dst)
+
+
+def first_key(bucket: str, prefix: str) -> str | None:
+    key = aws(
+        "s3api",
+        "list-objects-v2",
+        "--bucket",
+        bucket,
+        "--prefix",
+        prefix,
+        "--max-items",
+        "1",
+        "--query",
+        "Contents[0].Key",
+        "--output",
+        "text",
+    ).strip()
+    return None if key in ("", "None") else key  # an empty listing prints "None"
+
+
+def published_manifest(bucket: str, key: str) -> dict | None:
+    """Returns the manifest already at `key`, or None if there is none."""
+    # Compare exactly so a longer key sharing the prefix (e.g. manifest.json.bak)
+    # doesn't count as published.
+    if first_key(bucket, key) != key:
+        return None
+    try:
+        return json.loads(aws("s3", "cp", f"s3://{bucket}/{key}", "-"))
+    except json.JSONDecodeError as e:
+        fail(f"s3://{bucket}/{key} is not valid JSON ({e})")
+
+
+def upload_network(net_dir: Path, bucket: str, prefix: str) -> list[str]:
+    """Uploads one network's files with manifest.json last. A present manifest
+    means a completed publish: matching digests are a no-op (an rc and its final
+    release tagged on one commit), differing digests fail. Objects without a
+    manifest are an interrupted publish and are uploaded again."""
+    manifest = json.loads((net_dir / "manifest.json").read_text())
+    network = validate_network(manifest["network"])
+    version = manifest["version"]
+    if not VERSION_RE.fullmatch(version):
+        fail(f"manifest version is not S3-key-safe: {version!r}")
+    key_base = f"{prefix}/{network}/{version}"
+    base = f"s3://{bucket}/{key_base}"
+
+    existing = published_manifest(bucket, f"{key_base}/manifest.json")
+    if existing is not None:
+        if existing.get("sha256") != manifest["sha256"]:
+            fail(
+                f"{base}/ was published from {existing.get('tag')!r} with different "
+                f"digests than {manifest['tag']!r}: two builds of {version} differ"
+            )
+        print(f"{base}/ already published from {existing.get('tag')}, digests match")
+        return []
+    if first_key(bucket, f"{key_base}/"):
+        print(f"::warning::{base}/ has objects but no manifest.json, uploading again")
+
+    uris = []
+    for name, digest in manifest["sha256"].items():
+        s3_cp(net_dir / name, f"{base}/{name}")
+        # `sha256sum -c` format, like asm and strata-bridge.
+        sidecar = net_dir / f"{name}.sha256"
+        sidecar.write_text(f"{digest}  {name}\n", encoding="utf-8")
+        s3_cp(sidecar, f"{base}/{name}.sha256")
+        uris += [f"{base}/{name}", f"{base}/{name}.sha256"]
+    s3_cp(net_dir / "manifest.json", f"{base}/manifest.json")
+    return [*uris, f"{base}/manifest.json"]
+
+
+def cmd_upload() -> None:
+    """Env: OUTPUT_DIR, S3_BUCKET, S3_PREFIX, GITHUB_STEP_SUMMARY."""
+    output_dir = Path(os.environ["OUTPUT_DIR"])
+    bucket = os.environ["S3_BUCKET"]
+    prefix = os.environ["S3_PREFIX"]
+
+    summary = ["### S3 upload", ""]
+    for manifest_path in sorted(output_dir.glob("*/manifest.json")):
+        uris = upload_network(manifest_path.parent, bucket, prefix)
+        if uris:
+            summary += [f"- `{uri}`" for uri in uris]
+        else:
+            summary.append(f"- `{manifest_path.parent.name}`: already published")
+    append_summary([*summary, ""])
+
+
 # ---- entry point -----------------------------------------------------------
 
 COMMANDS = {
@@ -279,6 +460,8 @@ COMMANDS = {
     "params": cmd_params,
     "stage": cmd_stage,
     "notes": cmd_notes,
+    "fetch": cmd_fetch,
+    "upload": cmd_upload,
 }
 
 
