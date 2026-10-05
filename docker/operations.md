@@ -40,13 +40,15 @@ tested examples live in
 [`bin/alpen-client/src/config.rs`](../bin/alpen-client/src/config.rs). Start
 from a testdata file and edit it.
 
-Building the params artifact: the pinned `strata-datatool` does not have
-`gen-alpen-params` yet, so until it ships, compose the JSON by hand. See the
+Getting the params artifact: for a known network, use
+[`params/<network>.json`](../params/) (`dev`, `staging`, `testnet` or
+`mainnet`). The network's SP1 guests are built with the same file, so don't
+edit it locally. For a new network, write the JSON by hand. See the
 `AlpenParams` schema in
 [`crates/alpen-ee/params/src/params.rs`](../crates/alpen-ee/params/src/params.rs),
 or [`functional-tests/common/alpen_params.py`](../functional-tests/common/alpen_params.py)
-for a working example that stitches it together from `gen-ee-params` output
-and an in-repo chain spec.
+for a working example that builds one from `gen-ee-params` output and the
+`evm_spec` of a params file.
 
 ---
 

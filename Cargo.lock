@@ -1127,27 +1127,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "alpen-chainspec"
-version = "0.3.0-alpha.1"
-dependencies = [
- "alloy-genesis",
- "eyre",
- "reth-chainspec",
- "reth-cli",
- "serde_json",
- "shellexpand",
-]
-
-[[package]]
 name = "alpen-client"
 version = "0.3.0-alpha.1"
 dependencies = [
  "alloy-consensus 2.0.4",
  "alloy-eips 2.0.4",
+ "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-engine",
- "alpen-chainspec",
  "alpen-ee-common",
  "alpen-ee-da-provider",
  "alpen-ee-da-runtime",
@@ -1178,6 +1166,7 @@ dependencies = [
  "metrics",
  "proptest",
  "reth-chainspec",
+ "reth-cli",
  "reth-cli-commands",
  "reth-cli-runner",
  "reth-cli-util",
@@ -1233,7 +1222,7 @@ version = "0.3.0-alpha.1"
 dependencies = [
  "alpen-ee-database",
  "clap",
- "dirs 5.0.1",
+ "dirs",
  "eyre",
  "hex",
  "libc",
@@ -1498,7 +1487,6 @@ dependencies = [
  "alloy-consensus 2.0.4",
  "alloy-genesis",
  "alloy-primitives",
- "alpen-chainspec",
  "num_enum 0.7.6",
  "reth-chainspec",
  "serde",
@@ -1747,9 +1735,7 @@ dependencies = [
  "alloy-genesis",
  "alloy-primitives",
  "alloy-trie",
- "alpen-chainspec",
  "bincode",
- "eyre",
  "proptest",
  "revm",
  "revm-primitives",
@@ -4636,16 +4622,7 @@ version = "5.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "44c45a9d03d6676652bcb5e724c7e988de1acad23a711b5217ab9cbecbec2225"
 dependencies = [
- "dirs-sys 0.4.1",
-]
-
-[[package]]
-name = "dirs"
-version = "6.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3e8aa94d75141228480295a7d0e7feb620b1a5ad9f12bc40be62411e38cce4e"
-dependencies = [
- "dirs-sys 0.5.0",
+ "dirs-sys",
 ]
 
 [[package]]
@@ -4666,20 +4643,8 @@ checksum = "520f05a5cbd335fae5a99ff7a6ab8627577660ee5cfd6a94a6a929b52ff0321c"
 dependencies = [
  "libc",
  "option-ext",
- "redox_users 0.4.6",
+ "redox_users",
  "windows-sys 0.48.0",
-]
-
-[[package]]
-name = "dirs-sys"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e01a3366d27ee9890022452ee61b2b63a67e6f13f58900b651ff5665f0bb1fab"
-dependencies = [
- "libc",
- "option-ext",
- "redox_users 0.5.2",
- "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4689,7 +4654,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ebda144c4fe02d1f7ea1a7d9641b6fc6b580adcfa024ae48797ecdeb6825b4d"
 dependencies = [
  "libc",
- "redox_users 0.4.6",
+ "redox_users",
  "winapi",
 ]
 
@@ -9240,17 +9205,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "redox_users"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4e608c6638b9c18977b00b475ac1f28d14e84b27d8d42f70e0bf1e3dec127ac"
-dependencies = [
- "getrandom 0.2.17",
- "libredox",
- "thiserror 2.0.20",
-]
-
-[[package]]
 name = "ref-cast"
 version = "1.0.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13178,15 +13132,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "shellexpand"
-version = "3.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32824fab5e16e6c4d86dc1ba84489390419a39f97699852b66480bb87d297ed8"
-dependencies = [
- "dirs 6.0.0",
-]
-
-[[package]]
 name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13864,7 +13809,7 @@ dependencies = [
  "cargo_metadata 0.18.1",
  "chrono",
  "clap",
- "dirs 5.0.1",
+ "dirs",
  "sp1-primitives",
 ]
 
@@ -14142,7 +14087,7 @@ dependencies = [
  "anyhow",
  "bincode",
  "clap",
- "dirs 5.0.1",
+ "dirs",
  "either",
  "enum-map",
  "eyre",
@@ -14370,7 +14315,7 @@ dependencies = [
  "backoff",
  "bincode",
  "cfg-if",
- "dirs 5.0.1",
+ "dirs",
  "eventsource-stream",
  "futures",
  "hex",
@@ -14413,7 +14358,7 @@ dependencies = [
  "bincode",
  "blake3",
  "cfg-if",
- "dirs 5.0.1",
+ "dirs",
  "hex",
  "lazy_static",
  "serde",
@@ -15754,7 +15699,6 @@ dependencies = [
 name = "strata-proofimpl-alpen-chunk"
 version = "0.1.0"
 dependencies = [
- "alpen-chainspec",
  "alpen-ee-params",
  "alpen-reth-evm",
  "k256",
@@ -15766,13 +15710,11 @@ dependencies = [
  "serde_json",
  "ssz",
  "strata-acct-types",
- "strata-bridge-params",
  "strata-codec",
  "strata-ee-acct-types",
  "strata-ee-chain-types",
  "strata-ee-chunk-runtime",
  "strata-evm-ee",
- "strata-l1-txfmt",
  "strata-predicate",
  "zkaleido",
  "zkaleido-native-adapter",
@@ -15797,7 +15739,6 @@ dependencies = [
 name = "strata-provers-perf"
 version = "0.3.0-alpha.1"
 dependencies = [
- "alpen-chainspec",
  "alpen-ee-da-types",
  "alpen-ee-params",
  "alpen-reth-evm",
@@ -15813,7 +15754,6 @@ dependencies = [
  "sp1-sdk",
  "ssz",
  "strata-acct-types",
- "strata-bridge-params",
  "strata-codec",
  "strata-ee-acct-runtime",
  "strata-ee-acct-types",
@@ -15821,7 +15761,6 @@ dependencies = [
  "strata-ee-chunk-runtime",
  "strata-evm-ee",
  "strata-identifiers",
- "strata-l1-txfmt",
  "strata-predicate",
  "strata-proofimpl-alpen-acct",
  "strata-proofimpl-alpen-chunk",

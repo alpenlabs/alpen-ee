@@ -6,22 +6,17 @@
 
 use std::{fs, path::PathBuf, sync::Arc};
 
-use alpen_ee_params::{
-    AlpenParams, AlpenSpecId, AlpenSpecSchedule, BlobSpec, EvmSpec, FeeSpec, SpecVersioned,
-    DEFAULT_ALPEN_EE_ACCOUNT_ID,
-};
+use alpen_ee_params::{AlpenParams, AlpenSpecId, DEV_PARAMS_JSON};
 use alpen_reth_evm::evm::AlpenEvmFactory;
 use reth_primitives_traits::Block as _;
 use rsp_client_executor::io::EthClientExecutorInput;
 use serde::Deserialize;
 use strata_acct_types::Hash;
-use strata_bridge_params::BridgeParams;
 use strata_codec::encode_to_vec;
 use strata_ee_acct_types::{ExecBlock, ExecHeader, ExecPayload, ExecutionEnvironment};
 use strata_ee_chain_types::ExecInputs;
 use strata_ee_chunk_runtime::{PrivateInput, RawBlockData, RawChunkData};
 use strata_evm_ee::{EvmBlock, EvmBlockBody, EvmExecutionEnvironment, EvmHeader, EvmPartialState};
-use strata_l1_txfmt::MagicBytes;
 use strata_proofimpl_alpen_chunk::{EeChunkProgram, EeChunkProofInput};
 use tracing::info;
 use zkaleido::{ExecutionSummary, ZkVmHost, ZkVmProgram};
@@ -52,17 +47,7 @@ fn load_witness() -> EthClientExecutorInput {
 const PERF_SPEC_VERSION: AlpenSpecId = AlpenSpecId::V1;
 
 pub(super) fn perf_alpen_params() -> AlpenParams {
-    let evm_spec: EvmSpec =
-        serde_json::from_str(alpen_chainspec::DEV_CHAIN_SPEC).expect("dev chain should parse");
-    AlpenParams::new(
-        DEFAULT_ALPEN_EE_ACCOUNT_ID,
-        BridgeParams::new_with_descriptor_limit(100_000_000, Some(1_000_000_000), 81)
-            .expect("valid bridge params"),
-        BlobSpec::new(MagicBytes::new(*b"ALPN")),
-        AlpenSpecSchedule::genesis(),
-        evm_spec,
-        FeeSpec::new(SpecVersioned::new(0)),
-    )
+    serde_json::from_str(DEV_PARAMS_JSON).expect("dev params should parse")
 }
 
 /// Builds an EeChunkProofInput from the canonical EVM witness fixture.

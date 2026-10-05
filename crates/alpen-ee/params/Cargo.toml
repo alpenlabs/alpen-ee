@@ -21,5 +21,7 @@ serde.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-alpen-chainspec.workspace = true
 serde_json.workspace = true
+
+[features]
+test-utils = []

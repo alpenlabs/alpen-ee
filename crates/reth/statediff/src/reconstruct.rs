@@ -2,8 +2,6 @@
 
 pub use alloy_genesis::GenesisAccount;
 use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
-#[cfg(feature = "chainspec")]
-use alpen_chainspec::chain_value_parser;
 use revm_primitives::{alloy_primitives::keccak256, Address, B256, KECCAK_EMPTY, U256};
 use rsp_mpt::EthereumState;
 use strata_da_framework::ContextlessDaWrite;
@@ -34,21 +32,6 @@ pub enum ReconstructError {
     },
 }
 
-#[cfg(feature = "chainspec")]
-fn genesis_accounts_from_chain_spec(
-    spec: &str,
-) -> Result<Vec<(Address, GenesisAccount)>, eyre::Error> {
-    let chain_spec = chain_value_parser(spec)?;
-    let accounts = chain_spec
-        .genesis
-        .alloc
-        .iter()
-        .map(|(address, account)| (*address, account.clone()))
-        .collect();
-
-    Ok(accounts)
-}
-
 fn state_account_from_genesis(account: &GenesisAccount) -> TrieAccount {
     TrieAccount {
         nonce: account.nonce.unwrap_or(0),
@@ -56,14 +39,6 @@ fn state_account_from_genesis(account: &GenesisAccount) -> TrieAccount {
         storage_root: EMPTY_ROOT_HASH,
         code_hash: account.code.as_ref().map(keccak256).unwrap_or(KECCAK_EMPTY),
     }
-}
-
-/// Creates an [`EthereumState`] initialized with genesis state from a chain spec.
-#[cfg(feature = "chainspec")]
-pub fn ethereum_state_from_chain_spec(spec: &str) -> Result<EthereumState, eyre::Error> {
-    Ok(ethereum_state_from_genesis_accounts(
-        genesis_accounts_from_chain_spec(spec)?,
-    )?)
 }
 
 /// Creates an [`EthereumState`] initialized with explicit genesis accounts.

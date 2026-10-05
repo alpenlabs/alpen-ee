@@ -23,6 +23,8 @@ pub use extra_data::{
 };
 pub use fee_spec::FeeSpec;
 pub use genesis_info::{ee_genesis_block_info, AlpenEeGenesisBlockInfo};
+#[cfg(any(test, feature = "test-utils"))]
+pub use params::DEV_PARAMS_JSON;
 pub use params::{AlpenParams, DEFAULT_ALPEN_EE_ACCOUNT_ID};
 pub use spec_activations::{AlpenSpecId, AlpenSpecSchedule, AlpenSpecScheduleError};
 pub use spec_versioned::{MissingV0Entry, SpecVersioned};

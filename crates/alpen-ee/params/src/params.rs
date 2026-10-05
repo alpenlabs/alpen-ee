@@ -16,6 +16,10 @@ use crate::{
 /// Default Alpen EE account id registered in generated OL params.
 pub const DEFAULT_ALPEN_EE_ACCOUNT_ID: AccountId = AccountId::new([1u8; 32]);
 
+/// JSON of the dev network's params, `params/dev.json` at the repo root.
+#[cfg(any(test, feature = "test-utils"))]
+pub const DEV_PARAMS_JSON: &str = include_str!("../../../../params/dev.json");
+
 /// Top-level Alpen chain params.
 ///
 /// The single source of truth for how a node interprets the chain: the EE
@@ -147,17 +151,17 @@ impl Default for AlpenParams {
 
 #[cfg(test)]
 mod tests {
-    use alpen_chainspec::DEV_CHAIN_SPEC;
     use serde_json::{json, Value};
     use strata_bridge_params::BridgeParams;
     use strata_l1_txfmt::MagicBytes;
 
-    use super::{AlpenParams, DEFAULT_ALPEN_EE_ACCOUNT_ID};
-    use crate::{AlpenSpecId, AlpenSpecSchedule, BlobSpec, EvmSpec, FeeSpec, SpecVersioned};
+    use super::{AlpenParams, DEFAULT_ALPEN_EE_ACCOUNT_ID, DEV_PARAMS_JSON};
+    use crate::{AlpenSpecId, AlpenSpecSchedule, BlobSpec, FeeSpec, SpecVersioned};
 
     fn sample_params() -> AlpenParams {
-        let evm_spec: EvmSpec =
-            serde_json::from_str(DEV_CHAIN_SPEC).expect("dev chain should parse");
+        let dev: AlpenParams =
+            serde_json::from_str(DEV_PARAMS_JSON).expect("dev params should parse");
+        let evm_spec = dev.evm_spec().clone();
         AlpenParams::new(
             DEFAULT_ALPEN_EE_ACCOUNT_ID,
             BridgeParams::new_with_descriptor_limit(100_000_000, Some(1_000_000_000), 81)
