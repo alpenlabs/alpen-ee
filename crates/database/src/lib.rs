@@ -33,20 +33,16 @@ pub use storage::NodeStorage;
 /// (`alpen-dbconsole-core`) reflects the tables through the codecs these
 /// markers carry, which is the one reason they are public.
 pub mod schema {
-    pub use crate::mdbxdb::{
-        schema::{
-            da_tables, node_tables, prover_tables, AccountStateAtOLEpochSchema,
-            AcctProofIdIndexSchema, AcctProofReceiptSchema, AcctProverTaskSchema, BatchByIdxSchema,
-            BatchChunksSchema, BatchIdToIdxSchema, BlockAccessedStateSchema, BlockWitnessSchema,
-            BytecodeSchema, ChunkByIdxSchema, ChunkIdToIdxSchema, ChunkProofReceiptSchema,
-            ChunkProverTaskSchema, ExecBlockFinalizedSchema, ExecBlockPayloadSchema,
-            ExecBlockSchema, ExecBlocksAtHeightSchema, L1BroadcastActiveTxNodeSchema,
-            L1BroadcastTxIdSchema, L1BroadcastTxNodeSchema, L1BroadcastTxSchema,
-            L1ChunkedEnvelopeSchema, OLBlockAtEpochSchema,
-        },
-        witness_schema::{
-            witness_tables, BlockHashByNumber, BlockStateChangesSchema, PublishedCodeHashSchema,
-        },
+    pub use crate::mdbxdb::schema::{
+        da_tables, node_tables, prover_tables, witness_tables, AccountStateAtOLEpochSchema,
+        AcctProofIdIndexSchema, AcctProofReceiptSchema, AcctProverTaskSchema, BatchByIdxSchema,
+        BatchChunksSchema, BatchIdToIdxSchema, BlockAccessedStateSchema, BlockHashByNumber,
+        BlockStateChangesSchema, BlockWitnessSchema, BytecodeSchema, ChunkByIdxSchema,
+        ChunkIdToIdxSchema, ChunkProofReceiptSchema, ChunkProverTaskSchema,
+        ExecBlockFinalizedSchema, ExecBlockPayloadSchema, ExecBlockSchema,
+        ExecBlocksAtHeightSchema, L1BroadcastActiveTxNodeSchema, L1BroadcastTxIdSchema,
+        L1BroadcastTxNodeSchema, L1BroadcastTxSchema, L1ChunkedEnvelopeSchema,
+        OLBlockAtEpochSchema, PublishedCodeHashSchema,
     };
 }
 

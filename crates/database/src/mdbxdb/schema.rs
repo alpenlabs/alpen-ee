@@ -18,12 +18,15 @@
 //! encoded witness — has framing owned by whatever produced it rather than by
 //! this store.
 
+use alloy_primitives::B256;
 use alpen_common::{AccessedStateRecord, BatchId, ChunkId};
 use alpen_mdbx::{
-    define_table, define_table_be_key, define_table_borsh, define_table_versioned,
-    define_table_versioned_be_key, impl_be_key_codec, impl_unit_value_codec,
-    impl_versioned_value_codec, tables, CodecError, KeyCodec, Schema, TableSpec,
+    define_table, define_table_be_key, define_table_bincode_be_key, define_table_borsh,
+    define_table_versioned, define_table_versioned_be_key, impl_be_key_codec,
+    impl_unit_value_codec, impl_versioned_value_codec, tables, CodecError, KeyCodec, Schema,
+    TableSpec,
 };
+use alpen_reth_statediff::BlockStateChanges;
 use strata_acct_types::Hash;
 use strata_db_types::{
     chunked_envelope::ChunkedEnvelopeEntry,
@@ -286,6 +289,36 @@ define_table! {
 impl_be_key_codec!(L1ChunkedEnvelopeSchema, u64);
 impl_versioned_value_codec!(L1ChunkedEnvelopeSchema { 1 => ChunkedEnvelopeEntry as cbor });
 
+// --- Witness tables (per-block state diffs + the DA-published filter) ---
+//
+// Keys are `B256`/`u64` in big-endian form; the diff values are bincode, as
+// the reth side writes them.
+
+define_table_versioned_be_key! {
+    /// Block state-diff data.
+    (pub BlockStateChangesSchema) B256 => {
+        1 => BlockStateChanges as bincode,
+    }
+}
+
+define_table_bincode_be_key! {
+    /// Block number to hash mapping.
+    ///
+    /// A bare identifier, and the canonical hash at a height changes on a
+    /// reorg — nothing here to version.
+    (pub BlockHashByNumber) u64 => B256
+}
+
+define_table! {
+    /// Set of contract code hashes already published to DA.
+    ///
+    /// Membership is the whole record, so the value is `()` and occupies no
+    /// bytes: the key says everything the table has to say.
+    (pub PublishedCodeHashSchema) B256 => ()
+}
+impl_be_key_codec!(PublishedCodeHashSchema, B256);
+impl_unit_value_codec!(PublishedCodeHashSchema);
+
 /// The full set of tables backing the EE node database, for
 /// [`MdbxEnv::open`](alpen_mdbx::MdbxEnv::open).
 pub fn node_tables() -> Vec<TableSpec> {
@@ -315,6 +348,16 @@ pub fn prover_tables() -> Vec<TableSpec> {
         ChunkProofReceiptSchema,
         AcctProofReceiptSchema,
         AcctProofIdIndexSchema,
+    ]
+}
+
+/// The full set of tables backing the witness environment (state diffs and
+/// the DA-context filter).
+pub fn witness_tables() -> Vec<TableSpec> {
+    tables![
+        BlockStateChangesSchema,
+        BlockHashByNumber,
+        PublishedCodeHashSchema,
     ]
 }
 

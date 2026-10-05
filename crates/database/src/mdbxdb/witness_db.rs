@@ -7,7 +7,7 @@ use alpen_reth_statediff::BlockStateChanges;
 use strata_db_types::{errors::DbError, DbResult};
 use tracing::warn;
 
-use super::witness_schema::{
+use super::schema::{
     witness_tables, BlockHashByNumber, BlockStateChangesSchema, PublishedCodeHashSchema,
 };
 

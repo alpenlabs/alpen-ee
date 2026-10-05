@@ -15,7 +15,6 @@ mod prover_db;
 pub(crate) mod schema;
 mod task_key;
 mod witness_db;
-pub(crate) mod witness_schema;
 
 pub(crate) use broadcast_db::L1BroadcastDbMdbx;
 pub use db::NodeDbMdbx;
@@ -29,8 +28,7 @@ fn to_db_error(err: MdbxError) -> DbError {
     DbError::Other(format!("mdbx: {err}"))
 }
 
-// The schema modules are re-exported whole: `init` and `test_db` open
+// The schema module is re-exported whole: `init` and `test_db` open
 // environments by their table lists, and the crate root's `schema` module
 // publishes the markers for tooling.
 pub(crate) use schema::*;
-pub(crate) use witness_schema::*;
