@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use alpen_ee_params::EvmSpec;
+use alpen_ee_params::{EvmSpec, FeeSpec};
 use alpen_reth_evm::evm::AlpenEvmFactory;
 use alpen_reth_rpc::{
     eth::{AlpenEthApiBuilder, LiveDaFeeRateProvider},
@@ -100,8 +100,8 @@ pub struct AlpenEthereumNode {
     mode: AlpenNodeMode,
     /// Read-only DA rate policy shared by payload construction and fee estimation.
     da_fee_rate_handle: DaFeeRateHandle,
-    /// Minimum EIP-1559 base fee from the chain params artifact.
-    base_fee_floor: u64,
+    /// Fee settings of each spec version, from the chain params artifact.
+    fee_spec: FeeSpec,
 }
 
 impl AlpenEthereumNode {
@@ -110,14 +110,14 @@ impl AlpenEthereumNode {
         evm_spec: EvmSpec,
         mode: AlpenNodeMode,
         da_fee_rate_handle: DaFeeRateHandle,
-        base_fee_floor: u64,
+        fee_spec: FeeSpec,
     ) -> Self {
         Self {
             evm_factory,
             evm_spec,
             mode,
             da_fee_rate_handle,
-            base_fee_floor,
+            fee_spec,
         }
     }
 }
@@ -166,13 +166,13 @@ where
             .payload(BasicPayloadServiceBuilder::new(
                 AlpenPayloadBuilderBuilder {
                     da_fee_rate_handle: self.da_fee_rate_handle.clone(),
-                    base_fee_floor: self.base_fee_floor,
+                    fee_spec: self.fee_spec.clone(),
                 },
             ))
             .network(EthereumNetworkBuilder::default())
             .consensus(AlpenConsensusBuilder::new(
                 self.evm_spec.clone(),
-                self.base_fee_floor,
+                self.fee_spec.clone(),
             ))
     }
 

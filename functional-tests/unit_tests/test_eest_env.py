@@ -43,7 +43,7 @@ class EestEnvironmentTests(unittest.TestCase):
         self.assertEqual(env.alpen_env_params.batch_sealing_block_count, 5)
         self.assertEqual(env.alpen_env_params.prover, prover_backend.NATIVE_BACKEND)
         self.assertIs(env.strata_config.prover, env.alpen_env_params.prover)
-        self.assertEqual(env.alpen_env_params.base_fee_floor, 0)
+        self.assertEqual(env.alpen_env_params.base_fee_floor, {"v0": 0})
         self.assertEqual(env.alpen_env_params.prover.spec_versions, ("v1",))
         self.assertEqual(env.alpen_env_params.fullnode_count, 0)
         self.assertEqual(env.strata_config.pre_generate_blocks, 110)
@@ -56,7 +56,7 @@ class EestEnvironmentTests(unittest.TestCase):
             env = eest.create_eest_env()
         resolve.assert_called_once_with()
         self.assertEqual(env.alpen_env_params.batch_sealing_block_count, 100)
-        self.assertEqual(env.alpen_env_params.base_fee_floor, 0)
+        self.assertEqual(env.alpen_env_params.base_fee_floor, {"v0": 0})
         prover = env.alpen_env_params.prover
         self.assertIs(env.strata_config.prover, prover)
         self.assertEqual(prover.backend, "sp1")
@@ -132,8 +132,8 @@ class EestEnvironmentTests(unittest.TestCase):
             json.loads((guest_dir / "alpen-params.json").read_text()),
             json.loads(live_path.read_text()),
         )
-        self.assertEqual(params.base_fee_floor, 0)
-        self.assertEqual(EeOLEnv().alpen_env_params.base_fee_floor, 1_000_000_000)
+        self.assertEqual(params.base_fee_floor, {"v0": 0})
+        self.assertEqual(EeOLEnv().alpen_env_params.base_fee_floor, {"v0": 0, "v1": 1_000_000_000})
 
     def test_invalid_deadline_fails(self):
         os.environ["EE_PROVER_BACKEND"] = "sp1"

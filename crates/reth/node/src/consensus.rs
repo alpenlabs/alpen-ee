@@ -17,11 +17,15 @@
 //! floored base fee `max(base_fee_floor, eip1559_next(parent))` (see
 //! [`alpen_reth_evm::base_fee`]); stock reth recomputes the pure EIP-1559
 //! value and would reject a floored block. Above the floor the two agree.
+//! Each unit gets its version's floor from the params' [`FeeSpec`]. A unit
+//! with a zero floor validates exactly as stock reth would.
 
-use std::sync::Arc;
+use std::{iter, sync::Arc};
 
 use alloy_consensus::BlockHeader as _;
-use alpen_ee_params::{header_spec_version, AlpenSpecId, EvmSpec, HeaderExtra, HeaderExtraError};
+use alpen_ee_params::{
+    header_spec_version, AlpenSpecId, EvmSpec, FeeSpec, HeaderExtra, HeaderExtraError,
+};
 use alpen_reth_evm::{
     base_fee::expected_floored_base_fee,
     da_fee::{stamped_da_rate_from_extra_data, validate_da_rate_against_parent},
@@ -169,14 +173,17 @@ pub struct AlpenConsensus {
 }
 
 impl AlpenConsensus {
-    /// Creates the consensus over `evm_spec`'s per-version chain spec table.
-    pub fn new(evm_spec: &EvmSpec, base_fee_floor: u64) -> Self {
+    /// Creates the consensus over `evm_spec`'s per-version chain spec table,
+    /// holding each version to its base-fee floor in `fee_spec`.
+    pub fn new(evm_spec: &EvmSpec, fee_spec: &FeeSpec) -> Self {
         Self {
-            inners: evm_spec
-                .chain_specs()
-                .iter()
-                .cloned()
-                .map(|chain_spec| FlooredConsensus::new(chain_spec, base_fee_floor))
+            inners: iter::successors(Some(AlpenSpecId::V0), |version| version.successor().ok())
+                .map(|version| {
+                    FlooredConsensus::new(
+                        evm_spec.chain_spec(version).clone(),
+                        fee_spec.base_fee_floor(version),
+                    )
+                })
                 .collect(),
         }
     }
@@ -272,15 +279,12 @@ impl FullConsensus<EthPrimitives> for AlpenConsensus {
 #[derive(Debug, Clone)]
 pub struct AlpenConsensusBuilder {
     evm_spec: EvmSpec,
-    base_fee_floor: u64,
+    fee_spec: FeeSpec,
 }
 
 impl AlpenConsensusBuilder {
-    pub fn new(evm_spec: EvmSpec, base_fee_floor: u64) -> Self {
-        Self {
-            evm_spec,
-            base_fee_floor,
-        }
+    pub fn new(evm_spec: EvmSpec, fee_spec: FeeSpec) -> Self {
+        Self { evm_spec, fee_spec }
     }
 }
 
@@ -293,7 +297,7 @@ where
     async fn build_consensus(self, _ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
         Ok(Arc::new(AlpenConsensus::new(
             &self.evm_spec,
-            self.base_fee_floor,
+            &self.fee_spec,
         )))
     }
 }
@@ -302,7 +306,7 @@ where
 mod tests {
     use alloy_eips::eip1559::INITIAL_BASE_FEE;
     use alloy_primitives::Bytes;
-    use alpen_ee_params::{AlpenSpecId, EvmSpec, HeaderExtra, DEFAULT_BASE_FEE_FLOOR};
+    use alpen_ee_params::{AlpenSpecId, EvmSpec, FeeSpec, HeaderExtra, SpecVersioned};
     use reth_consensus::HeaderValidator;
     use reth_errors::ConsensusError;
     use reth_primitives_traits::{Header, SealedHeader};
@@ -317,9 +321,22 @@ mod tests {
     const TEST_GENESIS: &str = r#"{"config":{"chainId":2892,"londonBlock":0,
         "shanghaiTime":0,"cancunTime":0,"pragueTime":0}}"#;
 
+    /// Where an idle chain's base fee settles under plain EIP-1559: at 7 wei
+    /// the 1/8 decay rounds to zero. Deployed chains with idle blocks sit
+    /// there.
+    const DECAYED_BASE_FEE: u64 = 7;
+
+    const BASE_FEE_FLOOR: u64 = 1_000_000_000;
+
+    /// The fee spec of a deployed chain: plain EIP-1559 under V0, and the
+    /// floor from V1 on.
+    fn deployed_fee_spec() -> FeeSpec {
+        FeeSpec::new(SpecVersioned::new(0).with(AlpenSpecId::V1, BASE_FEE_FLOOR))
+    }
+
     fn test_consensus() -> AlpenConsensus {
         let evm_spec: EvmSpec = serde_json::from_str(TEST_GENESIS).expect("genesis parses");
-        AlpenConsensus::new(&evm_spec, DEFAULT_BASE_FEE_FLOOR)
+        AlpenConsensus::new(&evm_spec, &deployed_fee_spec())
     }
 
     fn sealed_header(number: u64, extra_data: Bytes) -> SealedHeader {
@@ -338,7 +355,7 @@ mod tests {
             number,
             extra_data,
             gas_limit: 30_000_000,
-            base_fee_per_gas: Some(DEFAULT_BASE_FEE_FLOOR),
+            base_fee_per_gas: Some(BASE_FEE_FLOOR),
             withdrawals_root: Some(Default::default()),
             blob_gas_used: Some(0),
             excess_blob_gas: Some(0),
@@ -426,30 +443,71 @@ mod tests {
         );
     }
 
-    /// The fee model's base-fee floor survives per-version dispatch: a child
-    /// carrying the floored base fee validates against its parent under every
-    /// version, where stock consensus would demand the pure EIP-1559 value.
+    /// A child of `parent` stamped with `spec_version` and carrying `base_fee`.
+    fn child_with_base_fee(
+        parent: &SealedHeader,
+        spec_version: AlpenSpecId,
+        base_fee: u64,
+    ) -> SealedHeader {
+        SealedHeader::seal_slow(Header {
+            parent_hash: parent.hash(),
+            timestamp: parent.timestamp + 1,
+            base_fee_per_gas: Some(base_fee),
+            ..valid_header(
+                parent.number + 1,
+                HeaderExtra::new(spec_version, 0).encode().into(),
+            )
+        })
+    }
+
+    fn assert_base_fee_diff(result: Result<(), ConsensusError>) {
+        assert!(
+            matches!(result, Err(ConsensusError::BaseFeeDiff(_))),
+            "{result:?}"
+        );
+    }
+
+    /// A deployed chain's V0 has no floor, so a V0 child of an empty block at
+    /// the EIP-1559 fixed point keeps that base fee, and a floored one is
+    /// refused.
     #[test]
-    fn the_base_fee_floor_applies_under_every_version() {
+    fn v0_without_a_floor_follows_plain_eip1559() {
+        let consensus = test_consensus();
+        let parent = SealedHeader::seal_slow(Header {
+            base_fee_per_gas: Some(DECAYED_BASE_FEE),
+            ..valid_header(1, HeaderExtra::new(AlpenSpecId::V0, 0).encode().into())
+        });
+
+        let unfloored = child_with_base_fee(&parent, AlpenSpecId::V0, DECAYED_BASE_FEE);
+        assert!(consensus
+            .validate_header_against_parent(&unfloored, &parent)
+            .is_ok());
+
+        let floored = child_with_base_fee(&parent, AlpenSpecId::V0, BASE_FEE_FLOOR);
+        assert_base_fee_diff(consensus.validate_header_against_parent(&floored, &parent));
+    }
+
+    /// V1 applies the floor, including on the first V1 block over a V0 parent.
+    #[test]
+    fn v1_applies_the_floor_from_its_first_block() {
         let consensus = test_consensus();
 
-        for version in [AlpenSpecId::V0, AlpenSpecId::V1] {
-            let stamp: Bytes = HeaderExtra::new(version, 0).encode().into();
-            let parent = SealedHeader::seal_slow(valid_header(1, stamp.clone()));
-            // An empty parent drives EIP-1559 below the floor, so the pure
-            // recurrence and the floored rule disagree here.
-            let child = SealedHeader::seal_slow(Header {
-                parent_hash: parent.hash(),
-                timestamp: 1,
-                ..valid_header(2, stamp)
+        for parent_version in [AlpenSpecId::V0, AlpenSpecId::V1] {
+            let parent = SealedHeader::seal_slow(Header {
+                base_fee_per_gas: Some(DECAYED_BASE_FEE),
+                ..valid_header(1, HeaderExtra::new(parent_version, 0).encode().into())
             });
 
+            let floored = child_with_base_fee(&parent, AlpenSpecId::V1, BASE_FEE_FLOOR);
             assert!(
                 consensus
-                    .validate_header_against_parent(&child, &parent)
+                    .validate_header_against_parent(&floored, &parent)
                     .is_ok(),
-                "{version:?}"
+                "{parent_version:?}"
             );
+
+            let unfloored = child_with_base_fee(&parent, AlpenSpecId::V1, DECAYED_BASE_FEE);
+            assert_base_fee_diff(consensus.validate_header_against_parent(&unfloored, &parent));
         }
     }
 
@@ -458,13 +516,13 @@ mod tests {
         let evm_spec: EvmSpec =
             serde_json::from_str(r#"{"config":{"chainId":2892,"londonBlock":0,"shanghaiTime":0}}"#)
                 .expect("genesis document parses");
-        let consensus = AlpenConsensus::new(&evm_spec, 0);
+        let consensus = AlpenConsensus::new(&evm_spec, &FeeSpec::new(SpecVersioned::new(0)));
         let version = AlpenSpecId::V0;
         let parent = SealedHeader::seal_slow(Header {
             number: 1,
             gas_limit: 30_000_000,
             gas_used: 0,
-            base_fee_per_gas: Some(DEFAULT_BASE_FEE_FLOOR),
+            base_fee_per_gas: Some(BASE_FEE_FLOOR),
             extra_data: HeaderExtra::new(version, 0).encode().into(),
             ..Default::default()
         });
@@ -488,7 +546,8 @@ mod tests {
             serde_json::from_str(r#"{"config":{"chainId":2892,"londonBlock":2}}"#)
                 .expect("genesis document parses");
         let base_fee_floor = INITIAL_BASE_FEE + 1;
-        let consensus = AlpenConsensus::new(&evm_spec, base_fee_floor);
+        let consensus =
+            AlpenConsensus::new(&evm_spec, &FeeSpec::new(SpecVersioned::new(base_fee_floor)));
         let extra_data: Bytes = HeaderExtra::new(AlpenSpecId::V0, 0).encode().into();
         let parent = SealedHeader::seal_slow(Header {
             number: 1,
@@ -524,12 +583,16 @@ mod tests {
 
     /// An existing chain must be able to cross into the stamped format: a
     /// newly stamped child validates against a legacy (unstamped) tip, and
-    /// legacy-against-legacy keeps working behind it.
+    /// legacy-against-legacy keeps working behind it. Legacy blocks carry the
+    /// unfloored base fee deployed chains have today.
     #[test]
     fn stamped_child_validates_against_a_legacy_tip() {
         let consensus = test_consensus();
 
-        let legacy_parent = SealedHeader::seal_slow(valid_header(100, Default::default()));
+        let legacy_parent = SealedHeader::seal_slow(Header {
+            base_fee_per_gas: Some(DECAYED_BASE_FEE),
+            ..valid_header(100, Default::default())
+        });
 
         // legacy tip validates on its own
         assert!(consensus.validate_header(&legacy_parent).is_ok());
@@ -538,6 +601,7 @@ mod tests {
         let legacy_child = SealedHeader::seal_slow(Header {
             parent_hash: legacy_parent.hash(),
             timestamp: 1,
+            base_fee_per_gas: Some(DECAYED_BASE_FEE),
             ..valid_header(101, Default::default())
         });
         assert!(consensus.validate_header(&legacy_child).is_ok());
@@ -546,10 +610,14 @@ mod tests {
             .is_ok());
 
         // legacy -> first stamped child (the activation boundary)
-        for version in [AlpenSpecId::V0, AlpenSpecId::V1] {
+        for (version, base_fee) in [
+            (AlpenSpecId::V0, DECAYED_BASE_FEE),
+            (AlpenSpecId::V1, BASE_FEE_FLOOR),
+        ] {
             let stamped_child = SealedHeader::seal_slow(Header {
                 parent_hash: legacy_parent.hash(),
                 timestamp: 1,
+                base_fee_per_gas: Some(base_fee),
                 ..valid_header(101, HeaderExtra::new(version, 0).encode().into())
             });
             assert!(

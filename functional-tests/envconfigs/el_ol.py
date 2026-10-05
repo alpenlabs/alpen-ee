@@ -45,7 +45,7 @@ class EeOLEnv(flexitest.EnvConfig):
         batch_sealing_block_count: int = 10,
         prover: ProverBackend = NATIVE_BACKEND,
         chunk_sealing_block_count: int | None = None,
-        base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR,
+        base_fee_floor: dict[str, int] = DEFAULT_BASE_FEE_FLOOR,
     ):
         epoch_seal_config = (
             EpochSealingConfig.new_fixed_slot(seal_epoch_slots)

@@ -117,7 +117,7 @@ mod tests {
         .expect("chain spec should be readable");
 
         serde_json::from_str(&format!(
-            r#"{{"strata_exec_account_id":"{id}","bridge_params":{{"denomination":100000000,"max_withdrawal_amount":1000000000,"max_withdrawal_descriptor_len":81}},"blob_spec":{{"magic_bytes":"ALPN"}},"spec_schedule":{{"v0":0}},"evm_spec":{spec}}}"#,
+            r#"{{"strata_exec_account_id":"{id}","bridge_params":{{"denomination":100000000,"max_withdrawal_amount":1000000000,"max_withdrawal_descriptor_len":81}},"blob_spec":{{"magic_bytes":"ALPN"}},"spec_schedule":{{"v0":0}},"evm_spec":{spec},"fee_spec":{{"base_fee_floor":{{"v0":0}}}}}}"#,
             id = "01".repeat(32),
         ))
         .expect("params should parse")

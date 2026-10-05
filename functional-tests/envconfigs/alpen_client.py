@@ -2,7 +2,7 @@
 Alpen-client test environment configurations.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
@@ -54,7 +54,7 @@ class AlpenClientEnvParams:
     l1_fee_policy: AlpenL1FeePolicyConfig | None = None
     da_fee_rate: AlpenDaFeeRateConfig | None = None
     forward_tx: bool = True
-    base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR
+    base_fee_floor: dict[str, int] = field(default_factory=lambda: dict(DEFAULT_BASE_FEE_FLOOR))
 
 
 class AlpenClientEnv(flexitest.EnvConfig):
@@ -89,7 +89,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
         l1_fee_policy: AlpenL1FeePolicyConfig | None = None,
         da_fee_rate: AlpenDaFeeRateConfig | None = None,
         forward_tx: bool = True,
-        base_fee_floor: int = DEFAULT_BASE_FEE_FLOOR,
+        base_fee_floor: dict[str, int] = DEFAULT_BASE_FEE_FLOOR,
     ):
         self.env_params = AlpenClientEnvParams(
             fullnode_count=fullnode_count,

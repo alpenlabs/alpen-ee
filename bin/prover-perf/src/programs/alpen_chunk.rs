@@ -7,7 +7,8 @@
 use std::{fs, path::PathBuf, sync::Arc};
 
 use alpen_ee_params::{
-    AlpenParams, AlpenSpecId, AlpenSpecSchedule, BlobSpec, EvmSpec, DEFAULT_ALPEN_EE_ACCOUNT_ID,
+    AlpenParams, AlpenSpecId, AlpenSpecSchedule, BlobSpec, EvmSpec, FeeSpec, SpecVersioned,
+    DEFAULT_ALPEN_EE_ACCOUNT_ID,
 };
 use alpen_reth_evm::evm::AlpenEvmFactory;
 use reth_primitives_traits::Block as _;
@@ -60,6 +61,7 @@ pub(super) fn perf_alpen_params() -> AlpenParams {
         BlobSpec::new(MagicBytes::new(*b"ALPN")),
         AlpenSpecSchedule::genesis(),
         evm_spec,
+        FeeSpec::new(SpecVersioned::new(0)),
     )
 }
 

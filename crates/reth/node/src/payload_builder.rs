@@ -6,6 +6,7 @@ use std::{
 
 use alloy_consensus::{Header, Transaction};
 use alloy_eips::eip4895::Withdrawals;
+use alpen_ee_params::FeeSpec;
 use alpen_reth_evm::{
     base_fee::next_floored_base_fee,
     constants::BRIDGEOUT_PRECOMPILE_ADDRESS,
@@ -61,8 +62,8 @@ const MIN_TX_GAS_LIMIT: u64 = 21_000;
 pub struct AlpenPayloadBuilderBuilder {
     /// Provides read-only access to the DA rate sampled by each payload attempt.
     pub da_fee_rate_handle: DaFeeRateHandle,
-    /// Minimum EIP-1559 base fee from the chain params artifact.
-    pub base_fee_floor: u64,
+    /// Fee settings of each spec version, from the chain params artifact.
+    pub fee_spec: FeeSpec,
 }
 
 impl<Node, Pool> PayloadBuilderBuilder<Node, Pool, AlpenEvmConfig> for AlpenPayloadBuilderBuilder
@@ -96,7 +97,7 @@ where
             evm_config,
             EthereumBuilderConfig::new().with_gas_limit(gas_limit),
             self.da_fee_rate_handle,
-            self.base_fee_floor,
+            self.fee_spec,
         ))
     }
 }
@@ -116,8 +117,8 @@ pub struct AlpenPayloadBuilder<Pool, Client> {
     builder_config: EthereumBuilderConfig,
     /// Provides the DA rate sampled and frozen by each payload attempt.
     da_fee_rate_handle: DaFeeRateHandle,
-    /// Minimum EIP-1559 base fee from the chain params artifact.
-    base_fee_floor: u64,
+    /// Fee settings of each spec version, from the chain params artifact.
+    fee_spec: FeeSpec,
 }
 
 impl<Pool, Client> AlpenPayloadBuilder<Pool, Client> {
@@ -128,7 +129,7 @@ impl<Pool, Client> AlpenPayloadBuilder<Pool, Client> {
         evm_config: AlpenEvmConfig,
         builder_config: EthereumBuilderConfig,
         da_fee_rate_handle: DaFeeRateHandle,
-        base_fee_floor: u64,
+        fee_spec: FeeSpec,
     ) -> Self {
         Self {
             client,
@@ -136,7 +137,7 @@ impl<Pool, Client> AlpenPayloadBuilder<Pool, Client> {
             evm_config,
             builder_config,
             da_fee_rate_handle,
-            base_fee_floor,
+            fee_spec,
         }
     }
 }
@@ -161,7 +162,7 @@ where
         try_build_payload::<Pool, Client, _>(
             self.evm_config.clone(),
             da_rate,
-            self.base_fee_floor,
+            &self.fee_spec,
             self.client.clone(),
             self.builder_config.clone(),
             args,
@@ -203,7 +204,7 @@ type BestTransactionsIter<Pool> = Box<
 fn try_build_payload<Pool, Client, F>(
     evm_config: AlpenEvmConfig,
     candidate_da_rate: u64,
-    base_fee_floor: u64,
+    fee_spec: &FeeSpec,
     client: Client,
     builder_config: EthereumBuilderConfig,
     args: BuildArguments<AlpenPayloadAttributes, AlpenBuiltPayload>,
@@ -270,10 +271,10 @@ where
         slot_number: attributes.slot_number,
     };
 
-    // Use the same next-block fee rule as host validation. Reth's `next_evm_env`
-    // defaults a missing parent base fee to zero, so clamping its result would
-    // build an invalid London-activation block when the configured floor is
-    // below the EIP-1559 initial base fee.
+    // Use the same next-block fee rule as host validation, with the floor of the version
+    // being built. Reth's `next_evm_env` defaults a missing parent base fee to zero, so
+    // clamping its result would build an invalid London-activation block when the configured
+    // floor is below the EIP-1559 initial base fee.
     //
     // The env comes from the version's inner config, but the builder is driven through the
     // outer version-aware config: that is what carries `spec_version` into the executor and
@@ -291,7 +292,7 @@ where
         chain_spec.as_ref(),
         next_number,
         attributes.timestamp,
-        base_fee_floor,
+        fee_spec.base_fee_floor(spec_version),
     ) {
         evm_env.block_env.basefee = base_fee;
     }
@@ -564,7 +565,7 @@ where
 #[cfg(test)]
 mod tests {
     use alloy_rpc_types::engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
-    use alpen_ee_params::{AlpenSpecId, EvmSpec, HeaderExtra};
+    use alpen_ee_params::{AlpenSpecId, EvmSpec, HeaderExtra, SpecVersioned};
     use alpen_reth_evm::evm::AlpenEvmFactory;
     use reth_node_api::BuiltPayload;
     use reth_primitives_traits::SealedHeader;
@@ -592,7 +593,7 @@ mod tests {
             evm_config,
             EthereumBuilderConfig::default(),
             handle,
-            alpen_ee_params::DEFAULT_BASE_FEE_FLOOR,
+            FeeSpec::new(SpecVersioned::new(0)),
         );
         let parent = Arc::new(SealedHeader::seal_slow(Header {
             gas_limit: 30_000_000,
@@ -635,6 +636,70 @@ mod tests {
             let header_extra = HeaderExtra::decode(&payload.block().header().extra_data)
                 .expect("built payload carries valid header extra data");
             assert_eq!(header_extra.da_rate(), expected_rate);
+        }
+    }
+
+    /// The builder holds a block to its own version's floor, so it builds what
+    /// consensus accepts: plain EIP-1559 under a deployed chain's V0, the
+    /// floor under V1.
+    #[test]
+    fn built_base_fee_follows_the_version_floor() {
+        // An idle chain's base fee under plain EIP-1559, where the 1/8 decay
+        // rounds to zero.
+        const DECAYED_BASE_FEE: u64 = 7;
+        const BASE_FEE_FLOOR: u64 = 1_000_000_000;
+
+        let evm_spec: EvmSpec = serde_json::from_str(
+            r#"{"config":{"chainId":2892,"londonBlock":0,"shanghaiTime":0,"cancunTime":0,"pragueTime":0}}"#,
+        )
+        .expect("genesis document parses");
+        let (_updater, handle) = da_fee_rate_channel(0, u64::MAX);
+        let builder = AlpenPayloadBuilder::new(
+            NoopProvider::default(),
+            NoopTransactionPool::default(),
+            AlpenEvmConfig::new(&evm_spec, AlpenEvmFactory::default()),
+            EthereumBuilderConfig::default(),
+            handle,
+            FeeSpec::new(SpecVersioned::new(0).with(AlpenSpecId::V1, BASE_FEE_FLOOR)),
+        );
+        let parent = Arc::new(SealedHeader::seal_slow(Header {
+            gas_limit: 30_000_000,
+            base_fee_per_gas: Some(DECAYED_BASE_FEE),
+            withdrawals_root: Some(Default::default()),
+            blob_gas_used: Some(0),
+            excess_blob_gas: Some(0),
+            parent_beacon_block_root: Some(Default::default()),
+            requests_hash: Some(Default::default()),
+            extra_data: HeaderExtra::new(AlpenSpecId::V0, 0).encode().into(),
+            ..Default::default()
+        }));
+
+        for (spec_version, expected_base_fee) in [
+            (AlpenSpecId::V0, DECAYED_BASE_FEE),
+            (AlpenSpecId::V1, BASE_FEE_FLOOR),
+        ] {
+            let attributes = AlpenPayloadAttributes::new_from_eth(
+                EthPayloadAttributes {
+                    timestamp: 1,
+                    withdrawals: Some(Vec::new()),
+                    parent_beacon_block_root: Some(Default::default()),
+                    ..Default::default()
+                },
+                spec_version,
+            );
+            let payload = builder
+                .build_empty_payload(PayloadConfig::new(
+                    parent.clone(),
+                    attributes,
+                    PayloadId::default(),
+                ))
+                .expect("empty payload builds");
+
+            assert_eq!(
+                payload.block().header().base_fee_per_gas,
+                Some(expected_base_fee),
+                "{spec_version:?}"
+            );
         }
     }
 }

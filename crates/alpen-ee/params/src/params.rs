@@ -10,29 +10,19 @@ use strata_l1_txfmt::MagicBytes;
 
 use crate::{
     genesis_info::AlpenEeGenesisBlockInfo, AlpenSpecId, AlpenSpecSchedule, BlobSpec, EvmSpec,
+    FeeSpec, SpecVersioned,
 };
 
 /// Default Alpen EE account id registered in generated OL params.
 pub const DEFAULT_ALPEN_EE_ACCOUNT_ID: AccountId = AccountId::new([1u8; 32]);
 
-/// Production minimum base fee per gas, in wei.
-///
-/// The floor is part of the signed Alpen params artifact because payload construction and
-/// full-node header validation must apply exactly the same fee rule. Networks that intentionally
-/// use the unmodified EIP-1559 recurrence, such as the EEST conformance environment, set this to
-/// zero in their own artifact.
-pub const DEFAULT_BASE_FEE_FLOOR: u64 = 1_000_000_000;
-
-const fn default_base_fee_floor() -> u64 {
-    DEFAULT_BASE_FEE_FLOOR
-}
-
 /// Top-level Alpen chain params.
 ///
 /// The single source of truth for how a node interprets the chain: the EE
 /// account identity, bridge economics, DA stream identity, the Alpen spec
-/// activations, and the embedded EVM chain spec. Loaded from one JSON artifact
-/// with validate-on-decode semantics on every field.
+/// activations, the embedded EVM chain spec, and the fee settings of each
+/// spec version. Loaded from one JSON artifact with validate-on-decode
+/// semantics on every field.
 ///
 /// Unknown fields are rejected so that a params file written for a newer
 /// node version (e.g. one carrying spec activations this binary does not
@@ -63,11 +53,8 @@ pub struct AlpenParams {
     /// Embedded EVM chain spec (genesis document + fork configuration).
     evm_spec: EvmSpec,
 
-    /// Minimum EIP-1559 base fee, in wei.
-    ///
-    /// Missing values retain the production default so older params artifacts remain valid.
-    #[serde(default = "default_base_fee_floor")]
-    base_fee_floor: u64,
+    /// Fee settings of each spec version.
+    fee_spec: FeeSpec,
 }
 
 impl AlpenParams {
@@ -78,6 +65,7 @@ impl AlpenParams {
         blob_spec: BlobSpec,
         spec_schedule: AlpenSpecSchedule,
         evm_spec: EvmSpec,
+        fee_spec: FeeSpec,
     ) -> Self {
         Self {
             strata_exec_account_id,
@@ -85,7 +73,7 @@ impl AlpenParams {
             blob_spec,
             spec_schedule,
             evm_spec,
-            base_fee_floor: DEFAULT_BASE_FEE_FLOOR,
+            fee_spec,
         }
     }
 
@@ -114,9 +102,9 @@ impl AlpenParams {
         &self.evm_spec
     }
 
-    /// Returns the configured EIP-1559 base-fee floor in wei.
-    pub fn base_fee_floor(&self) -> u64 {
-        self.base_fee_floor
+    /// Returns the fee settings of each spec version.
+    pub fn fee_spec(&self) -> &FeeSpec {
+        &self.fee_spec
     }
 
     /// Returns the derived reth chain spec of `version`.
@@ -138,8 +126,8 @@ impl Default for AlpenParams {
     /// Placeholder params for tests and benchmarks that construct an
     /// `AlpenParams` but don't exercise EVM execution: the default EE
     /// account id and bridge params, the canonical `ALPN` DA magic, the
-    /// genesis spec schedule, and an empty EVM genesis. Not valid params for
-    /// any real network.
+    /// genesis spec schedule, an empty EVM genesis, and no base-fee floor. Not
+    /// valid params for any real network.
     fn default() -> Self {
         Self {
             strata_exec_account_id: DEFAULT_ALPEN_EE_ACCOUNT_ID,
@@ -152,7 +140,7 @@ impl Default for AlpenParams {
             blob_spec: BlobSpec::new(MagicBytes::new(*b"ALPN")),
             spec_schedule: AlpenSpecSchedule::genesis(),
             evm_spec: EvmSpec::default(),
-            base_fee_floor: DEFAULT_BASE_FEE_FLOOR,
+            fee_spec: FeeSpec::new(SpecVersioned::new(0)),
         }
     }
 }
@@ -164,8 +152,8 @@ mod tests {
     use strata_bridge_params::BridgeParams;
     use strata_l1_txfmt::MagicBytes;
 
-    use super::{AlpenParams, DEFAULT_ALPEN_EE_ACCOUNT_ID, DEFAULT_BASE_FEE_FLOOR};
-    use crate::{AlpenSpecSchedule, BlobSpec, EvmSpec};
+    use super::{AlpenParams, DEFAULT_ALPEN_EE_ACCOUNT_ID};
+    use crate::{AlpenSpecId, AlpenSpecSchedule, BlobSpec, EvmSpec, FeeSpec, SpecVersioned};
 
     fn sample_params() -> AlpenParams {
         let evm_spec: EvmSpec =
@@ -177,6 +165,7 @@ mod tests {
             BlobSpec::new(MagicBytes::new(*b"ALPN")),
             AlpenSpecSchedule::genesis(),
             evm_spec,
+            FeeSpec::new(SpecVersioned::new(0).with(AlpenSpecId::V1, 1_000_000_000)),
         )
     }
 
@@ -217,15 +206,14 @@ mod tests {
     }
 
     #[test]
-    fn json_defaults_missing_base_fee_floor_to_production_value() {
+    fn json_rejects_missing_fee_spec() {
         let mut json = sample_json();
         json.as_object_mut()
             .expect("params should be an object")
-            .remove("base_fee_floor")
-            .expect("base fee floor should be present");
+            .remove("fee_spec")
+            .expect("fee_spec should be present");
 
-        let decoded: AlpenParams = serde_json::from_value(json).expect("params should decode");
-        assert_eq!(decoded.base_fee_floor(), DEFAULT_BASE_FEE_FLOOR);
+        assert!(serde_json::from_value::<AlpenParams>(json).is_err());
     }
 
     #[test]

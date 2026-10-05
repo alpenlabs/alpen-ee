@@ -12,23 +12,18 @@
 //!
 //! # Activation
 //!
-//! The floor applies to every post-London block; there is no separate fee-model activation
-//! height. Alpen runs with the floor in force from genesis, so no canonical pre-floor
-//! history exists for it to invalidate. This is deliberate for the initial deployment. If a
-//! network ever needs blocks that predate the floor to stay valid under a clean sync, this
-//! rule must be gated behind a fee-model activation height/timestamp in both the payload builder
-//! and host validator.
+//! The floor is part of a spec version's rules. Each version's floor comes from the params
+//! artifact's [`FeeSpec`], and callers pass in the floor of the version they build or validate.
+//! A zero floor is plain EIP-1559, which deployed chains ran under [`AlpenSpecId::V0`] before the
+//! floor existed. The first block of a version applies that version's floor against its parent
+//! like any other block, so a raised floor takes effect in that one block.
+//!
+//! [`FeeSpec`]: alpen_ee_params::FeeSpec
+//! [`AlpenSpecId::V0`]: alpen_ee_params::AlpenSpecId::V0
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::eip1559::INITIAL_BASE_FEE;
-use alpen_ee_params::DEFAULT_BASE_FEE_FLOOR;
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
-
-/// Production default for the minimum base fee per gas, in wei.
-///
-/// Kept as a re-export for callers that need the production value. Nodes use the value from
-/// their Alpen params artifact instead.
-pub const BASE_FEE_FLOOR: u64 = DEFAULT_BASE_FEE_FLOOR;
 
 /// Clamps an already-computed EIP-1559 base fee to `base_fee_floor`.
 ///
@@ -98,7 +93,9 @@ mod tests {
     use alloy_eips::eip1559::INITIAL_BASE_FEE;
     use alpen_ee_params::{AlpenSpecId, EvmSpec};
 
-    use super::{apply_base_fee_floor, next_floored_base_fee, BASE_FEE_FLOOR};
+    use super::{apply_base_fee_floor, next_floored_base_fee};
+
+    const BASE_FEE_FLOOR: u64 = 1_000_000_000;
 
     #[test]
     fn floor_clamps_below_and_passes_through_above() {

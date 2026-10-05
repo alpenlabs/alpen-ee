@@ -111,7 +111,8 @@ mod tests {
     use std::{fs, path::PathBuf, sync::Arc};
 
     use alpen_ee_params::{
-        AlpenSpecId, AlpenSpecSchedule, BlobSpec, DEFAULT_ALPEN_EE_ACCOUNT_ID, EvmSpec,
+        AlpenSpecId, AlpenSpecSchedule, BlobSpec, DEFAULT_ALPEN_EE_ACCOUNT_ID, EvmSpec, FeeSpec,
+        SpecVersioned,
     };
     use alpen_reth_evm::evm::AlpenEvmFactory;
     use reth_primitives_traits::Block as _;
@@ -156,6 +157,7 @@ mod tests {
             BlobSpec::new(MagicBytes::new(*b"ALPN")),
             AlpenSpecSchedule::genesis(),
             evm_spec,
+            FeeSpec::new(SpecVersioned::new(0)),
         )
     }
 
