@@ -7,19 +7,20 @@ mod traits;
 mod types;
 mod utils;
 
-#[cfg(feature = "test-utils")]
 pub use traits::{
-    da::MockBatchDaProvider,
-    ol_client::{MockOLClient, MockSequencerOLClient},
-    prover::MockBatchProver,
-};
-pub use traits::{
+    block_production::BlockProductionControl,
     da::{BatchDaProvider, DaStatus, EvmCodeProvider, HeaderSummaryProvider},
     ol_client::{
         chain_status_checked, get_inbox_messages_checked, OLAccountStateView, OLBlockData,
         OLBlockLink, OLClient, OLClientError, SequencerOLClient,
     },
     prover::{BatchProver, ProofGenerationStatus},
+};
+#[cfg(feature = "test-utils")]
+pub use traits::{
+    da::MockBatchDaProvider,
+    ol_client::{MockOLClient, MockSequencerOLClient},
+    prover::MockBatchProver,
 };
 pub use types::{
     accessed_state::{AccessedAccount, AccessedStateRecord},
