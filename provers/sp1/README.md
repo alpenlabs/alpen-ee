@@ -68,8 +68,8 @@ the same params share a folder. The files there drop their network prefix, and
 `manifest.json` lists the networks.
 
 The copy waits for a reviewer to approve it in the `sp1-artifacts`
-environment. It is skipped until the `ALPEN_GUESTS_S3_BUCKET` and
-`ALPEN_GUESTS_S3_ROLE_ARN` repo variables are set.
+environment. It fails if the `ALPEN_GUESTS_S3_BUCKET` or
+`ALPEN_GUESTS_S3_ROLE_ARN` repo variable is not set.
 
 To build with params that are not in the repo yet, run `publish-guests.yml` by
 hand with `params_url`. Releases are immutable once published, so `release_tag`
