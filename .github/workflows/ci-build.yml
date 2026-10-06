@@ -129,7 +129,7 @@ jobs:
         run: |
           # The guest builder's build script compiles the guest programs and
           # writes the ELFs to provers/sp1/generated/.
-          cargo build --release -p strata-sp1-guest-builder
+          cargo build --release -p alpen-sp1-guest-builder
 
           mkdir -p artifacts/elfs/sp1
           cp -v provers/sp1/generated/guest-alpen-chunk.elf \

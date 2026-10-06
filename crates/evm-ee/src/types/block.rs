@@ -1,8 +1,8 @@
 //! EVM block implementation.
 
+use alpen_acct_types::ExecBlock;
 use reth_consensus_common::validation::validate_body_against_header;
 use strata_codec::impl_type_flat_struct;
-use strata_ee_acct_types::ExecBlock;
 
 use super::{EvmBlockBody, EvmHeader};
 

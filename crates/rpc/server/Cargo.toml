@@ -1,0 +1,29 @@
+[package]
+edition.workspace = true
+name = "alpen-rpc-server"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+alpen-common.workspace = true
+alpen-rpc-api.workspace = true
+
+alloy-primitives.workspace = true
+async-trait.workspace = true
+jsonrpsee = { workspace = true, features = ["server"] }
+reth-node-builder.workspace = true
+reth-provider.workspace = true
+reth-rpc-layer.workspace = true
+strata-identifiers.workspace = true
+tokio.workspace = true
+tower.workspace = true
+
+[dev-dependencies]
+alpen-rpc-api = { workspace = true, features = ["client"] }
+http.workspace = true
+jsonrpsee = { workspace = true, features = ["http-client"] }
+tempfile.workspace = true

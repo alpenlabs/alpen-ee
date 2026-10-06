@@ -8,25 +8,25 @@
 
 use std::{fmt, sync::Arc};
 
-use alpen_ee_common::{
+use alpen_acct_types::{ExecBlock, ExecHeader};
+use alpen_chain_types::{
+    ChunkTransition, ExecHeaderSummary, ExecInputs, ExecOutputs, OutputMessage, OutputTransfer,
+};
+use alpen_chunk_runtime::{PrivateInput, RawBlockData, RawChunkData};
+use alpen_common::{
     decode_chunk_task_key, encode_chunk_task_key, BlockWitnessStore, ChunkId, ChunkStorage,
     ExecBlockStorage, ProverTaskKeyDecodeError,
 };
-use alpen_ee_database::EeNodeStorage;
+use alpen_database::NodeStorage;
+use alpen_evm_ee::{EvmBlock, EvmBlockBody, EvmExecutionEnvironment, EvmHeader, EvmPartialState};
+use alpen_proof_chunk::{EeChunkProgram, EeChunkProofInput};
 use alpen_reth_node::BlockWitnessRecord;
 use async_trait::async_trait;
 use reth_ethereum_primitives::Block;
 use reth_primitives_traits::Block as _;
 use strata_acct_types::Hash;
 use strata_codec::encode_to_vec;
-use strata_ee_acct_types::{ExecBlock, ExecHeader};
-use strata_ee_chain_types::{
-    ChunkTransition, ExecHeaderSummary, ExecInputs, ExecOutputs, OutputMessage, OutputTransfer,
-};
-use strata_ee_chunk_runtime::{PrivateInput, RawBlockData, RawChunkData};
-use strata_evm_ee::{EvmBlock, EvmBlockBody, EvmExecutionEnvironment, EvmHeader, EvmPartialState};
 use strata_paas::{InputResolution, ProofSpec, ProverError as PaasError, ProverResult};
-use strata_proofimpl_alpen_chunk::{EeChunkProgram, EeChunkProofInput};
 
 /// Chunk-id-shaped task identifier for paas.
 ///
@@ -79,11 +79,11 @@ impl TryFrom<Vec<u8>> for ChunkTask {
 /// the normal path.
 pub(crate) struct ChunkSpec {
     chunk_storage: Arc<dyn ChunkStorage>,
-    storage: Arc<EeNodeStorage>,
+    storage: Arc<NodeStorage>,
 }
 
 impl ChunkSpec {
-    pub(crate) fn new(chunk_storage: Arc<dyn ChunkStorage>, storage: Arc<EeNodeStorage>) -> Self {
+    pub(crate) fn new(chunk_storage: Arc<dyn ChunkStorage>, storage: Arc<NodeStorage>) -> Self {
         Self {
             chunk_storage,
             storage,

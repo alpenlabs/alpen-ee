@@ -2,7 +2,7 @@
 //!
 //! This module defines the types needed for EVM block execution within the
 //! ExecutionEnvironment trait framework.
-pub(crate) use strata_ee_acct_types::Hash;
+pub(crate) use alpen_acct_types::Hash;
 
 // Module declarations
 mod block;

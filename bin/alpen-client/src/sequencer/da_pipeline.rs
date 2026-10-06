@@ -3,9 +3,9 @@
 
 use std::sync::Arc;
 
-use alpen_ee_da_provider::{ChunkedEnvelopeDaProvider, DaBlobSource, StateDiffBlobProvider};
-use alpen_ee_database::{EeNodeStorage, SequencerDatabases};
-use alpen_ee_params::AlpenParams;
+use alpen_da_provider::{ChunkedEnvelopeDaProvider, DaBlobSource, StateDiffBlobProvider};
+use alpen_database::{NodeStorage, SequencerDatabases};
+use alpen_params::AlpenParams;
 use bitcoind_async_client::{
     corepc_types::bitcoin::key::Keypair,
     traits::{Reader, Wallet as _},
@@ -43,7 +43,7 @@ pub(crate) struct DaPipelineInputs<'a, P> {
     pub(crate) l1_reorg_safe_depth: u32,
     pub(crate) genesis_l1_height: L1Height,
     pub(crate) dbs: &'a SequencerDatabases,
-    pub(crate) storage: Arc<EeNodeStorage>,
+    pub(crate) storage: Arc<NodeStorage>,
     pub(crate) node_provider: P,
     pub(crate) params: Arc<AlpenParams>,
     pub(crate) writer_config: Arc<WriterConfig>,

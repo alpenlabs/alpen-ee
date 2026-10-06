@@ -46,7 +46,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/git \
     install -m 0555 /app/target/release/alpen-client /usr/local/bin/alpen-client
 
 # A separate cargo run, so the `console` feature dbconsole enables on
-# alpen-ee-database is not compiled into alpen-client.
+# alpen-database is not compiled into alpen-client.
 RUN --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,sharing=private,target=/app/target \

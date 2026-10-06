@@ -1,0 +1,29 @@
+[package]
+description = "Consolidated top-level Alpen chain params artifact."
+edition.workspace = true
+name = "alpen-params"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+strata-acct-types.workspace = true
+strata-bridge-params.workspace = true
+strata-l1-txfmt.workspace = true
+
+alloy-consensus.workspace = true
+alloy-genesis.workspace = true
+alloy-primitives.workspace = true
+num_enum.workspace = true
+reth-chainspec.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[features]
+test-utils = []

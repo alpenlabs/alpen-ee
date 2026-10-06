@@ -134,7 +134,7 @@ jobs:
           uv sync --frozen
           ALPEN_PARAMS="$(uv run --frozen python -m scripts.gen_eest_sp1_guest_params)"
           SP1_ALPEN_PARAMS_PATH="$ALPEN_PARAMS" \
-            cargo build --locked --release -p strata-sp1-guest-builder
+            cargo build --locked --release -p alpen-sp1-guest-builder
           uv run --frozen python -c 'from common.prover_backend import resolve_prover_backend; assert resolve_prover_backend().backend == "sp1"'
 
       - name: Run alpen EEST env in fntests

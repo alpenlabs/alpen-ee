@@ -1,6 +1,6 @@
 //! MDBX-backed storage managers for the EE prover.
 //!
-//! Three managers, all wrapping the shared [`EeProverDbMdbx`]:
+//! Three managers, all wrapping the shared [`ProverDbMdbx`]:
 //!
 //! - [`EeTaskStore`] — impls `paas::TaskStore` over one task table for one resident spec version.
 //!   The chunk prover gets an [`EeChunkTaskStore`], the acct prover an [`EeAcctTaskStore`].
@@ -22,9 +22,9 @@
 
 use std::{marker::PhantomData, sync::Arc};
 
-use alpen_ee_common::{decode_chunk_task_key, BatchId, Proof, ProofId};
-use alpen_ee_database::{BatchTaskKey, ChunkTaskKey, EeProverDbMdbx, ProverTaskKey};
-use alpen_ee_params::AlpenSpecId;
+use alpen_common::{decode_chunk_task_key, BatchId, Proof, ProofId};
+use alpen_database::{BatchTaskKey, ChunkTaskKey, ProverDbMdbx, ProverTaskKey};
+use alpen_params::AlpenSpecId;
 use strata_db_types::errors::DbError;
 use strata_paas::{
     ProverError, ProverResult, ReceiptStore, TaskRecord, TaskRecordData, TaskStatus, TaskStore,
@@ -49,7 +49,7 @@ fn db_err(e: DbError) -> ProverError {
 /// store never lists acct tasks and vice versa.
 #[derive(Debug)]
 pub(crate) struct EeTaskStore<K> {
-    db: Arc<EeProverDbMdbx>,
+    db: Arc<ProverDbMdbx>,
     spec_version: AlpenSpecId,
     _key: PhantomData<K>,
 }
@@ -71,7 +71,7 @@ impl<K> Clone for EeTaskStore<K> {
 }
 
 impl<K: ProverTaskKey> EeTaskStore<K> {
-    pub(crate) fn new(db: Arc<EeProverDbMdbx>, spec_version: AlpenSpecId) -> Self {
+    pub(crate) fn new(db: Arc<ProverDbMdbx>, spec_version: AlpenSpecId) -> Self {
         Self {
             db,
             spec_version,
@@ -165,11 +165,11 @@ impl<K: ProverTaskKey> TaskStore for EeTaskStore<K> {
 /// reads via `collect_chunk_inputs_for_batch`.
 #[derive(Debug, Clone)]
 pub(crate) struct EeChunkReceiptStore {
-    db: Arc<EeProverDbMdbx>,
+    db: Arc<ProverDbMdbx>,
 }
 
 impl EeChunkReceiptStore {
-    pub(crate) fn new(db: Arc<EeProverDbMdbx>) -> Self {
+    pub(crate) fn new(db: Arc<ProverDbMdbx>) -> Self {
         Self { db }
     }
 }
@@ -197,11 +197,11 @@ impl ReceiptStore for EeChunkReceiptStore {
 /// serves OL submission from the secondary `ProofId → BatchId` index.
 #[derive(Debug, Clone)]
 pub(crate) struct EeBatchProofDbManager {
-    db: Arc<EeProverDbMdbx>,
+    db: Arc<ProverDbMdbx>,
 }
 
 impl EeBatchProofDbManager {
-    pub(crate) fn new(db: Arc<EeProverDbMdbx>) -> Self {
+    pub(crate) fn new(db: Arc<ProverDbMdbx>) -> Self {
         Self { db }
     }
 

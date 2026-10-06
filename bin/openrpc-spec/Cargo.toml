@@ -1,0 +1,15 @@
+[package]
+edition.workspace = true
+name = "alpen-openrpc-spec"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+alpen-rpc-api.workspace = true
+serde_json.workspace = true
+strata-ol-rpc-api.workspace = true
+strata-open-rpc.workspace = true

@@ -1,0 +1,186 @@
+use alpen_acct_types::{EeAccountState, PendingFinclEntry, PendingInputEntry};
+use alpen_chain_types::SubjectDepositData;
+use borsh::{BorshDeserialize, BorshSerialize};
+use serde::{Deserialize, Serialize};
+use strata_acct_types::{BitcoinAmount, Hash, SubjectId};
+use strata_predicate::PredicateKey;
+
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
+pub struct DBAccountStateAtEpoch {
+    epoch: u32,
+    slot: u64,
+    account_state: DBEeAccountState,
+}
+
+impl DBAccountStateAtEpoch {
+    pub(crate) fn from_parts(epoch: u32, slot: u64, account_state: DBEeAccountState) -> Self {
+        Self {
+            epoch,
+            slot,
+            account_state,
+        }
+    }
+
+    pub(crate) fn into_parts(self) -> (u32, u64, DBEeAccountState) {
+        (self.epoch, self.slot, self.account_state)
+    }
+}
+
+// TODO(STR-3421): Migrate EE account-state persistence away from this Borsh
+// mirror and store the SSZ account-state type directly, including any needed
+// DB compatibility/versioning path for existing local data.
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
+pub struct DBEeAccountState {
+    last_exec_blkid: Hash,
+    last_exec_state_root: Hash,
+    pending_inputs: Vec<DBPendingInputEntry>,
+    pending_fincls: Vec<DBPendingFinclEntry>,
+}
+
+impl From<EeAccountState> for DBEeAccountState {
+    fn from(value: EeAccountState) -> Self {
+        let (last_exec_blkid, last_exec_state_root, pending_inputs, pending_fincls) =
+            value.into_parts();
+        Self {
+            last_exec_blkid,
+            last_exec_state_root,
+            pending_inputs: pending_inputs.into_iter().map(Into::into).collect(),
+            pending_fincls: pending_fincls.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<DBEeAccountState> for EeAccountState {
+    fn from(value: DBEeAccountState) -> Self {
+        Self::new(
+            value.last_exec_blkid,
+            value.last_exec_state_root,
+            value.pending_inputs.into_iter().map(Into::into).collect(),
+            value.pending_fincls.into_iter().map(Into::into).collect(),
+        )
+    }
+}
+
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
+struct DBBitcoinAmount(u64);
+
+impl From<DBBitcoinAmount> for BitcoinAmount {
+    fn from(value: DBBitcoinAmount) -> Self {
+        Self::try_from(value.0).expect("database amount must be within the bitcoin money supply")
+    }
+}
+
+impl From<BitcoinAmount> for DBBitcoinAmount {
+    fn from(value: BitcoinAmount) -> Self {
+        Self(value.to_sat())
+    }
+}
+
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
+struct DBPendingFinclEntry {
+    epoch: u32,
+    raw_tx_hash: Hash,
+}
+
+impl From<PendingFinclEntry> for DBPendingFinclEntry {
+    fn from(value: PendingFinclEntry) -> Self {
+        let (epoch, raw_tx_hash) = value.into_parts();
+        Self { epoch, raw_tx_hash }
+    }
+}
+
+impl From<DBPendingFinclEntry> for PendingFinclEntry {
+    fn from(value: DBPendingFinclEntry) -> Self {
+        let DBPendingFinclEntry { epoch, raw_tx_hash } = value;
+        Self::new(epoch, raw_tx_hash)
+    }
+}
+
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
+enum DBPendingInputEntry {
+    Deposit(DBSubjectDepositData),
+    PredicateRotation(#[serde(with = "predicate_key_serde")] PredicateKey),
+}
+
+impl From<DBPendingInputEntry> for PendingInputEntry {
+    fn from(value: DBPendingInputEntry) -> Self {
+        match value {
+            DBPendingInputEntry::Deposit(value) => Self::Deposit(value.into()),
+            DBPendingInputEntry::PredicateRotation(key) => Self::PredicateRotation(key),
+        }
+    }
+}
+
+impl From<PendingInputEntry> for DBPendingInputEntry {
+    fn from(value: PendingInputEntry) -> Self {
+        match value {
+            PendingInputEntry::Deposit(value) => Self::Deposit(value.into()),
+            PendingInputEntry::PredicateRotation(key) => Self::PredicateRotation(key),
+        }
+    }
+}
+
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
+struct DBSubjectDepositData {
+    dest: DBSubjectId,
+    value: DBBitcoinAmount,
+}
+
+impl From<DBSubjectDepositData> for SubjectDepositData {
+    fn from(value: DBSubjectDepositData) -> Self {
+        Self::new(value.dest.into(), value.value.into())
+    }
+}
+
+impl From<SubjectDepositData> for DBSubjectDepositData {
+    fn from(value: SubjectDepositData) -> Self {
+        Self {
+            dest: value.dest().into(),
+            value: value.value().into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Serialize, Deserialize)]
+struct DBSubjectId(#[serde(with = "hex::serde")] [u8; 32]);
+
+impl From<DBSubjectId> for SubjectId {
+    fn from(value: DBSubjectId) -> Self {
+        Self::new(value.0)
+    }
+}
+
+impl From<SubjectId> for DBSubjectId {
+    fn from(value: SubjectId) -> Self {
+        Self(value.into())
+    }
+}
+
+/// Serde for [`PredicateKey`], which carries none of its own: the type id and
+/// the condition bytes, as the key's own byte format lays them out.
+mod predicate_key_serde {
+    use serde::{de::Error as _, Deserialize, Deserializer, Serialize, Serializer};
+    use strata_predicate::{PredicateKey, PredicateTypeId};
+
+    #[derive(Serialize, Deserialize)]
+    struct Repr {
+        id: u8,
+        #[serde(with = "serde_bytes")]
+        condition: Vec<u8>,
+    }
+
+    pub(super) fn serialize<S: Serializer>(key: &PredicateKey, ser: S) -> Result<S::Ok, S::Error> {
+        Repr {
+            id: key.id(),
+            condition: key.condition().to_vec(),
+        }
+        .serialize(ser)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(de: D) -> Result<PredicateKey, D::Error> {
+        let repr = Repr::deserialize(de)?;
+        let id = PredicateTypeId::try_from(repr.id)
+            .map_err(|e| D::Error::custom(format!("predicate type id {}: {e}", repr.id)))?;
+        PredicateKey::try_new(id, repr.condition).map_err(D::Error::custom)
+    }
+}

@@ -5,8 +5,10 @@
 //! in isolation without needing to run a full OL node.
 
 #[cfg(feature = "sequencer")]
-use alpen_ee_common::{OLAccountStateView, OLBlockData, SequencerOLClient};
-use alpen_ee_common::{OLChainStatus, OLClient, OLClientError, SnarkAccountEpochSummary};
+use alpen_common::{OLAccountStateView, OLBlockData, SequencerOLClient};
+use alpen_common::{OLChainStatus, OLClient, OLClientError, SnarkAccountEpochSummary};
+#[cfg(feature = "sequencer")]
+use alpen_proof_acct::EeAcctProgram;
 use async_trait::async_trait;
 use strata_acct_types::Hash;
 use strata_identifiers::{Buf32, Epoch, OLBlockCommitment};
@@ -15,8 +17,6 @@ use strata_identifiers::{L1Height, OLTxId};
 #[cfg(feature = "sequencer")]
 use strata_predicate::PredicateKey;
 use strata_primitives::EpochCommitment;
-#[cfg(feature = "sequencer")]
-use strata_proofimpl_alpen_acct::EeAcctProgram;
 #[cfg(feature = "sequencer")]
 use strata_snark_acct_types::{ProofState, Seqno, SnarkAccountUpdate};
 

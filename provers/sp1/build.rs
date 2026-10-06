@@ -178,7 +178,7 @@ fn write_chunk_predicate_const(condition: &[u8]) {
 /// (`SequenceMustHaveLength`). JSON stays the wire format end to end.
 fn write_alpen_params_const(path: &Path) {
     let json = fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-    let params: alpen_ee_params::AlpenParams = serde_json::from_str(&json)
+    let params: alpen_params::AlpenParams = serde_json::from_str(&json)
         .unwrap_or_else(|e| panic!("parse alpen params at {}: {e}", path.display()));
     let json_oneline = serde_json::to_string(&params).expect("re-serialize alpen params");
 

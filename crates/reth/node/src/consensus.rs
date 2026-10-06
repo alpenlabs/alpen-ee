@@ -23,7 +23,7 @@
 use std::{iter, sync::Arc};
 
 use alloy_consensus::BlockHeader as _;
-use alpen_ee_params::{
+use alpen_params::{
     header_spec_version, AlpenSpecId, EvmSpec, FeeSpec, HeaderExtra, HeaderExtraError,
 };
 use alpen_reth_evm::{
@@ -306,7 +306,7 @@ where
 mod tests {
     use alloy_eips::eip1559::INITIAL_BASE_FEE;
     use alloy_primitives::Bytes;
-    use alpen_ee_params::{AlpenSpecId, EvmSpec, FeeSpec, HeaderExtra, SpecVersioned};
+    use alpen_params::{AlpenSpecId, EvmSpec, FeeSpec, HeaderExtra, SpecVersioned};
     use reth_consensus::HeaderValidator;
     use reth_errors::ConsensusError;
     use reth_primitives_traits::{Header, SealedHeader};

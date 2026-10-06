@@ -1,0 +1,32 @@
+[package]
+edition.workspace = true
+name = "alpen-da-provider"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+alpen-common.workspace = true
+alpen-da-types.workspace = true
+alpen-reth-statediff.workspace = true
+
+alloy-primitives.workspace = true
+async-trait.workspace = true
+bitcoin.workspace = true
+bitcoind-async-client.workspace = true
+eyre.workspace = true
+strata-btc-types.workspace = true
+strata-btcio.workspace = true
+strata-codec.workspace = true
+strata-db-types = { workspace = true, features = ["proxies"] }
+strata-identifiers.workspace = true
+strata-l1-envelope-fmt.workspace = true
+strata-l1-txfmt.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+alpen-database = { workspace = true, features = ["test-utils"] }
+tokio.workspace = true

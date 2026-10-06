@@ -1,0 +1,55 @@
+[package]
+edition.workspace = true
+name = "alpen-database"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# The sled-era layouts the offline migration decodes and the test exporter
+# writes; enabled by alpen-dbconsole-core, which holds the migration rules.
+migration = ["dep:ssz_derive", "dep:ssz_types"]
+# Exposes helpers for constructing and seeding EE stores in downstream tests.
+test-utils = ["dep:strata-l1-txfmt", "alpen-common/test-utils"]
+
+[dependencies]
+alloy-primitives.workspace = true
+alpen-acct-types.workspace = true
+alpen-chain-types.workspace = true
+alpen-common.workspace = true
+alpen-mdbx.workspace = true
+alpen-params.workspace = true
+alpen-reth-statediff.workspace = true
+bitcoin.workspace = true
+hex.workspace = true
+serde.workspace = true
+serde_bytes.workspace = true
+strata-acct-types.workspace = true
+strata-db-macros.workspace = true
+strata-db-types = { workspace = true, features = ["proxies"] }
+strata-identifiers.workspace = true
+strata-l1-txfmt = { workspace = true, optional = true }
+strata-paas.workspace = true
+strata-predicate = { workspace = true, features = ["borsh"] }
+strata-storage-common.workspace = true
+zkaleido.workspace = true
+
+async-trait.workspace = true
+bincode.workspace = true
+borsh.workspace = true
+ciborium.workspace = true
+eyre.workspace = true
+ssz.workspace = true
+ssz_derive = { workspace = true, optional = true }
+ssz_types = { workspace = true, optional = true }
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+strata-l1-txfmt.workspace = true
+alpen-common = { workspace = true, features = ["test-utils"] }
+strata-db-tests.workspace = true

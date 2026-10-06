@@ -104,7 +104,7 @@ def _sign_clz_call(rpc, *, nonce: int, probe_address: str, gas: int) -> str:
 def _spec_version_from_extra_data(extra_data_hex: str) -> int:
     """Decode the big-endian AlpenSpecId prefix from a block's `extraData`.
 
-    Mirrors `peek_spec_version` in `crates/alpen-ee/params/src/extra_data.rs`.
+    Mirrors `peek_spec_version` in `crates/params/src/extra_data.rs`.
     """
     hex_body = extra_data_hex[2:] if extra_data_hex.startswith("0x") else extra_data_hex
     raw = bytes.fromhex(hex_body)
@@ -148,7 +148,7 @@ class TestEeLiveForkUpgrade(BaseTest):
         # rotation's inbox message without waiting on the L1 checkpoint round
         # trip, and a small `batch_sealing_block_count` keeps the
         # rotation-consuming block's forced batch seal (see
-        # alpen-ee-sequencer's force-seal-after-rotation behavior) from
+        # alpen-sequencer's force-seal-after-rotation behavior) from
         # stalling the test.
         ctx.set_env(
             EeOLEnv(

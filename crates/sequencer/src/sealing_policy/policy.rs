@@ -1,0 +1,361 @@
+//! Policy traits and accumulator for block accumulation and sealing.
+//!
+//! These types define a generic framework for accumulating blocks and
+//! deciding when to seal a group (batch, chunk, or any other contiguous
+//! block range). Both the batch builder and chunk builder use these with
+//! different policy implementations.
+
+use std::{any::type_name, fmt::Debug};
+
+use alpen_common::BlockNumHash;
+use async_trait::async_trait;
+use strata_acct_types::Hash;
+
+/// Core trait that defines the types for an accumulation strategy.
+///
+/// The policy specifies what data is collected per block and how it's
+/// accumulated across a contiguous range of blocks (e.g., a batch for
+/// DA submission, a chunk for proving).
+pub trait AccumulationPolicy: Send + Sync + 'static {
+    /// Data collected per block, used for sealing decisions.
+    /// This is provided by [`BlockDataProvider`].
+    type BlockData: Send + Sync + Clone;
+
+    /// Accumulated value across blocks (e.g., count, DA size).
+    /// Must implement [`Default`] for initialization and reset.
+    type AccumulatedValue: Default + Send + Sync + Debug;
+
+    /// Accumulate block data into the value.
+    ///
+    /// Called when a block is added to the accumulator.
+    fn accumulate(value: &mut Self::AccumulatedValue, data: &Self::BlockData);
+}
+
+/// Names the policy that asked for a seal, for logs and events.
+pub type SealReason = &'static str;
+
+/// Policy for deciding when to seal a group of accumulated blocks.
+///
+/// Implementations define the threshold logic (e.g., by block count,
+/// DA size, prover cost, or a combination) through the `bool` checks. The
+/// `*_with_reason` variants wrap those and report [`Self::name`] so callers
+/// can say which policy sealed a group; combinators override them to return
+/// the leaf that triggered.
+pub trait SealingPolicy<P: AccumulationPolicy>: Send + Sync {
+    /// The [`SealReason`] this policy reports when it seals.
+    ///
+    /// Defaults to the bare type name without its module path. Override if
+    /// necessary.
+    fn name(&self) -> SealReason {
+        let full = type_name::<Self>(); // = `a::b::FooPolicy<c::BarAccumulator>`
+        let base_end = full.find('<').unwrap_or(full.len());
+        match full[..base_end].rfind("::") {
+            Some(idx) => &full[idx + 2..], // = FooPolicy
+            None => full,
+        }
+    }
+
+    /// Check if adding a block would exceed the threshold.
+    ///
+    /// If this returns `true`, the current group should be sealed before
+    /// adding this block. The block will then become the first block of
+    /// the next group.
+    ///
+    /// # Arguments
+    ///
+    /// * `value` - The accumulated policy-specific value
+    /// * `block_data` - Data for the block about to be added
+    fn would_exceed(&self, value: &P::AccumulatedValue, block_data: &P::BlockData) -> bool;
+
+    /// Check if the group must be sealed as it stands.
+    ///
+    /// The counterpart to [`Self::would_exceed`]: that one seals *before* a
+    /// block because of what the group has accumulated, this one seals *after*
+    /// a block because of what that block was. Some blocks have to be the last
+    /// in their group no matter how much room is left.
+    ///
+    /// Because the answer is read off the accumulated value, it lasts as long
+    /// as those blocks do. A seal whose write fails is still required on the
+    /// next pass, rather than being lost with the step that decided it.
+    ///
+    /// Defaults to `false`, for policies where only a threshold seals.
+    fn must_seal(&self, _value: &P::AccumulatedValue) -> bool {
+        false
+    }
+
+    /// [`Self::would_exceed`], naming the policy that triggered.
+    fn would_exceed_with_reason(
+        &self,
+        value: &P::AccumulatedValue,
+        block_data: &P::BlockData,
+    ) -> Option<SealReason> {
+        self.would_exceed(value, block_data).then(|| self.name())
+    }
+
+    /// [`Self::must_seal`], naming the policy that triggered.
+    fn must_seal_with_reason(&self, value: &P::AccumulatedValue) -> Option<SealReason> {
+        self.must_seal(value).then(|| self.name())
+    }
+}
+
+/// Trait to fetch processed block data for sealing decisions.
+#[async_trait]
+pub trait BlockDataProvider<P: AccumulationPolicy>: Send + Sync {
+    /// Get processed data for a block.
+    ///
+    /// Returns `None` if data is not yet available (block still processing).
+    /// The caller should retry after a delay if `None` is returned.
+    async fn get_block_data(&self, hash: Hash) -> eyre::Result<Option<P::BlockData>>;
+}
+
+// ---------------------------------------------------------------------------
+// Accumulator
+// ---------------------------------------------------------------------------
+
+/// Accumulates blocks and a policy-specific value for a pending group.
+///
+/// Used by both the batch builder and chunk builder to track blocks
+/// before sealing.
+#[derive(Debug)]
+pub struct Accumulator<P: AccumulationPolicy> {
+    /// Blocks accumulated so far (in order).
+    blocks: Vec<BlockNumHash>,
+    /// Policy-specific accumulated value.
+    value: P::AccumulatedValue,
+}
+
+impl<P: AccumulationPolicy> Default for Accumulator<P> {
+    fn default() -> Self {
+        Self {
+            blocks: Vec::new(),
+            value: P::AccumulatedValue::default(),
+        }
+    }
+}
+
+impl<P: AccumulationPolicy> Accumulator<P> {
+    /// Create a new empty accumulator.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a block to the accumulator.
+    ///
+    /// Appends the block to the list and calls the policy's accumulate
+    /// function to update the accumulated value.
+    pub fn add_block(&mut self, block: BlockNumHash, data: &P::BlockData) {
+        self.blocks.push(block);
+        P::accumulate(&mut self.value, data);
+    }
+
+    /// Number of blocks accumulated.
+    pub fn block_count(&self) -> u64 {
+        self.blocks.len() as u64
+    }
+
+    /// All accumulated block hashes in order.
+    pub fn blocks(&self) -> &[BlockNumHash] {
+        &self.blocks
+    }
+
+    /// Last block hash, if any.
+    pub fn last_block(&self) -> Option<BlockNumHash> {
+        self.blocks.last().copied()
+    }
+
+    /// Whether accumulator is empty.
+    pub fn is_empty(&self) -> bool {
+        self.blocks.is_empty()
+    }
+
+    /// Access the accumulated value.
+    pub fn value(&self) -> &P::AccumulatedValue {
+        &self.value
+    }
+
+    /// Check if adding a block would exceed the sealing policy threshold.
+    pub fn would_exceed(&self, policy: &impl SealingPolicy<P>, block_data: &P::BlockData) -> bool {
+        policy.would_exceed(self.value(), block_data)
+    }
+
+    /// Check if the accumulated blocks must be sealed as they stand.
+    ///
+    /// Always false while empty: there is nothing to seal.
+    pub fn must_seal(&self, policy: &impl SealingPolicy<P>) -> bool {
+        !self.is_empty() && policy.must_seal(self.value())
+    }
+
+    /// [`Self::would_exceed`], naming the policy that would be exceeded.
+    pub fn would_exceed_with_reason(
+        &self,
+        policy: &impl SealingPolicy<P>,
+        block_data: &P::BlockData,
+    ) -> Option<SealReason> {
+        policy.would_exceed_with_reason(self.value(), block_data)
+    }
+
+    /// [`Self::must_seal`], naming the policy that requires the seal.
+    pub fn must_seal_with_reason(&self, policy: &impl SealingPolicy<P>) -> Option<SealReason> {
+        if self.is_empty() {
+            return None;
+        }
+        policy.must_seal_with_reason(self.value())
+    }
+
+    /// Reset accumulator for a new batch.
+    pub fn reset(&mut self) {
+        self.blocks.clear();
+        self.value = P::AccumulatedValue::default();
+    }
+
+    /// Drain blocks for group creation.
+    ///
+    /// Returns `(inner_blocks, last_block)` where `inner_blocks` excludes
+    /// `last_block`.
+    ///
+    /// Never call this before a fallible write. The blocks are gone once it
+    /// returns, and none of this state is persisted, so a write that fails
+    /// afterwards loses them. Read them with [`Self::blocks`], write, then
+    /// release them.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the accumulator is empty.
+    #[allow(clippy::absolute_paths, clippy::allow_attributes, reason = "std")]
+    pub fn drain(&mut self) -> (Vec<BlockNumHash>, BlockNumHash) {
+        debug_assert!(!self.blocks.is_empty(), "Cannot drain empty accumulator");
+        let last = self.blocks.pop().expect("accumulator is not empty");
+        let inner = std::mem::take(&mut self.blocks);
+        self.value = P::AccumulatedValue::default();
+        (inner, last)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::*;
+
+    struct TestPolicy;
+
+    #[derive(Debug, Clone)]
+    struct TestBlockData {
+        value: u64,
+    }
+
+    #[derive(Debug, Default)]
+    struct TestAccumulatedValue {
+        total: u64,
+    }
+
+    impl AccumulationPolicy for TestPolicy {
+        type BlockData = TestBlockData;
+        type AccumulatedValue = TestAccumulatedValue;
+
+        fn accumulate(value: &mut Self::AccumulatedValue, data: &Self::BlockData) {
+            value.total += data.value;
+        }
+    }
+
+    struct AlwaysSeals;
+
+    impl SealingPolicy<TestPolicy> for AlwaysSeals {
+        fn would_exceed(&self, _value: &TestAccumulatedValue, _data: &TestBlockData) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn default_name_is_bare_type_name() {
+        let acc: Accumulator<TestPolicy> = Accumulator::new();
+        assert_eq!(AlwaysSeals.name(), "AlwaysSeals");
+        assert_eq!(
+            acc.would_exceed_with_reason(&AlwaysSeals, &TestBlockData { value: 1 }),
+            Some("AlwaysSeals")
+        );
+        assert_eq!(acc.must_seal_with_reason(&AlwaysSeals), None);
+    }
+
+    #[test]
+    fn test_new_accumulator_is_empty() {
+        let acc: Accumulator<TestPolicy> = Accumulator::new();
+        assert!(acc.is_empty());
+        assert_eq!(acc.block_count(), 0);
+        assert!(acc.last_block().is_none());
+        assert_eq!(acc.value().total, 0);
+    }
+
+    #[test]
+    fn test_add_block() {
+        let mut acc: Accumulator<TestPolicy> = Accumulator::new();
+        let block = test_blocknumhash(1);
+        let data = TestBlockData { value: 10 };
+
+        acc.add_block(block, &data);
+
+        assert!(!acc.is_empty());
+        assert_eq!(acc.block_count(), 1);
+        assert_eq!(acc.last_block(), Some(block));
+        assert_eq!(acc.value().total, 10);
+    }
+
+    #[test]
+    fn test_add_multiple_blocks() {
+        let mut acc: Accumulator<TestPolicy> = Accumulator::new();
+
+        acc.add_block(test_blocknumhash(1), &TestBlockData { value: 10 });
+        acc.add_block(test_blocknumhash(2), &TestBlockData { value: 20 });
+        acc.add_block(test_blocknumhash(3), &TestBlockData { value: 30 });
+
+        assert_eq!(acc.block_count(), 3);
+        assert_eq!(acc.last_block(), Some(test_blocknumhash(3)));
+        assert_eq!(acc.value().total, 60);
+        assert_eq!(
+            acc.blocks(),
+            &[
+                test_blocknumhash(1),
+                test_blocknumhash(2),
+                test_blocknumhash(3)
+            ]
+        );
+    }
+
+    #[test]
+    fn test_reset() {
+        let mut acc: Accumulator<TestPolicy> = Accumulator::new();
+        acc.add_block(test_blocknumhash(1), &TestBlockData { value: 10 });
+        acc.add_block(test_blocknumhash(2), &TestBlockData { value: 20 });
+
+        acc.reset();
+
+        assert!(acc.is_empty());
+        assert_eq!(acc.block_count(), 0);
+        assert_eq!(acc.value().total, 0);
+    }
+
+    #[test]
+    fn test_drain() {
+        let mut acc: Accumulator<TestPolicy> = Accumulator::new();
+        acc.add_block(test_blocknumhash(1), &TestBlockData { value: 10 });
+        acc.add_block(test_blocknumhash(2), &TestBlockData { value: 20 });
+        acc.add_block(test_blocknumhash(3), &TestBlockData { value: 30 });
+
+        let (inner, last) = acc.drain();
+
+        assert_eq!(inner, vec![test_blocknumhash(1), test_blocknumhash(2)]);
+        assert_eq!(last, test_blocknumhash(3));
+        assert!(acc.is_empty());
+        assert_eq!(acc.value().total, 0);
+    }
+
+    #[test]
+    fn test_drain_single_block() {
+        let mut acc: Accumulator<TestPolicy> = Accumulator::new();
+        acc.add_block(test_blocknumhash(1), &TestBlockData { value: 10 });
+
+        let (inner, last) = acc.drain();
+
+        assert!(inner.is_empty());
+        assert_eq!(last, test_blocknumhash(1));
+    }
+}

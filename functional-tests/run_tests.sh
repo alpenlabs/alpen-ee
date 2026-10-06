@@ -69,7 +69,7 @@ build_sp1_guests() {
 
     local alpen_params
     alpen_params="$(uv run python -m scripts.gen_sp1_guest_params)"
-    SP1_ALPEN_PARAMS_PATH="$alpen_params" cargo build --release -p strata-sp1-guest-builder
+    SP1_ALPEN_PARAMS_PATH="$alpen_params" cargo build --release -p alpen-sp1-guest-builder
 }
 
 # Runs tests.

@@ -45,7 +45,7 @@ Getting the params artifact: for a known network, use
 `mainnet`). The network's SP1 guests are built with the same file, so don't
 edit it locally. For a new network, write the JSON by hand. See the
 `AlpenParams` schema in
-[`crates/alpen-ee/params/src/params.rs`](../crates/alpen-ee/params/src/params.rs),
+[`crates/params/src/params.rs`](../crates/params/src/params.rs),
 or [`functional-tests/common/alpen_params.py`](../functional-tests/common/alpen_params.py)
 for a working example that builds one from `gen-ee-params` output and the
 `evm_spec` of a params file.

@@ -18,8 +18,8 @@
 //! floor existed. The first block of a version applies that version's floor against its parent
 //! like any other block, so a raised floor takes effect in that one block.
 //!
-//! [`FeeSpec`]: alpen_ee_params::FeeSpec
-//! [`AlpenSpecId::V0`]: alpen_ee_params::AlpenSpecId::V0
+//! [`FeeSpec`]: alpen_params::FeeSpec
+//! [`AlpenSpecId::V0`]: alpen_params::AlpenSpecId::V0
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::eip1559::INITIAL_BASE_FEE;
@@ -91,7 +91,7 @@ where
 mod tests {
     use alloy_consensus::Header;
     use alloy_eips::eip1559::INITIAL_BASE_FEE;
-    use alpen_ee_params::{AlpenSpecId, EvmSpec};
+    use alpen_params::{AlpenSpecId, EvmSpec};
 
     use super::{apply_base_fee_floor, next_floored_base_fee};
 

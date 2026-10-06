@@ -19,13 +19,20 @@ mod services;
 
 use std::sync::Arc;
 
-use alpen_ee_common::{require_latest_batch, BlockNumHash, SequencerOLClient};
-use alpen_ee_database::{EeDb, EeNodeStorage, SequencerDatabases};
-use alpen_ee_engine::{sync_chainstate_to_engine, AlpenRethExecEngine};
-use alpen_ee_exec_chain::{init_exec_chain_state_from_storage, ExecChainState};
-use alpen_ee_genesis::{ensure_batch_genesis, ensure_finalized_exec_chain_genesis};
-use alpen_ee_rpc_server::{AlpenEeRpcServer, EeRpcServer};
-use alpen_ee_sequencer::{
+use alpen_common::{require_latest_batch, BlockNumHash, SequencerOLClient};
+use alpen_database::{NodeStorage, SequencerDatabases, Stores};
+use alpen_engine::{sync_chainstate_to_engine, AlpenRethExecEngine};
+use alpen_exec_chain::{init_exec_chain_state_from_storage, ExecChainState};
+use alpen_exex::{AccessedStateGenerator, StateDiffGenerator};
+use alpen_genesis::{ensure_batch_genesis, ensure_finalized_exec_chain_genesis};
+use alpen_reth_evm::evm::AlpenEvmFactory;
+use alpen_reth_node::{
+    AlpenEngineTypes, AlpenEthereumNode, AlpenGossipProtocolHandler, AlpenGossipState,
+    AlpenNodeMode,
+};
+use alpen_reth_rpc::AlpenFeeApiServer;
+use alpen_rpc_server::{AlpenEeRpcServer, EeRpcServer};
+use alpen_sequencer::{
     block_builder_task, build_ol_chain_tracker, compose_policy, create_batch_builder,
     create_batch_lifecycle_task, create_update_submitter_task, init_batch_builder_state,
     init_lifecycle_state, init_ol_chain_tracker_state, or_sealing,
@@ -37,13 +44,6 @@ use alpen_ee_sequencer::{
     BatchBuilderEvent, BatchBuilderState, BatchLifecycleState, BlockBuilderConfig,
     OLChainTrackerState,
 };
-use alpen_reth_evm::evm::AlpenEvmFactory;
-use alpen_reth_exex::{AccessedStateGenerator, StateDiffGenerator};
-use alpen_reth_node::{
-    AlpenEngineTypes, AlpenEthereumNode, AlpenGossipProtocolHandler, AlpenGossipState,
-    AlpenNodeMode,
-};
-use alpen_reth_rpc::AlpenFeeApiServer;
 use bitcoind_async_client::{
     corepc_types::bitcoin::{
         key::Keypair,
@@ -87,7 +87,7 @@ use crate::{
 /// full-node-only build never carries them.
 pub(crate) struct BootstrapResources {
     pub(crate) service_executor: ServiceExecutor,
-    pub(crate) db: EeDb,
+    pub(crate) db: Stores,
     pub(crate) ol_client: Arc<OLClientKind>,
     pub(crate) genesis_epoch: EpochCommitment,
 }
@@ -123,7 +123,7 @@ struct BtcioResources {
 /// local, read-only MDBX reads with nothing else touching storage in
 /// between, so re-reading is simpler than threading a boot-state value
 /// across the generic parts of node startup.
-async fn initial_preconf_head(storage: &EeNodeStorage) -> eyre::Result<BlockNumHash> {
+async fn initial_preconf_head(storage: &NodeStorage) -> eyre::Result<BlockNumHash> {
     let exec_chain = init_exec_chain_state_from_storage(storage)
         .instrument(info_span!(
             "init_exec_chain_head_probe",
@@ -186,7 +186,7 @@ pub(crate) fn sequencer_gossip_pubkey(privkey: &Buf32) -> eyre::Result<Buf32> {
 /// Loads sequencer boot state: OL chain tracker, exec chain, batch builder,
 /// and batch lifecycle.
 async fn init_boot_state(
-    storage: &EeNodeStorage,
+    storage: &NodeStorage,
     ol_client: &(impl SequencerOLClient + Send + Sync),
 ) -> eyre::Result<SequencerBootState> {
     let ol_chain_tracker = init_ol_chain_tracker_state(storage, ol_client)

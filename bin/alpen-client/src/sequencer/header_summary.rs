@@ -9,10 +9,10 @@
 //! This adapter lives in the binary crate because it depends on
 //! `reth_provider::HeaderProvider`, which is only available where the Reth node
 //! is assembled. The generic DA providers that consume it live in
-//! `alpen-ee-da-provider`.
+//! `alpen-da-provider`.
 
-use alpen_ee_common::HeaderSummaryProvider;
-use alpen_ee_da_types::EvmHeaderSummary;
+use alpen_common::HeaderSummaryProvider;
+use alpen_da_types::EvmHeaderSummary;
 
 /// [`HeaderSummaryProvider`] backed by a Reth [`HeaderProvider`](reth_provider::HeaderProvider).
 pub(crate) struct RethHeaderSummaryProvider<P> {

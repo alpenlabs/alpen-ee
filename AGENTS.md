@@ -103,206 +103,129 @@ The EE provides EVM execution, decoupled from OL. Currently implemented via Alpe
 
 ## Workspace Crates
 
-Crate tables list repository paths. Package names usually carry a `strata-*` or `alpen-*` prefix in `Cargo.toml`.
+Every package carries the `alpen-` prefix, and its name is its path with `/`
+turned into `-` (`crates/da/types` is `alpen-da-types`, `crates/reth/node` is
+`alpen-reth-node`). A subfolder under `crates/` groups crates of one role;
+everything else sits at the top level. The authoritative list is `members` in
+the root `Cargo.toml`.
 
 ### Binary Crates (`bin/`)
 
-| Path | Binary target | Description |
-|------|---------------|-------------|
-| `bin/strata` | `strata` | OL (Strata) client, sequencer, RPC, and prover entrypoint |
-| `bin/strata-signer` | `strata-signer` | Detached signer for OL sequencer duties |
-| `bin/alpen-client` | `alpen-client` | EE client with OL tracking and payload building, embedding Alpen Reth |
-| `bin/strata-dbtool` | `strata-dbtool` | Database inspection and debugging utility |
-| `bin/strata-test-cli` | `strata-test-cli` | Bridge, ASM, and transaction testing utility |
-| `bin/datatool` | `strata-datatool` | Development utility for test data and key generation |
-| `bin/prover-perf` | `strata-provers-perf` | Performance benchmarking for proof systems |
+| Path | Package | Binary | Description |
+|------|---------|--------|-------------|
+| `bin/alpen-client` | `alpen-client` | `alpen-client` | The EE node: Alpen Reth with OL tracking, the sequencer, the provers and the DA pipeline |
+| `bin/dbconsole` | `alpen-dbconsole` | `dbconsole` | Operator console over the EE store: inspect, scan and stage edits through the production codecs |
+| `bin/prover-perf` | `alpen-prover-perf` | `alpen-prover-perf` | Prover performance evaluation |
+| `bin/openrpc-spec` | `alpen-openrpc-spec` | `openrpc-spec` | OpenRPC specification assembly for the Alpen RPC surface |
 
-The workspace default members include the main runtime and testing binaries, but not every workspace crate. Check root `Cargo.toml` before assuming a crate is built by default.
+Only `alpen-client` is a default member. Check root `Cargo.toml` before assuming a crate is built by default.
 
 ## Library Crates
 
-### ASM Domain
+### Node (`crates/`)
 
-Core ASM code is imported from the `alpenlabs/asm` git dependency family (`strata-asm-*`) pinned in root `Cargo.toml`. Local crates consume ASM manifests, logs, parameters, subprotocol transaction types, and the ASM worker.
-
-### OL Domain (`crates/ol/`)
-
-Orchestration Layer implementation.
+The services that make up the EE node, each a workspace crate at the top level.
 
 | Crate | Description |
 |-------|-------------|
-| `ol/stf` | OL state transition function (block, epoch, manifest processing) |
-| `ol/state-types` | State structures (toplevel, global, epochal, ledger, snark account) |
-| `ol/chain-types` | New OL block/transaction/log types (SSZ) |
-| `ol/msg-types` | Deposit and withdrawal message types |
-| `ol/da` | OL data availability traits |
-| `ol/block-assembly` | OL block construction |
-| `ol/mempool` | Transaction mempool |
-| `ol/state-support-types` | State access layers (batch diff, indexer, write tracking) |
-| `ol/state-provider` | OL state provider traits and implementations |
-| `ol/genesis` | OL genesis state construction |
-| `ol/params` | OL parameter types |
-| `ol/checkpoint` | OL checkpoint builder service |
-| `ol/sequencer` | OL sequencing helpers and state |
-| `ol/rpc/api` | OL JSON-RPC API traits and client/server glue |
-| `ol/rpc/types` | OL RPC request and response types |
-| `bridge-types` | Bridge operation and message types shared with OL/EE |
-| `ledger-types` | Ledger entry and account ledger types |
-| `checkpoint-types` | Checkpoint and batch types |
+| `params` | Consolidated Alpen chain parameters, spec version schedule |
+| `common` | Shared EE types and the trait families (engine, storage, DA, OL client, prover) |
+| `engine` | Execution engine control: drives the reth engine API |
+| `exec-chain` | In-memory view of the canonical execution chain, orphan tracking |
+| `ol-tracker` | Follows the paired OL node: epochs, checkpoints, finalization, inbox messages |
+| `genesis` | Deterministic EE genesis state |
+| `block-assembly` | EE block and package assembly |
+| `sequencer` | Sequencer workers: block, chunk and batch builders, batch lifecycle, update submitter |
+| `witness` | Block range witness extraction for EVM proof generation |
+| `exex` | Reth execution extensions: per-block state-diff persistence and accessed-state capture |
 
-### EE Domain (`crates/alpen-ee/`, `crates/evm-ee/`, `crates/ee-*`, `crates/simple-ee/`)
+### Storage (`crates/`)
 
-Execution Environment implementation.
+The engine is generic infrastructure; the store and the console core are the EE's.
 
 | Crate | Description |
 |-------|-------------|
-| `alpen-ee/engine` | EE sync and control logic |
-| `alpen-ee/exec-chain` | Execution chain state and orphan tracking |
-| `alpen-ee/ol-tracker` | OL state tracking from EE perspective |
-| `alpen-ee/sequencer` | EE block building and OL chain tracking |
-| `alpen-ee/database` | EE-specific storage (MDBX) |
-| `alpen-ee/common` | Shared EE types and traits |
-| `alpen-ee/da` | EE data availability payload and inclusion helpers |
-| `alpen-ee/genesis` | EE genesis state |
-| `alpen-ee/block-assembly` | EE block and package assembly |
-| `alpen-ee/rpc/api` | Alpen EE RPC API traits |
-| `alpen-ee/rpc/server` | Alpen EE RPC server implementation |
-| `alpen-ee/rpc/types` | Alpen EE RPC wire types |
-| `evm-ee` | EVM execution environment integration |
-| `ee-acct-types` | EE account types (SSZ) |
-| `ee-acct-runtime` | EE account runtime |
-| `ee-chain-types` | EE chain types (SSZ) |
-| `ee-chunk-runtime` | EE chunk proof runtime |
-| `simple-ee` | Minimal EE implementation for tests and tooling |
+| `mdbx` | Generic MDBX typed table store: environments, codecs, versioned values; knows nothing of the EE |
+| `database` | The EE store: node, prover, witness and DA-pipeline tables, the trait impls and store opening; its `schema` and `records` modules publish the on-disk model for tooling |
+| `dbconsole-core` | Operator console core: table registry, row reflection through the production codecs, staged writes, the sled migration rules; `bin/dbconsole` is its shell |
 
-### DA Framework (`crates/da-framework/`)
+### Protocol Types and Runtimes (`crates/`)
 
-Data Availability primitives for state diff encoding.
-
-| Primitive | Description |
-|-----------|-------------|
-| `Register` | Simple value replacement |
-| `Counter` | Increment-only values |
-| `LinearAccumulator` | MMR-style accumulators |
-| `Queue` | FIFO structures |
-| `Compound` | Nested DA structures |
-
-### Core Types & Utilities
-
-Fundamental types and shared utilities.
+The EE account and chain types shared with the specs, and the runtimes the proofs wrap.
 
 | Crate | Description |
 |-------|-------------|
-| `primitives` | Core primitive types |
-| `params` | Network parameters |
-| `config` | Configuration types |
-| `common` | Shared helpers, traits, and utilities |
-| `codec-utils` | Helpers for `strata-codec` encoding/decoding |
-| `key-derivation` | Key derivation primitives and helpers |
-| `mpt` | Merkle-Patricia Trie implementation |
-| `status` | Shared status types for services and APIs |
-| `cli-common` | Shared CLI argument and output helpers |
-| `paas` | Prover-as-a-Service task orchestration framework |
-| `node-context` | Runtime context shared by node services |
-| `strata-signer` | Detached signer library used by `bin/strata-signer` |
+| `acct-types` | EE account state and update types (SSZ) |
+| `acct-runtime` | EE account runtime: applies updates to account state |
+| `chain-types` | EE chain types: blocks, chunks, inputs and outputs (SSZ) |
+| `chunk-runtime` | Chunk proof runtime for generic execution environments |
+| `evm-ee` | The EVM implementation of the `ExecutionEnvironment` trait |
 
-### Bitcoin Types & IO
+### Data Availability (`crates/da/`)
 
 | Crate | Description |
 |-------|-------------|
-| `btcio` | Bitcoin I/O (reader, writer, broadcaster) |
+| `da/types` | Shared DA types and primitives |
+| `da/provider` | Sequencer-side DA providers: blob aggregation, SPS-51 chunked envelopes |
+| `da/runtime` | Proof-side DA reconstruction |
 
-Bitcoin primitive types, header verification, and related helpers are provided through pinned workspace dependencies from `alpenlabs/strata-common` and `alpenlabs/asm` git dependency family.
-
-### Storage & State
-
-| Crate | Description |
-|-------|-------------|
-| `storage` | Storage managers and interfaces |
-| `storage-common` | Shared storage abstractions |
-| `store-mdbx` | MDBX storage implementation |
-| `db/types` | Database type definitions |
-| `state` | Chain and client state management |
-
-### Account & Protocol Types
+### RPC (`crates/rpc/`)
 
 | Crate | Description |
 |-------|-------------|
-| `acct-types` | Account types and messages (SSZ) |
-| `snark-acct-types` | Snark account types (SSZ) |
-| `snark-acct-runtime` | Snark account runtime |
-| `snark-acct-sys` | Snark account system logic |
-| `csm-types` | Client state machine type definitions |
-
-### Proof Domain (`crates/proof-impl/`)
-
-Zero-knowledge proof generation.
-
-| Crate | Description |
-|-------|-------------|
-| `proof-impl/checkpoint` | Checkpoint proof implementation |
-| `proof-impl/evm-ee-stf` | EE Layer STF proof |
-| `proof-impl/alpen-chunk` | Alpen chunk proof implementation |
-| `proof-impl/alpen-acct` | Alpen account proof implementation |
-| `prover-core` | Shared prover coordination primitives |
-| `provers/sp1` | SP1 guest builder support |
-| `provers/sp1/guest-checkpoint` | SP1 checkpoint proof guest |
-| `provers/sp1/guest-alpen-chunk` | SP1 Alpen chunk proof guest |
-| `provers/sp1/guest-alpen-acct` | SP1 Alpen account proof guest |
-
-The SP1 guest packages are local manifests used by the guest builder, but they are not root workspace members.
+| `rpc/api` | Alpen EE RPC API traits |
+| `rpc/types` | Alpen EE RPC wire types |
+| `rpc/server` | Alpen EE RPC server implementation |
 
 ### Reth Integration (`crates/reth/`)
 
-Custom Reth node components.
+Alpen's configuration of reth. These sit below `common` in the dependency graph.
 
 | Crate | Description |
 |-------|-------------|
-| `reth/node` | Alpen Reth node implementation |
-| `reth/evm` | Custom EVM with Alpen precompiles |
-| `reth/exex` | Execution extensions |
-| `reth/rpc` | Custom RPC endpoints |
-| `reth/statediff` | State diff generation |
-| `reth/db` | Reth database glue |
 | `reth/primitives` | Reth primitive type bindings |
-| `reth/witness` | Witness and tracing helpers |
+| `reth/evm` | Custom EVM with the Alpen precompiles |
+| `reth/rpc` | Custom reth RPC endpoints |
+| `reth/node` | Alpen Reth node implementation and gossip |
+| `reth/statediff` | State diff generation |
 
-### RPC (`crates/rpc/`, `crates/ol/rpc/`)
-
-RPC APIs, types, and helpers.
-
-| Crate | Description |
-|-------|-------------|
-| `rpc/api` | Shared top-level RPC API definitions |
-| `rpc/types` | Shared top-level RPC wire types |
-| `rpc/utils` | RPC helper utilities |
-| `rpc/open-rpc` | OpenRPC specification model types |
-| `rpc/open-rpc-macros` | OpenRPC derive/proc-macro support |
-
-### Service Crates
-
-Worker patterns and service infrastructure.
+### Proofs (`crates/proof/`, `provers/sp1/`)
 
 | Crate | Description |
 |-------|-------------|
-| `chain-worker` | Legacy chain worker implementation |
-| `chain-worker` | Chain worker implementation for OL types |
-| `csm-worker` | Client state machine worker |
-| `chainexec` | Chain execution context |
-| `chaintsn` | Chain transition logic |
-| `consensus-logic` | Fork choice and sync management |
+| `proof/chunk` | Chunk proof implementation wrapping `chunk-runtime` with zkaleido proof IO |
+| `proof/acct` | Account proof implementation wrapping `acct-runtime` with zkaleido proof IO |
+| `provers/sp1` | SP1 guest builder: compiles the guests and exports their ELF paths |
+| `provers/sp1/guest-alpen-chunk` | SP1 chunk proof guest |
+| `provers/sp1/guest-alpen-acct` | SP1 account proof guest |
+
+The SP1 guest packages are local manifests with their own lockfiles, used by the guest builder; they are not workspace members.
 
 ### Test Utilities (`crates/test-utils/`)
 
-| Crate | Description |
+| Path | Description |
 |-------|-------------|
-| `test-utils` | Shared test helpers |
-| `test-utils/btcio` | Bitcoin I/O test utilities |
-| `test-utils/evm-ee` | EVM EE test utilities |
-| `test-utils/l2` | L2 integration test utilities |
-| `test-utils/ssz` | SSZ test utilities |
-| `db/tests` | Database-focused test fixtures and helpers |
-| `benches` | Criterion benchmarks for database paths |
+| `test-utils/simple-ee` | A minimal `ExecutionEnvironment` for the runtime tests and Miri |
+| `test-utils/data/` | JSON fixtures (no crate) read by the `evm-ee` and `proof/chunk` tests |
+
+### Network Params
+
+`params/<network>.json` holds the full `AlpenParams` of each network (`dev`, `staging`, `testnet`, `mainnet`). It is the file `alpen-client --alpen-params` loads and the file the SP1 guests bake in through `SP1_ALPEN_PARAMS_PATH`, so changing it changes that network's guest ELFs. Tests and CI use `dev.json`. The `genesis_inner_state_roots_are_stable` test in `alpen-genesis` parses every file and pins its genesis root.
+
+### Key Dependencies
+
+| Dependency | Purpose |
+|------------|---------|
+| Reth | Base Ethereum execution client |
+| Alloy | Ethereum types and RPC |
+| SP1 | Zero-knowledge proof system |
+| Bitcoin | Bitcoin protocol implementation |
+| SSZ | Serialization |
+
+### Prerequisites
+
+- **bitcoind**: Required for L1 integration and testing
+- **uv**: For Python functional tests
 
 ## Development Commands
 
@@ -313,7 +236,7 @@ Worker patterns and service infrastructure.
 just build
 
 # Build specific binary
-cargo build --bin strata --release
+cargo build --bin alpen-client --release
 
 # Build with specific features
 FEATURES="feature1,feature2" just build
@@ -594,10 +517,6 @@ If the functional tests fail, you can find the logs in the `_dd` directory insid
 The datadir will be the outputted by the test framework and will be named after the test run.
 
 ## Configuration
-
-### Network Params
-
-`params/<network>.json` holds the full `AlpenParams` of each network (`dev`, `staging`, `testnet`, `mainnet`). It is the file `alpen-client --alpen-params` loads and the file the SP1 guests bake in through `SP1_ALPEN_PARAMS_PATH`, so changing it changes that network's guest ELFs. Tests and CI use `dev.json`. The `genesis_inner_state_roots_are_stable` test in `alpen-ee-genesis` parses every file and pins its genesis root.
 
 ### Key Dependencies
 

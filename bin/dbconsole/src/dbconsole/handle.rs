@@ -11,7 +11,7 @@
 
 use std::rc::Rc;
 
-use alpen_ee_database::console::{ConsoleDb, FieldValue};
+use alpen_dbconsole_core::{ConsoleDb, FieldValue};
 use rhai::{Dynamic, EvalAltResult};
 
 use super::value::dynamic_to_field;

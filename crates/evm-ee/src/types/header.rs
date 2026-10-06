@@ -1,12 +1,12 @@
 //! EVM block header implementation.
 
 use alloy_consensus::{BlockBody, Header, proofs::calculate_transaction_root};
-use alpen_ee_da_types::EvmHeaderSummary;
+use alpen_acct_types::ExecHeader;
+use alpen_chain_types::ExecHeaderSummary;
+use alpen_da_types::EvmHeaderSummary;
 use reth_ethereum_primitives::TransactionSigned;
 use revm_primitives::alloy_primitives::{Address, B64, B256, Bloom, Bytes, U256};
 use strata_codec::{Codec, CodecError, encode_to_vec};
-use strata_ee_acct_types::ExecHeader;
-use strata_ee_chain_types::ExecHeaderSummary;
 
 use super::Hash;
 use crate::codec_shims::{decode_rlp_with_length, encode_rlp_with_length};

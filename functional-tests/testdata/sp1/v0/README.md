@@ -30,7 +30,7 @@ so moving between them is a predicate rotation rather than a redeploy.
 
 See `provers/sp1/guest-alpen-chunk/src/main.rs` and
 `provers/sp1/guest-alpen-acct/src/main.rs` for the constant, and
-`crates/proof-impl/alpen-chunk/src/lib.rs` for why it is an out-of-band
+`crates/proof/chunk/src/lib.rs` for why it is an out-of-band
 argument instead of zkVM input.
 
 ## Provenance
@@ -39,7 +39,7 @@ Built from this workspace, not from a sister repo:
 
 - source: this branch, with `SPEC_VERSION` set to `AlpenSpecId::V0` in both
   `provers/sp1/guest-alpen-acct` and `provers/sp1/guest-alpen-chunk`
-- builder: `cargo build --release -p strata-sp1-guest-builder`, driven by
+- builder: `cargo build --release -p alpen-sp1-guest-builder`, driven by
   `run_tests.sh`'s `build_sp1_guests`
 - output: `provers/sp1/generated/`, copied here
 

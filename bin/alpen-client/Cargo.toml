@@ -1,7 +1,9 @@
 [package]
-edition = "2021"
+edition.workspace = true
 name = "alpen-client"
-version = "0.3.0-alpha.1"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [lints]
 workspace = true
@@ -41,15 +43,14 @@ sequencer = [
   "dep:alloy-eips",
   "dep:alloy-rlp",
   "dep:alloy-rpc-types-engine",
-  "dep:alpen-ee-da-provider",
-  "dep:alpen-ee-da-runtime",
-  "dep:alpen-ee-da-types",
-  "dep:alpen-ee-exec-chain",
-  "dep:alpen-ee-sequencer",
-  "dep:alpen-reth-db",
-  "dep:alpen-reth-exex",
+  "dep:alpen-da-provider",
+  "dep:alpen-da-runtime",
+  "dep:alpen-da-types",
+  "dep:alpen-exec-chain",
+  "dep:alpen-sequencer",
+  "dep:alpen-exex",
   "dep:alpen-reth-statediff",
-  "dep:alpen-reth-witness",
+  "dep:alpen-witness",
   "dep:bitcoind-async-client",
   "dep:k256",
   "dep:metrics",
@@ -57,14 +58,14 @@ sequencer = [
   "dep:strata-btcio",
   "dep:strata-codec",
   "dep:strata-db-types",
-  "dep:strata-ee-acct-runtime",
-  "dep:strata-ee-acct-types",
-  "dep:strata-ee-chain-types",
-  "dep:strata-ee-chunk-runtime",
-  "dep:strata-evm-ee",
+  "dep:alpen-acct-runtime",
+  "dep:alpen-acct-types",
+  "dep:alpen-chain-types",
+  "dep:alpen-chunk-runtime",
+  "dep:alpen-evm-ee",
   "dep:strata-paas",
-  "dep:strata-proofimpl-alpen-acct",
-  "dep:strata-proofimpl-alpen-chunk",
+  "dep:alpen-proof-acct",
+  "dep:alpen-proof-chunk",
   "dep:strata-snark-acct-runtime",
   "dep:thiserror",
   "dep:zkaleido",
@@ -89,27 +90,33 @@ path = "src/main.rs"
 [dependencies]
 alloy-consensus = { workspace = true, optional = true }
 alloy-rlp = { workspace = true, optional = true }
-alpen-ee-common.workspace = true
-alpen-ee-da-provider = { workspace = true, optional = true }
-alpen-ee-da-runtime = { workspace = true, optional = true, features = [
+alpen-acct-runtime = { workspace = true, optional = true }
+alpen-acct-types = { workspace = true, optional = true }
+alpen-chain-types = { workspace = true, optional = true }
+alpen-chunk-runtime = { workspace = true, optional = true }
+alpen-common.workspace = true
+alpen-da-provider = { workspace = true, optional = true }
+alpen-da-runtime = { workspace = true, optional = true, features = [
   "builders",
 ] }
-alpen-ee-da-types = { workspace = true, optional = true }
-alpen-ee-database.workspace = true
-alpen-ee-engine.workspace = true
-alpen-ee-exec-chain = { workspace = true, optional = true }
-alpen-ee-genesis.workspace = true
-alpen-ee-ol-tracker.workspace = true
-alpen-ee-params.workspace = true
-alpen-ee-rpc-server.workspace = true
-alpen-ee-sequencer = { workspace = true, optional = true }
-alpen-reth-db = { workspace = true, optional = true }
+alpen-da-types = { workspace = true, optional = true }
+alpen-database.workspace = true
+alpen-engine.workspace = true
+alpen-evm-ee = { workspace = true, optional = true }
+alpen-exec-chain = { workspace = true, optional = true }
+alpen-exex = { workspace = true, optional = true }
+alpen-genesis.workspace = true
+alpen-ol-tracker.workspace = true
+alpen-params.workspace = true
+alpen-proof-acct = { workspace = true, optional = true }
+alpen-proof-chunk = { workspace = true, optional = true }
 alpen-reth-evm.workspace = true
-alpen-reth-exex = { workspace = true, optional = true }
 alpen-reth-node.workspace = true
 alpen-reth-rpc.workspace = true
 alpen-reth-statediff = { workspace = true, optional = true }
-alpen-reth-witness = { workspace = true, optional = true }
+alpen-rpc-server.workspace = true
+alpen-sequencer = { workspace = true, optional = true }
+alpen-witness = { workspace = true, optional = true }
 bitcoind-async-client = { workspace = true, optional = true }
 k256 = { workspace = true, optional = true }
 metrics = { workspace = true, optional = true }
@@ -120,11 +127,6 @@ strata-codec = { workspace = true, optional = true }
 strata-common = { workspace = true, features = ["async"] }
 strata-config.workspace = true
 strata-db-types = { workspace = true, optional = true }
-strata-ee-acct-runtime = { workspace = true, optional = true }
-strata-ee-acct-types = { workspace = true, optional = true }
-strata-ee-chain-types = { workspace = true, optional = true }
-strata-ee-chunk-runtime = { workspace = true, optional = true }
-strata-evm-ee = { workspace = true, optional = true }
 strata-identifiers.workspace = true
 strata-logging.workspace = true
 strata-ol-rpc-api = { workspace = true, features = ["client"] }
@@ -132,8 +134,6 @@ strata-ol-rpc-types.workspace = true
 strata-paas = { workspace = true, optional = true }
 strata-predicate.workspace = true
 strata-primitives.workspace = true
-strata-proofimpl-alpen-acct = { workspace = true, optional = true }
-strata-proofimpl-alpen-chunk = { workspace = true, optional = true }
 strata-service.workspace = true
 strata-snark-acct-runtime = { workspace = true, optional = true }
 strata-snark-acct-types.workspace = true

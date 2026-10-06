@@ -4,7 +4,7 @@
 //! expression or a `--script` file over the EE MDBX store, decoding values
 //! through the node's own codecs. `migrate-sled` fills a fresh MDBX store from
 //! the sled store a previous binary wrote. The scripting shell lives in
-//! [`dbconsole`]; the codec-owning core lives in `alpen_ee_database::console`.
+//! [`dbconsole`]; the codec-owning core lives in `alpen_dbconsole_core`.
 
 use std::process;
 

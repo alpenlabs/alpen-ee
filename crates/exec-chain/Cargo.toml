@@ -1,0 +1,28 @@
+[package]
+edition.workspace = true
+name = "alpen-exec-chain"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+alpen-common.workspace = true
+strata-acct-types.workspace = true
+
+anyhow.workspace = true
+eyre.workspace = true
+serde.workspace = true
+strata-service.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+strata-identifiers.workspace = true
+alpen-acct-types.workspace = true
+alpen-chain-types.workspace = true
+alpen-common = { workspace = true, features = ["test-utils"] }
+alpen-params.workspace = true

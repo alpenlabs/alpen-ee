@@ -1,0 +1,19 @@
+[package]
+edition.workspace = true
+name = "alpen-rpc-api"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+alloy-primitives = { workspace = true, features = ["serde"] }
+alpen-rpc-types = { workspace = true, features = ["jsonschema"] }
+jsonrpsee = { workspace = true, features = ["server", "macros"] }
+schemars.workspace = true
+strata-open-rpc.workspace = true
+
+[features]
+client = ["jsonrpsee/client"]

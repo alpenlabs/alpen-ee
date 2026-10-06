@@ -262,7 +262,7 @@ Components marked **(Sequencer)** run only when the node's `--alpen-config` sets
 
 **Purpose**: Polls the OL chain and maintains the EE's view of consensus state.
 
-**Location**: [crates/alpen-ee/ol-tracker/src/](../../crates/alpen-ee/ol-tracker/src/), started via [src/services/ol_tracker.rs](src/services/ol_tracker.rs)
+**Location**: [crates/ol-tracker/src/](../../crates/ol-tracker/src/), started via [src/services/ol_tracker.rs](src/services/ol_tracker.rs)
 
 **Responsibilities**:
 - Poll the OL node for chain status at a regular interval
@@ -302,7 +302,7 @@ sequenceDiagram
 
 **Purpose**: Tracks finalized OL blocks and caches their inbox messages so the block builder can include them during block assembly.
 
-**Location**: [crates/alpen-ee/sequencer/src/ol_chain_tracker/](../../crates/alpen-ee/sequencer/src/ol_chain_tracker/)
+**Location**: [crates/sequencer/src/ol_chain_tracker/](../../crates/sequencer/src/ol_chain_tracker/)
 
 **Responsibilities**:
 - React to finalized-OL updates from the OL Tracker
@@ -321,7 +321,7 @@ Only messages from **finalized** OL blocks are exposed, avoiding reorg hazards.
 
 **Purpose**: Bridges OL consensus state to Reth's Engine API, managing fork choice updates.
 
-**Location**: [crates/alpen-ee/engine/src/control.rs](../../crates/alpen-ee/engine/src/control.rs)
+**Location**: [crates/engine/src/control.rs](../../crates/engine/src/control.rs)
 
 **Inputs**:
 - consensus heads — from OL Tracker (confirmed/finalized)
@@ -342,7 +342,7 @@ finalized block       →    finalized_block_hash
 
 **Purpose**: Assembles new EE blocks by combining pending transactions with OL inbox messages.
 
-**Location**: [crates/alpen-ee/sequencer/src/block_builder/](../../crates/alpen-ee/sequencer/src/block_builder/)
+**Location**: [crates/sequencer/src/block_builder/](../../crates/sequencer/src/block_builder/)
 
 **Responsibilities**:
 - Produce a block every block time (default 5,000ms; override via `sequencer.blocktime_ms` in `--alpen-config`)
@@ -363,7 +363,7 @@ Fork choice / canonicalization is owned by Engine Control, not the block builder
 
 **Purpose**: Maintains an in-memory view of the canonical execution chain, tracking both finalized and unfinalized blocks.
 
-**Location**: [crates/alpen-ee/exec-chain/src/](../../crates/alpen-ee/exec-chain/src/), started via [src/services/exec_chain.rs](src/services/exec_chain.rs)
+**Location**: [crates/exec-chain/src/](../../crates/exec-chain/src/), started via [src/services/exec_chain.rs](src/services/exec_chain.rs)
 
 **Block Lifecycle**: A new sequencer block is initially **unfinalized**. The Exec Chain tracks unfinalized blocks and determines which chain is canonical. Blocks become **finalized** only when confirmed by the OL (via OL Tracker updates), so the sequencer's latest blocks are always unfinalized until OL confirmation.
 
@@ -379,7 +379,7 @@ Fork choice / canonicalization is owned by Engine Control, not the block builder
 
 **Purpose**: Groups canonical exec blocks into sealed **batches**, the unit of DA and OL submission.
 
-**Location**: [crates/alpen-ee/sequencer/src/batch_builder/](../../crates/alpen-ee/sequencer/src/batch_builder/)
+**Location**: [crates/sequencer/src/batch_builder/](../../crates/sequencer/src/batch_builder/)
 
 **Responsibilities**:
 - Watch the canonical preconf head and walk newly-canonical blocks
@@ -397,7 +397,7 @@ Fork choice / canonicalization is owned by Engine Control, not the block builder
 
 **Purpose**: Subdivides each batch into **chunks**, smaller provable sub-units.
 
-**Location**: [crates/alpen-ee/sequencer/src/chunk_builder/](../../crates/alpen-ee/sequencer/src/chunk_builder/)
+**Location**: [crates/sequencer/src/chunk_builder/](../../crates/sequencer/src/chunk_builder/)
 
 **Responsibilities**:
 - Consume batch events from the Batch Builder (so it can never run ahead of it)
@@ -411,7 +411,7 @@ Fork choice / canonicalization is owned by Engine Control, not the block builder
 
 **Purpose**: Drives each sealed batch through DA and proving until it is ready for OL submission.
 
-**Location**: [crates/alpen-ee/sequencer/src/batch_lifecycle/](../../crates/alpen-ee/sequencer/src/batch_lifecycle/)
+**Location**: [crates/sequencer/src/batch_lifecycle/](../../crates/sequencer/src/batch_lifecycle/)
 
 **Responsibilities**:
 - Advance batches through `Sealed → DaPending → DaComplete → ProofPending → ProofReady`
@@ -435,7 +435,7 @@ DA and proof failures are non-fatal; the task retries on each poll.
 
 **Backends**, selected by `sequencer.prover.backend`:
 - **`sp1`** — production (`sp1` feature); each program's paths are compiled guest ELFs; deadline via `deadline_secs`
-- **`native`** — skips real Groth16 proving, signing proofs with a Schnorr key instead. Each program's paths are hex-encoded key files. The acct key must match whatever the OL genesis `update_vk` expects, or the account prover predicate validation at startup fails — see `crates/proof-impl/alpen-acct`'s `test_signing_key`
+- **`native`** — skips real Groth16 proving, signing proofs with a Schnorr key instead. Each program's paths are hex-encoded key files. The acct key must match whatever the OL genesis `update_vk` expects, or the account prover predicate validation at startup fails — see `crates/proof/acct`'s `test_signing_key`
 
 **Programs**: `[sequencer.prover.programs.<spec_version>]` holds one entry per resident spec version, keyed by the version that program was built for, each with its `chunk_path` / `acct_path` pair. Keying by the version rather than carrying it as a field makes declaring one twice a duplicate-key TOML error. Every entry is built and validated at startup, and each batch's proof request is routed to whichever entry's version matches that batch's own governing spec version. Configuring both sides of an `update_vk` rotation ahead of time therefore lets the sequencer keep proving across it without a restart. Startup still fails unless at least one entry matches the OL's live `update_vk`.
 
@@ -447,7 +447,7 @@ Proofs and prover tasks live in a dedicated MDBX instance, separate from OL stor
 
 **Purpose**: Posts each batch's state diff to Bitcoin so EE state is reconstructible from L1.
 
-**Location**: [crates/alpen-ee/da/](../../crates/alpen-ee/da/) (types, provider, runtime), wired in [main.rs](src/main.rs).
+**Location**: [crates/da/](../../crates/da/) (types, provider, runtime), wired in [main.rs](src/main.rs).
 
 **Flow**:
 1. A Reth exex captures per-block state diffs as blocks commit.
@@ -462,7 +462,7 @@ Proofs and prover tasks live in a dedicated MDBX instance, separate from OL stor
 
 **Purpose**: Submits proven batches to OL as snark account updates.
 
-**Location**: [crates/alpen-ee/sequencer/src/update_submitter/](../../crates/alpen-ee/sequencer/src/update_submitter/)
+**Location**: [crates/sequencer/src/update_submitter/](../../crates/sequencer/src/update_submitter/)
 
 **Responsibilities**:
 - Watch for `ProofReady` batches
@@ -612,7 +612,7 @@ sequenceDiagram
 - Deposits are rate-limited per block (`max_deposits_per_block`)
 - Deposits are applied by reusing the EVM's withdrawal (EIP-4895) mechanism to mint into EVM state
 - The deposit's destination subject ID (32 bytes) maps to a 20-byte EVM address by taking its last 20 bytes ([`subject_to_address_unchecked`](../../crates/reth/evm/src/utils.rs))
-- Bitcoin amounts (sats) are converted to gwei for the EVM ([`sats_to_gwei`](../../crates/alpen-ee/common/src/utils/conversions.rs))
+- Bitcoin amounts (sats) are converted to gwei for the EVM ([`sats_to_gwei`](../../crates/common/src/utils/conversions.rs))
 
 ---
 
@@ -642,7 +642,7 @@ sequenceDiagram
 
 ## Key Abstractions
 
-All traits and types below are re-exported flat from the `alpen_ee_common` crate.
+All traits and types below are re-exported flat from the `alpen_common` crate.
 
 ### Core Traits
 
@@ -659,7 +659,7 @@ All traits and types below are re-exported flat from the `alpen_ee_common` crate
 | `BatchDaProvider` | DA posting/status interface, decoupled from the DA implementation |
 | `HeaderSummaryProvider` | Supplies header metadata for DA blob construction |
 
-Location: [crates/alpen-ee/common/src/traits/](../../crates/alpen-ee/common/src/traits/)
+Location: [crates/common/src/traits/](../../crates/common/src/traits/)
 
 ### Core Types
 
@@ -675,7 +675,7 @@ Location: [crates/alpen-ee/common/src/traits/](../../crates/alpen-ee/common/src/
 | `Proof` / `ProofId` | Proof bytes and its hash identifier |
 | `L1DaBlockRef` | Per-batch reference to its L1 DA transactions |
 
-Location: [crates/alpen-ee/common/src/types/](../../crates/alpen-ee/common/src/types/)
+Location: [crates/common/src/types/](../../crates/common/src/types/)
 
 ---
 
@@ -725,7 +725,7 @@ The client extends the standard Reth CLI with three Alpen-specific flags (see [m
 
 Reth's own `--config <path>` flag is unrelated — it points at `reth.toml` and is untouched by Alpen.
 
-The pinned `strata-datatool` doesn't have `gen-alpen-params` yet, so until it ships, compose the params JSON by hand: see the `AlpenParams` schema in [crates/alpen-ee/params/src/params.rs](../../crates/alpen-ee/params/src/params.rs), or [functional-tests/common/alpen_params.py](../../functional-tests/common/alpen_params.py) for a working example that stitches it together from `gen-ee-params` output and an in-repo chain spec.
+The pinned `strata-datatool` doesn't have `gen-alpen-params` yet, so until it ships, compose the params JSON by hand: see the `AlpenParams` schema in [crates/params/src/params.rs](../../crates/params/src/params.rs), or [functional-tests/common/alpen_params.py](../../functional-tests/common/alpen_params.py) for a working example that stitches it together from `gen-ee-params` output and an in-repo chain spec.
 
 For deployment — Docker, P2P peering and discovery, and troubleshooting a running node — see [docker/operations.md](../../docker/operations.md).
 
@@ -816,7 +816,7 @@ Two secrets are read from the environment instead of the config file, both seque
 ## RPC & Observability
 
 - **Standard Reth RPC** — the full Ethereum JSON-RPC surface.
-- **Alpen EE RPC** — a custom `alpen` namespace ([crates/alpen-ee/rpc/](../../crates/alpen-ee/rpc/)):
+- **Alpen EE RPC** — a custom `alpen` namespace ([crates/rpc/](../../crates/rpc/)):
   - `alpen_getBlockStatus` — L1 finalization status for an EE block
   - `alpen_getChunkProofCoverage` — whether proof-ready chunks cover a block interval
 - **Health check** — an HTTP endpoint that reports readiness once startup completes.

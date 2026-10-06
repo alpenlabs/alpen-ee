@@ -31,7 +31,7 @@ impl FromStr for GuestProgram {
 pub async fn run_sp1_programs(programs: &[GuestProgram]) -> Vec<(String, ExecutionSummary)> {
     use std::fs;
 
-    use strata_sp1_guest_builder::{GUEST_ALPEN_ACCT_ELF_PATH, GUEST_ALPEN_CHUNK_ELF_PATH};
+    use alpen_sp1_guest_builder::{GUEST_ALPEN_ACCT_ELF_PATH, GUEST_ALPEN_CHUNK_ELF_PATH};
     use zkaleido_sp1_host::{SP1Host, SP1HostConfig};
 
     let mut reports = Vec::with_capacity(programs.len());

@@ -562,7 +562,59 @@ dependencies = [
 ]
 
 [[package]]
-name = "alpen-ee-da-types"
+name = "alpen-acct-types"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alpen-chain-types",
+ "ssz",
+ "ssz_codegen",
+ "ssz_derive",
+ "ssz_primitives",
+ "ssz_types",
+ "strata-acct-types",
+ "strata-codec",
+ "strata-identifiers",
+ "strata-msg-fmt",
+ "strata-ol-msg-types",
+ "strata-predicate",
+ "strata-snark-acct-runtime",
+ "thiserror 2.0.18",
+ "tree_hash",
+ "tree_hash_derive",
+]
+
+[[package]]
+name = "alpen-chain-types"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "ssz",
+ "ssz_codegen",
+ "ssz_derive",
+ "ssz_primitives",
+ "ssz_types",
+ "strata-acct-types",
+ "strata-predicate",
+ "thiserror 2.0.18",
+ "tree_hash",
+ "tree_hash_derive",
+]
+
+[[package]]
+name = "alpen-chunk-runtime"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alpen-acct-types",
+ "alpen-chain-types",
+ "rkyv",
+ "rkyv_impl 0.2.2",
+ "ssz",
+ "strata-acct-types",
+ "strata-codec",
+ "strata-predicate",
+]
+
+[[package]]
+name = "alpen-da-types"
 version = "0.3.0-alpha.1"
 dependencies = [
  "alpen-reth-statediff",
@@ -576,7 +628,39 @@ dependencies = [
 ]
 
 [[package]]
-name = "alpen-ee-params"
+name = "alpen-evm-ee"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alloy-consensus",
+ "alloy-rlp",
+ "alloy-rpc-types-debug",
+ "alpen-acct-types",
+ "alpen-chain-types",
+ "alpen-da-types",
+ "alpen-params",
+ "alpen-reth-evm",
+ "alpen-reth-primitives",
+ "bincode",
+ "itertools 0.14.0",
+ "reth-chainspec",
+ "reth-consensus-common",
+ "reth-errors",
+ "reth-ethereum-primitives",
+ "reth-evm",
+ "reth-primitives-traits",
+ "reth-trie",
+ "revm",
+ "revm-primitives",
+ "rsp-client-executor",
+ "rsp-mpt",
+ "strata-acct-types",
+ "strata-codec",
+ "strata-msg-fmt",
+ "strata-ol-msg-types",
+]
+
+[[package]]
+name = "alpen-params"
 version = "0.3.0-alpha.1"
 dependencies = [
  "alloy-consensus",
@@ -592,6 +676,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "alpen-proof-chunk"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alpen-chain-types",
+ "alpen-chunk-runtime",
+ "alpen-evm-ee",
+ "alpen-params",
+ "alpen-reth-evm",
+ "k256",
+ "reth-chainspec",
+ "rkyv",
+ "ssz",
+ "strata-predicate",
+ "zkaleido",
+ "zkaleido-native-adapter",
+]
+
+[[package]]
 name = "alpen-reth-evm"
 version = "0.3.0-alpha.1"
 dependencies = [
@@ -599,7 +701,7 @@ dependencies = [
  "alloy-eips 2.0.4",
  "alloy-rpc-types-engine",
  "alloy-sol-types",
- "alpen-ee-params",
+ "alpen-params",
  "alpen-reth-primitives",
  "reth-chainspec",
  "reth-ethereum-primitives",
@@ -2191,9 +2293,9 @@ dependencies = [
 name = "guest-sp1-alpen-chunk"
 version = "0.1.0"
 dependencies = [
- "alpen-ee-params",
+ "alpen-params",
+ "alpen-proof-chunk",
  "serde_json",
- "strata-proofimpl-alpen-chunk",
  "zkaleido-sp1-guest-env",
 ]
 
@@ -5116,89 +5218,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "strata-ee-acct-types"
-version = "0.1.0"
-dependencies = [
- "ssz",
- "ssz_codegen",
- "ssz_derive",
- "ssz_primitives",
- "ssz_types",
- "strata-acct-types",
- "strata-codec",
- "strata-ee-chain-types",
- "strata-identifiers",
- "strata-msg-fmt",
- "strata-ol-msg-types",
- "strata-predicate",
- "strata-snark-acct-runtime",
- "thiserror 2.0.18",
- "tree_hash",
- "tree_hash_derive",
-]
-
-[[package]]
-name = "strata-ee-chain-types"
-version = "0.1.0"
-dependencies = [
- "ssz",
- "ssz_codegen",
- "ssz_derive",
- "ssz_primitives",
- "ssz_types",
- "strata-acct-types",
- "strata-predicate",
- "thiserror 2.0.18",
- "tree_hash",
- "tree_hash_derive",
-]
-
-[[package]]
-name = "strata-ee-chunk-runtime"
-version = "0.1.0"
-dependencies = [
- "rkyv",
- "rkyv_impl 0.2.2",
- "ssz",
- "strata-acct-types",
- "strata-codec",
- "strata-ee-acct-types",
- "strata-ee-chain-types",
- "strata-predicate",
-]
-
-[[package]]
-name = "strata-evm-ee"
-version = "0.1.0"
-dependencies = [
- "alloy-consensus",
- "alloy-rlp",
- "alloy-rpc-types-debug",
- "alpen-ee-da-types",
- "alpen-reth-evm",
- "alpen-reth-primitives",
- "bincode",
- "itertools 0.14.0",
- "reth-chainspec",
- "reth-consensus-common",
- "reth-errors",
- "reth-ethereum-primitives",
- "reth-evm",
- "reth-primitives-traits",
- "reth-trie",
- "revm",
- "revm-primitives",
- "rsp-client-executor",
- "rsp-mpt",
- "strata-acct-types",
- "strata-codec",
- "strata-ee-acct-types",
- "strata-ee-chain-types",
- "strata-msg-fmt",
- "strata-ol-msg-types",
-]
-
-[[package]]
 name = "strata-identifiers"
 version = "0.1.0"
 source = "git+https://github.com/alpenlabs/strata-common?tag=v0.4.0-rc.3#4b7fd841447910cd9b29b057c02d847b91d23872"
@@ -5325,24 +5344,6 @@ dependencies = [
  "strata-btc-types",
  "strata-crypto",
  "strata-identifiers",
-]
-
-[[package]]
-name = "strata-proofimpl-alpen-chunk"
-version = "0.1.0"
-dependencies = [
- "alpen-ee-params",
- "alpen-reth-evm",
- "k256",
- "reth-chainspec",
- "rkyv",
- "ssz",
- "strata-ee-chain-types",
- "strata-ee-chunk-runtime",
- "strata-evm-ee",
- "strata-predicate",
- "zkaleido",
- "zkaleido-native-adapter",
 ]
 
 [[package]]

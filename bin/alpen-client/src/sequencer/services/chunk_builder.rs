@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
-use alpen_ee_common::{BatchStorage, BlockNumHash, ChunkStorage, ExecBlockStorage};
-use alpen_ee_sequencer::{
+use alpen_common::{BatchStorage, BlockNumHash, ChunkStorage, ExecBlockStorage};
+use alpen_sequencer::{
     chunk_builder::{
         cleanup_orphaned_chunks, create_chunk_builder_state, init_chunk_builder_state,
         repair_batch_linkage, ChunkBuilderService, ChunkBuilderStatus,

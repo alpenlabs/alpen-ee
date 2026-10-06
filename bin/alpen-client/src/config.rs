@@ -17,10 +17,10 @@ use std::{
 };
 
 use alloy_primitives::{address, Address};
-use alpen_ee_ol_tracker::EpochTrackingMode;
+use alpen_ol_tracker::EpochTrackingMode;
 #[cfg(feature = "sequencer")]
-use alpen_ee_params::AlpenParams;
-use alpen_ee_params::AlpenSpecId;
+use alpen_params::AlpenParams;
+use alpen_params::AlpenSpecId;
 use serde::{de::Error as DeError, Deserialize, Deserializer, Serialize};
 #[cfg(feature = "sequencer")]
 use strata_config::btcio::FeePolicy;

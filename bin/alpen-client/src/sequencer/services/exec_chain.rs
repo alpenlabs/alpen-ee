@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use alpen_ee_common::{BlockNumHash, ConsensusHeads, ExecBlockStorage};
-use alpen_ee_exec_chain::{
+use alpen_common::{BlockNumHash, ConsensusHeads, ExecBlockStorage};
+use alpen_exec_chain::{
     ExecChainHandle, ExecChainMsg, ExecChainService, ExecChainServiceState, ExecChainState,
 };
 use strata_service::{AsyncExecutor, ServiceBuilder, TokioMpscInput};

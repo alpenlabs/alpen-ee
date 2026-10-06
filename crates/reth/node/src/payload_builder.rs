@@ -6,7 +6,7 @@ use std::{
 
 use alloy_consensus::{Header, Transaction};
 use alloy_eips::eip4895::Withdrawals;
-use alpen_ee_params::FeeSpec;
+use alpen_params::FeeSpec;
 use alpen_reth_evm::{
     base_fee::next_floored_base_fee,
     constants::BRIDGEOUT_PRECOMPILE_ADDRESS,
@@ -565,7 +565,7 @@ where
 #[cfg(test)]
 mod tests {
     use alloy_rpc_types::engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
-    use alpen_ee_params::{AlpenSpecId, EvmSpec, HeaderExtra, SpecVersioned};
+    use alpen_params::{AlpenSpecId, EvmSpec, HeaderExtra, SpecVersioned};
     use alpen_reth_evm::evm::AlpenEvmFactory;
     use reth_node_api::BuiltPayload;
     use reth_primitives_traits::SealedHeader;

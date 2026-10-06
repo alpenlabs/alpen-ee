@@ -1,0 +1,18 @@
+[package]
+name = "alpen-simple-ee"
+version.workspace = true
+edition = "2024"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+alpen-acct-types.workspace = true
+alpen-chain-types.workspace = true
+strata-acct-types.workspace = true
+strata-codec.workspace = true
+
+digest.workspace = true
+sha2.workspace = true
+
+[lints]
+workspace = true

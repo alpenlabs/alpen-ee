@@ -12,15 +12,15 @@
 
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc, time::Duration};
 
-use alpen_ee_common::{BatchStorage, ChunkStorage, SequencerOLClient};
-use alpen_ee_params::{AlpenParams, AlpenSpecId};
+use alpen_common::{BatchStorage, ChunkStorage, SequencerOLClient};
+use alpen_params::{AlpenParams, AlpenSpecId};
+use alpen_proof_acct::process_ee_acct_update;
+use alpen_proof_chunk::process_ee_chunk;
 use eyre::Context;
 use k256::schnorr::SigningKey;
 use strata_paas::{Prover, ProverBuilder, ProverServiceBuilder};
 use strata_predicate::{PredicateKey, PredicateTypeId};
 use strata_primitives::buf::Buf32;
-use strata_proofimpl_alpen_acct::process_ee_acct_update;
-use strata_proofimpl_alpen_chunk::process_ee_chunk;
 use tracing::{info, warn};
 #[cfg(feature = "sp1")]
 use zkaleido::ZkVmExecutor;

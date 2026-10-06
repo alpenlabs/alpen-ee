@@ -1,0 +1,108 @@
+//! Producer-side helpers for splitting a [`DaBlob`] into envelope-sized chunks.
+//!
+//! Consumers (proof verifier, host witness builder) only need the codec types
+//! and `reassemble_da_blob` from [`alpen_da_types`]; the chunking primitives
+//! here are exclusively used by the chunked-envelope DA provider when building
+//! inscriptions.
+
+use alpen_da_types::DaBlob;
+use strata_codec::{encode_to_vec, CodecError};
+use strata_l1_envelope_fmt::MAX_ENVELOPE_PAYLOAD_SIZE;
+
+/// Splits a blob into chunk payloads.
+///
+/// Each element is at most `max_chunk_payload` bytes. The original blob can
+/// be recovered by concatenating all payloads in order.
+///
+/// # Panics
+///
+/// Panics if `blob` is empty.
+fn split_blob(blob: &[u8], max_chunk_payload: usize) -> Vec<Vec<u8>> {
+    assert!(!blob.is_empty(), "cannot split an empty blob");
+    blob.chunks(max_chunk_payload).map(|c| c.to_vec()).collect()
+}
+
+/// Splits a [`DaBlob`] into raw chunk payloads ready for envelope inscription.
+///
+/// Each payload is at most `max_chunk_payload` bytes. Returns the chunks in
+/// order. Chunk index and total are implicit in commit tx output ordering.
+///
+/// # Panics
+///
+/// Panics if `max_chunk_payload` is zero or exceeds [`MAX_ENVELOPE_PAYLOAD_SIZE`]
+/// — either would produce chunks the envelope builder cannot accept.
+pub fn prepare_da_chunks(
+    blob: &DaBlob,
+    max_chunk_payload: usize,
+) -> Result<Vec<Vec<u8>>, CodecError> {
+    assert!(
+        (1..=MAX_ENVELOPE_PAYLOAD_SIZE).contains(&max_chunk_payload),
+        "max_chunk_payload must be in 1..={MAX_ENVELOPE_PAYLOAD_SIZE}, got {max_chunk_payload}"
+    );
+    let encoded = encode_to_vec(blob)?;
+    // Each chunk maps to one reveal tx and one P2TR output in the commit tx.
+    // Commit-tx standardness gives the practical chunk-count ceiling: a
+    // 43-byte P2TR output under Bitcoin Core's 400,000 wu limit leaves room
+    // for roughly 2,300 reveal outputs after the input, OP_RETURN marker, and
+    // change output. Current EE DA blobs should stay far below that;
+    // NOTE: add an explicit BlobTooLarge error if batch sizing approaches
+    // thousands of chunks.
+    Ok(split_blob(&encoded, max_chunk_payload))
+}
+
+#[cfg(test)]
+mod tests {
+    use alpen_da_types::{reassemble_da_blob, DaBlob, EvmHeaderSummary};
+    use alpen_reth_statediff::BatchStateDiff;
+    use strata_codec::{decode_buf_exact, encode_to_vec};
+    use strata_l1_envelope_fmt::MAX_ENVELOPE_PAYLOAD_SIZE;
+
+    use super::*;
+
+    fn make_test_da_blob() -> DaBlob {
+        DaBlob {
+            update_seq_no: 42,
+            evm_header: EvmHeaderSummary {
+                block_num: 42,
+                timestamp: 1_700_000_000,
+                base_fee: 1_000_000_000,
+                gas_used: 15_000_000,
+                gas_limit: 36_000_000,
+            },
+            state_diff: BatchStateDiff::default(),
+        }
+    }
+
+    fn assert_da_blob_eq(a: &DaBlob, b: &DaBlob) {
+        assert_eq!(a.update_seq_no, b.update_seq_no, "update_seq_no mismatch");
+        assert_eq!(a.evm_header, b.evm_header, "evm_header mismatch");
+        assert!(a.state_diff.is_empty(), "expected empty state_diff in a");
+        assert!(b.state_diff.is_empty(), "expected empty state_diff in b");
+    }
+
+    #[test]
+    fn da_blob_codec_roundtrip() {
+        let blob = make_test_da_blob();
+        let encoded = encode_to_vec(&blob).unwrap();
+        let decoded: DaBlob = decode_buf_exact(&encoded).unwrap();
+        assert_da_blob_eq(&blob, &decoded);
+    }
+
+    #[test]
+    fn full_pipeline_roundtrip() {
+        let blob = make_test_da_blob();
+        let chunks = prepare_da_chunks(&blob, MAX_ENVELOPE_PAYLOAD_SIZE).unwrap();
+        let reassembled = reassemble_da_blob(&chunks).unwrap();
+        assert_da_blob_eq(&blob, &reassembled);
+    }
+
+    #[test]
+    fn small_chunk_payload_splits_and_reassembles() {
+        let blob = make_test_da_blob();
+        let chunks = prepare_da_chunks(&blob, 4).unwrap();
+        assert!(chunks.len() > 1, "expected multiple chunks");
+        assert!(chunks.iter().all(|c| c.len() <= 4));
+        let reassembled = reassemble_da_blob(&chunks).unwrap();
+        assert_da_blob_eq(&blob, &reassembled);
+    }
+}

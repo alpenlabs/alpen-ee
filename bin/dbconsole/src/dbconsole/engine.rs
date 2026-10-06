@@ -15,7 +15,7 @@ use std::{
     },
 };
 
-use alpen_ee_database::console::{ConsoleDb, Direction, Range, Record};
+use alpen_dbconsole_core::{ConsoleDb, Direction, Range, Record};
 use rhai::{
     Array, Dynamic, Engine, EvalAltResult, FnPtr, ImmutableString, NativeCallContext, Position,
 };

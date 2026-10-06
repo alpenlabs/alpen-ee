@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use alpen_ee_params::{EvmSpec, FeeSpec};
+use alpen_params::{EvmSpec, FeeSpec};
 use alpen_reth_evm::evm::AlpenEvmFactory;
 use alpen_reth_rpc::{
     eth::{AlpenEthApiBuilder, LiveDaFeeRateProvider},

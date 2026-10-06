@@ -2,7 +2,7 @@ use alloy_rpc_types::engine::{
     payload::ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV3,
     ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6, ExecutionPayloadV1,
 };
-use alpen_ee_params::{AlpenSpecId, EvmSpec, HeaderExtraError};
+use alpen_params::{AlpenSpecId, EvmSpec, HeaderExtraError};
 use reth_chainspec::ChainSpec;
 use reth_ethereum_payload_builder::EthereumExecutionPayloadValidator;
 use reth_ethereum_primitives::{Block, EthPrimitives};

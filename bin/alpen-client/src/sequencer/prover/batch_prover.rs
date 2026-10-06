@@ -19,11 +19,11 @@
 
 use std::{collections::BTreeMap, sync::Arc};
 
-use alpen_ee_common::{
+use alpen_common::{
     BatchId, BatchProver, BatchStorage, ChunkStatus, ChunkStorage, Proof, ProofGenerationStatus,
     ProofId,
 };
-use alpen_ee_params::AlpenSpecId;
+use alpen_params::AlpenSpecId;
 use async_trait::async_trait;
 use strata_paas::{ProverError as PaasError, ProverHandle, TaskStatus};
 use tracing::{debug, info, warn};
