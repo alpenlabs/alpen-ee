@@ -11,6 +11,8 @@ Subcommands:
                 network-prefixed names.
     notes       Put each network's account predicate and the rebuild command at
                 the top of the draft release's notes.
+    publish     Check the draft release holds exactly the files built for
+                $NETWORKS, then publish it.
     fetch       Download a published release's guest files, check each
                 against the release attestation and group them by build into
                 $OUTPUT_DIR/<version>/, with a manifest.json per build.
@@ -106,6 +108,15 @@ def params_name(network: str) -> str:
 
 def release_files(network: str) -> list[str]:
     return [*published_names(network).values(), params_name(network)]
+
+
+def check_release_files(tag: str, found: list[str], networks: list[str]) -> None:
+    """Fails unless a release holds exactly the files of `networks`."""
+    expected = {name for network in networks for name in release_files(network)}
+    extra = sorted(set(found) - expected)
+    missing = sorted(expected - set(found))
+    if extra or missing:
+        fail(f"release {tag} has unexpected files {extra} and is missing {missing}")
 
 
 def guest_version(commit: str, params_digest: str) -> str:
@@ -292,6 +303,35 @@ def cmd_notes() -> None:
     gh("release", "edit", tag, "--repo", repo, "--notes-file", str(notes))
 
 
+# ---- publish ---------------------------------------------------------------
+
+
+def cmd_publish() -> None:
+    """Env: TAG, NETWORKS (a JSON list), GH_TOKEN, GITHUB_REPOSITORY.
+
+    A published release is immutable, so the files are checked while it is
+    still a draft. A stray file can then be deleted from the draft and the job
+    rerun. Once published, it would stay forever and block the S3 copy.
+    """
+    tag = os.environ["TAG"]
+    repo = os.environ["GITHUB_REPOSITORY"]
+    networks = [validate_network(n) for n in json.loads(os.environ["NETWORKS"])]
+
+    assets = gh(
+        "release",
+        "view",
+        tag,
+        "--repo",
+        repo,
+        "--json",
+        "assets",
+        "--jq",
+        ".assets[].name",
+    )
+    check_release_files(tag, assets.splitlines(), networks)
+    gh("release", "edit", tag, "--repo", repo, "--draft=false")
+
+
 # ---- fetch -----------------------------------------------------------------
 
 
@@ -309,9 +349,7 @@ def cmd_fetch() -> None:
     if not networks:
         fail(f"release {tag} has no <network>-alpen-params.json assets")
     found = sorted(path.name for path in download_dir.iterdir())
-    expected = sorted(name for network in networks for name in release_files(network))
-    if found != expected:
-        fail(f"release {tag} has {found}, expected {expected}")
+    check_release_files(tag, found, networks)
     for name in found:
         # Checks the file's digest against the attestation GitHub signed when
         # the release was published.
@@ -473,6 +511,7 @@ COMMANDS = {
     "params": cmd_params,
     "stage": cmd_stage,
     "notes": cmd_notes,
+    "publish": cmd_publish,
     "fetch": cmd_fetch,
     "upload": cmd_upload,
 }

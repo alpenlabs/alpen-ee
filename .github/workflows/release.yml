@@ -2,7 +2,8 @@
 # attaches them to the tag's GitHub Release and then copies them to S3.
 #
 # Releases are immutable once published, so the release is created as a draft,
-# every network attaches its files, and only then is it published.
+# every network attaches its files, and it is only published once it holds
+# exactly those files.
 
 name: Release
 
@@ -80,7 +81,7 @@ jobs:
 
   publish:
     name: Publish release
-    needs: guests
+    needs: [prepare, guests]
     runs-on: ubuntu-latest
     permissions:
       contents: write # edit and publish the draft release
@@ -98,11 +99,12 @@ jobs:
           WORK_DIR: ${{ runner.temp }}/notes
         run: python3 .github/scripts/guest_publish.py notes
 
-      - name: Publish release
+      - name: Check files and publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
-        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+          NETWORKS: ${{ needs.prepare.outputs.networks }}
+        run: python3 .github/scripts/guest_publish.py publish
 
   s3:
     name: Guests to S3

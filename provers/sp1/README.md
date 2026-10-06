@@ -51,8 +51,8 @@ account predicate. Each network's params live in `params/<network>.json`.
 The files always go to a workflow artifact. Pushing a `v*` tag runs
 `.github/workflows/release.yml`. It creates a draft GitHub Release, runs
 `publish-guests.yml` for every network in `params/` and attaches the files. It
-then puts each network's account predicate in the release notes and publishes
-the release.
+then puts each network's account predicate in the release notes. Once the draft
+holds exactly the files that were built, it publishes the release.
 
 After the release is published, `.github/workflows/publish-guests-s3.yml`
 checks each file against the release attestation and copies it to
