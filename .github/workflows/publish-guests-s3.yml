@@ -10,7 +10,7 @@
 #
 # The ELFs depend on the commit and the params, so each network's files are
 # keyed by both:
-#   s3://$ALPEN_GUESTS_S3_BUCKET/alpen-guests/<network>/<commit sha8>-<params sha8>/
+#   s3://$ALPEN_GUESTS_S3_BUCKET/elfs/alpen-ee/<network>/<commit sha8>-<params sha8>/
 #     <network>-guest-alpen-chunk.elf  <network>-guest-alpen-acct.elf
 #     <network>-alpen-acct.predicate   <network>-alpen-params.json
 #     (+ a .sha256 sidecar each)       manifest.json
@@ -18,8 +18,10 @@
 # same digests is a no-op, different digests fail, and objects without a
 # manifest are uploaded again.
 #
-# The upload is skipped until infra sets the ALPEN_GUESTS_S3_BUCKET and
-# ALPEN_GUESTS_S3_ROLE_ARN repo variables. The attestation check still runs.
+# The S3 role only trusts jobs in the sp1-artifacts environment, which needs a
+# reviewer's approval and only allows main and v* tags. The upload is skipped
+# until the ALPEN_GUESTS_S3_BUCKET and ALPEN_GUESTS_S3_ROLE_ARN repo variables
+# are set. The attestation check still runs.
 
 name: Publish SP1 Guests to S3
 
@@ -39,7 +41,8 @@ on:
 
 env:
   AWS_REGION: us-east-1
-  S3_PREFIX: alpen-guests
+  # The clusters can only read under elfs/.
+  S3_PREFIX: elfs/alpen-ee
 
 # One global group: tags on the same commit share S3 keys, and the commit isn't
 # known until the job runs.
@@ -56,6 +59,9 @@ jobs:
     if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # The S3 role trusts only the OIDC subject
+    # repo:alpenlabs/alpen-ee:environment:sp1-artifacts.
+    environment: sp1-artifacts
     permissions:
       contents: read # download release files
       attestations: read # check them against the release attestation

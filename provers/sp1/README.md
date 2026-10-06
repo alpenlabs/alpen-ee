@@ -56,8 +56,9 @@ the release.
 
 After the release is published, `.github/workflows/publish-guests-s3.yml`
 checks each file against the release attestation and copies it to
-`s3://$ALPEN_GUESTS_S3_BUCKET/alpen-guests/<network>/<version>/`, with a
-`.sha256` file next to each and a `manifest.json`. The copy is skipped until
+`s3://$ALPEN_GUESTS_S3_BUCKET/elfs/alpen-ee/<network>/<version>/`, with a
+`.sha256` file next to each and a `manifest.json`. The copy waits for a
+reviewer to approve it in the `sp1-artifacts` environment. It is skipped until
 the `ALPEN_GUESTS_S3_BUCKET` and `ALPEN_GUESTS_S3_ROLE_ARN` repo variables are
 set.
 
