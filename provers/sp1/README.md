@@ -27,6 +27,11 @@ condition bytes are code-generated into `guest-alpen-acct/src/predicates.rs`
 (gitignored), and then the account guest is compiled with that predicate
 embedded.
 
+Each guest is its own Cargo workspace with its own `Cargo.lock`, and is built
+with `--locked`. If a change to a shared crate needs a new lockfile entry, the
+guest build fails until you run `cargo update --workspace` in that guest's
+directory and commit its `Cargo.lock`.
+
 ## Features and environment variables
 
 - `docker-build` — compile the guests inside Docker for reproducible ELFs.

@@ -101,6 +101,9 @@ fn build_guest(program: &str) {
     let build_args = BuildArgs {
         output_directory: Some(GENERATED_DIR.to_owned()),
         elf_name: Some(format!("{program}.elf")),
+        // Fail on a stale guest Cargo.lock instead of re-resolving it, so the
+        // ELF is built from the committed dependencies.
+        locked: true,
         #[cfg(feature = "docker-build")]
         docker: true,
         // Override the guest's workspace root with the repo root so Docker
