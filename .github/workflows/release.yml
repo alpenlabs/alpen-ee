@@ -3,7 +3,8 @@
 #
 # Releases are immutable once published, so the release is created as a draft,
 # every network attaches its files, and it is only published once it holds
-# exactly those files.
+# exactly those files and the tag still points at the commit they were built
+# from.
 
 name: Release
 
@@ -104,6 +105,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
           NETWORKS: ${{ needs.prepare.outputs.networks }}
+          SOURCE_SHA: ${{ github.sha }}
         run: python3 .github/scripts/guest_publish.py publish
 
   s3:

@@ -12,7 +12,8 @@ Subcommands:
     notes       Put each network's account predicate and the rebuild command at
                 the top of the draft release's notes.
     publish     Check the draft release holds exactly the files built for
-                $NETWORKS, then publish it.
+                $NETWORKS and that the tag still points at $SOURCE_SHA, then
+                publish it.
     fetch       Download a published release's guest files, check each
                 against the release attestation and group them by build into
                 $OUTPUT_DIR/<version>/, with a manifest.json per build.
@@ -117,6 +118,15 @@ def check_release_files(tag: str, found: list[str], networks: list[str]) -> None
     missing = sorted(expected - set(found))
     if extra or missing:
         fail(f"release {tag} has unexpected files {extra} and is missing {missing}")
+
+
+def tag_commit(repo: str, tag: str) -> str:
+    """Resolves a tag to its commit. The full ref keeps a branch with the same
+    name from matching, and the commits endpoint resolves annotated tags too."""
+    commit = gh("api", f"repos/{repo}/commits/refs/tags/{tag}", "--jq", ".sha").strip()
+    if not SHA1_RE.fullmatch(commit):
+        fail(f"could not resolve {repo} tag {tag} to a commit sha (got {commit!r})")
+    return commit
 
 
 def guest_version(commit: str, params_digest: str) -> str:
@@ -307,15 +317,21 @@ def cmd_notes() -> None:
 
 
 def cmd_publish() -> None:
-    """Env: TAG, NETWORKS (a JSON list), GH_TOKEN, GITHUB_REPOSITORY.
+    """Env: TAG, NETWORKS (a JSON list), SOURCE_SHA, GH_TOKEN, GITHUB_REPOSITORY.
 
     A published release is immutable, so the files are checked while it is
     still a draft. A stray file can then be deleted from the draft and the job
     rerun. Once published, it would stay forever and block the S3 copy.
+
+    The tag can still be moved while the release is a draft. The release would
+    then name a different commit than the one the guests were built from.
     """
     tag = os.environ["TAG"]
     repo = os.environ["GITHUB_REPOSITORY"]
     networks = [validate_network(n) for n in json.loads(os.environ["NETWORKS"])]
+    source_sha = os.environ["SOURCE_SHA"]
+    if not SHA1_RE.fullmatch(source_sha):
+        fail(f"SOURCE_SHA is not a commit sha: {source_sha!r}")
 
     assets = gh(
         "release",
@@ -329,6 +345,11 @@ def cmd_publish() -> None:
         ".assets[].name",
     )
     check_release_files(tag, assets.splitlines(), networks)
+    commit = tag_commit(repo, tag)
+    if commit != source_sha:
+        fail(
+            f"tag {tag} now points at {commit}, but the guests were built from {source_sha}"
+        )
     gh("release", "edit", tag, "--repo", repo, "--draft=false")
 
 
@@ -355,10 +376,7 @@ def cmd_fetch() -> None:
         # the release was published.
         gh("release", "verify-asset", tag, str(download_dir / name), "--repo", repo)
 
-    # The commits endpoint resolves both lightweight and annotated tags.
-    commit = gh("api", f"repos/{repo}/commits/{tag}", "--jq", ".sha").strip()
-    if not SHA1_RE.fullmatch(commit):
-        fail(f"could not resolve {repo} tag {tag} to a commit sha (got {commit!r})")
+    commit = tag_commit(repo, tag)
 
     # Networks with the same params get the same build, so they share one
     # folder. The files drop their network prefix there.
