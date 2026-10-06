@@ -1,0 +1,169 @@
+# Builds the SP1 guests for one network in SP1's Docker image and publishes
+# them. The guests bake in that network's params, so each network gets its own
+# ELFs and account predicate.
+#
+# release.yml calls this once per params/<network>.json on a version tag. Run
+# it by hand with params_url to build with params that are not in the repo yet.
+
+name: Publish SP1 Guests
+
+on:
+  workflow_dispatch:
+    inputs:
+      network:
+        description: Network whose params are baked into the guests.
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - testnet
+          - mainnet
+      params_url:
+        description: HTTPS URL of the params JSON to use (raw URL, not a github.com /blob/ URL). Defaults to params/<network>.json at the ref.
+        required: false
+        type: string
+      ref:
+        description: Git ref to build. Defaults to the branch or tag selected in the UI.
+        required: false
+        type: string
+      release_tag:
+        description: Also attach the files to this tag's GitHub Release. The release must still be a draft.
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      network:
+        description: Network whose params are baked into the guests (dev | staging | testnet | mainnet).
+        required: true
+        type: string
+      params_url:
+        description: HTTPS URL of the params JSON to use. Defaults to params/<network>.json at the ref.
+        required: false
+        type: string
+      ref:
+        description: Git ref to build. Defaults to the caller's ref.
+        required: false
+        type: string
+      release_tag:
+        description: Also attach the files to this tag's GitHub Release. The release must still be a draft.
+        required: false
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: publish-guests-${{ inputs.network }}-${{ inputs.ref || github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  publish:
+    name: Build and publish SP1 guests (${{ inputs.network }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write # attach files to a draft GitHub Release
+    steps:
+      # Inline cleanup before checkout. The repo is too large to clone without
+      # freeing space first, so the local cleanup action can't be used here.
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /usr/local/.ghcup \
+            /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" /usr/share/swift \
+            /usr/local/share/powershell /usr/local/share/chromium /usr/local/lib/node_modules
+
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+
+      - name: Resolve checked-out commit
+        id: resolve-sha
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Validate inputs
+        env:
+          INPUT_NETWORK: ${{ inputs.network }}
+          INPUT_PARAMS_URL: ${{ inputs.params_url }}
+          INPUT_REF: ${{ inputs.ref }}
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+        run: python3 .github/scripts/guest_publish.py validate
+
+      # Fail before the long build rather than after it.
+      - name: Check release is a draft
+        if: inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          is_draft="$(gh release view "$TAG" --json isDraft --jq .isDraft)" \
+            || { echo "::error::no GitHub Release for $TAG"; exit 1; }
+          if [ "$is_draft" != "true" ]; then
+            echo "::error::release $TAG is already published; files cannot be attached to an immutable release"
+            exit 1
+          fi
+
+      - name: Fetch params
+        id: params
+        env:
+          NETWORK: ${{ inputs.network }}
+          PARAMS_URL: ${{ inputs.params_url }}
+          OUTPUT_PATH: ${{ runner.temp }}/alpen-params.json
+        run: python3 .github/scripts/guest_publish.py params
+
+      - name: Install Rust toolchain
+        run: |
+          RUST_TOOLCHAIN="$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)"
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          rustup default "$RUST_TOOLCHAIN"
+
+      - name: Install SP1 toolchain
+        run: |
+          curl -fsSL --proto '=https' --tlsv1.2 https://sp1.succinct.xyz | bash
+          ~/.sp1/bin/sp1up
+          echo "$HOME/.sp1/bin" >> "$GITHUB_PATH"
+
+      - name: Check SP1 toolchain
+        run: cargo prove --version
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build guest ELFs and predicate
+        env:
+          SP1_ALPEN_PARAMS_PATH: ${{ runner.temp }}/alpen-params.json
+        run: cargo build --release --locked -p alpen-sp1-guest-builder --features docker-build
+
+      - name: Stage artifacts
+        id: stage
+        env:
+          NETWORK: ${{ inputs.network }}
+          GEN_DIR: provers/sp1/generated
+          PARAMS_PATH: ${{ runner.temp }}/alpen-params.json
+          PARAMS_SOURCE: ${{ steps.params.outputs.params_source }}
+          SOURCE_REF: ${{ inputs.ref || github.ref }}
+          SOURCE_SHA: ${{ steps.resolve-sha.outputs.sha }}
+          DIST_DIR: dist
+        run: python3 .github/scripts/guest_publish.py stage
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: alpen-guests-${{ inputs.network }}-${{ steps.stage.outputs.version }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Attach to GitHub Release
+        if: inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.release_tag }}
+        run: gh release upload "$TAG" --clobber dist/*

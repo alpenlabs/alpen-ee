@@ -1,0 +1,120 @@
+# On a version tag, builds the SP1 guests for every network in params/,
+# attaches them to the tag's GitHub Release and then copies them to S3.
+#
+# Releases are immutable once published, so the release is created as a draft,
+# every network attaches its files, and it is only published once it holds
+# exactly those files and the tag still points at the commit they were built
+# from.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  prepare:
+    name: Create draft release and list networks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the draft release
+    outputs:
+      networks: ${{ steps.networks.outputs.networks }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: params
+
+      - name: List networks
+        id: networks
+        run: |
+          set -euo pipefail
+          networks="$(find params -mindepth 1 -maxdepth 1 -name '*.json' \
+            | sed 's|^params/||; s|\.json$||' | sort | jq -R . | jq -cs .)"
+          if [ "$networks" = "[]" ]; then
+            echo "::error::no params/<network>.json found"
+            exit 1
+          fi
+          echo "networks=$networks" >> "$GITHUB_OUTPUT"
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            if [ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" != "true" ]; then
+              echo "::error::release $TAG is already published; files cannot be attached to an immutable release"
+              exit 1
+            fi
+          else
+            prerelease_flag=""
+            case "$TAG" in *-*) prerelease_flag="--prerelease" ;; esac
+            gh release create "$TAG" --draft $prerelease_flag --title "$TAG" --generate-notes
+          fi
+
+  guests:
+    name: Guests
+    needs: prepare
+    strategy:
+      fail-fast: true
+      matrix:
+        network: ${{ fromJSON(needs.prepare.outputs.networks) }}
+    uses: $/.github/workflows/publish-guests.yml
+    permissions:
+      contents: write # attach files to the draft release
+    with:
+      network: ${{ matrix.network }}
+      # The commit, not the tag name: checkout resolves a bare name to a branch
+      # first, so a branch named like the tag would be built instead.
+      ref: ${{ github.sha }}
+      release_tag: ${{ github.ref_name }}
+
+  publish:
+    name: Publish release
+    needs: [prepare, guests]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # edit and publish the draft release
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - name: Add account predicates to release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          WORK_DIR: ${{ runner.temp }}/notes
+        run: python3 .github/scripts/guest_publish.py notes
+
+      - name: Check files and publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          NETWORKS: ${{ needs.prepare.outputs.networks }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: python3 .github/scripts/guest_publish.py publish
+
+  s3:
+    name: Guests to S3
+    needs: publish
+    uses: $/.github/workflows/publish-guests-s3.yml
+    permissions:
+      contents: read # download release files
+      attestations: read # check them against the release attestation
+      id-token: write # assume the S3 upload role via OIDC
+    with:
+      tag: ${{ github.ref_name }}
