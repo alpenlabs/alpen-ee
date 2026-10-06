@@ -132,6 +132,7 @@ strata-codec = { git = "https://github.com/alpenlabs/strata-common", features = 
   "derive",
 ], tag = "v0.4.0-rc.3" }
 strata-codec-tests = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.4.0-rc.3" }
+strata-codec-utils = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.4.0-rc.3" }
 strata-crypto = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.4.0-rc.3" }
 strata-db-macros = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.4.0-rc.3" }
 strata-identifiers = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.4.0-rc.3" }

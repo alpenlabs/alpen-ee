@@ -16,7 +16,6 @@ builders = [
   "dep:alpen-common",
   "dep:async-trait",
   "dep:bitcoind-async-client",
-  "dep:strata-identifiers",
   "dep:strata-primitives",
 ]
 
@@ -36,7 +35,9 @@ revm-primitives.workspace = true
 ssz.workspace = true
 strata-acct-types.workspace = true
 strata-codec.workspace = true
-strata-identifiers = { workspace = true, optional = true }
+strata-codec-utils.workspace = true
+strata-identifiers.workspace = true
+strata-l1-envelope-fmt.workspace = true
 strata-primitives = { workspace = true, optional = true }
 strata-snark-acct-types.workspace = true
 thiserror.workspace = true
@@ -45,4 +46,4 @@ thiserror.workspace = true
 rkyv.workspace = true
 rsp-mpt.workspace = true
 sha2.workspace = true
-strata-l1-envelope-fmt.workspace = true
+strata-l1-envelope-fmt = { workspace = true, features = ["test-utils"] }
