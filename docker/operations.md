@@ -67,7 +67,15 @@ environment:
 volumes:
   - ./configs/my-sequencer.toml:/app/configs/alpen-config.toml:ro
   - ./configs/generated/alpen-params.json:/app/configs/generated/alpen-params.json:ro
+  - ./elfs/sp1:/app/elfs/sp1:ro  # only for a sequencer with backend = "sp1"
 ```
+
+The image does not ship the SP1 guest ELFs. Each network's guests bake in its
+params, so one set of ELFs cannot serve every network. A sequencer with
+`sequencer.prover.backend = "sp1"` takes them from the network's GitHub
+Release (see [`provers/sp1/README.md`](../provers/sp1/README.md#publishing))
+and mounts them at the paths its `[sequencer.prover.programs.<version>]`
+entries name.
 
 Environment variables the entrypoint reads:
 
