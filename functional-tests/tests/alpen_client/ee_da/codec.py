@@ -27,8 +27,8 @@ logger = logging.getLogger(__name__)
 COMMIT_OP_RETURN_PAYLOAD_LEN = 8
 
 # EVM header digest length per blob version. The version is the batch's spec
-# version, and every version so far carries 5 x u64.
-EVM_HEADER_DIGEST_LEN = {0: 40, 1: 40}
+# version: v0 carries 5 x u64, and v1 appends the DA rate.
+EVM_HEADER_DIGEST_LEN = {0: 40, 1: 48}
 
 # Minimum state_diff size for empty batch (3 u32 counts, 4 bytes BE each).
 EMPTY_STATE_DIFF_MAX_SIZE = 12
@@ -56,6 +56,7 @@ class EvmHeaderDigest:
     base_fee: int
     gas_used: int
     gas_limit: int
+    da_rate: int
 
 
 @dataclass
@@ -147,7 +148,10 @@ def parse_commit_op_return(script_hex: str, expected_magic: bytes) -> CommitOpRe
 
 
 def parse_evm_header_digest(data: bytes, version: int) -> EvmHeaderDigest | None:
-    """Parse EvmHeaderDigest (u64 big-endian fields) under a blob version."""
+    """Parse EvmHeaderDigest (u64 big-endian fields) under a blob version.
+
+    v0 has no DA rate, so it reads as 0.
+    """
     if len(data) < EVM_HEADER_DIGEST_LEN[version]:
         return None
     return EvmHeaderDigest(
@@ -156,6 +160,7 @@ def parse_evm_header_digest(data: bytes, version: int) -> EvmHeaderDigest | None
         base_fee=int.from_bytes(data[16:24], "big"),
         gas_used=int.from_bytes(data[24:32], "big"),
         gas_limit=int.from_bytes(data[32:40], "big"),
+        da_rate=int.from_bytes(data[40:48], "big") if version >= 1 else 0,
     )
 
 

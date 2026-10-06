@@ -2,7 +2,7 @@
 //!
 //! The DA blob pipeline needs an [`EvmHeaderSummary`] for each batch so that
 //! verifiers can reconstruct EVM chain metadata (block number, timestamp,
-//! base fee, gas used/limit). [`RethHeaderSummaryProvider`]
+//! base fee, gas used/limit, DA rate). [`RethHeaderSummaryProvider`]
 //! satisfies the [`HeaderSummaryProvider`] trait by reading headers directly
 //! from the Reth [`HeaderProvider`](reth_provider::HeaderProvider).
 //!
@@ -14,6 +14,7 @@
 use alpen_common::HeaderSummaryProvider;
 use alpen_da_types::EvmHeaderSummary;
 use alpen_params::{header_spec_version, AlpenSpecId};
+use alpen_reth_evm::da_fee::da_rate_from_extra_data;
 
 /// [`HeaderSummaryProvider`] backed by a Reth [`HeaderProvider`](reth_provider::HeaderProvider).
 pub(crate) struct RethHeaderSummaryProvider<P> {
@@ -70,6 +71,11 @@ fn summarize_header(
         })?,
         gas_used: header.gas_used,
         gas_limit: header.gas_limit,
+        // V0 does not publish the rate, so the summary leaves it out too.
+        da_rate: match spec_version {
+            AlpenSpecId::V0 => 0,
+            AlpenSpecId::V1 => da_rate_from_extra_data(&header.extra_data),
+        },
     })
 }
 
@@ -104,6 +110,15 @@ mod tests {
         assert_eq!(summary.base_fee, 1_000_000_000);
         assert_eq!(summary.gas_used, 15_000_000);
         assert_eq!(summary.gas_limit, 36_000_000);
+        assert_eq!(summary.da_rate, 2_500_000_000);
+    }
+
+    #[test]
+    fn summarize_header_drops_the_rate_under_v0() {
+        let header = stamped_header(AlpenSpecId::V0, 2_500_000_000);
+        let summary = summarize_header(&header, AlpenSpecId::V0).expect("mapping must succeed");
+
+        assert_eq!(summary.da_rate, 0);
     }
 
     #[test]

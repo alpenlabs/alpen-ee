@@ -5,6 +5,8 @@ use std::{collections::BTreeMap, fs::read_to_string, path::PathBuf};
 use alloy_consensus::{Header, Sealable, constants::EMPTY_ROOT_HASH};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alpen_acct_types::ExecHeader;
+use alpen_da_types::EvmHeaderSummary;
+use alpen_params::{AlpenSpecId, HeaderExtra};
 use reth_primitives_traits::Account;
 use reth_trie::{HashedPostState, HashedStorage, TrieAccount};
 use revm::{DatabaseRef, state::Bytecode};
@@ -161,6 +163,28 @@ fn test_evm_header_exec_header_trait() {
     assert_eq!(evm_header.compute_block_id().0, header.hash_slow().0);
     assert_eq!(evm_header.get_intrinsics().number(), header.number);
     assert_eq!(evm_header.block_number(), header.number);
+}
+
+#[test]
+fn test_evm_header_summary_layout_follows_spec_version() {
+    fn summary_bytes(spec_version: AlpenSpecId) -> Vec<u8> {
+        let mut header = create_test_header();
+        header.extra_data = HeaderExtra::new(spec_version, 2_500_000_000)
+            .encode()
+            .into();
+        let summary = EvmHeader::new(header).get_exec_header_summary();
+        summary.opaque_bytes().to_vec()
+    }
+
+    let v1 = summary_bytes(AlpenSpecId::V1);
+    let summary = EvmHeaderSummary::decode_exact(AlpenSpecId::V1, &v1).expect("decode v1 summary");
+    assert_eq!(summary.da_rate, 2_500_000_000);
+
+    // V0 keeps the layout it had before the rate was added.
+    let v0 = summary_bytes(AlpenSpecId::V0);
+    let summary = EvmHeaderSummary::decode_exact(AlpenSpecId::V0, &v0).expect("decode v0 summary");
+    assert_eq!(summary.da_rate, 0);
+    assert_eq!(v0[..], v1[..v0.len()]);
 }
 
 #[test]

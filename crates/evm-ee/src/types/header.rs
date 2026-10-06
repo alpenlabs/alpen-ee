@@ -5,6 +5,7 @@ use alpen_acct_types::ExecHeader;
 use alpen_chain_types::ExecHeaderSummary;
 use alpen_da_types::EvmHeaderSummary;
 use alpen_params::header_spec_version;
+use alpen_reth_evm::da_fee::da_rate_from_extra_data;
 use reth_ethereum_primitives::TransactionSigned;
 use revm_primitives::alloy_primitives::{Address, B64, B256, Bloom, Bytes, U256};
 use strata_codec::{Codec, CodecError};
@@ -201,6 +202,7 @@ impl ExecHeader for EvmHeader {
                 .expect("Alpen EVM headers must include base_fee_per_gas from genesis"),
             gas_used: self.header.gas_used,
             gas_limit: self.header.gas_limit,
+            da_rate: da_rate_from_extra_data(&self.header.extra_data),
         };
         let encoded = payload
             .encode_to_vec(spec_version)

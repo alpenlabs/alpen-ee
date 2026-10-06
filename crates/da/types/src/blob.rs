@@ -76,11 +76,12 @@ impl DaBlob {
 /// A sequencer rebuilding from L1 DA has the [`BatchStateDiff`] for state
 /// changes but not the block headers, so these non-derivable fields let it
 /// build the next block: `base_fee`/`gas_used`/`gas_limit` drive the EIP-1559
-/// base-fee and gas-limit update, `timestamp` enforces monotonicity, and
-/// `block_num` marks where the chain continues.
+/// base-fee and gas-limit update, `timestamp` enforces monotonicity,
+/// `da_rate` bounds the next block's DA rate (from V1), and `block_num` marks
+/// where the chain continues.
 ///
-/// The layout depends on the spec version governing the block. Every version
-/// so far shares one layout.
+/// The layout depends on the spec version governing the block. V0 carries
+/// every field but `da_rate`, and V1 appends it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EvmHeaderSummary {
     /// Block number of the last EVM block in this batch.
@@ -93,6 +94,12 @@ pub struct EvmHeaderSummary {
     pub gas_used: u64,
     /// Gas limit of the last EVM block.
     pub gas_limit: u64,
+    /// DA rate (wei per byte) stamped in the last EVM block's `extra_data`.
+    ///
+    /// V0 does not publish the rate, so a V0 summary always holds `0`. That
+    /// `0` means the rate is unknown, not that it was zero. A reader bounding
+    /// the next block's rate must treat it as an unstamped parent.
+    pub da_rate: u64,
 }
 
 impl EvmHeaderSummary {
@@ -108,7 +115,8 @@ impl EvmHeaderSummary {
         self.gas_used.encode(enc)?;
         self.gas_limit.encode(enc)?;
         match spec_version {
-            AlpenSpecId::V0 | AlpenSpecId::V1 => Ok(()),
+            AlpenSpecId::V0 => Ok(()),
+            AlpenSpecId::V1 => self.da_rate.encode(enc),
         }
     }
 
@@ -126,15 +134,17 @@ impl EvmHeaderSummary {
         let base_fee = u64::decode(dec)?;
         let gas_used = u64::decode(dec)?;
         let gas_limit = u64::decode(dec)?;
-        match spec_version {
-            AlpenSpecId::V0 | AlpenSpecId::V1 => {}
-        }
+        let da_rate = match spec_version {
+            AlpenSpecId::V0 => 0,
+            AlpenSpecId::V1 => u64::decode(dec)?,
+        };
         Ok(Self {
             block_num,
             timestamp,
             base_fee,
             gas_used,
             gas_limit,
+            da_rate,
         })
     }
 
@@ -250,6 +260,7 @@ mod tests {
             base_fee: 100,
             gas_used: 21_000,
             gas_limit: 36_000_000,
+            da_rate: 2_500_000_000,
         }
     }
 
@@ -263,21 +274,52 @@ mod tests {
     }
 
     #[test]
-    fn summary_layout_is_the_same_under_every_version() {
+    fn v0_summary_layout_omits_da_rate() {
         let summary = sample_summary();
+        let encoded = summary.encode_to_vec(AlpenSpecId::V0).unwrap();
+
         let expected: Vec<u8> = [10u64, 1_700_000_000, 100, 21_000, 36_000_000]
             .iter()
             .flat_map(|field| field.to_be_bytes())
             .collect();
+        assert_eq!(encoded, expected);
 
-        for spec_version in VERSIONS {
-            let encoded = summary.encode_to_vec(spec_version).unwrap();
-            assert_eq!(encoded, expected, "{spec_version:?}");
-            assert_eq!(
-                EvmHeaderSummary::decode_exact(spec_version, &encoded).unwrap(),
-                summary
-            );
-        }
+        let decoded = EvmHeaderSummary::decode_exact(AlpenSpecId::V0, &encoded).unwrap();
+        assert_eq!(decoded.da_rate, 0);
+        assert_eq!(
+            decoded,
+            EvmHeaderSummary {
+                da_rate: 0,
+                ..summary
+            }
+        );
+    }
+
+    #[test]
+    fn v1_summary_layout_appends_da_rate() {
+        let summary = sample_summary();
+        let v0 = summary.encode_to_vec(AlpenSpecId::V0).unwrap();
+        let v1 = summary.encode_to_vec(AlpenSpecId::V1).unwrap();
+
+        assert_eq!(v1[..v0.len()], v0[..]);
+        assert_eq!(v1[v0.len()..], 2_500_000_000u64.to_be_bytes());
+        assert_eq!(
+            EvmHeaderSummary::decode_exact(AlpenSpecId::V1, &v1).unwrap(),
+            summary
+        );
+    }
+
+    #[test]
+    fn summary_does_not_decode_under_another_layout() {
+        let summary = sample_summary();
+        let v0 = summary.encode_to_vec(AlpenSpecId::V0).unwrap();
+        let v1 = summary.encode_to_vec(AlpenSpecId::V1).unwrap();
+
+        assert!(matches!(
+            EvmHeaderSummary::decode_exact(AlpenSpecId::V0, &v1),
+            Err(CodecError::ExtraInput)
+        ));
+        assert!(EvmHeaderSummary::decode_exact(AlpenSpecId::V1, &v0).is_err());
     }
 
     #[test]

@@ -29,7 +29,7 @@ use rkyv::rancor::Error as RkyvError;
 use rsp_mpt::EthereumState;
 use sha2::{Digest, Sha256};
 use strata_acct_types::{l1_block_record_leaf_hash, Hash};
-use strata_codec::encode_to_vec;
+use strata_codec::{encode_to_vec, CodecError};
 use strata_l1_envelope_fmt::EnvelopeScriptBuilder;
 use strata_snark_acct_types::{
     AccumulatorClaim, LedgerRefs, ProofState, Seqno, UpdateOutputs, UpdateProofPubParams,
@@ -37,7 +37,8 @@ use strata_snark_acct_types::{
 
 use super::{verify_da_witness, DaVerificationError};
 
-/// Spec version the fixtures are built under: the newest one.
+/// Spec version the fixtures are built under. V1 is the first layout that
+/// carries the DA rate, so the rate is covered by every check.
 const SPEC_VERSION: AlpenSpecId = AlpenSpecId::V1;
 
 const MAGIC: [u8; 4] = *b"ALPN";
@@ -208,6 +209,7 @@ fn valid_fixture_for(
         base_fee: 100,
         gas_used: 21_000,
         gas_limit: 36_000_000,
+        da_rate: 2_500_000_000,
     };
     let pre_state = EvmPartialState::new(
         EthereumState {
@@ -269,6 +271,7 @@ fn verify_da_witness_accepts_deduped_bytecode_from_private_witness() {
         base_fee: 100,
         gas_used: 21_000,
         gas_limit: 36_000_000,
+        da_rate: 2_500_000_000,
     };
     let mut pre_state = EvmPartialState::new(
         EthereumState {
@@ -368,6 +371,7 @@ fn verify_da_blob_metadata_rejects_missing_deployed_bytecode() {
         base_fee: 100,
         gas_used: 21_000,
         gas_limit: 36_000_000,
+        da_rate: 2_500_000_000,
     };
     // An account references a code hash that is neither published in the blob nor
     // supplied as a preimage, so verification must reject it.
@@ -503,6 +507,44 @@ fn verify_da_witness_rejects_blob_from_another_version() {
     ));
 }
 
+/// A V1 summary starts with the V0 bytes, so only the strict length check
+/// keeps a V0 proof from reading the V0 fields off it and accepting it.
+#[test]
+fn verify_da_witness_rejects_chunk_summary_in_another_layout() {
+    let (ee_input, da_witness, pub_params, expected_pre_root) = valid_fixture_for(AlpenSpecId::V0);
+    let header = EvmHeaderSummary {
+        block_num: 10,
+        timestamp: 1_700_000_000,
+        base_fee: 100,
+        gas_used: 21_000,
+        gas_limit: 36_000_000,
+        da_rate: 2_500_000_000,
+    };
+    let v1_ee_input = rebuild_ee_input(
+        ee_input.raw_partial_pre_state(),
+        expected_pre_root,
+        header,
+        AlpenSpecId::V1,
+    );
+    let (ee_bytes, da_bytes) = archive_inputs(&v1_ee_input, &da_witness);
+    let archived_ee = rkyv::access::<ArchivedEePrivateInput, RkyvError>(&ee_bytes).unwrap();
+    let archived_da = rkyv::access::<ArchivedDaWitness, RkyvError>(&da_bytes).unwrap();
+
+    let err = verify_da_witness(
+        archived_ee,
+        archived_da,
+        &pub_params,
+        expected_pre_root,
+        AlpenSpecId::V0,
+    )
+    .expect_err("a V1-layout chunk summary must not verify in a V0 proof");
+
+    assert!(matches!(
+        err,
+        DaVerificationError::ExecHeaderSummaryDecode(CodecError::ExtraInput)
+    ));
+}
+
 #[test]
 fn verify_da_witness_rejects_update_seq_no_mismatch() {
     let (ee_input, da_witness, pub_params, expected_pre_root) = valid_fixture();
@@ -535,6 +577,7 @@ fn verify_da_witness_rejects_evm_header_mismatch() {
         base_fee: 100,
         gas_used: 21_000,
         gas_limit: 36_000_000,
+        da_rate: 2_500_000_000,
     };
     let bad_ee_input = rebuild_ee_input(
         ee_input.raw_partial_pre_state(),
@@ -550,6 +593,30 @@ fn verify_da_witness_rejects_evm_header_mismatch() {
 }
 
 #[test]
+fn verify_da_witness_rejects_da_rate_mismatch() {
+    let (ee_input, da_witness, pub_params, expected_pre_root) = valid_fixture();
+    let wrong_header = EvmHeaderSummary {
+        block_num: 10,
+        timestamp: 1_700_000_000,
+        base_fee: 100,
+        gas_used: 21_000,
+        gas_limit: 36_000_000,
+        da_rate: 2_500_000_001,
+    };
+    let bad_ee_input = rebuild_ee_input(
+        ee_input.raw_partial_pre_state(),
+        expected_pre_root,
+        wrong_header,
+        SPEC_VERSION,
+    );
+
+    let err = run_verify_da_witness(&bad_ee_input, &da_witness, &pub_params, expected_pre_root)
+        .expect_err("DA blob rate must match the last chunk public header summary");
+
+    assert!(matches!(err, DaVerificationError::EvmHeaderMismatch { .. }));
+}
+
+#[test]
 fn verify_da_witness_rejects_state_root_mismatch() {
     let (ee_input, da_witness, pub_params, expected_pre_root) = valid_fixture();
     let mut wrong_tip_state_root = expected_pre_root;
@@ -560,6 +627,7 @@ fn verify_da_witness_rejects_state_root_mismatch() {
         base_fee: 100,
         gas_used: 21_000,
         gas_limit: 36_000_000,
+        da_rate: 2_500_000_000,
     };
     let bad_ee_input = rebuild_ee_input(
         ee_input.raw_partial_pre_state(),
