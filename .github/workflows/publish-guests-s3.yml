@@ -8,15 +8,15 @@
 # backfill, dispatch with a v* tag selected as the ref and the target tag as
 # input.
 #
-# The ELFs depend on the commit and the params, so each network's files are
-# keyed by both:
-#   s3://$ALPEN_GUESTS_S3_BUCKET/elfs/alpen-ee/<network>/<commit sha8>-<params sha8>/
-#     <network>-guest-alpen-chunk.elf  <network>-guest-alpen-acct.elf
-#     <network>-alpen-acct.predicate   <network>-alpen-params.json
-#     (+ a .sha256 sidecar each)       manifest.json
-# manifest.json is written last and marks a completed publish. A rerun with the
-# same digests is a no-op, different digests fail, and objects without a
-# manifest are uploaded again.
+# The ELFs depend on the commit and the params, so each build is keyed by both:
+#   s3://$ALPEN_GUESTS_S3_BUCKET/elfs/alpen-ee/<commit sha8>-<params sha8>/
+#     guest-alpen-chunk.elf       guest-alpen-acct.elf
+#     alpen-acct.predicate        alpen-params.json
+#     (+ a .sha256 sidecar each)  manifest.json
+# Networks with the same params share a build, and manifest.json lists them.
+# It is written last and marks a completed publish. A rerun with the same
+# digests is a no-op, different digests fail, and objects without a manifest
+# are uploaded again.
 #
 # The S3 role only trusts jobs in the sp1-artifacts environment, which needs a
 # reviewer's approval and only allows main and v* tags. The upload is skipped

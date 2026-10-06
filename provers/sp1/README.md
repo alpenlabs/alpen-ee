@@ -56,11 +56,14 @@ the release.
 
 After the release is published, `.github/workflows/publish-guests-s3.yml`
 checks each file against the release attestation and copies it to
-`s3://$ALPEN_GUESTS_S3_BUCKET/elfs/alpen-ee/<network>/<version>/`, with a
-`.sha256` file next to each and a `manifest.json`. The copy waits for a
-reviewer to approve it in the `sp1-artifacts` environment. It is skipped until
-the `ALPEN_GUESTS_S3_BUCKET` and `ALPEN_GUESTS_S3_ROLE_ARN` repo variables are
-set.
+`s3://$ALPEN_GUESTS_S3_BUCKET/elfs/alpen-ee/<version>/`, with a `.sha256` file
+next to each. `<version>` is `<commit sha8>-<params sha8>`, so networks with
+the same params share a folder. The files there drop their network prefix, and
+`manifest.json` lists the networks.
+
+The copy waits for a reviewer to approve it in the `sp1-artifacts`
+environment. It is skipped until the `ALPEN_GUESTS_S3_BUCKET` and
+`ALPEN_GUESTS_S3_ROLE_ARN` repo variables are set.
 
 To build with params that are not in the repo yet, run `publish-guests.yml` by
 hand with `params_url`. Releases are immutable once published, so `release_tag`

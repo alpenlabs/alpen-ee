@@ -11,13 +11,12 @@ Subcommands:
                 network-prefixed names.
     notes       Put each network's account predicate and the rebuild command at
                 the top of the draft release's notes.
-    fetch       Download a published release's guest files into
-                $OUTPUT_DIR/<network>/, check each against the release
-                attestation and write a manifest.json per network.
-    upload      Copy each network's files to
-                s3://<bucket>/<prefix>/<network>/<version>/, each with a
-                `<name>.sha256` sidecar, then manifest.json last as the
-                completion marker.
+    fetch       Download a published release's guest files, check each
+                against the release attestation and group them by build into
+                $OUTPUT_DIR/<version>/, with a manifest.json per build.
+    upload      Copy each build's files to s3://<bucket>/<prefix>/<version>/,
+                each with a `<name>.sha256` sidecar, then manifest.json last as
+                the completion marker.
 
 Each subcommand reads its inputs from the environment variables listed on its
 function.
@@ -323,6 +322,13 @@ def cmd_fetch() -> None:
     if not SHA1_RE.fullmatch(commit):
         fail(f"could not resolve {repo} tag {tag} to a commit sha (got {commit!r})")
 
+    # Networks with the same params get the same build, so they share one
+    # folder. The files drop their network prefix there.
+    builds: dict[str, list[str]] = {}
+    for network in networks:
+        params_digest = sha256_hex(download_dir / params_name(network))
+        builds.setdefault(guest_version(commit, params_digest), []).append(network)
+
     release_url = f"https://github.com/{repo}/releases/tag/{tag}"
     summary = [
         "## SP1 guests to S3",
@@ -330,27 +336,35 @@ def cmd_fetch() -> None:
         f"- release: [`{tag}`]({release_url}) @ `{commit}`",
         "",
     ]
-    for network in networks:
-        net_dir = output_dir / network
-        net_dir.mkdir(parents=True, exist_ok=True)
-        for name in release_files(network):
-            shutil.move(download_dir / name, net_dir / name)
-        digests = {name: sha256_hex(net_dir / name) for name in release_files(network)}
-        predicate_name = published_names(network)["alpen-acct.predicate"]
+    for version, build_networks in builds.items():
+        build_dir = output_dir / version
+        build_dir.mkdir(parents=True, exist_ok=True)
+        digests: dict[str, str] = {}
+        for network in build_networks:
+            for name in release_files(network):
+                build_name = name.removeprefix(f"{network}-")
+                digest = sha256_hex(download_dir / name)
+                if digests.setdefault(build_name, digest) != digest:
+                    fail(
+                        f"{', '.join(build_networks)} have the same params "
+                        f"but different {build_name} files"
+                    )
+                shutil.move(download_dir / name, build_dir / build_name)
+        predicate = (build_dir / "alpen-acct.predicate").read_text().strip()
         manifest = {
             "tag": tag,
             "commit": commit,
-            "network": network,
-            "version": guest_version(commit, digests[params_name(network)]),
+            "networks": build_networks,
+            "version": version,
             "release_url": release_url,
-            "alpen_acct_predicate": (net_dir / predicate_name).read_text().strip(),
+            "alpen_acct_predicate": predicate,
             "sha256": digests,
         }
-        (net_dir / "manifest.json").write_text(
+        (build_dir / "manifest.json").write_text(
             json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
         )
         summary += [
-            f"### `{network}`: `{manifest['version']}`",
+            f"### `{version}`: {', '.join(build_networks)}",
             "",
             "```",
             *(f"{digest}  {name}" for name, digest in digests.items()),
@@ -400,17 +414,16 @@ def published_manifest(bucket: str, key: str) -> dict | None:
         fail(f"s3://{bucket}/{key} is not valid JSON ({e})")
 
 
-def upload_network(net_dir: Path, bucket: str, prefix: str) -> list[str]:
-    """Uploads one network's files with manifest.json last. A present manifest
+def upload_build(build_dir: Path, bucket: str, prefix: str) -> list[str]:
+    """Uploads one build's files with manifest.json last. A present manifest
     means a completed publish: matching digests are a no-op (an rc and its final
     release tagged on one commit), differing digests fail. Objects without a
     manifest are an interrupted publish and are uploaded again."""
-    manifest = json.loads((net_dir / "manifest.json").read_text())
-    network = validate_network(manifest["network"])
+    manifest = json.loads((build_dir / "manifest.json").read_text())
     version = manifest["version"]
     if not VERSION_RE.fullmatch(version):
         fail(f"manifest version is not S3-key-safe: {version!r}")
-    key_base = f"{prefix}/{network}/{version}"
+    key_base = f"{prefix}/{version}"
     base = f"s3://{bucket}/{key_base}"
 
     existing = published_manifest(bucket, f"{key_base}/manifest.json")
@@ -427,13 +440,13 @@ def upload_network(net_dir: Path, bucket: str, prefix: str) -> list[str]:
 
     uris = []
     for name, digest in manifest["sha256"].items():
-        s3_cp(net_dir / name, f"{base}/{name}")
+        s3_cp(build_dir / name, f"{base}/{name}")
         # `sha256sum -c` format, like asm and strata-bridge.
-        sidecar = net_dir / f"{name}.sha256"
+        sidecar = build_dir / f"{name}.sha256"
         sidecar.write_text(f"{digest}  {name}\n", encoding="utf-8")
         s3_cp(sidecar, f"{base}/{name}.sha256")
         uris += [f"{base}/{name}", f"{base}/{name}.sha256"]
-    s3_cp(net_dir / "manifest.json", f"{base}/manifest.json")
+    s3_cp(build_dir / "manifest.json", f"{base}/manifest.json")
     return [*uris, f"{base}/manifest.json"]
 
 
@@ -445,7 +458,7 @@ def cmd_upload() -> None:
 
     summary = ["### S3 upload", ""]
     for manifest_path in sorted(output_dir.glob("*/manifest.json")):
-        uris = upload_network(manifest_path.parent, bucket, prefix)
+        uris = upload_build(manifest_path.parent, bucket, prefix)
         if uris:
             summary += [f"- `{uri}`" for uri in uris]
         else:
