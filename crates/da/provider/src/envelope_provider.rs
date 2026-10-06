@@ -3,7 +3,7 @@
 use std::{collections::HashMap, fmt, sync::Arc};
 
 use alpen_common::{BatchDaProvider, BatchId, DaStatus, L1DaBlockInfo, L1DaBlockRef};
-use alpen_da_types::{wtxids_root_from_txs, DA_BLOB_VERSION, EE_DA_MAGIC_BYTES};
+use alpen_da_types::{da_blob_version, wtxids_root_from_txs, EE_DA_MAGIC_BYTES};
 use async_trait::async_trait;
 use bitcoin::{Block, BlockHash, Txid, Wtxid};
 use bitcoind_async_client::{traits::Reader, Client as BtcClient};
@@ -159,7 +159,11 @@ impl BatchDaProvider for ChunkedEnvelopeDaProvider {
         let chunks = prepare_da_chunks(&blob, self.max_chunk_payload)?;
         ensure!(!chunks.is_empty(), "prepare_da_chunks returned empty");
 
-        let entry = ChunkedEnvelopeEntry::new_unsigned(chunks, self.magic_bytes, DA_BLOB_VERSION);
+        let entry = ChunkedEnvelopeEntry::new_unsigned(
+            chunks,
+            self.magic_bytes,
+            da_blob_version(blob.spec_version),
+        );
         let chunk_count = entry.chunk_count();
 
         let idx = self
@@ -360,6 +364,7 @@ mod tests {
 
     use alpen_da_types::DaBlob;
     use alpen_database::{open_da_ops, BroadcastDbOps, ChunkedEnvelopeOps};
+    use alpen_params::AlpenSpecId;
     use async_trait::async_trait;
     use bitcoin::{
         absolute::LockTime,
@@ -508,7 +513,7 @@ mod tests {
         let mut entry = ChunkedEnvelopeEntry::new_unsigned(
             vec![vec![0xAA; 100]; heights.len().max(1)],
             MagicBytes::new([0x01, 0x02, 0x03, 0x04]),
-            DA_BLOB_VERSION,
+            da_blob_version(AlpenSpecId::V1),
         );
         entry.status = status;
         entry.commit_txid = L1TxId::from([0x11; 32]);

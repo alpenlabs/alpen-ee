@@ -10,17 +10,15 @@ use strata_codec::{BufDecoder, Codec, CodecError, Decoder, Encoder};
 /// baking the network value into runtime/proof code.
 pub const EE_DA_MAGIC_BYTES: [u8; 4] = *b"ALPN";
 
-/// Current EE DA blob encoding version.
+/// Returns the DA blob version for a batch governed by `spec_version`.
 ///
 /// The commit transaction carries this version next to the EE DA magic bytes
-/// in OP_RETURN, so L1 scanners can associate reassembled blob bytes with the
-/// schema that produced them. The current decoder handles only the present
-/// [`DaBlob`] shape; version dispatch can be added when a future blob schema
-/// is introduced.
-///
-/// TODO(STR-1907): make this part of the same authenticated EE proof context
-/// as chain ID and DA magic bytes.
-pub const DA_BLOB_VERSION: u32 = 0;
+/// in OP_RETURN, so L1 scanners can tell which layout a reassembled blob uses.
+/// The version is the spec version itself, so the two version spaces
+/// coincide, and V0 blobs keep the `0` they always carried.
+pub fn da_blob_version(spec_version: AlpenSpecId) -> u32 {
+    u16::from(spec_version).into()
+}
 
 /// DA blob containing batch metadata and state diff.
 ///
@@ -29,8 +27,8 @@ pub const DA_BLOB_VERSION: u32 = 0;
 /// chain reconstruction.
 ///
 /// The layout depends on the spec version governing the batch, through
-/// [`EvmHeaderSummary`]. The version selects the layout but is not part of
-/// the encoded bytes.
+/// [`EvmHeaderSummary`]. The version is not part of the encoded bytes. The
+/// commit marker carries it instead (see [`da_blob_version`]).
 #[derive(Debug, Clone)]
 pub struct DaBlob {
     /// Spec version governing the batch.
@@ -280,6 +278,12 @@ mod tests {
                 summary
             );
         }
+    }
+
+    #[test]
+    fn da_blob_version_is_the_spec_version() {
+        assert_eq!(da_blob_version(AlpenSpecId::V0), 0);
+        assert_eq!(da_blob_version(AlpenSpecId::V1), 1);
     }
 
     #[test]

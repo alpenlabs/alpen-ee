@@ -25,7 +25,10 @@ logger = logging.getLogger(__name__)
 
 # Commit OP_RETURN payload: magic(4) + version(4) = 8 bytes.
 COMMIT_OP_RETURN_PAYLOAD_LEN = 8
-COMMIT_OP_RETURN_VERSION = 0
+
+# EVM header digest length per blob version. The version is the batch's spec
+# version, and every version so far carries 5 x u64.
+EVM_HEADER_DIGEST_LEN = {0: 40, 1: 40}
 
 # Minimum state_diff size for empty batch (3 u32 counts, 4 bytes BE each).
 EMPTY_STATE_DIFF_MAX_SIZE = 12
@@ -85,6 +88,7 @@ class DaEnvelope:
     commit_txid: str
     commit_height: int
     total_chunks: int
+    version: int
 
     # Per-reveal data.
     reveal_txid: str
@@ -117,7 +121,8 @@ def parse_commit_op_return(script_hex: str, expected_magic: bytes) -> CommitOpRe
 
     Layout: OP_RETURN <push8: magic(4) ++ version(4)>.
     Returns None if the script is not OP_RETURN, the push length is wrong,
-    or the magic doesn't match.
+    or the magic doesn't match. Raises ValueError on an unknown version,
+    since that means this codec is behind the node.
     """
     script = bytes.fromhex(script_hex)
     if len(script) != 2 + COMMIT_OP_RETURN_PAYLOAD_LEN:
@@ -132,8 +137,8 @@ def parse_commit_op_return(script_hex: str, expected_magic: bytes) -> CommitOpRe
     if magic != expected_magic:
         return None
     version = int.from_bytes(payload[4:8], "big")
-    if version != COMMIT_OP_RETURN_VERSION:
-        return None
+    if version not in EVM_HEADER_DIGEST_LEN:
+        raise ValueError(f"unknown EE DA blob version {version}; add it to EVM_HEADER_DIGEST_LEN")
 
     return CommitOpReturn(
         magic=magic,
@@ -141,9 +146,9 @@ def parse_commit_op_return(script_hex: str, expected_magic: bytes) -> CommitOpRe
     )
 
 
-def parse_evm_header_digest(data: bytes) -> EvmHeaderDigest | None:
-    """Parse EvmHeaderDigest (40 bytes, 5 x u64 big-endian)."""
-    if len(data) < 40:
+def parse_evm_header_digest(data: bytes, version: int) -> EvmHeaderDigest | None:
+    """Parse EvmHeaderDigest (u64 big-endian fields) under a blob version."""
+    if len(data) < EVM_HEADER_DIGEST_LEN[version]:
         return None
     return EvmHeaderDigest(
         block_num=int.from_bytes(data[0:8], "big"),
@@ -154,17 +159,18 @@ def parse_evm_header_digest(data: bytes) -> EvmHeaderDigest | None:
     )
 
 
-def parse_da_blob(data: bytes) -> DaBlob | None:
-    """Parse DaBlob from strata-codec encoded bytes."""
-    if len(data) < 48:
+def parse_da_blob(data: bytes, version: int) -> DaBlob | None:
+    """Parse DaBlob from strata-codec encoded bytes under a blob version."""
+    header_end = 8 + EVM_HEADER_DIGEST_LEN[version]
+    if len(data) < header_end:
         return None
-    evm_header = parse_evm_header_digest(data[8:48])
+    evm_header = parse_evm_header_digest(data[8:header_end], version)
     if evm_header is None:
         return None
     return DaBlob(
         update_seq_no=int.from_bytes(data[0:8], "big"),
         evm_header=evm_header,
-        state_diff=data[48:],
+        state_diff=data[header_end:],
     )
 
 
@@ -288,7 +294,7 @@ def reassemble_and_validate_blobs(envelopes: list[DaEnvelope]) -> list[Reassembl
         full_blob = b"".join(chunk_payloads)
         total_size = len(full_blob)
 
-        da_blob = parse_da_blob(full_blob)
+        da_blob = parse_da_blob(full_blob, blob_envs[0].version)
         if not da_blob:
             logger.warning("failed to parse blob for commit %s", commit_txid)
             continue

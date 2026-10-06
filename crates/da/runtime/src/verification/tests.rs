@@ -4,8 +4,9 @@ use alloy_primitives::{keccak256, Address, Bytes, U256};
 use alpen_acct_runtime::{ArchivedEePrivateInput, ChunkInput, EePrivateInput};
 use alpen_chain_types::{ChunkTransition, ExecHeaderSummary, ExecInputs, ExecOutputs};
 use alpen_da_types::{
-    ArchivedDaWitness, BitcoinMerkleProof, BytecodePreimage, DaBlob, DaBlockWitness, DaParseError,
-    DaTxWitness, DaWitness, DedupWitness, EvmHeaderSummary, L1DaBlockInclusion, DA_BLOB_VERSION,
+    da_blob_version, ArchivedDaWitness, BitcoinMerkleProof, BytecodePreimage, DaBlob,
+    DaBlockWitness, DaParseError, DaTxWitness, DaWitness, DedupWitness, EvmHeaderSummary,
+    L1DaBlockInclusion,
 };
 use alpen_evm_ee::EvmPartialState;
 use alpen_params::AlpenSpecId;
@@ -49,10 +50,10 @@ fn hash_pair(left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
     Sha256::digest(first).into()
 }
 
-fn commit_tx() -> Transaction {
+fn commit_tx(spec_version: AlpenSpecId) -> Transaction {
     let mut payload = [0u8; 8];
     payload[..4].copy_from_slice(&MAGIC);
-    payload[4..].copy_from_slice(&DA_BLOB_VERSION.to_be_bytes());
+    payload[4..].copy_from_slice(&da_blob_version(spec_version).to_be_bytes());
 
     let p2tr_script = {
         let mut bytes = vec![0x51, 0x20];
@@ -228,7 +229,7 @@ fn valid_fixture_for(
     let chunks = [blob.encode_to_vec().unwrap()];
     assert_eq!(chunks.len(), 1);
 
-    let commit = commit_tx();
+    let commit = commit_tx(spec_version);
     let reveal = reveal_tx(commit.compute_txid(), &chunks[0]);
     let commit_wtxid = commit.compute_wtxid().to_byte_array();
     let reveal_wtxid = reveal.compute_wtxid().to_byte_array();
@@ -297,7 +298,7 @@ fn verify_da_witness_accepts_deduped_bytecode_from_private_witness() {
         state_diff,
     };
     let chunks = [blob.encode_to_vec().unwrap()];
-    let commit = commit_tx();
+    let commit = commit_tx(SPEC_VERSION);
     let reveal = reveal_tx(commit.compute_txid(), &chunks[0]);
     let commit_wtxid = commit.compute_wtxid().to_byte_array();
     let reveal_wtxid = reveal.compute_wtxid().to_byte_array();
@@ -487,6 +488,22 @@ fn verify_da_witness_accepts_v0_layout() {
 }
 
 #[test]
+fn verify_da_witness_rejects_blob_from_another_version() {
+    let (ee_input, da_witness, pub_params, expected_pre_root) = valid_fixture_for(AlpenSpecId::V0);
+
+    let err = run_verify_da_witness(&ee_input, &da_witness, &pub_params, expected_pre_root)
+        .expect_err("a V0 blob must not verify in a V1 proof");
+
+    assert!(matches!(
+        err,
+        DaVerificationError::CommitVersionMismatch {
+            expected: 1,
+            actual: 0
+        }
+    ));
+}
+
+#[test]
 fn verify_da_witness_rejects_update_seq_no_mismatch() {
     let (ee_input, da_witness, pub_params, expected_pre_root) = valid_fixture();
     let block = da_witness.blocks().first().unwrap();
@@ -633,7 +650,7 @@ fn verify_da_witness_rejects_duplicate_reveal() {
 #[test]
 fn verify_da_witness_rejects_reveal_spending_marker_vout() {
     let (ee_input, _, pub_params, expected_pre_root) = valid_fixture();
-    let commit = commit_tx();
+    let commit = commit_tx(SPEC_VERSION);
     let reveal = reveal_tx_spending_vout(commit.compute_txid(), 0, &[0xaa]);
     let commit_wtxid = commit.compute_wtxid().to_byte_array();
     let reveal_wtxid = reveal.compute_wtxid().to_byte_array();
