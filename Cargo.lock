@@ -1363,6 +1363,7 @@ dependencies = [
  "alpen-common",
  "alpen-da-types",
  "alpen-database",
+ "alpen-params",
  "alpen-reth-statediff",
  "async-trait",
  "bitcoin",
@@ -1389,6 +1390,7 @@ dependencies = [
  "alpen-common",
  "alpen-da-types",
  "alpen-evm-ee",
+ "alpen-params",
  "alpen-reth-statediff",
  "async-trait",
  "bitcoin",
@@ -1411,6 +1413,7 @@ dependencies = [
 name = "alpen-da-types"
 version = "0.3.0-alpha.1"
 dependencies = [
+ "alpen-params",
  "alpen-reth-statediff",
  "bitcoin",
  "rkyv",

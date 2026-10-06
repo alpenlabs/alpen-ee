@@ -9,6 +9,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+alpen-params.workspace = true
 alpen-reth-statediff.workspace = true
 strata-codec.workspace = true
 strata-crypto.workspace = true

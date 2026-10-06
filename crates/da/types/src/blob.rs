@@ -1,7 +1,8 @@
 //! DA codec types and format constants shared between producer and verifier.
 
+use alpen_params::AlpenSpecId;
 use alpen_reth_statediff::BatchStateDiff;
-use strata_codec::{Codec, CodecError, Decoder};
+use strata_codec::{BufDecoder, Codec, CodecError, Decoder, Encoder};
 
 /// Magic bytes in the EE DA commit transaction marker output.
 ///
@@ -26,8 +27,14 @@ pub const DA_BLOB_VERSION: u32 = 0;
 /// This is the top-level structure that gets encoded and posted to L1. It
 /// wraps the batch state diff with sequencing metadata needed for L1 sync and
 /// chain reconstruction.
-#[derive(Debug, Clone, Codec)]
+///
+/// The layout depends on the spec version governing the batch, through
+/// [`EvmHeaderSummary`]. The version selects the layout but is not part of
+/// the encoded bytes.
+#[derive(Debug, Clone)]
 pub struct DaBlob {
+    /// Spec version governing the batch.
+    pub spec_version: AlpenSpecId,
     /// Monotonic EE account update sequence number for this blob.
     pub update_seq_no: u64,
     /// EVM header context of the last block in this batch.
@@ -37,6 +44,35 @@ pub struct DaBlob {
     pub state_diff: BatchStateDiff,
 }
 
+impl DaBlob {
+    /// Encodes the blob under the layout its spec version defines.
+    pub fn encode(&self, enc: &mut impl Encoder) -> Result<(), CodecError> {
+        self.update_seq_no.encode(enc)?;
+        self.evm_header.encode(self.spec_version, enc)?;
+        self.state_diff.encode(enc)
+    }
+
+    /// Encodes the blob into a newly allocated vec.
+    pub fn encode_to_vec(&self) -> Result<Vec<u8>, CodecError> {
+        let mut buf = Vec::new();
+        self.encode(&mut buf)?;
+        Ok(buf)
+    }
+
+    /// Decodes a blob encoded under the layout `spec_version` defines.
+    pub fn decode(spec_version: AlpenSpecId, dec: &mut impl Decoder) -> Result<Self, CodecError> {
+        let update_seq_no = u64::decode(dec)?;
+        let evm_header = EvmHeaderSummary::decode(spec_version, dec)?;
+        let state_diff = BatchStateDiff::decode(dec)?;
+        Ok(Self {
+            spec_version,
+            update_seq_no,
+            evm_header,
+            state_diff,
+        })
+    }
+}
+
 /// Compact summary of the last EVM block header in a batch.
 ///
 /// A sequencer rebuilding from L1 DA has the [`BatchStateDiff`] for state
@@ -44,7 +80,10 @@ pub struct DaBlob {
 /// build the next block: `base_fee`/`gas_used`/`gas_limit` drive the EIP-1559
 /// base-fee and gas-limit update, `timestamp` enforces monotonicity, and
 /// `block_num` marks where the chain continues.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Codec)]
+///
+/// The layout depends on the spec version governing the block. Every version
+/// so far shares one layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EvmHeaderSummary {
     /// Block number of the last EVM block in this batch.
     pub block_num: u64,
@@ -58,18 +97,76 @@ pub struct EvmHeaderSummary {
     pub gas_limit: u64,
 }
 
+impl EvmHeaderSummary {
+    /// Encodes the summary under the layout `spec_version` defines.
+    pub fn encode(
+        &self,
+        spec_version: AlpenSpecId,
+        enc: &mut impl Encoder,
+    ) -> Result<(), CodecError> {
+        self.block_num.encode(enc)?;
+        self.timestamp.encode(enc)?;
+        self.base_fee.encode(enc)?;
+        self.gas_used.encode(enc)?;
+        self.gas_limit.encode(enc)?;
+        match spec_version {
+            AlpenSpecId::V0 | AlpenSpecId::V1 => Ok(()),
+        }
+    }
+
+    /// Encodes the summary into a newly allocated vec.
+    pub fn encode_to_vec(&self, spec_version: AlpenSpecId) -> Result<Vec<u8>, CodecError> {
+        let mut buf = Vec::new();
+        self.encode(spec_version, &mut buf)?;
+        Ok(buf)
+    }
+
+    /// Decodes a summary encoded under the layout `spec_version` defines.
+    pub fn decode(spec_version: AlpenSpecId, dec: &mut impl Decoder) -> Result<Self, CodecError> {
+        let block_num = u64::decode(dec)?;
+        let timestamp = u64::decode(dec)?;
+        let base_fee = u64::decode(dec)?;
+        let gas_used = u64::decode(dec)?;
+        let gas_limit = u64::decode(dec)?;
+        match spec_version {
+            AlpenSpecId::V0 | AlpenSpecId::V1 => {}
+        }
+        Ok(Self {
+            block_num,
+            timestamp,
+            base_fee,
+            gas_used,
+            gas_limit,
+        })
+    }
+
+    /// Decodes a summary from `buf`, rejecting any trailing bytes.
+    pub fn decode_exact(spec_version: AlpenSpecId, buf: &[u8]) -> Result<Self, CodecError> {
+        let mut dec = BufDecoder::new(buf);
+        let summary = Self::decode(spec_version, &mut dec)?;
+        if dec.remaining() > 0 {
+            return Err(CodecError::ExtraInput);
+        }
+        Ok(summary)
+    }
+}
+
 /// Reassembles a [`DaBlob`] from raw chunk payloads.
 ///
 /// `chunks` must be in commit-output order. The blob is decoded directly across
 /// the chunk slices (no intermediate contiguous copy), and any trailing bytes
 /// after a complete `DaBlob` are rejected — matching `decode_buf_exact`.
-pub fn reassemble_da_blob(chunks: &[Vec<u8>]) -> Result<DaBlob, CodecError> {
+/// `spec_version` names the layout the blob was encoded under.
+pub fn reassemble_da_blob(
+    chunks: &[Vec<u8>],
+    spec_version: AlpenSpecId,
+) -> Result<DaBlob, CodecError> {
     if chunks.is_empty() {
         return Err(CodecError::MalformedField("no DA chunks provided"));
     }
 
     let mut dec = MultiSliceDecoder::new(chunks);
-    let blob = DaBlob::decode(&mut dec)?;
+    let blob = DaBlob::decode(spec_version, &mut dec)?;
     if dec.remaining() > 0 {
         return Err(CodecError::ExtraInput);
     }
@@ -144,53 +241,80 @@ impl Decoder for MultiSliceDecoder<'_> {
 
 #[cfg(test)]
 mod tests {
-    use strata_codec::encode_to_vec;
-
     use super::*;
 
-    fn sample_blob() -> DaBlob {
+    const VERSIONS: [AlpenSpecId; 2] = [AlpenSpecId::V0, AlpenSpecId::V1];
+
+    fn sample_summary() -> EvmHeaderSummary {
+        EvmHeaderSummary {
+            block_num: 10,
+            timestamp: 1_700_000_000,
+            base_fee: 100,
+            gas_used: 21_000,
+            gas_limit: 36_000_000,
+        }
+    }
+
+    fn sample_blob(spec_version: AlpenSpecId) -> DaBlob {
         DaBlob {
+            spec_version,
             update_seq_no: 7,
-            evm_header: EvmHeaderSummary {
-                block_num: 10,
-                timestamp: 1_700_000_000,
-                base_fee: 100,
-                gas_used: 21_000,
-                gas_limit: 36_000_000,
-            },
+            evm_header: sample_summary(),
             state_diff: BatchStateDiff::new(),
         }
     }
 
     #[test]
-    fn reassembles_across_arbitrary_chunk_boundaries() {
-        let encoded = encode_to_vec(&sample_blob()).unwrap();
+    fn summary_layout_is_the_same_under_every_version() {
+        let summary = sample_summary();
+        let expected: Vec<u8> = [10u64, 1_700_000_000, 100, 21_000, 36_000_000]
+            .iter()
+            .flat_map(|field| field.to_be_bytes())
+            .collect();
 
-        // Splitting the same bytes at every boundary must decode identically to
-        // the single-buffer path (compared via re-encoding, as DaBlob is not Eq).
-        for chunk_size in 1..=encoded.len() {
-            let chunks: Vec<Vec<u8>> = encoded.chunks(chunk_size).map(|c| c.to_vec()).collect();
-            let got = reassemble_da_blob(&chunks).expect("decode across chunks");
+        for spec_version in VERSIONS {
+            let encoded = summary.encode_to_vec(spec_version).unwrap();
+            assert_eq!(encoded, expected, "{spec_version:?}");
             assert_eq!(
-                encode_to_vec(&got).unwrap(),
-                encoded,
-                "chunk_size={chunk_size}"
+                EvmHeaderSummary::decode_exact(spec_version, &encoded).unwrap(),
+                summary
             );
         }
     }
 
     #[test]
+    fn reassembles_across_arbitrary_chunk_boundaries() {
+        for spec_version in VERSIONS {
+            let encoded = sample_blob(spec_version).encode_to_vec().unwrap();
+
+            // Splitting the same bytes at every boundary must decode identically to
+            // the single-buffer path (compared via re-encoding, as DaBlob is not Eq).
+            for chunk_size in 1..=encoded.len() {
+                let chunks: Vec<Vec<u8>> = encoded.chunks(chunk_size).map(|c| c.to_vec()).collect();
+                let got = reassemble_da_blob(&chunks, spec_version).expect("decode across chunks");
+                assert_eq!(
+                    got.encode_to_vec().unwrap(),
+                    encoded,
+                    "{spec_version:?} chunk_size={chunk_size}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn empty_chunks_is_error() {
-        assert!(reassemble_da_blob(&[]).is_err());
+        assert!(reassemble_da_blob(&[], AlpenSpecId::V1).is_err());
     }
 
     #[test]
     fn trailing_bytes_are_rejected() {
-        let mut encoded = encode_to_vec(&sample_blob()).unwrap();
-        encoded.push(0xFF);
-        assert!(matches!(
-            reassemble_da_blob(&[encoded]),
-            Err(CodecError::ExtraInput)
-        ));
+        for spec_version in VERSIONS {
+            let mut encoded = sample_blob(spec_version).encode_to_vec().unwrap();
+            encoded.push(0xFF);
+            assert!(matches!(
+                reassemble_da_blob(&[encoded], spec_version),
+                Err(CodecError::ExtraInput)
+            ));
+        }
     }
 }

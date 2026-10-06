@@ -11,6 +11,7 @@ use alpen_da_types::{
     wtxids_root_from_txs, BitcoinMerkleProof, DaBlob, DaBlockWitness, DaTxWitness,
     L1DaBlockInclusion,
 };
+use alpen_params::AlpenSpecId;
 use bitcoin::{consensus::serialize as btc_serialize, hashes::Hash as _, Transaction};
 use bitcoind_async_client::traits::Reader;
 use strata_identifiers::{Buf32, WtxidsRoot};
@@ -108,9 +109,10 @@ pub(crate) fn build_wtxid_inclusion_proof(txs: &[Transaction], idx: usize) -> Bi
 /// Reassembles this batch's DA blob from its included commit/reveal transactions.
 pub(crate) fn reassemble_da_blob_from_txs(
     txs: &[Transaction],
+    spec_version: AlpenSpecId,
 ) -> Result<DaBlob, DaWitnessBuildError> {
     let chunks = extract_da_chunks(txs.iter())?;
-    reassemble_da_blob(&chunks).map_err(DaWitnessBuildError::Reassembly)
+    reassemble_da_blob(&chunks, spec_version).map_err(DaWitnessBuildError::Reassembly)
 }
 
 #[cfg(test)]

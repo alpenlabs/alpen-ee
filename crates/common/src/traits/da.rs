@@ -1,6 +1,7 @@
 //! Data availability provider trait for batch lifecycle management.
 
 use alpen_da_types::EvmHeaderSummary;
+use alpen_params::AlpenSpecId;
 use async_trait::async_trait;
 
 use crate::{BatchId, L1DaBlockRef};
@@ -61,6 +62,15 @@ pub trait BatchDaProvider: Send + Sync {
 /// to each batch. The binary crate supplies the concrete implementation
 /// backed by its block header store.
 pub trait HeaderSummaryProvider: Send + Sync {
-    /// Returns the [`EvmHeaderSummary`] for the given block number.
-    fn header_summary(&self, block_num: u64) -> eyre::Result<EvmHeaderSummary>;
+    /// Returns the [`EvmHeaderSummary`] for the given block number, built
+    /// under `spec_version`.
+    ///
+    /// Fails if the header is stamped with another version. The blob encodes
+    /// the summary under the batch's version and the chunk proof under the
+    /// header's, so a mismatch would post a blob no proof can accept.
+    fn header_summary(
+        &self,
+        block_num: u64,
+        spec_version: AlpenSpecId,
+    ) -> eyre::Result<EvmHeaderSummary>;
 }

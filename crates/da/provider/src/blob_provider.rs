@@ -131,7 +131,9 @@ where
         );
 
         // 4. Read the last block's header for chain-reconstruction metadata.
-        let evm_header = self.header_summary.header_summary(batch.last_blocknum())?;
+        let evm_header = self
+            .header_summary
+            .header_summary(batch.last_blocknum(), batch.spec_version())?;
 
         let update_seq_no = batch
             .update_seq_no()
@@ -139,6 +141,7 @@ where
 
         // 5. Construct the DaBlob with metadata.
         Ok(DaBlob {
+            spec_version: batch.spec_version(),
             update_seq_no,
             evm_header,
             state_diff,

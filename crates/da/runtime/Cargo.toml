@@ -23,6 +23,7 @@ builders = [
 [dependencies]
 alpen-common = { workspace = true, optional = true }
 alpen-da-types.workspace = true
+alpen-params.workspace = true
 alpen-reth-statediff.workspace = true
 
 alloy-primitives.workspace = true

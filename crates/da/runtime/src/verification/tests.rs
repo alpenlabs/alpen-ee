@@ -8,6 +8,7 @@ use alpen_da_types::{
     DaTxWitness, DaWitness, DedupWitness, EvmHeaderSummary, L1DaBlockInclusion, DA_BLOB_VERSION,
 };
 use alpen_evm_ee::EvmPartialState;
+use alpen_params::AlpenSpecId;
 use alpen_reth_statediff::{
     apply_batch_state_diff_to_ethereum_state, AccountChange, AccountDiff, BatchStateDiff,
 };
@@ -34,6 +35,9 @@ use strata_snark_acct_types::{
 };
 
 use super::{verify_da_witness, DaVerificationError};
+
+/// Spec version the fixtures are built under: the newest one.
+const SPEC_VERSION: AlpenSpecId = AlpenSpecId::V1;
 
 const MAGIC: [u8; 4] = *b"ALPN";
 
@@ -140,7 +144,13 @@ fn run_verify_da_witness(
     let archived_ee = rkyv::access::<ArchivedEePrivateInput, RkyvError>(&ee_bytes).unwrap();
     let archived_da = rkyv::access::<ArchivedDaWitness, RkyvError>(&da_bytes).unwrap();
 
-    verify_da_witness(archived_ee, archived_da, pub_params, expected_pre_root)
+    verify_da_witness(
+        archived_ee,
+        archived_da,
+        pub_params,
+        expected_pre_root,
+        SPEC_VERSION,
+    )
 }
 
 fn rebuild_pub_params(
@@ -167,12 +177,13 @@ fn rebuild_ee_input(
     raw_partial_pre_state: &[u8],
     tip_state_root: [u8; 32],
     header: EvmHeaderSummary,
+    spec_version: AlpenSpecId,
 ) -> EePrivateInput {
     let transition = ChunkTransition::new(
         Hash::from([1; 32]),
         Hash::from([2; 32]),
         Hash::from(tip_state_root),
-        ExecHeaderSummary::from_vec(encode_to_vec(&header).unwrap()).unwrap(),
+        ExecHeaderSummary::from_vec(header.encode_to_vec(spec_version).unwrap()).unwrap(),
         ExecInputs::new_empty(),
         ExecOutputs::new_empty(),
     );
@@ -184,6 +195,12 @@ fn rebuild_ee_input(
 }
 
 fn valid_fixture() -> (EePrivateInput, DaWitness, UpdateProofPubParams, [u8; 32]) {
+    valid_fixture_for(SPEC_VERSION)
+}
+
+fn valid_fixture_for(
+    spec_version: AlpenSpecId,
+) -> (EePrivateInput, DaWitness, UpdateProofPubParams, [u8; 32]) {
     let header = EvmHeaderSummary {
         block_num: 10,
         timestamp: 1_700_000_000,
@@ -203,11 +220,12 @@ fn valid_fixture() -> (EePrivateInput, DaWitness, UpdateProofPubParams, [u8; 32]
     let raw_pre_state = encode_to_vec(&pre_state).unwrap();
 
     let blob = DaBlob {
+        spec_version,
         update_seq_no: 7,
         evm_header: header,
         state_diff: BatchStateDiff::new(),
     };
-    let chunks = [encode_to_vec(&blob).unwrap()];
+    let chunks = [blob.encode_to_vec().unwrap()];
     assert_eq!(chunks.len(), 1);
 
     let commit = commit_tx();
@@ -218,7 +236,7 @@ fn valid_fixture() -> (EePrivateInput, DaWitness, UpdateProofPubParams, [u8; 32]
     let block_hash = [0x44; 32];
     let height = 42;
 
-    let ee_input = rebuild_ee_input(&raw_pre_state, pre_root, header);
+    let ee_input = rebuild_ee_input(&raw_pre_state, pre_root, header, spec_version);
 
     let da_witness = DaWitness::new(
         vec![DaBlockWitness::new(
@@ -273,11 +291,12 @@ fn verify_da_witness_accepts_deduped_bytecode_from_private_witness() {
     let post_root = pre_state.ethereum_state().state_root().0;
 
     let blob = DaBlob {
+        spec_version: SPEC_VERSION,
         update_seq_no: 7,
         evm_header: header,
         state_diff,
     };
-    let chunks = [encode_to_vec(&blob).unwrap()];
+    let chunks = [blob.encode_to_vec().unwrap()];
     let commit = commit_tx();
     let reveal = reveal_tx(commit.compute_txid(), &chunks[0]);
     let commit_wtxid = commit.compute_wtxid().to_byte_array();
@@ -292,7 +311,7 @@ fn verify_da_witness_accepts_deduped_bytecode_from_private_witness() {
         Hash::from([1; 32]),
         Hash::from([2; 32]),
         Hash::from(post_root),
-        ExecHeaderSummary::from_vec(encode_to_vec(&header).unwrap()).unwrap(),
+        ExecHeaderSummary::from_vec(header.encode_to_vec(SPEC_VERSION).unwrap()).unwrap(),
         ExecInputs::new_empty(),
         ExecOutputs::new_empty(),
     );
@@ -330,8 +349,14 @@ fn verify_da_witness_accepts_deduped_bytecode_from_private_witness() {
     let archived_ee = rkyv::access::<ArchivedEePrivateInput, RkyvError>(&ee_bytes).unwrap();
     let archived_da = rkyv::access::<ArchivedDaWitness, RkyvError>(&da_bytes).unwrap();
 
-    verify_da_witness(archived_ee, archived_da, &pub_params, pre_root)
-        .expect("private witness bytecode should satisfy deduped code hash");
+    verify_da_witness(
+        archived_ee,
+        archived_da,
+        &pub_params,
+        pre_root,
+        SPEC_VERSION,
+    )
+    .expect("private witness bytecode should satisfy deduped code hash");
 }
 
 #[test]
@@ -352,6 +377,7 @@ fn verify_da_blob_metadata_rejects_missing_deployed_bytecode() {
         AccountChange::Created(AccountDiff::new_created(U256::ZERO, 1, code_hash)),
     );
     let blob = DaBlob {
+        spec_version: SPEC_VERSION,
         update_seq_no: 7,
         evm_header: header,
         state_diff,
@@ -360,7 +386,7 @@ fn verify_da_blob_metadata_rejects_missing_deployed_bytecode() {
         Hash::from([1; 32]),
         Hash::from([2; 32]),
         Hash::from([3; 32]),
-        ExecHeaderSummary::from_vec(encode_to_vec(&header).unwrap()).unwrap(),
+        ExecHeaderSummary::from_vec(header.encode_to_vec(SPEC_VERSION).unwrap()).unwrap(),
         ExecInputs::new_empty(),
         ExecOutputs::new_empty(),
     );
@@ -420,7 +446,7 @@ fn verify_da_witness_rejects_empty_witness_for_non_empty_batch() {
     let archived_ee = rkyv::access::<ArchivedEePrivateInput, RkyvError>(&ee_bytes).unwrap();
     let archived_da = rkyv::access::<ArchivedDaWitness, RkyvError>(&da_bytes).unwrap();
 
-    let err = verify_da_witness(archived_ee, archived_da, &pub_params, [0; 32])
+    let err = verify_da_witness(archived_ee, archived_da, &pub_params, [0; 32], SPEC_VERSION)
         .expect_err("non-empty batch must require DA witness");
 
     assert!(matches!(err, DaVerificationError::MissingDaWitness));
@@ -433,8 +459,31 @@ fn verify_da_witness_accepts_valid_commit_reveal_round_trip() {
     let archived_ee = rkyv::access::<ArchivedEePrivateInput, RkyvError>(&ee_bytes).unwrap();
     let archived_da = rkyv::access::<ArchivedDaWitness, RkyvError>(&da_bytes).unwrap();
 
-    verify_da_witness(archived_ee, archived_da, &pub_params, expected_pre_root)
-        .expect("valid DA witness must verify");
+    verify_da_witness(
+        archived_ee,
+        archived_da,
+        &pub_params,
+        expected_pre_root,
+        SPEC_VERSION,
+    )
+    .expect("valid DA witness must verify");
+}
+
+#[test]
+fn verify_da_witness_accepts_v0_layout() {
+    let (ee_input, da_witness, pub_params, expected_pre_root) = valid_fixture_for(AlpenSpecId::V0);
+    let (ee_bytes, da_bytes) = archive_inputs(&ee_input, &da_witness);
+    let archived_ee = rkyv::access::<ArchivedEePrivateInput, RkyvError>(&ee_bytes).unwrap();
+    let archived_da = rkyv::access::<ArchivedDaWitness, RkyvError>(&da_bytes).unwrap();
+
+    verify_da_witness(
+        archived_ee,
+        archived_da,
+        &pub_params,
+        expected_pre_root,
+        AlpenSpecId::V0,
+    )
+    .expect("a V0 batch must verify under the V0 layout");
 }
 
 #[test]
@@ -474,6 +523,7 @@ fn verify_da_witness_rejects_evm_header_mismatch() {
         ee_input.raw_partial_pre_state(),
         expected_pre_root,
         wrong_header,
+        SPEC_VERSION,
     );
 
     let err = run_verify_da_witness(&bad_ee_input, &da_witness, &pub_params, expected_pre_root)
@@ -498,6 +548,7 @@ fn verify_da_witness_rejects_state_root_mismatch() {
         ee_input.raw_partial_pre_state(),
         wrong_tip_state_root,
         header,
+        SPEC_VERSION,
     );
 
     let err = run_verify_da_witness(&bad_ee_input, &da_witness, &pub_params, expected_pre_root)
@@ -640,8 +691,14 @@ fn verify_da_witness_rejects_unclaimed_l1_ref() {
     let archived_ee = rkyv::access::<ArchivedEePrivateInput, RkyvError>(&ee_bytes).unwrap();
     let archived_da = rkyv::access::<ArchivedDaWitness, RkyvError>(&da_bytes).unwrap();
 
-    let err = verify_da_witness(archived_ee, archived_da, &pub_params, expected_pre_root)
-        .expect_err("unclaimed L1 ref must fail");
+    let err = verify_da_witness(
+        archived_ee,
+        archived_da,
+        &pub_params,
+        expected_pre_root,
+        SPEC_VERSION,
+    )
+    .expect_err("unclaimed L1 ref must fail");
 
     assert!(matches!(
         err,
@@ -679,8 +736,14 @@ fn verify_da_witness_rejects_bad_wtxid_root() {
     let archived_ee = rkyv::access::<ArchivedEePrivateInput, RkyvError>(&ee_bytes).unwrap();
     let archived_da = rkyv::access::<ArchivedDaWitness, RkyvError>(&da_bytes).unwrap();
 
-    let err = verify_da_witness(archived_ee, archived_da, &pub_params, expected_pre_root)
-        .expect_err("bad wtxid root must fail");
+    let err = verify_da_witness(
+        archived_ee,
+        archived_da,
+        &pub_params,
+        expected_pre_root,
+        SPEC_VERSION,
+    )
+    .expect_err("bad wtxid root must fail");
 
     assert!(matches!(
         err,

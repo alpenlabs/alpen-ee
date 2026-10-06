@@ -4,9 +4,10 @@ use alloy_consensus::{BlockBody, Header, proofs::calculate_transaction_root};
 use alpen_acct_types::ExecHeader;
 use alpen_chain_types::ExecHeaderSummary;
 use alpen_da_types::EvmHeaderSummary;
+use alpen_params::header_spec_version;
 use reth_ethereum_primitives::TransactionSigned;
 use revm_primitives::alloy_primitives::{Address, B64, B256, Bloom, Bytes, U256};
-use strata_codec::{Codec, CodecError, encode_to_vec};
+use strata_codec::{Codec, CodecError};
 
 use super::Hash;
 use crate::codec_shims::{decode_rlp_with_length, encode_rlp_with_length};
@@ -186,6 +187,11 @@ impl ExecHeader for EvmHeader {
     }
 
     fn get_exec_header_summary(&self) -> ExecHeaderSummary {
+        // Hosts only summarize headers they have already validated, so the
+        // stamp decodes. The guest summarizes the chunk tip before it runs
+        // the blocks, but there a panic rejects the chunk just like an error.
+        let spec_version = header_spec_version(&self.header)
+            .expect("Alpen EVM headers carry a known spec version");
         let payload = EvmHeaderSummary {
             block_num: self.header.number,
             timestamp: self.header.timestamp,
@@ -196,8 +202,10 @@ impl ExecHeader for EvmHeader {
             gas_used: self.header.gas_used,
             gas_limit: self.header.gas_limit,
         };
-        ExecHeaderSummary::from_vec(encode_to_vec(&payload).expect("encode EVM header summary"))
-            .expect("exec header summary fits the SSZ bound")
+        let encoded = payload
+            .encode_to_vec(spec_version)
+            .expect("encode EVM header summary");
+        ExecHeaderSummary::from_vec(encoded).expect("exec header summary fits the SSZ bound")
     }
 
     fn compute_block_id(&self) -> Hash {

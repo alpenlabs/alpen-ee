@@ -6,7 +6,7 @@
 //! inscriptions.
 
 use alpen_da_types::DaBlob;
-use strata_codec::{encode_to_vec, CodecError};
+use strata_codec::CodecError;
 use strata_l1_envelope_fmt::MAX_ENVELOPE_PAYLOAD_SIZE;
 
 /// Splits a blob into chunk payloads.
@@ -39,7 +39,7 @@ pub fn prepare_da_chunks(
         (1..=MAX_ENVELOPE_PAYLOAD_SIZE).contains(&max_chunk_payload),
         "max_chunk_payload must be in 1..={MAX_ENVELOPE_PAYLOAD_SIZE}, got {max_chunk_payload}"
     );
-    let encoded = encode_to_vec(blob)?;
+    let encoded = blob.encode_to_vec()?;
     // Each chunk maps to one reveal tx and one P2TR output in the commit tx.
     // Commit-tx standardness gives the practical chunk-count ceiling: a
     // 43-byte P2TR output under Bitcoin Core's 400,000 wu limit leaves room
@@ -53,14 +53,16 @@ pub fn prepare_da_chunks(
 #[cfg(test)]
 mod tests {
     use alpen_da_types::{reassemble_da_blob, DaBlob, EvmHeaderSummary};
+    use alpen_params::AlpenSpecId;
     use alpen_reth_statediff::BatchStateDiff;
-    use strata_codec::{decode_buf_exact, encode_to_vec};
+    use strata_codec::BufDecoder;
     use strata_l1_envelope_fmt::MAX_ENVELOPE_PAYLOAD_SIZE;
 
     use super::*;
 
     fn make_test_da_blob() -> DaBlob {
         DaBlob {
+            spec_version: AlpenSpecId::V1,
             update_seq_no: 42,
             evm_header: EvmHeaderSummary {
                 block_num: 42,
@@ -74,6 +76,7 @@ mod tests {
     }
 
     fn assert_da_blob_eq(a: &DaBlob, b: &DaBlob) {
+        assert_eq!(a.spec_version, b.spec_version, "spec_version mismatch");
         assert_eq!(a.update_seq_no, b.update_seq_no, "update_seq_no mismatch");
         assert_eq!(a.evm_header, b.evm_header, "evm_header mismatch");
         assert!(a.state_diff.is_empty(), "expected empty state_diff in a");
@@ -83,8 +86,8 @@ mod tests {
     #[test]
     fn da_blob_codec_roundtrip() {
         let blob = make_test_da_blob();
-        let encoded = encode_to_vec(&blob).unwrap();
-        let decoded: DaBlob = decode_buf_exact(&encoded).unwrap();
+        let encoded = blob.encode_to_vec().unwrap();
+        let decoded = DaBlob::decode(blob.spec_version, &mut BufDecoder::new(&encoded)).unwrap();
         assert_da_blob_eq(&blob, &decoded);
     }
 
@@ -92,7 +95,7 @@ mod tests {
     fn full_pipeline_roundtrip() {
         let blob = make_test_da_blob();
         let chunks = prepare_da_chunks(&blob, MAX_ENVELOPE_PAYLOAD_SIZE).unwrap();
-        let reassembled = reassemble_da_blob(&chunks).unwrap();
+        let reassembled = reassemble_da_blob(&chunks, blob.spec_version).unwrap();
         assert_da_blob_eq(&blob, &reassembled);
     }
 
@@ -102,7 +105,7 @@ mod tests {
         let chunks = prepare_da_chunks(&blob, 4).unwrap();
         assert!(chunks.len() > 1, "expected multiple chunks");
         assert!(chunks.iter().all(|c| c.len() <= 4));
-        let reassembled = reassemble_da_blob(&chunks).unwrap();
+        let reassembled = reassemble_da_blob(&chunks, blob.spec_version).unwrap();
         assert_da_blob_eq(&blob, &reassembled);
     }
 }

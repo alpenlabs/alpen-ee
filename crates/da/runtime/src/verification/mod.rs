@@ -22,6 +22,7 @@ use alpen_da_types::{
     EvmHeaderSummary, DA_BLOB_VERSION, EE_DA_MAGIC_BYTES,
 };
 use alpen_evm_ee::EvmPartialState;
+use alpen_params::AlpenSpecId;
 use alpen_reth_statediff::{
     apply_batch_state_diff_to_ethereum_state, AccountChange, BatchStateDiff,
 };
@@ -41,11 +42,15 @@ use strata_snark_acct_types::{LedgerRefs, UpdateProofPubParams};
 /// (header summary, deployed bytecodes, state-diff applied to the partial
 /// pre-state matches the last chunk's `tip_state_root`). there is no
 /// downstream consumer for the blob itself, so nothing is returned.
+///
+/// `spec_version` is the version governing the batch. It selects the layout
+/// both the blob and the last chunk's header summary are decoded under.
 pub fn verify_da_witness(
     ee_input: &ArchivedEePrivateInput,
     da_witness: &ArchivedDaWitness,
     pub_params: &UpdateProofPubParams,
     expected_pre_state_root: [u8; 32],
+    spec_version: AlpenSpecId,
 ) -> DaVerificationResult {
     if da_witness.blocks().is_empty() {
         return if ee_input.chunks().is_empty() {
@@ -65,7 +70,8 @@ pub fn verify_da_witness(
     }
 
     let encoded_chunks = extract_and_verify_da_chunks(included_txs.iter())?;
-    let blob = reassemble_da_blob(&encoded_chunks).map_err(DaVerificationError::Reassembly)?;
+    let blob = reassemble_da_blob(&encoded_chunks, spec_version)
+        .map_err(DaVerificationError::Reassembly)?;
     let last_chunk = decode_last_chunk_transition(ee_input)?;
     verify_da_blob_metadata(
         &blob,
@@ -214,9 +220,11 @@ fn verify_da_blob_metadata(
         });
     }
 
-    let expected_header: EvmHeaderSummary =
-        decode_buf_exact(last_chunk.tip_exec_header_summary().opaque_bytes())
-            .map_err(DaVerificationError::ExecHeaderSummaryDecode)?;
+    let expected_header = EvmHeaderSummary::decode_exact(
+        blob.spec_version,
+        last_chunk.tip_exec_header_summary().opaque_bytes(),
+    )
+    .map_err(DaVerificationError::ExecHeaderSummaryDecode)?;
     if blob.evm_header != expected_header {
         return Err(DaVerificationError::EvmHeaderMismatch {
             expected: expected_header,
