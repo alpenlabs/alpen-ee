@@ -4,7 +4,8 @@
 //! proofs, so the chunk guest's Groth16 predicate condition bytes are code-generated
 //! between the two builds. Both guests also embed the `AlpenParams` (genesis,
 //! bridge params) baked in from an external JSON file — see below. All generated
-//! artifacts (ELFs, `predicates.rs`, `alpen_params.rs`) are emitted to `<crate>/generated/`.
+//! artifacts (ELFs, `predicates.rs`, `alpen_params.rs`, the account predicate and the
+//! account program ID) are emitted to `<crate>/generated/`.
 //!
 //! Building the guests requires the SP1 toolchain; set `SP1_SKIP_PROGRAM_BUILD=true` to
 //! skip guest compilation entirely (clippy is skipped automatically).
@@ -41,7 +42,7 @@ use std::{
 use sp1_build::{build_program_with_args, BuildArgs};
 use sp1_sdk::{
     blocking::{Prover, ProverClient},
-    HashableKey, ProvingKey,
+    HashableKey, ProvingKey, SP1VerifyingKey,
 };
 use sp1_verifier::{GROTH16_VK_BYTES, VK_ROOT_BYTES};
 use zkaleido_sp1_groth16_verifier::SP1Groth16Verifier;
@@ -93,12 +94,14 @@ fn main() {
     // The account guest embeds the chunk guest's predicate condition, so the
     // chunk guest must be built (and its VK derived) first.
     build_guest(ALPEN_CHUNK);
-    write_chunk_predicate_const(&sp1_predicate(ALPEN_CHUNK));
+    write_chunk_predicate_const(&sp1_predicate(&program_vkey(ALPEN_CHUNK)));
     build_guest(ALPEN_ACCT);
+    let acct_vk = program_vkey(ALPEN_ACCT);
 
     // The acct guest's own predicate is not consumed by any guest. It is what
     // the OL holds as the account's `update_vk` to check account proofs.
-    write_acct_predicate_file(&sp1_predicate(ALPEN_ACCT));
+    write_acct_predicate_file(&sp1_predicate(&acct_vk));
+    write_acct_program_id_file(&acct_vk);
 }
 
 fn build_guest(program: &str) {
@@ -154,12 +157,8 @@ fn ensure_guest_lockfile_current(program: &str) {
     }
 }
 
-/// Derives the condition bytes of `program`'s `Sp1Groth16` predicate from its
-/// freshly built ELF. These are the canonical uncompressed encoding of an
-/// [`SP1Groth16Verifier`] (embedding the guest's verifying key) that the
-/// runtime predicate verifier in `strata-predicate` decodes via
-/// `SP1Groth16Verifier::parse`.
-fn sp1_predicate(program: &str) -> Vec<u8> {
+/// Derives `program`'s verifying key from its freshly built ELF.
+fn program_vkey(program: &str) -> SP1VerifyingKey {
     let elf_path = Path::new(GENERATED_DIR).join(format!("{program}.elf"));
     let elf = fs::read(&elf_path)
         .unwrap_or_else(|e| panic!("read built ELF {}: {e}", elf_path.display()));
@@ -170,11 +169,32 @@ fn sp1_predicate(program: &str) -> Vec<u8> {
         .unwrap_or_else(|e| panic!("sp1 key setup for {program}: {e}"));
     let vk = pk.verifying_key();
     println!("cargo:warning={program} vkey: {}", vk.bytes32());
-    let vkey_hash = vk.bytes32_raw();
+    vk.clone()
+}
 
-    let verifier = SP1Groth16Verifier::load(&GROTH16_VK_BYTES, vkey_hash, *VK_ROOT_BYTES, true)
-        .unwrap_or_else(|e| panic!("load SP1 Groth16 verifier: {e}"));
+/// Derives the condition bytes of a guest's `Sp1Groth16` predicate from its
+/// verifying key. These are the canonical uncompressed encoding of an
+/// [`SP1Groth16Verifier`] (embedding the guest's verifying key) that the
+/// runtime predicate verifier in `strata-predicate` decodes via
+/// `SP1Groth16Verifier::parse`.
+fn sp1_predicate(vk: &SP1VerifyingKey) -> Vec<u8> {
+    let verifier =
+        SP1Groth16Verifier::load(&GROTH16_VK_BYTES, vk.bytes32_raw(), *VK_ROOT_BYTES, true)
+            .unwrap_or_else(|e| panic!("load SP1 Groth16 verifier: {e}"));
     verifier.to_uncompressed_bytes()
+}
+
+/// Writes the acct guest's program ID to `<generated>/alpen-acct.program-id` as
+/// `0x<hex>`. This is SP1's program vkey hash, the value `cargo prove vkey`
+/// prints for the ELF.
+///
+/// The predicate folds the program ID into a single curve point, and its other
+/// bytes are the same for every guest, so the predicate alone is hard to tell
+/// apart from another build's. The program ID names the build directly.
+fn write_acct_program_id_file(vk: &SP1VerifyingKey) {
+    let out_path = Path::new(GENERATED_DIR).join("alpen-acct.program-id");
+    fs::write(&out_path, vk.bytes32())
+        .unwrap_or_else(|e| panic!("write {}: {e}", out_path.display()));
 }
 
 /// Writes the acct guest's own predicate to `<generated>/alpen-acct.predicate`
