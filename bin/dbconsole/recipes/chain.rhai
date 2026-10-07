@@ -88,3 +88,28 @@ fn drop_chain_above(height) {
     }
     n
 }
+
+/// Stages what `drop_chain_above` does for the height of block `hash`, so
+/// that block becomes the tip. Takes the hash as OL reports it, `0x` or not.
+/// Refuses a block the store does not hold, a block at a finalized height
+/// that is not the finalized one, and a block that shares an unfinalized
+/// height with another, since the node could then pick either as its tip.
+/// Returns the count staged.
+fn drop_chain_above_block(hash) {
+    let block = get("ExecBlockSchema", hash);
+    if block == () { throw `no exec block ${hash}`; }
+    let height = block.value.blocknum;
+
+    let finalized = get("ExecBlockFinalizedSchema", height.to_string());
+    if finalized != () {
+        if finalized.value != block.key {
+            throw `block ${block.key} is not on the finalized chain; height ${height} holds ${finalized.value}`;
+        }
+    } else {
+        let others = get("ExecBlocksAtHeightSchema", height.to_string()).value.filter(|h| h != block.key);
+        if !others.is_empty() {
+            throw `block ${block.key} shares height ${height} with ${others}; the node could pick either as its tip`;
+        }
+    }
+    drop_chain_above(height)
+}

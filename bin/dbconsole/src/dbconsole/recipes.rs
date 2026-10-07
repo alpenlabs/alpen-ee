@@ -72,6 +72,7 @@ mod tests {
             "broadcast_summary",
             "chain_summary",
             "drop_chain_above",
+            "drop_chain_above_block",
             "prover_abandon",
             "prover_delete",
             "prover_reset",
@@ -363,6 +364,72 @@ mod tests {
         let mut session = Session::new(db, Arc::new(AtomicBool::new(false)));
         install(&mut session).unwrap();
         (datadir, session)
+    }
+
+    /// The hash of the seeded block whose bytes are all `seed`, as OL
+    /// reports it.
+    fn block_hash(seed: u8) -> String {
+        format!("0x{}", hex::encode([seed; 32]))
+    }
+
+    #[test]
+    fn drop_chain_above_block_drops_what_its_height_would() {
+        let (_datadir, mut session) = seeded_session();
+        // Block 1 of the seeded chain is all 0x02.
+        let by_hash = int(
+            &mut session,
+            &format!(r#"drop_chain_above_block("{}")"#, block_hash(2)),
+        );
+        let ops_by_hash = session.db().staged();
+        session.db().abort();
+
+        let by_height = int(&mut session, "drop_chain_above(1)");
+        assert_eq!(by_hash, by_height);
+        assert_eq!(ops_by_hash, session.db().staged());
+    }
+
+    #[test]
+    fn drop_chain_above_block_refuses_a_block_that_cannot_be_the_tip() {
+        let (_datadir, mut session) = seeded_session();
+        let refusal = |session: &mut Session, hash: &str| {
+            let err = session
+                .eval(&format!(r#"drop_chain_above_block("{hash}")"#))
+                .unwrap_err()
+                .to_string();
+            assert!(session.db().staged().is_empty(), "staged on refusal");
+            err
+        };
+
+        let err = refusal(&mut session, &block_hash(0xee));
+        assert!(err.contains("no exec block"), "{err}");
+
+        // A copy of block 1 under another hash sits at a finalized height
+        // without being the finalized block there.
+        let copy = "ef".repeat(32);
+        let _ = session
+            .eval(&format!(
+                r#"
+                put("ExecBlockSchema", "{copy}", edit("ExecBlockSchema", "{}"));
+                commit();
+                "#,
+                block_hash(2)
+            ))
+            .unwrap();
+        let err = refusal(&mut session, &copy);
+        assert!(err.contains("not on the finalized chain"), "{err}");
+
+        // On the full node, height 2 is unfinalized and holds two blocks.
+        let (_datadir, mut session) = full_node_session();
+        let err = refusal(&mut session, &block_hash(3));
+        assert!(err.contains("shares height 2"), "{err}");
+        // Block 1 has its height to itself, and both blocks above it go.
+        assert_eq!(
+            int(
+                &mut session,
+                &format!(r#"drop_chain_above_block("{}")"#, block_hash(2))
+            ),
+            5
+        );
     }
 
     #[test]

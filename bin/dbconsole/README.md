@@ -608,6 +608,7 @@ until you say otherwise. `.recipes` lists them:
 | `prover_delete(table, key)` | the task, its receipt, and the proof-id index entries of an account receipt |
 | `chain_summary()` | nothing; tip and finalized heights, counts, latest batch and chunk |
 | `drop_chain_above(height)` | every exec block above `height` with its payload, accessed state and witness; the height and finalized entries; the witness environment's diffs above `height`, where that environment is present; the OL epoch entries whose accepted account state points at a dropped block, so the tracker resumes from the last surviving epoch; then `revert_batches_from` for the first batch ending above `height`. Chain, witness and batches are each cut by their own top, so a witness that ran ahead is trimmed even when the chain is already at `height` |
+| `drop_chain_above_block(hash)` | what `drop_chain_above` stages for the height of block `hash`, so that block becomes the tip. Takes the hash as OL reports it, `0x` or not. Refuses a block the store does not hold, a block at a finalized height that is not the finalized one, and a block that shares an unfinalized height with another |
 | `batch_summary()` | nothing; batches and chunks counted by status |
 | `revert_batches_from(idx)` | batches from `idx`, their id and chunk-list entries, and every chunk of those batches; then, where the prover environment is present, every prover task over those batches and chunks under any spec version, their receipts, and the proof-id index entries of the account receipts |
 | `broadcast_summary()` | nothing; the L1 queue by status, replacement chains, envelopes |
@@ -635,6 +636,11 @@ committed 138 edit(s) to `witness`
 committed 30 edit(s) to `prover`
 543
 ```
+
+To roll back to the EE tip OL has accepted, pass that tip's hash straight in:
+`drop_chain_above_block("0x…")`. OL holds it as `new_tip_blkid`, the first 32
+bytes of the `extra_data` of the EE account's latest update
+(`strata_getSnarkAcctUpdateManifest`).
 
 A recipe that touches more than one environment stages the authoritative one
 first, because `commit()` applies environments in first-staged order and
