@@ -1,15 +1,11 @@
 //! EE account update proof implementation wrapping `acct-runtime` with zkaleido proof IO.
 
-use std::sync::Arc;
-
 use alpen_acct_runtime::ArchivedEePrivateInput;
 use alpen_acct_types::EeAccountState;
 use alpen_da_runtime::verification::verify_da_witness;
 use alpen_da_types::ArchivedDaWitness;
 use alpen_evm_ee::EvmExecutionEnvironment;
 use alpen_params::{AlpenParams, AlpenSpecId};
-use alpen_reth_evm::evm::AlpenEvmFactory;
-use reth_chainspec::ChainSpec;
 use rkyv::rancor::Error as RkyvError;
 use strata_predicate::PredicateKey;
 use strata_snark_acct_runtime::ArchivedPrivateInput as ArchivedUpdatePrivateInput;
@@ -46,8 +42,6 @@ pub fn process_ee_acct_update(
     spec_version: AlpenSpecId,
     chunk_predicate_key: &PredicateKey,
 ) {
-    let chain_spec: Arc<ChainSpec> = params.evm_spec().chain_spec(spec_version).clone();
-
     let ee_buf = zkvm.read_buf();
     let ee_input: &ArchivedEePrivateInput =
         rkyv::access::<ArchivedEePrivateInput, RkyvError>(&ee_buf)
@@ -58,13 +52,11 @@ pub fn process_ee_acct_update(
         rkyv::access::<ArchivedUpdatePrivateInput, RkyvError>(&upd_buf)
             .expect("failed to access rkyv update archive");
 
-    let evm_factory = AlpenEvmFactory::from_bridge_params(params.bridge_params());
-
     let da_buf = zkvm.read_buf();
     let da_witness: &ArchivedDaWitness = rkyv::access::<ArchivedDaWitness, RkyvError>(&da_buf)
         .expect("failed to access rkyv DA witness archive");
 
-    let ee = EvmExecutionEnvironment::new(chain_spec, evm_factory);
+    let ee = EvmExecutionEnvironment::new(params, spec_version);
 
     alpen_acct_runtime::verify_and_process_update(&ee, chunk_predicate_key, ee_input, upd_input)
         .expect("account update verification failed");

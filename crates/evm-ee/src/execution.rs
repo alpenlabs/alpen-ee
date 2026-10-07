@@ -3,25 +3,18 @@
 //! This module provides the core ExecutionEnvironment implementation for EVM blocks,
 //! using RSP's sparse state and Reth's EVM execution engine.
 
-use std::sync::Arc;
-
 use alloy_consensus::Block as AlloyBlock;
 use alpen_acct_types::{
     EnvError, EnvResult, ExecBlock, ExecBlockOutput, ExecPayload, ExecutionEnvironment,
 };
 use alpen_chain_types::{ExecInputs, ExecOutputs, OutputMessage};
-use alpen_params::HeaderExtra;
+use alpen_params::{AlpenParams, AlpenSpecId, HeaderExtra};
 use alpen_reth_evm::{
-    config::AlpenEvmConfig, da_fee::validate_da_rate_against_parent, evm::AlpenEvmFactory,
-    extract_withdrawal_intents,
+    config::AlpenEvmConfig, da_fee::validate_da_rate_against_parent, extract_withdrawal_intents,
 };
-use reth_chainspec::ChainSpec;
 use reth_consensus_common::validation::validate_body_against_header;
 use reth_ethereum_primitives::{EthPrimitives, Receipt as EthereumReceipt, TransactionSigned};
-use reth_evm::{
-    ConfigureEvm,
-    execute::{BasicBlockExecutor, BlockExecutionOutput, Executor},
-};
+use reth_evm::execute::{BasicBlockExecutor, BlockExecutionOutput, Executor};
 use reth_primitives_traits::RecoveredBlock;
 use revm::database::WrapDatabaseRef;
 use rsp_client_executor::BlockValidator;
@@ -41,7 +34,7 @@ use crate::{
 /// of EVM blocks against sparse state using RSP and Reth.
 #[derive(Debug, Clone)]
 pub struct EvmExecutionEnvironment {
-    /// EVM configuration with AlpenEvmFactory (contains chain spec)
+    /// EVM configuration of the one spec version this environment executes.
     evm_config: AlpenEvmConfig,
 }
 
@@ -122,10 +115,10 @@ fn validate_ancestors_against_block(
 }
 
 impl EvmExecutionEnvironment {
-    /// Creates a new EvmExecutionEnvironment with the given chain specification
-    /// and EVM factory.
-    pub fn new(chain_spec: Arc<ChainSpec>, evm_factory: AlpenEvmFactory) -> Self {
-        let evm_config = AlpenEvmConfig::new(chain_spec, evm_factory);
+    /// Creates the environment that executes blocks under `spec_version`, with
+    /// the rules `params` gives that version.
+    pub fn new(params: &AlpenParams, spec_version: AlpenSpecId) -> Self {
+        let evm_config = AlpenEvmConfig::new(params, spec_version);
         Self { evm_config }
     }
 
@@ -198,7 +191,7 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
         let withdrawal_intents = extract_withdrawal_intents(
             &transactions,
             &execution_output.receipts,
-            self.evm_config.evm_factory().bridge_params(),
+            self.evm_config.bridge_params(),
         )
         .map_err(|_| EnvError::InvalidBlock)?;
 
@@ -264,7 +257,7 @@ mod tests {
 
     use alloy_consensus::{Header, Sealable};
     use alpen_acct_types::{ExecBlock, ExecHeader, ExecPartialState};
-    use alpen_params::AlpenSpecId;
+    use alpen_params::DEV_PARAMS_JSON;
     use reth_primitives_traits::Block as RethBlockTrait;
     use revm::{DatabaseRef, state::Bytecode};
     use revm_primitives::{B256, alloy_primitives::Bloom};
@@ -277,6 +270,15 @@ mod tests {
 
     use super::*;
     use crate::types::{EvmBlock, EvmBlockBody, EvmHeader, EvmPartialState};
+
+    /// The spec version the witness fixture was produced under.
+    const FIXTURE_SPEC_VERSION: AlpenSpecId = AlpenSpecId::V0;
+
+    /// The dev network's params, whose genesis the witness fixture was built
+    /// on.
+    fn dev_params() -> AlpenParams {
+        serde_json::from_str(DEV_PARAMS_JSON).expect("dev params should parse")
+    }
 
     fn rehashed_fixture_bytecodes(bytecodes: Vec<Bytecode>) -> BTreeMap<B256, Bytecode> {
         // The RSP fixture stores bytecodes as a Vec without the original code-hash
@@ -344,8 +346,7 @@ mod tests {
         let test_data: TestData =
             serde_json::from_str(&json_content).expect("Failed to parse test data");
 
-        let chain_spec: Arc<ChainSpec> = Arc::new((&test_data.witness.genesis).try_into().unwrap());
-        let env = EvmExecutionEnvironment::new(chain_spec, AlpenEvmFactory::default());
+        let env = EvmExecutionEnvironment::new(&dev_params(), FIXTURE_SPEC_VERSION);
         let header = test_data.witness.current_block.header().clone();
         let evm_header = EvmHeader::new(header.clone());
         let mut state = EvmPartialState::new(
@@ -396,8 +397,7 @@ mod tests {
         let test_data: TestData =
             serde_json::from_str(&json_content).expect("Failed to parse test data");
 
-        let chain_spec: Arc<ChainSpec> = Arc::new((&test_data.witness.genesis).try_into().unwrap());
-        let env = EvmExecutionEnvironment::new(chain_spec, AlpenEvmFactory::default());
+        let env = EvmExecutionEnvironment::new(&dev_params(), FIXTURE_SPEC_VERSION);
 
         // Same block numbers, different content, relinked so the chain still
         // hangs together on its own terms.
@@ -495,8 +495,7 @@ mod tests {
             serde_json::from_str(&json_content).expect("Failed to parse test data");
 
         // Create execution environment
-        let chain_spec: Arc<ChainSpec> = Arc::new((&test_data.witness.genesis).try_into().unwrap());
-        let env = EvmExecutionEnvironment::new(chain_spec, AlpenEvmFactory::default());
+        let env = EvmExecutionEnvironment::new(&dev_params(), FIXTURE_SPEC_VERSION);
 
         // Use the pre-state directly from witness data (it already has all the proofs!)
         let mut pre_state = EvmPartialState::new(
@@ -571,8 +570,7 @@ mod tests {
         let test_data: TestData =
             serde_json::from_str(&json_content).expect("Failed to parse test data");
 
-        let chain_spec: Arc<ChainSpec> = Arc::new((&test_data.witness.genesis).try_into().unwrap());
-        let env = EvmExecutionEnvironment::new(chain_spec, AlpenEvmFactory::default());
+        let env = EvmExecutionEnvironment::new(&dev_params(), FIXTURE_SPEC_VERSION);
         let pre_state = EvmPartialState::new(
             test_data.witness.parent_state,
             rehashed_fixture_bytecodes(test_data.witness.bytecodes),

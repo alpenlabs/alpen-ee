@@ -17,7 +17,7 @@ use reth_primitives_traits::{NodePrimitives, SealedBlock, SignedTransaction};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    evm_config::{payload_spec_version, version_indexed, AlpenEvmConfig},
+    evm_config::{payload_spec_version, version_indexed, MultiSpecEvmConfig},
     payload::{AlpenBuiltPayload, AlpenExecutionPayloadEnvelopeV4},
     AlpenExecutionPayloadEnvelopeV2, AlpenPayloadAttributes,
 };
@@ -185,7 +185,7 @@ where
             ChainSpec = ChainSpec,
             Primitives = EthPrimitives,
         >,
-        Evm = AlpenEvmConfig,
+        Evm = MultiSpecEvmConfig,
     >,
 {
     type Validator = AlpenEngineValidator;

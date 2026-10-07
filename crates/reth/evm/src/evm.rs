@@ -12,11 +12,9 @@ use revm::{
     Context, Inspector, MainBuilder, MainContext,
 };
 use revm_primitives::{hardfork::SpecId, U256};
-use strata_bridge_params::{BridgeParams, DEFAULT_MAX_WITHDRAWAL_DESCRIPTOR_LEN};
+use strata_bridge_params::BridgeParams;
 
-use crate::{
-    apis::AlpenAlloyEvm, da_fee::DA_COVERAGE_UNKNOWN, precompiles::factory, utils::wei_to_sats,
-};
+use crate::{apis::AlpenAlloyEvm, da_fee::DA_COVERAGE_UNKNOWN, precompiles::factory};
 
 /// Per-transaction gas-limit cap, as a multiple of the block gas limit.
 ///
@@ -46,56 +44,29 @@ const TX_GAS_LIMIT_BLOCK_MULTIPLE: u64 = 4;
 /// [`AlpenAlloyEvm::da_report_handle`](crate::apis::AlpenAlloyEvm::da_report_handle)). Both
 /// therefore ride the per-execution EVM rather than shared factory state, which keeps
 /// concurrent executions race-free.
+///
+/// The factory must not depend on the Alpen spec version. reth creates the EVM before it has
+/// the block's execution context, and the node's multi-version config hands every version the
+/// same factory. A per-version EVM setting has to travel on the execution context and be
+/// applied in [`create_executor`](reth_evm::block::BlockExecutorFactory::create_executor),
+/// the way the DA rate is.
+///
+/// Only [`crate::config::AlpenEvmConfig`] builds one, from the chain params, so the node and
+/// the provers cannot end up with different withdrawal policies.
 #[derive(Debug, Clone)]
 pub struct AlpenEvmFactory {
     bridge_params: BridgeParams,
 }
 
-// Manual instead of derived: `BridgeParams` has no `Default` (denomination
-// zero is invalid).
-impl Default for AlpenEvmFactory {
-    /// Placeholder withdrawal policy for tests and benchmarks that construct
-    /// an `AlpenEvmFactory` but don't exercise bridge-out validation. Not
-    /// valid params for any real network.
-    fn default() -> Self {
-        Self {
-            bridge_params: BridgeParams::new_with_descriptor_limit(
-                100_000_000,
-                Some(1_000_000_000),
-                81,
-            )
-            .expect("valid bridge params"),
-        }
-    }
-}
-
 impl AlpenEvmFactory {
-    pub fn new(denomination_wei: U256, max_withdrawal_wei: Option<U256>) -> Self {
-        let denomination = wei_to_sats_exact(denomination_wei, "denomination_wei");
-        let max_withdrawal_amount =
-            max_withdrawal_wei.map(|max| wei_to_sats_exact(max, "max_withdrawal_wei"));
-
-        Self {
-            bridge_params: BridgeParams::new_with_descriptor_limit(
-                denomination,
-                max_withdrawal_amount,
-                DEFAULT_MAX_WITHDRAWAL_DESCRIPTOR_LEN,
-            )
-            .expect("withdrawal policy constructed from wei must be valid"),
-        }
+    /// Creates a factory whose precompiles validate against `bridge_params`.
+    pub(crate) fn new(bridge_params: BridgeParams) -> Self {
+        Self { bridge_params }
     }
 
-    pub fn max_withdrawal_descriptor_len(&self) -> u32 {
-        self.bridge_params.max_withdrawal_descriptor_len()
-    }
-
+    /// Returns the bridge withdrawal policy the precompiles validate against.
     pub fn bridge_params(&self) -> &BridgeParams {
         &self.bridge_params
-    }
-
-    /// Creates an [`AlpenEvmFactory`] from [`BridgeParams`].
-    pub fn from_bridge_params(bp: &BridgeParams) -> Self {
-        Self { bridge_params: *bp }
     }
 }
 
@@ -103,16 +74,6 @@ impl AlpenEvmFactory {
 /// [`DA_COVERAGE_UNKNOWN`] so an unwritten cell is never read as covered.
 fn new_da_report_cell() -> Arc<AtomicU64> {
     Arc::new(AtomicU64::new(DA_COVERAGE_UNKNOWN))
-}
-
-fn wei_to_sats_exact(wei: U256, field: &str) -> u64 {
-    let (sats, remainder) = wei_to_sats(wei);
-    assert!(
-        remainder.is_zero(),
-        "{field} must be an exact number of satoshis"
-    );
-    sats.try_into()
-        .expect("withdrawal policy amount must fit in u64 satoshis")
 }
 
 impl EvmFactory for AlpenEvmFactory {

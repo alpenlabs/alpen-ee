@@ -5,39 +5,37 @@
 //! Alpen spec version governing a block is decided per block, from the version
 //! carried in the header's `extra_data` (see [`alpen_params::HeaderExtra`]).
 //! This config keeps `NodeTypes::ChainSpec` and the surrounding generics
-//! untouched: it holds the whole per-version table — total over the closed
-//! [`AlpenSpecId`] enum by [`EvmSpec`]'s construction — and dispatches each
+//! untouched: it holds the whole per-version table — one config for every
+//! known [`AlpenSpecId`], all built from the same params — and dispatches each
 //! [`ConfigureEvm`] call by the block's stamp. Nothing ever switches — every
 //! version's rules stay live, which is what lets one node execute both sides
 //! of an upgrade during sync, reorgs, and historical re-execution.
 //!
-//! Each entry of the table is an [`alpen_reth_evm::config::AlpenEvmConfig`]
-//! — the DA-rate-aware config from the fee model — so the two per-block
-//! concerns compose: this layer picks *which rules* a block runs under, and
-//! the inner layer threads *what rate* it charges. Both ride the same
-//! execution context.
+//! Each entry of the table is an [`AlpenEvmConfig`], which executes one
+//! version. It does the per-block work itself: it decodes the block's stamp
+//! into the execution context, charges the stamp's DA rate, and writes the
+//! stamp into every header it assembles. This layer only picks the entry.
 //!
 //! The dispatch has to reach *inside* reth's execution abstraction:
 //! [`ConfigureEvm`] exposes its executor factory and block assembler through
-//! context-free getters, so those are wrappers too, carrying the resolved
-//! version in the execution context ([`AlpenBlockExecutionCtx`]) from the
-//! `context_for_*` methods — the last point where the block is in hand — to
-//! the executor and assembler. The assembler closes the production loop: it
-//! stamps the context's version into every block it assembles, so the version
-//! that selected the build rules is the version import resolves from.
+//! context-free getters, so those dispatch too. They pick the entry by the
+//! version in the stamp the execution context carries
+//! ([`AlpenBlockExecutionCtx::header_extra`]). Since the assembler writes that
+//! same stamp into the header, the version that selected the build rules is
+//! the version import resolves from.
 
-use std::{convert::Infallible, io};
+use std::{io, iter};
 
 use alloy_eips::Decodable2718;
 use alloy_primitives::Bytes;
 use alloy_rpc_types::engine::payload::ExecutionData;
 use alpen_params::{
-    header_spec_version, peek_spec_version, AlpenSpecId, EvmSpec, HeaderExtra, HeaderExtraError,
+    header_spec_version, peek_spec_version, AlpenParams, AlpenSpecId, EvmSpec, HeaderExtra,
+    HeaderExtraError,
 };
 use alpen_reth_evm::{
     config::{
-        AlpenBlockAssembler as DaBlockAssembler, AlpenBlockExecutionCtx as DaBlockExecutionCtx,
-        AlpenBlockExecutorFactory as DaBlockExecutorFactory, AlpenEvmConfig as DaEvmConfig,
+        AlpenBlockAssembler, AlpenBlockExecutionCtx, AlpenBlockExecutorFactory, AlpenEvmConfig,
     },
     evm::AlpenEvmFactory,
 };
@@ -50,56 +48,33 @@ use reth_evm::{
 };
 use reth_primitives_traits::{Header, Recovered, SealedBlock, SealedHeader, SignedTransaction};
 use revm::Inspector;
-use revm_primitives::U256;
 
-/// The per-version inner EVM config the table is made of: the DA-rate-aware
-/// config, one per spec version.
-pub type VersionedEvmConfig = DaEvmConfig;
-
-type VersionedExecutorFactory = DaBlockExecutorFactory;
-
-type VersionedAssembler = DaBlockAssembler;
-
-fn infallible<T>(result: Result<T, Infallible>) -> T {
-    result.unwrap_or_else(|never| match never {})
-}
-
-/// Version-aware [`ConfigureEvm`] over the per-version chain spec table.
+/// Version-aware [`ConfigureEvm`] over one [`AlpenEvmConfig`] per spec version.
 #[derive(Debug, Clone)]
-pub struct AlpenEvmConfig {
+pub struct MultiSpecEvmConfig {
     /// The embedded EVM chain spec the table was derived from.
     evm_spec: EvmSpec,
     /// EVM config of each known [`AlpenSpecId`], indexed by discriminant.
-    configs: Vec<VersionedEvmConfig>,
-    executor_factory: AlpenBlockExecutorFactory,
-    assembler: AlpenBlockAssembler,
+    configs: Vec<AlpenEvmConfig>,
+    executor_factory: MultiSpecBlockExecutorFactory,
+    assembler: MultiSpecBlockAssembler,
 }
 
-impl AlpenEvmConfig {
-    /// Creates the config over `evm_spec`'s per-version chain spec table.
-    pub fn new(evm_spec: &EvmSpec, evm_factory: AlpenEvmFactory) -> Self {
-        let configs: Vec<VersionedEvmConfig> = evm_spec
-            .chain_specs()
-            .iter()
-            .map(|spec| DaEvmConfig::new(spec.clone(), evm_factory.clone()))
-            .collect();
-
-        Self::from_configs(evm_spec.clone(), configs)
-    }
-
-    /// Rebuilds the outer table's dispatchers over `configs`.
-    ///
-    /// The executor factory and assembler hold clones of the inner configs'
-    /// own, so they must be re-derived whenever an inner config changes (see
-    /// [`Self::with_pending_da_rate`]).
-    fn from_configs(evm_spec: EvmSpec, configs: Vec<VersionedEvmConfig>) -> Self {
-        let executor_factory = AlpenBlockExecutorFactory {
+impl MultiSpecEvmConfig {
+    /// Creates the config over the rules of every known spec version in
+    /// `params`.
+    pub fn new(params: &AlpenParams) -> Self {
+        let configs: Vec<AlpenEvmConfig> =
+            iter::successors(Some(AlpenSpecId::V0), |version| version.successor().ok())
+                .map(|version| AlpenEvmConfig::new(params, version))
+                .collect();
+        let executor_factory = MultiSpecBlockExecutorFactory {
             inners: configs
                 .iter()
                 .map(|config| config.block_executor_factory().clone())
                 .collect(),
         };
-        let assembler = AlpenBlockAssembler {
+        let assembler = MultiSpecBlockAssembler {
             inners: configs
                 .iter()
                 .map(|config| config.block_assembler().clone())
@@ -107,7 +82,7 @@ impl AlpenEvmConfig {
         };
 
         Self {
-            evm_spec,
+            evm_spec: params.evm_spec().clone(),
             configs,
             executor_factory,
             assembler,
@@ -119,59 +94,36 @@ impl AlpenEvmConfig {
         &self.evm_spec
     }
 
-    /// Sets the DA rate (wei per byte) applied when building the next block,
-    /// on every version's inner config.
-    ///
-    /// The payload attributes pick the version later, so the caller must pass
-    /// the rate that version charges: zero for V0, which has no rate field
-    /// (see [`HeaderExtra::new`]). The assembler refuses a block that charged
-    /// a rate its header can't commit to.
-    pub fn with_pending_da_rate(self, da_rate: U256) -> Self {
-        let configs = self
-            .configs
-            .into_iter()
-            .map(|config| config.with_pending_da_rate(da_rate))
-            .collect();
-        Self::from_configs(self.evm_spec, configs)
-    }
-
-    /// Returns the inner EVM config governing `spec_version`.
+    /// Returns the EVM config governing `spec_version`.
     ///
     /// Total: the table covers every known version, so only decoding a raw
     /// version out of chain data can fail, never the lookup.
-    pub fn config_for(&self, spec_version: AlpenSpecId) -> &VersionedEvmConfig {
+    pub fn config_for(&self, spec_version: AlpenSpecId) -> &AlpenEvmConfig {
         version_indexed(&self.configs, spec_version)
     }
 
-    /// Returns the inner EVM config governing `header`.
-    pub fn config_for_header(
-        &self,
-        header: &Header,
-    ) -> Result<&VersionedEvmConfig, HeaderExtraError> {
+    /// Returns the EVM config governing `header`.
+    fn config_for_header(&self, header: &Header) -> Result<&AlpenEvmConfig, HeaderExtraError> {
         Ok(self.config_for(header_spec_version(header)?))
     }
 
-    /// Builds the execution context for the next block under an explicitly
-    /// resolved governing version.
+    /// Builds the execution context for a new block on top of `parent`,
+    /// stamped with `header_extra`.
     ///
     /// Block production cannot use [`ConfigureEvm::context_for_next_block`]:
     /// that path continues the parent's version — all a header-only resolver
     /// can do — while the version to build under comes from the Alpen layer
     /// via the payload attributes, and the two differ at an upgrade
-    /// boundary. Carrying the version on the context is also what stamps it
-    /// into the built header.
-    /// Infallible: the version is given, so no stamp has to be decoded.
-    pub fn context_for_next_block_with_version(
+    /// boundary. The stamp's version picks the config, and the assembler
+    /// writes the stamp into the built header.
+    pub fn context_for_next_block_with(
         &self,
         parent: &SealedHeader,
         attributes: NextBlockEnvAttributes,
-        spec_version: AlpenSpecId,
+        header_extra: HeaderExtra,
     ) -> AlpenBlockExecutionCtx<'_> {
-        let config = self.config_for(spec_version);
-        AlpenBlockExecutionCtx {
-            inner: infallible(config.context_for_next_block(parent, attributes)),
-            spec_version,
-        }
+        self.config_for(header_extra.spec_version())
+            .context_for_next_block_with(parent, attributes, header_extra)
     }
 }
 
@@ -182,32 +134,21 @@ pub(crate) fn version_indexed<T>(table: &[T], spec_version: AlpenSpecId) -> &T {
         .expect("EvmSpec invariant: the table covers every known version")
 }
 
-/// Execution context carrying the block's resolved spec version from
-/// `context_for_*` resolution to executor and assembler dispatch.
-#[derive(Debug, Clone)]
-pub struct AlpenBlockExecutionCtx<'a> {
-    inner: DaBlockExecutionCtx<'a>,
-    /// Resolved when the context was built — the last point the block was in
-    /// hand — and carried to the dispatch sites reth reaches through
-    /// context-free getters.
-    spec_version: AlpenSpecId,
-}
-
 /// Version-dispatching [`BlockExecutorFactory`]: `create_executor` picks the
-/// inner factory by the version carried on the context.
+/// inner factory by the version in the context's stamp.
 #[derive(Debug, Clone)]
-pub struct AlpenBlockExecutorFactory {
-    inners: Vec<VersionedExecutorFactory>,
+pub struct MultiSpecBlockExecutorFactory {
+    inners: Vec<AlpenBlockExecutorFactory>,
 }
 
-impl BlockExecutorFactory for AlpenBlockExecutorFactory {
+impl BlockExecutorFactory for MultiSpecBlockExecutorFactory {
     type EvmFactory = AlpenEvmFactory;
     type ExecutionCtx<'a> = AlpenBlockExecutionCtx<'a>;
-    type Transaction = <VersionedExecutorFactory as BlockExecutorFactory>::Transaction;
-    type Receipt = <VersionedExecutorFactory as BlockExecutorFactory>::Receipt;
-    type TxExecutionResult = <VersionedExecutorFactory as BlockExecutorFactory>::TxExecutionResult;
+    type Transaction = <AlpenBlockExecutorFactory as BlockExecutorFactory>::Transaction;
+    type Receipt = <AlpenBlockExecutorFactory as BlockExecutorFactory>::Receipt;
+    type TxExecutionResult = <AlpenBlockExecutorFactory as BlockExecutorFactory>::TxExecutionResult;
     type Executor<'a, DB: StateDB, I: Inspector<<Self::EvmFactory as EvmFactory>::Context<DB>>> =
-        <VersionedExecutorFactory as BlockExecutorFactory>::Executor<'a, DB, I>;
+        <AlpenBlockExecutorFactory as BlockExecutorFactory>::Executor<'a, DB, I>;
 
     fn evm_factory(&self) -> &Self::EvmFactory {
         // Every version shares the node's EVM factory; any entry serves.
@@ -226,68 +167,46 @@ impl BlockExecutorFactory for AlpenBlockExecutorFactory {
         DB: StateDB,
         I: Inspector<<Self::EvmFactory as EvmFactory>::Context<DB>>,
     {
-        version_indexed(&self.inners, ctx.spec_version).create_executor(evm, ctx.inner)
+        version_indexed(&self.inners, ctx.header_extra().spec_version()).create_executor(evm, ctx)
     }
 }
 
-/// Version-dispatching [`BlockAssembler`]: assembles under the version
-/// carried on the execution context and stamps that version into the built
-/// header's `extra_data`.
-///
-/// Stamping happens per assembled block, not via the inner assemblers'
-/// static `extra_data` field: the layout is per-block data (V1 adds the
-/// sequencer-set DA rate), and taking the version from the same context
-/// that selected the executor makes a skew between build rules and stamp
-/// unrepresentable.
+/// Version-dispatching [`BlockAssembler`]: assembles under the version in the
+/// context's stamp. The inner assembler writes that stamp into the header.
 #[derive(Debug, Clone)]
-pub struct AlpenBlockAssembler {
-    inners: Vec<VersionedAssembler>,
+pub struct MultiSpecBlockAssembler {
+    inners: Vec<AlpenBlockAssembler>,
 }
 
-impl BlockAssembler<AlpenBlockExecutorFactory> for AlpenBlockAssembler {
-    type Block = <VersionedAssembler as BlockAssembler<VersionedExecutorFactory>>::Block;
+impl BlockAssembler<MultiSpecBlockExecutorFactory> for MultiSpecBlockAssembler {
+    type Block = <AlpenBlockAssembler as BlockAssembler<AlpenBlockExecutorFactory>>::Block;
 
     fn assemble_block(
         &self,
-        input: BlockAssemblerInput<'_, '_, AlpenBlockExecutorFactory, Header>,
+        input: BlockAssemblerInput<'_, '_, MultiSpecBlockExecutorFactory, Header>,
     ) -> Result<Self::Block, BlockExecutionError> {
-        let spec_version = input.execution_ctx.spec_version;
-        let da_rate = input.execution_ctx.inner.da_rate();
-        // Stamp both per-block commitments from the one context that produced
-        // the block: the version that selected its rules, and the DA rate its
-        // execution charged. Taking them from anywhere else would let the
-        // header disagree with what actually ran.
-        let header_extra = HeaderExtra::new(spec_version, da_rate.saturating_to());
-        // V0 has no rate field, so a V0 block that charged a rate would
-        // re-execute without the charge and reach a different state root.
-        if U256::from(header_extra.da_rate().unwrap_or(0)) != da_rate {
-            return Err(BlockExecutionError::msg(format!(
-                "{spec_version:?} block charged DA rate {da_rate}, which its header can't commit to"
-            )));
-        }
-        let assembler = version_indexed(&self.inners, spec_version);
-        let mut block =
-            assembler.assemble_block(BlockAssemblerInput::<VersionedExecutorFactory>::new(
-                input.evm_env,
-                input.execution_ctx.inner,
-                input.parent,
-                input.transactions,
-                input.output,
-                input.bundle_state,
-                input.state_provider,
-                input.state_root,
-            ))?;
-        block.header.extra_data = header_extra.encode().into();
-        Ok(block)
+        let spec_version = input.execution_ctx.header_extra().spec_version();
+        version_indexed(&self.inners, spec_version).assemble_block(BlockAssemblerInput::<
+            AlpenBlockExecutorFactory,
+        >::new(
+            input.evm_env,
+            input.execution_ctx,
+            input.parent,
+            input.transactions,
+            input.output,
+            input.bundle_state,
+            input.state_provider,
+            input.state_root,
+        ))
     }
 }
 
-impl ConfigureEvm for AlpenEvmConfig {
+impl ConfigureEvm for MultiSpecEvmConfig {
     type Primitives = EthPrimitives;
     type Error = HeaderExtraError;
     type NextBlockEnvCtx = NextBlockEnvAttributes;
-    type BlockExecutorFactory = AlpenBlockExecutorFactory;
-    type BlockAssembler = AlpenBlockAssembler;
+    type BlockExecutorFactory = MultiSpecBlockExecutorFactory;
+    type BlockAssembler = MultiSpecBlockAssembler;
 
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
         &self.executor_factory
@@ -298,7 +217,7 @@ impl ConfigureEvm for AlpenEvmConfig {
     }
 
     fn evm_env(&self, header: &Header) -> Result<EvmEnvFor<Self>, Self::Error> {
-        Ok(infallible(self.config_for_header(header)?.evm_env(header)))
+        self.config_for_header(header)?.evm_env(header)
     }
 
     /// Resolves next-block environments under the parent's version.
@@ -312,22 +231,16 @@ impl ConfigureEvm for AlpenEvmConfig {
         parent: &Header,
         attributes: &Self::NextBlockEnvCtx,
     ) -> Result<EvmEnvFor<Self>, Self::Error> {
-        Ok(infallible(
-            self.config_for_header(parent)?
-                .next_evm_env(parent, attributes),
-        ))
+        self.config_for_header(parent)?
+            .next_evm_env(parent, attributes)
     }
 
     fn context_for_block<'a>(
         &self,
         block: &'a SealedBlock<reth_ethereum_primitives::Block>,
     ) -> Result<AlpenBlockExecutionCtx<'a>, Self::Error> {
-        let spec_version = header_spec_version(block.header())?;
-        let config = self.config_for(spec_version);
-        Ok(AlpenBlockExecutionCtx {
-            inner: infallible(config.context_for_block(block)),
-            spec_version,
-        })
+        self.config_for_header(block.header())?
+            .context_for_block(block)
     }
 
     /// See [`Self::next_evm_env`] on why the parent's version governs.
@@ -336,12 +249,8 @@ impl ConfigureEvm for AlpenEvmConfig {
         parent: &SealedHeader,
         attributes: Self::NextBlockEnvCtx,
     ) -> Result<AlpenBlockExecutionCtx<'_>, Self::Error> {
-        let spec_version = header_spec_version(parent.header())?;
-        let config = self.config_for(spec_version);
-        Ok(AlpenBlockExecutionCtx {
-            inner: infallible(config.context_for_next_block(parent, attributes)),
-            spec_version,
-        })
+        self.config_for_header(parent.header())?
+            .context_for_next_block(parent, attributes)
     }
 }
 
@@ -349,22 +258,18 @@ impl ConfigureEvm for AlpenEvmConfig {
 // incoming `newPayload` payloads through these before they are ever sealed
 // blocks. Resolution reads the same stamped bytes as the block path, from the
 // payload's `extra_data`.
-impl ConfigureEngineEvm<ExecutionData> for AlpenEvmConfig {
+impl ConfigureEngineEvm<ExecutionData> for MultiSpecEvmConfig {
     fn evm_env_for_payload(&self, payload: &ExecutionData) -> Result<EvmEnvFor<Self>, Self::Error> {
-        let config = self.config_for(payload_spec_version(payload)?);
-        Ok(infallible(config.evm_env_for_payload(payload)))
+        self.config_for(payload_spec_version(payload)?)
+            .evm_env_for_payload(payload)
     }
 
     fn context_for_payload<'a>(
         &self,
         payload: &'a ExecutionData,
     ) -> Result<AlpenBlockExecutionCtx<'a>, Self::Error> {
-        let spec_version = payload_spec_version(payload)?;
-        let config = self.config_for(spec_version);
-        Ok(AlpenBlockExecutionCtx {
-            inner: infallible(config.context_for_payload(payload)),
-            spec_version,
-        })
+        self.config_for(payload_spec_version(payload)?)
+            .context_for_payload(payload)
     }
 
     fn tx_iterator_for_payload(
@@ -393,13 +298,26 @@ pub fn payload_spec_version(payload: &ExecutionData) -> Result<AlpenSpecId, Head
     peek_spec_version(&payload.payload.as_v1().extra_data)
 }
 
+/// Returns placeholder params around `evm_spec`, for tests that build the
+/// config from a genesis document of their own.
+#[cfg(test)]
+pub(crate) fn test_params(evm_spec: EvmSpec) -> AlpenParams {
+    let defaults = AlpenParams::default();
+    AlpenParams::new(
+        defaults.strata_exec_account_id(),
+        *defaults.bridge_params(),
+        defaults.blob_spec(),
+        defaults.spec_schedule().clone(),
+        evm_spec,
+        defaults.fee_spec().clone(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use alloy_primitives::Bytes;
     use alpen_params::{AlpenSpecId, EvmSpec, HeaderExtra, HeaderExtraError};
-    use alpen_reth_evm::evm::AlpenEvmFactory;
     use reth_evm::{
-        eth::EthBlockExecutionCtx,
         execute::{BlockAssembler, BlockAssemblerInput, BlockBuilder},
         ConfigureEvm, EvmEnv, NextBlockEnvAttributes,
     };
@@ -408,20 +326,32 @@ mod tests {
     use reth_storage_api::noop::NoopProvider;
     use revm::{database::State, primitives::hardfork::SpecId};
 
-    use super::{infallible, AlpenBlockExecutionCtx, AlpenEvmConfig, DaBlockExecutionCtx, U256};
+    use super::{test_params, MultiSpecEvmConfig};
 
     /// A non-zero DA rate, so the tests catch a stamp that silently drops it.
     const DA_RATE: u64 = 1_500_000_000;
 
     /// The real two-version table: v0 up to Prague from the genesis document,
     /// v1 = v0 with Osaka on top (the code-owned delta).
-    fn test_config() -> AlpenEvmConfig {
+    fn test_config() -> MultiSpecEvmConfig {
         let evm_spec: EvmSpec = serde_json::from_str(
             r#"{"config":{"chainId":2892,"shanghaiTime":0,"cancunTime":0,"pragueTime":0}}"#,
         )
         .expect("genesis document parses");
-        AlpenEvmConfig::new(&evm_spec, AlpenEvmFactory::default())
-            .with_pending_da_rate(U256::from(DA_RATE))
+        MultiSpecEvmConfig::new(&test_params(evm_spec))
+    }
+
+    fn next_block_attributes() -> NextBlockEnvAttributes {
+        NextBlockEnvAttributes {
+            timestamp: 1,
+            suggested_fee_recipient: Default::default(),
+            prev_randao: Default::default(),
+            gas_limit: 30_000_000,
+            parent_beacon_block_root: None,
+            withdrawals: Some(Default::default()),
+            extra_data: Default::default(),
+            slot_number: None,
+        }
     }
 
     fn stamped_header(spec_version: AlpenSpecId) -> Header {
@@ -491,9 +421,8 @@ mod tests {
 
     /// The production path pins what the functional fullnode-sync flow
     /// exercises end to end: a block built under an explicitly resolved
-    /// version comes out stamped with it — driving a version's inner config
-    /// directly would skip the stamping assembler and produce a block strict
-    /// import rejects.
+    /// stamp comes out carrying it, so strict import resolves the same
+    /// version and rate the block was built with.
     #[test]
     fn production_builder_stamps_the_resolved_version() {
         // Shanghai-only so the empty-state build needs no post-Cancun system
@@ -501,6 +430,7 @@ mod tests {
         let evm_spec: EvmSpec =
             serde_json::from_str(r#"{"config":{"chainId":2892,"shanghaiTime":0}}"#)
                 .expect("genesis document parses");
+        let config = MultiSpecEvmConfig::new(&test_params(evm_spec));
         let parent = SealedHeader::seal_slow(Header {
             gas_limit: 30_000_000,
             base_fee_per_gas: Some(7),
@@ -509,31 +439,21 @@ mod tests {
         let provider = NoopProvider::default();
 
         for version in [AlpenSpecId::V0, AlpenSpecId::V1] {
-            // The rate this version charges, as the payload builder resolves it.
-            let header_extra = HeaderExtra::new(version, DA_RATE);
-            let config = AlpenEvmConfig::new(&evm_spec, AlpenEvmFactory::default())
-                .with_pending_da_rate(U256::from(header_extra.da_rate().unwrap_or(0)));
             let mut db = State::builder()
                 .with_database(StateProviderDatabase::new(&provider))
                 .with_bundle_update()
                 .build();
-            let attributes = NextBlockEnvAttributes {
-                timestamp: 1,
-                suggested_fee_recipient: Default::default(),
-                prev_randao: Default::default(),
-                gas_limit: 30_000_000,
-                parent_beacon_block_root: None,
-                withdrawals: Some(Default::default()),
-                extra_data: Default::default(),
-                slot_number: None,
-            };
-            let evm_env = infallible(
-                config
-                    .config_for(version)
-                    .next_evm_env(&parent, &attributes),
-            );
+            let attributes = next_block_attributes();
+            let evm_env = config
+                .config_for(version)
+                .next_evm_env(&parent, &attributes)
+                .expect("next env resolves");
             let evm = config.evm_with_env(&mut db, evm_env);
-            let ctx = config.context_for_next_block_with_version(&parent, attributes, version);
+            let ctx = config.context_for_next_block_with(
+                &parent,
+                attributes,
+                HeaderExtra::new(version, DA_RATE),
+            );
             let mut builder = config.create_block_builder(evm, &parent, ctx);
             builder
                 .apply_pre_execution_changes()
@@ -544,63 +464,48 @@ mod tests {
 
             assert_eq!(
                 outcome.block.header().extra_data,
-                Bytes::from(header_extra.encode()),
+                Bytes::from(HeaderExtra::new(version, DA_RATE).encode()),
                 "{version:?}"
             );
         }
     }
 
-    /// The assembler stamps the context's version into the built header —
-    /// the same version that selected the build rules, closing the
-    /// production/import loop. It refuses a V0 context that charged a rate,
-    /// since V0's header has no field to commit it.
+    /// The assembler writes the context's stamp into the built header — the
+    /// same stamp whose version selected the build rules, closing the
+    /// production/import loop. V0's stamp has no rate, so its header stays
+    /// empty.
     #[test]
-    fn assembled_blocks_carry_the_contexts_version_stamp() {
+    fn assembled_blocks_carry_the_contexts_stamp() {
         let config = test_config();
         let parent = SealedHeader::seal_slow(Header::default());
         let output = Default::default();
         let bundle_state = Default::default();
         let provider = NoopProvider::default();
 
-        for (version, da_rate, expected) in [
-            (AlpenSpecId::V0, 0, Some(HeaderExtra::V0)),
-            (AlpenSpecId::V0, DA_RATE, None),
-            (
-                AlpenSpecId::V1,
-                DA_RATE,
-                Some(HeaderExtra::V1 { da_rate: DA_RATE }),
-            ),
-        ] {
-            let ctx = AlpenBlockExecutionCtx {
-                inner: DaBlockExecutionCtx::new(
-                    EthBlockExecutionCtx {
-                        parent_hash: parent.hash(),
-                        parent_beacon_block_root: None,
-                        ommers: &[],
-                        withdrawals: None,
-                        extra_data: Default::default(),
-                        tx_count_hint: None,
-                        slot_number: None,
-                    },
-                    U256::from(da_rate),
-                ),
-                spec_version: version,
-            };
-            let block = config.assembler.assemble_block(BlockAssemblerInput::new(
-                EvmEnv::default(),
-                ctx,
+        for version in [AlpenSpecId::V0, AlpenSpecId::V1] {
+            let ctx = config.context_for_next_block_with(
                 &parent,
-                Vec::new(),
-                &output,
-                &bundle_state,
-                &provider,
-                Default::default(),
-            ));
+                next_block_attributes(),
+                HeaderExtra::new(version, DA_RATE),
+            );
+            let block = config
+                .assembler
+                .assemble_block(BlockAssemblerInput::new(
+                    EvmEnv::default(),
+                    ctx,
+                    &parent,
+                    Vec::new(),
+                    &output,
+                    &bundle_state,
+                    &provider,
+                    Default::default(),
+                ))
+                .expect("empty block assembles");
 
             assert_eq!(
-                block.ok().map(|block| block.header.extra_data),
-                expected.map(|extra| Bytes::from(extra.encode())),
-                "{version:?} at rate {da_rate}"
+                block.header.extra_data,
+                Bytes::from(HeaderExtra::new(version, DA_RATE).encode()),
+                "{version:?}"
             );
         }
     }

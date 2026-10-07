@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
-use alpen_params::{EvmSpec, FeeSpec};
-use alpen_reth_evm::evm::AlpenEvmFactory;
+use alpen_params::AlpenParams;
 use alpen_reth_rpc::{
     eth::{AlpenEthApiBuilder, LiveDaFeeRateProvider},
     SequencerClient,
@@ -90,34 +89,25 @@ impl LiveDaFeeRateProvider for DaFeeRateHandle {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct AlpenEthereumNode {
-    /// Carries the bridge params the Alpen precompiles validate against. Has to
-    /// match what the provers build from the same params, otherwise a block
-    /// executes one way on the node and another way in its proof.
-    evm_factory: AlpenEvmFactory,
-    /// The embedded EVM chain spec whose per-version table backs per-block
-    /// version resolution across the node's fork-sensitive components.
-    evm_spec: EvmSpec,
+    /// The chain params every component takes its rules from. The provers
+    /// build their EVM config from the same params, so a block executes the
+    /// same way on the node and in its proof.
+    params: Arc<AlpenParams>,
     mode: AlpenNodeMode,
     /// Read-only DA rate policy shared by payload construction and fee estimation.
     da_fee_rate_handle: DaFeeRateHandle,
-    /// Fee settings of each spec version, from the chain params artifact.
-    fee_spec: FeeSpec,
 }
 
 impl AlpenEthereumNode {
     pub fn new(
-        evm_factory: AlpenEvmFactory,
-        evm_spec: EvmSpec,
+        params: Arc<AlpenParams>,
         mode: AlpenNodeMode,
         da_fee_rate_handle: DaFeeRateHandle,
-        fee_spec: FeeSpec,
     ) -> Self {
         Self {
-            evm_factory,
-            evm_spec,
+            params,
             mode,
             da_fee_rate_handle,
-            fee_spec,
         }
     }
 }
@@ -159,20 +149,17 @@ where
         ComponentsBuilder::default()
             .node_types::<N>()
             .pool(AlpenEthereumPoolBuilder::default())
-            .executor(AlpenExecutorBuilder::new(
-                self.evm_factory.clone(),
-                self.evm_spec.clone(),
-            ))
+            .executor(AlpenExecutorBuilder::new(self.params.clone()))
             .payload(BasicPayloadServiceBuilder::new(
                 AlpenPayloadBuilderBuilder {
                     da_fee_rate_handle: self.da_fee_rate_handle.clone(),
-                    fee_spec: self.fee_spec.clone(),
+                    fee_spec: self.params.fee_spec().clone(),
                 },
             ))
             .network(EthereumNetworkBuilder::default())
             .consensus(AlpenConsensusBuilder::new(
-                self.evm_spec.clone(),
-                self.fee_spec.clone(),
+                self.params.evm_spec().clone(),
+                self.params.fee_spec().clone(),
             ))
     }
 

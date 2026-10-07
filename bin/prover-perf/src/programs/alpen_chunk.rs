@@ -4,7 +4,7 @@
 //! reusing the EVM witness fixture from `proof-impl/evm-ee-stf/test_data`
 //! to produce a single-block chunk transition.
 
-use std::{fs, path::PathBuf, sync::Arc};
+use std::{fs, path::PathBuf};
 
 use alpen_acct_types::{ExecBlock, ExecHeader, ExecPayload, ExecutionEnvironment};
 use alpen_chain_types::ExecInputs;
@@ -12,7 +12,6 @@ use alpen_chunk_runtime::{PrivateInput, RawBlockData, RawChunkData};
 use alpen_evm_ee::{EvmBlock, EvmBlockBody, EvmExecutionEnvironment, EvmHeader, EvmPartialState};
 use alpen_params::{AlpenParams, AlpenSpecId, DEV_PARAMS_JSON};
 use alpen_proof_chunk::{EeChunkProgram, EeChunkProofInput};
-use alpen_reth_evm::evm::AlpenEvmFactory;
 use reth_primitives_traits::Block as _;
 use rsp_client_executor::io::EthClientExecutorInput;
 use serde::Deserialize;
@@ -89,9 +88,7 @@ pub(super) fn prepare_input() -> EeChunkProofInput {
     let tip_exec_header_summary = block.get_header().get_exec_header_summary();
 
     let params = perf_alpen_params();
-    let chain_spec: Arc<reth_chainspec::ChainSpec> =
-        params.evm_spec().chain_spec(PERF_SPEC_VERSION).clone();
-    let ee = EvmExecutionEnvironment::new(chain_spec, AlpenEvmFactory::default());
+    let ee = EvmExecutionEnvironment::new(&params, PERF_SPEC_VERSION);
     let header_intrinsics = block.get_header().get_intrinsics();
     let exec_payload = ExecPayload::new(&header_intrinsics, block.get_body());
     let inputs = ExecInputs::new_empty();

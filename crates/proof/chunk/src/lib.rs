@@ -1,12 +1,8 @@
 //! EE chunk proof implementation wrapping `chunk-runtime` with zkaleido proof IO.
 
-use std::sync::Arc;
-
 use alpen_chunk_runtime::ArchivedPrivateInput;
 use alpen_evm_ee::EvmExecutionEnvironment;
 use alpen_params::{AlpenParams, AlpenSpecId};
-use alpen_reth_evm::evm::AlpenEvmFactory;
-use reth_chainspec::ChainSpec;
 use rkyv::rancor::Error as RkyvError;
 use zkaleido::ZkVmEnvSerde;
 
@@ -33,9 +29,7 @@ pub use program::{EeChunkProgram, EeChunkProofInput};
 /// always ends its group -- see `sealing_policy::rotation_policy` -- so no
 /// chunk straddles an activation boundary.
 pub fn process_ee_chunk(zkvm: &impl ZkVmEnvSerde, params: &AlpenParams, spec_version: AlpenSpecId) {
-    let chain_spec: Arc<ChainSpec> = params.evm_spec().chain_spec(spec_version).clone();
-    let evm_factory = AlpenEvmFactory::from_bridge_params(params.bridge_params());
-    let ee = EvmExecutionEnvironment::new(chain_spec, evm_factory);
+    let ee = EvmExecutionEnvironment::new(params, spec_version);
 
     let buf = zkvm.read_buf();
     let input: &ArchivedPrivateInput = rkyv::access::<ArchivedPrivateInput, RkyvError>(&buf)

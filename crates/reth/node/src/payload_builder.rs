@@ -42,7 +42,7 @@ use crate::{
     block_witness::build_block_witness_from_executed_state,
     da_fee_rate::DaFeeRateHandle,
     engine::AlpenEngineTypes,
-    evm_config::AlpenEvmConfig,
+    evm_config::MultiSpecEvmConfig,
     payload::{AlpenBuiltPayload, AlpenPayloadAttributes},
 };
 
@@ -63,7 +63,8 @@ pub struct AlpenPayloadBuilderBuilder {
     pub fee_spec: FeeSpec,
 }
 
-impl<Node, Pool> PayloadBuilderBuilder<Node, Pool, AlpenEvmConfig> for AlpenPayloadBuilderBuilder
+impl<Node, Pool> PayloadBuilderBuilder<Node, Pool, MultiSpecEvmConfig>
+    for AlpenPayloadBuilderBuilder
 where
     Node: FullNodeTypes<
         Types: NodeTypes<
@@ -82,7 +83,7 @@ where
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-        evm_config: AlpenEvmConfig,
+        evm_config: MultiSpecEvmConfig,
     ) -> eyre::Result<Self::PayloadBuilder> {
         let conf = ctx.payload_builder_config();
         let chain = ctx.chain_spec().chain();
@@ -109,7 +110,7 @@ pub struct AlpenPayloadBuilder<Pool, Client> {
     pool: Pool,
     /// The node's version-aware EVM config; payload jobs select the inner
     /// per-version config by the version carried on their attributes.
-    evm_config: AlpenEvmConfig,
+    evm_config: MultiSpecEvmConfig,
     /// Payload builder configuration.
     builder_config: EthereumBuilderConfig,
     /// Provides the DA rate sampled and frozen by each payload attempt.
@@ -123,7 +124,7 @@ impl<Pool, Client> AlpenPayloadBuilder<Pool, Client> {
     pub fn new(
         client: Client,
         pool: Pool,
-        evm_config: AlpenEvmConfig,
+        evm_config: MultiSpecEvmConfig,
         builder_config: EthereumBuilderConfig,
         da_fee_rate_handle: DaFeeRateHandle,
         fee_spec: FeeSpec,
@@ -157,7 +158,7 @@ where
         let da_rate = self.da_fee_rate_handle.current_rate();
 
         try_build_payload::<Pool, Client, _>(
-            self.evm_config.clone(),
+            &self.evm_config,
             da_rate,
             &self.fee_spec,
             self.client.clone(),
@@ -199,7 +200,7 @@ type BestTransactionsIter<Pool> = Box<
 /// [default_ethereum_payload](reth_ethereum_payload_builder::default_ethereum_payload)
 #[inline]
 fn try_build_payload<Pool, Client, F>(
-    evm_config: AlpenEvmConfig,
+    evm_config: &MultiSpecEvmConfig,
     candidate_da_rate: u64,
     fee_spec: &FeeSpec,
     client: Client,
@@ -233,24 +234,19 @@ where
         .map_err(PayloadBuilderError::other)?;
     let attributes = attributes.inner;
 
-    // V0 headers have no rate field, so V0 blocks charge no DA fee, just like the blocks the
-    // deployed V0 binary builds.
+    // The stamp this block commits to: the version it builds under and the DA rate it
+    // charges. Execution charges the stamp's rate and the assembler writes the same stamp
+    // into the header, so the charge and the commitment cannot drift and the block
+    // re-executes to the same state root. V0 headers have no rate field, so V0 blocks charge
+    // no DA fee, just like the blocks the deployed V0 binary builds.
     let parent_rate = HeaderExtra::of_header(parent_header.header())
         .map_err(PayloadBuilderError::other)?
         .da_rate();
-    let da_rate = HeaderExtra::new(
+    let header_extra = HeaderExtra::new(
         spec_version,
         constrain_next_da_rate(parent_rate, candidate_da_rate),
-    )
-    .da_rate()
-    .unwrap_or(0);
-
-    // Pin the per-block DA rate as the config's pending rate (the in-EVM charge reads it via
-    // `context_for_next_block` when the block builder's executor is created). The assembler
-    // stamps the committed `extra_data` itself, from the same spec version that selected the
-    // build rules, so the charge and the commitment cannot drift and the block re-executes
-    // to the same state root.
-    let evm_config = evm_config.with_pending_da_rate(U256::from(da_rate));
+    );
+    let da_rate = header_extra.da_rate().unwrap_or(0);
     let versioned_config = evm_config.config_for(spec_version);
 
     let state_provider = client.state_by_block_hash(parent_header.hash())?;
@@ -269,7 +265,7 @@ where
         withdrawals: Some(Withdrawals::new(
             attributes.withdrawals.clone().unwrap_or_default(),
         )),
-        // The version-aware assembler overwrites `extra_data` per block, so this value never
+        // The assembler writes the context's stamp into `extra_data`, so this value never
         // reaches a built header.
         extra_data: builder_config.extra_data.clone(),
         slot_number: attributes.slot_number,
@@ -280,9 +276,9 @@ where
     // clamping its result would build an invalid London-activation block when the configured
     // floor is below the EIP-1559 initial base fee.
     //
-    // The env comes from the version's inner config, but the builder is driven through the
-    // outer version-aware config: that is what carries `spec_version` into the executor and
-    // assembler, so the rules the block builds under are the rules its header claims.
+    // The env comes from the version's config. The builder is driven through the multi-spec
+    // config, which picks the executor and assembler by the context's stamp, so the rules the
+    // block builds under are the rules its header claims.
     let chain_spec = versioned_config.chain_spec().clone();
     let next_number = parent_header
         .number
@@ -302,11 +298,8 @@ where
     }
 
     let evm = evm_config.evm_with_env(&mut db, evm_env);
-    let block_ctx = evm_config.context_for_next_block_with_version(
-        &parent_header,
-        next_block_attrs,
-        spec_version,
-    );
+    let block_ctx =
+        evm_config.context_for_next_block_with(&parent_header, next_block_attrs, header_extra);
     let mut builder = evm_config.create_block_builder(evm, &parent_header, block_ctx);
 
     // Shared handle to *this build EVM's* DA-coverage cell: the in-EVM charge writes it per
@@ -538,12 +531,9 @@ where
         .flat_map(|receipt| receipt.logs.iter())
         .filter(|log| log.address == BRIDGEOUT_PRECOMPILE_ADDRESS)
         .count();
-    let withdrawal_intents: Vec<WithdrawalIntent> = extract_withdrawal_intents(
-        &txns,
-        &receipts,
-        versioned_config.evm_factory().bridge_params(),
-    )
-    .map_err(PayloadBuilderError::other)?;
+    let withdrawal_intents: Vec<WithdrawalIntent> =
+        extract_withdrawal_intents(&txns, &receipts, versioned_config.bridge_params())
+            .map_err(PayloadBuilderError::other)?;
     if bridgeout_log_count > 0 || !withdrawal_intents.is_empty() {
         info!(
             target: "payload_builder",
@@ -570,14 +560,13 @@ where
 mod tests {
     use alloy_rpc_types::engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
     use alpen_params::{AlpenSpecId, EvmSpec, HeaderExtra, SpecVersioned};
-    use alpen_reth_evm::evm::AlpenEvmFactory;
     use reth_node_api::BuiltPayload;
     use reth_primitives_traits::SealedHeader;
     use reth_storage_api::noop::NoopProvider;
     use reth_transaction_pool::noop::NoopTransactionPool;
 
     use super::*;
-    use crate::{da_fee_rate_channel, payload::AlpenPayloadAttributes};
+    use crate::{da_fee_rate_channel, evm_config::test_params, payload::AlpenPayloadAttributes};
 
     #[test]
     fn payload_attempts_sample_rates_independently_and_bound_increases() {
@@ -589,7 +578,7 @@ mod tests {
         let evm_spec: EvmSpec =
             serde_json::from_str(r#"{"config":{"chainId":2892,"shanghaiTime":0}}"#)
                 .expect("genesis document parses");
-        let evm_config = AlpenEvmConfig::new(&evm_spec, AlpenEvmFactory::default());
+        let evm_config = MultiSpecEvmConfig::new(&test_params(evm_spec));
         let (updater, handle) = da_fee_rate_channel(INITIAL_RATE, u64::MAX);
         let builder = AlpenPayloadBuilder::new(
             NoopProvider::default(),
@@ -656,7 +645,7 @@ mod tests {
         let builder = AlpenPayloadBuilder::new(
             NoopProvider::default(),
             NoopTransactionPool::default(),
-            AlpenEvmConfig::new(&evm_spec, AlpenEvmFactory::default()),
+            MultiSpecEvmConfig::new(&test_params(evm_spec)),
             EthereumBuilderConfig::default(),
             handle,
             FeeSpec::new(SpecVersioned::new(0)),
@@ -700,7 +689,7 @@ mod tests {
         let builder = AlpenPayloadBuilder::new(
             NoopProvider::default(),
             NoopTransactionPool::default(),
-            AlpenEvmConfig::new(&evm_spec, AlpenEvmFactory::default()),
+            MultiSpecEvmConfig::new(&test_params(evm_spec)),
             EthereumBuilderConfig::default(),
             handle,
             FeeSpec::new(SpecVersioned::new(0).with(AlpenSpecId::V1, BASE_FEE_FLOOR)),

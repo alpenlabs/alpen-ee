@@ -78,8 +78,8 @@ impl<DB: Database, I> AlpenAlloyEvm<DB, I> {
     ///
     /// The DA rate is a per-block execution parameter stamped onto the EVM instance by
     /// [`crate::config::AlpenEvmConfig`] (from the block's committed `extra_data` on
-    /// re-execution, or from the pending rate on block building) at the point block
-    /// execution begins, so a single EVM instance always charges exactly one block's rate.
+    /// re-execution, or from the stamp the builder passes in on block building) at the point
+    /// block execution begins, so a single EVM instance always charges exactly one block's rate.
     /// The value rides the per-execution EVM rather than shared factory state, so concurrent
     /// executions cannot race.
     pub fn set_da_rate(&mut self, da_rate: U256) {

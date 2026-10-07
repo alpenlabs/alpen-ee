@@ -7,7 +7,6 @@
 //! services past the two every node runs.
 
 use alpen_common::BlockNumHash;
-use alpen_reth_evm::evm::AlpenEvmFactory;
 use alpen_reth_node::{
     AlpenEthereumNode, AlpenGossipProtocolHandler, AlpenGossipState, AlpenNodeMode, DaFeeRateHandle,
 };
@@ -30,17 +29,14 @@ pub(crate) async fn run(
     common: NodeBootstrap,
     config: &FullNodeConfig,
 ) -> eyre::Result<()> {
-    let evm_factory = AlpenEvmFactory::from_bridge_params(common.params.bridge_params());
     // A full node never builds blocks, so its DA fee rate handle is never sampled. It
     // recovers each block's frozen rate from the header `extra_data` instead.
     // The handle exists only to satisfy the shared node type.
     let da_fee_rate_handle = DaFeeRateHandle::fixed(0);
     let node = AlpenEthereumNode::new(
-        evm_factory,
-        common.params.evm_spec().clone(),
+        common.params.clone(),
         AlpenNodeMode::full_node(config.sequencer_http_url.clone()),
         da_fee_rate_handle,
-        common.params.fee_spec().clone(),
     );
 
     let consensus_watcher = common.ol_tracker.consensus_watcher();
