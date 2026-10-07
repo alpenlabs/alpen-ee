@@ -117,6 +117,8 @@ fn validate_ancestors_against_block(
 impl EvmExecutionEnvironment {
     /// Creates the environment that executes blocks under `spec_version`, with
     /// the rules `params` gives that version.
+    ///
+    /// It rejects any block whose `extra_data` stamp names another version.
     pub fn new(params: &AlpenParams, spec_version: AlpenSpecId) -> Self {
         let evm_config = AlpenEvmConfig::new(params, spec_version);
         Self { evm_config }
@@ -471,6 +473,67 @@ mod tests {
 
         assert!(validate_ancestors_against_block(&pre_state, &intrinsics(1_100)).is_ok());
         assert!(validate_ancestors_against_block(&pre_state, &intrinsics(1_101)).is_err());
+    }
+
+    /// The proof guests build the environment for one version. A block stamped
+    /// for another version passes every check that runs before execution, so
+    /// execution itself has to reject it.
+    #[test]
+    fn execution_rejects_a_block_stamped_for_another_version() {
+        #[derive(Deserialize, Debug)]
+        struct TestData {
+            witness: EthClientExecutorInput,
+        }
+
+        let test_data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("test-utils/data/evm_ee/witness_params.json");
+        let json_content = fs::read_to_string(test_data_path).expect("read witness fixture");
+        let test_data: TestData =
+            serde_json::from_str(&json_content).expect("parse witness fixture");
+
+        let pre_state = EvmPartialState::new(
+            test_data.witness.parent_state,
+            rehashed_fixture_bytecodes(test_data.witness.bytecodes),
+            test_data.witness.ancestor_headers,
+        );
+        let evm_header = EvmHeader::new(test_data.witness.current_block.header().clone());
+        let evm_body =
+            EvmBlockBody::from_alloy_body(test_data.witness.current_block.body().clone());
+        let block = EvmBlock::new(evm_header, evm_body);
+        let intrinsics = block.get_header().get_intrinsics();
+        let exec_payload = ExecPayload::new(&intrinsics, block.get_body());
+        let recovered = build_and_recover_block(&exec_payload).expect("fixture block recovers");
+
+        assert_eq!(
+            HeaderExtra::decode(&recovered.header().extra_data).map(|extra| extra.spec_version()),
+            Ok(AlpenSpecId::V0),
+            "the fixture block is a V0 block"
+        );
+        let v0_env = EvmExecutionEnvironment::new(&dev_params(), AlpenSpecId::V0);
+        assert!(
+            v0_env
+                .execute_recovered_block(&recovered, &pre_state)
+                .is_ok()
+        );
+
+        let v1_env = EvmExecutionEnvironment::new(&dev_params(), AlpenSpecId::V1);
+        v1_env
+            .validate_execution_inputs(&recovered, &ExecInputs::new_empty())
+            .expect("the header is also valid under V1's chain spec");
+        validate_ancestors_against_block(&pre_state, &intrinsics)
+            .expect("the ancestors link to the block");
+        assert!(
+            v1_env
+                .execute_recovered_block(&recovered, &pre_state)
+                .is_err()
+        );
+        assert!(
+            v1_env
+                .execute_block_body(&pre_state, &exec_payload, &ExecInputs::new_empty())
+                .is_err()
+        );
     }
 
     /// Test with real witness data from the reference implementation.

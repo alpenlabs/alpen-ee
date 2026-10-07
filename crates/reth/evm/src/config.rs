@@ -37,6 +37,16 @@
 //! ([`AlpenAlloyEvm::da_report_handle`](crate::apis::AlpenAlloyEvm::da_report_handle)), not
 //! by this config; it is threaded independently of the `da_rate` input handled here.
 //!
+//! # Version check
+//!
+//! Each context method also rejects a stamp that names a different spec version from the
+//! config's ([`StampError::WrongVersion`]). The proof guests need this. A guest's version is
+//! built into its program, so its verifying key binds it. Without the check, a guest would
+//! prove a block under its own rules even when the block claims another version. Full nodes
+//! run that block under the rules its stamp names, so the proof could settle a state they
+//! never accepted. In the node the stamp picks the config, so the check never fails there. It
+//! sits in the context methods because every execution path goes through them.
+//!
 //! # Cost of the custom context
 //!
 //! reth's `EthBlockAssembler` is bound to
@@ -86,6 +96,23 @@ type InnerAssembler = <Inner as ConfigureEvm>::BlockAssembler;
 
 fn infallible<T>(result: Result<T, Infallible>) -> T {
     result.unwrap_or_else(|never| match never {})
+}
+
+/// Why a block's `extra_data` stamp can't run under an [`AlpenEvmConfig`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum StampError {
+    /// The stamp does not decode under any layout this binary knows.
+    #[error(transparent)]
+    Decode(#[from] HeaderExtraError),
+
+    /// The stamp names a different spec version from the one the config executes.
+    #[error("block is stamped {stamped:?}, but this config executes {expected:?}")]
+    WrongVersion {
+        /// The version the config executes.
+        expected: AlpenSpecId,
+        /// The version the stamp names.
+        stamped: AlpenSpecId,
+    },
 }
 
 /// Per-block execution context: the standard Ethereum context plus the block's `extra_data`
@@ -402,23 +429,35 @@ impl AlpenEvmConfig {
     ///
     /// This is the block production path. The caller decides the stamp: the version the block
     /// builds under and the DA rate it charges. The assembler writes the same stamp into the
-    /// built header.
+    /// built header. Fails if the stamp names a different version from this config's.
     pub fn context_for_next_block_with(
         &self,
         parent: &SealedHeader,
         attributes: NextBlockEnvAttributes,
         header_extra: HeaderExtra,
-    ) -> AlpenBlockExecutionCtx<'_> {
-        AlpenBlockExecutionCtx {
+    ) -> Result<AlpenBlockExecutionCtx<'_>, StampError> {
+        Ok(AlpenBlockExecutionCtx {
             inner: infallible(self.inner.context_for_next_block(parent, attributes)),
-            header_extra,
+            header_extra: self.check_version(header_extra)?,
+        })
+    }
+
+    /// Passes `header_extra` through if it names this config's spec version.
+    fn check_version(&self, header_extra: HeaderExtra) -> Result<HeaderExtra, StampError> {
+        let stamped = header_extra.spec_version();
+        if stamped != self.spec_version {
+            return Err(StampError::WrongVersion {
+                expected: self.spec_version,
+                stamped,
+            });
         }
+        Ok(header_extra)
     }
 }
 
 impl ConfigureEvm for AlpenEvmConfig {
     type Primitives = EthPrimitives;
-    type Error = HeaderExtraError;
+    type Error = StampError;
     type NextBlockEnvCtx = NextBlockEnvAttributes;
     type BlockExecutorFactory = AlpenBlockExecutorFactory;
     type BlockAssembler = AlpenBlockAssembler;
@@ -449,7 +488,7 @@ impl ConfigureEvm for AlpenEvmConfig {
     ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
         Ok(AlpenBlockExecutionCtx {
             inner: infallible(self.inner.context_for_block(block)),
-            header_extra: HeaderExtra::of_header(block.header())?,
+            header_extra: self.check_version(HeaderExtra::of_header(block.header())?)?,
         })
     }
 
@@ -463,11 +502,7 @@ impl ConfigureEvm for AlpenEvmConfig {
         parent: &SealedHeader,
         attributes: Self::NextBlockEnvCtx,
     ) -> Result<ExecutionCtxFor<'_, Self>, Self::Error> {
-        Ok(self.context_for_next_block_with(
-            parent,
-            attributes,
-            HeaderExtra::new(self.spec_version, 0),
-        ))
+        self.context_for_next_block_with(parent, attributes, HeaderExtra::new(self.spec_version, 0))
     }
 }
 
@@ -482,9 +517,10 @@ impl ConfigureEngineEvm<ExecutionData> for AlpenEvmConfig {
     ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
         // No genesis exemption: the genesis block is initialized locally and never arrives
         // as a payload.
+        let header_extra = HeaderExtra::decode(&payload.payload.as_v1().extra_data)?;
         Ok(AlpenBlockExecutionCtx {
             inner: infallible(self.inner.context_for_payload(payload)),
-            header_extra: HeaderExtra::decode(&payload.payload.as_v1().extra_data)?,
+            header_extra: self.check_version(header_extra)?,
         })
     }
 
@@ -493,5 +529,147 @@ impl ConfigureEngineEvm<ExecutionData> for AlpenEvmConfig {
         payload: &ExecutionData,
     ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
         Ok(infallible(self.inner.tx_iterator_for_payload(payload)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy_consensus::{Block, BlockBody, Header};
+    use alloy_rpc_types_engine::{ExecutionData, ExecutionPayload};
+    use alpen_params::{AlpenParams, AlpenSpecId, HeaderExtra, HeaderExtraError};
+    use reth_ethereum_primitives::TransactionSigned;
+    use reth_evm::{ConfigureEngineEvm, ConfigureEvm, NextBlockEnvAttributes};
+    use reth_primitives_traits::{SealedBlock, SealedHeader};
+    use revm_primitives::Bytes;
+
+    use super::{AlpenEvmConfig, StampError};
+
+    const DA_RATE: u64 = 7;
+
+    fn config(spec_version: AlpenSpecId) -> AlpenEvmConfig {
+        AlpenEvmConfig::new(&AlpenParams::default(), spec_version)
+    }
+
+    fn stamp(spec_version: AlpenSpecId) -> Bytes {
+        HeaderExtra::new(spec_version, DA_RATE).encode().into()
+    }
+
+    fn block(number: u64, extra_data: Bytes) -> SealedBlock<Block<TransactionSigned>> {
+        SealedBlock::seal_slow(Block {
+            header: Header {
+                number,
+                extra_data,
+                ..Default::default()
+            },
+            body: BlockBody::default(),
+        })
+    }
+
+    fn wrong_version(expected: AlpenSpecId, stamped: AlpenSpecId) -> Option<StampError> {
+        Some(StampError::WrongVersion { expected, stamped })
+    }
+
+    #[test]
+    fn context_for_block_accepts_its_own_version() {
+        for version in [AlpenSpecId::V0, AlpenSpecId::V1] {
+            let block = block(1, stamp(version));
+            let ctx = config(version)
+                .context_for_block(&block)
+                .expect("a block stamped with the config's version runs");
+            assert_eq!(ctx.header_extra(), HeaderExtra::new(version, DA_RATE));
+        }
+    }
+
+    /// A proof guest's version is fixed by its program, so a block stamped for
+    /// another version must fail instead of running under the guest's rules.
+    #[test]
+    fn context_for_block_rejects_another_version() {
+        for (expected, stamped) in [
+            (AlpenSpecId::V0, AlpenSpecId::V1),
+            (AlpenSpecId::V1, AlpenSpecId::V0),
+        ] {
+            assert_eq!(
+                config(expected)
+                    .context_for_block(&block(1, stamp(stamped)))
+                    .err(),
+                wrong_version(expected, stamped)
+            );
+        }
+    }
+
+    /// An empty stamp reads as V0, so a V1 config refuses an unstamped block.
+    #[test]
+    fn unstamped_block_runs_only_under_v0() {
+        let unstamped = block(1, Bytes::new());
+        assert!(config(AlpenSpecId::V0)
+            .context_for_block(&unstamped)
+            .is_ok());
+        assert_eq!(
+            config(AlpenSpecId::V1).context_for_block(&unstamped).err(),
+            wrong_version(AlpenSpecId::V1, AlpenSpecId::V0)
+        );
+    }
+
+    /// The genesis block is V0 whatever its `extra_data` holds.
+    #[test]
+    fn genesis_block_runs_only_under_v0() {
+        let genesis = block(0, Bytes::from_static(b"SC"));
+        assert!(config(AlpenSpecId::V0).context_for_block(&genesis).is_ok());
+        assert_eq!(
+            config(AlpenSpecId::V1).context_for_block(&genesis).err(),
+            wrong_version(AlpenSpecId::V1, AlpenSpecId::V0)
+        );
+    }
+
+    #[test]
+    fn malformed_stamp_fails_to_decode() {
+        assert_eq!(
+            config(AlpenSpecId::V0)
+                .context_for_block(&block(1, Bytes::from_static(&[0x00])))
+                .err(),
+            Some(StampError::Decode(HeaderExtraError::TooShort { len: 1 }))
+        );
+    }
+
+    #[test]
+    fn context_for_payload_rejects_another_version() {
+        let sealed = block(1, stamp(AlpenSpecId::V0));
+        let (payload, sidecar) =
+            ExecutionPayload::from_block_unchecked(sealed.hash(), &sealed.clone_block());
+        let payload = ExecutionData { payload, sidecar };
+
+        assert!(config(AlpenSpecId::V0)
+            .context_for_payload(&payload)
+            .is_ok());
+        assert_eq!(
+            config(AlpenSpecId::V1).context_for_payload(&payload).err(),
+            wrong_version(AlpenSpecId::V1, AlpenSpecId::V0)
+        );
+    }
+
+    #[test]
+    fn build_path_rejects_another_version() {
+        let parent = SealedHeader::seal_slow(Header::default());
+        let attributes = NextBlockEnvAttributes {
+            timestamp: 1,
+            suggested_fee_recipient: Default::default(),
+            prev_randao: Default::default(),
+            gas_limit: 30_000_000,
+            parent_beacon_block_root: None,
+            withdrawals: Some(Default::default()),
+            extra_data: Default::default(),
+            slot_number: None,
+        };
+
+        assert_eq!(
+            config(AlpenSpecId::V1)
+                .context_for_next_block_with(
+                    &parent,
+                    attributes,
+                    HeaderExtra::new(AlpenSpecId::V0, 0)
+                )
+                .err(),
+            wrong_version(AlpenSpecId::V1, AlpenSpecId::V0)
+        );
     }
 }

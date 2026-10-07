@@ -36,6 +36,7 @@ use alpen_params::{
 use alpen_reth_evm::{
     config::{
         AlpenBlockAssembler, AlpenBlockExecutionCtx, AlpenBlockExecutorFactory, AlpenEvmConfig,
+        StampError,
     },
     evm::AlpenEvmFactory,
 };
@@ -121,7 +122,7 @@ impl MultiSpecEvmConfig {
         parent: &SealedHeader,
         attributes: NextBlockEnvAttributes,
         header_extra: HeaderExtra,
-    ) -> AlpenBlockExecutionCtx<'_> {
+    ) -> Result<AlpenBlockExecutionCtx<'_>, StampError> {
         self.config_for(header_extra.spec_version())
             .context_for_next_block_with(parent, attributes, header_extra)
     }
@@ -203,7 +204,7 @@ impl BlockAssembler<MultiSpecBlockExecutorFactory> for MultiSpecBlockAssembler {
 
 impl ConfigureEvm for MultiSpecEvmConfig {
     type Primitives = EthPrimitives;
-    type Error = HeaderExtraError;
+    type Error = StampError;
     type NextBlockEnvCtx = NextBlockEnvAttributes;
     type BlockExecutorFactory = MultiSpecBlockExecutorFactory;
     type BlockAssembler = MultiSpecBlockAssembler;
@@ -390,7 +391,7 @@ mod tests {
         };
         assert_eq!(
             config.evm_env(&truncated),
-            Err(HeaderExtraError::TooShort { len: 1 })
+            Err(HeaderExtraError::TooShort { len: 1 }.into())
         );
 
         let future = Header {
@@ -400,7 +401,7 @@ mod tests {
         };
         assert_eq!(
             config.evm_env(&future),
-            Err(HeaderExtraError::UnknownVersion(7))
+            Err(HeaderExtraError::UnknownVersion(7).into())
         );
     }
 
@@ -449,11 +450,13 @@ mod tests {
                 .next_evm_env(&parent, &attributes)
                 .expect("next env resolves");
             let evm = config.evm_with_env(&mut db, evm_env);
-            let ctx = config.context_for_next_block_with(
-                &parent,
-                attributes,
-                HeaderExtra::new(version, DA_RATE),
-            );
+            let ctx = config
+                .context_for_next_block_with(
+                    &parent,
+                    attributes,
+                    HeaderExtra::new(version, DA_RATE),
+                )
+                .expect("the stamp picks its own version's config");
             let mut builder = config.create_block_builder(evm, &parent, ctx);
             builder
                 .apply_pre_execution_changes()
@@ -483,11 +486,13 @@ mod tests {
         let provider = NoopProvider::default();
 
         for version in [AlpenSpecId::V0, AlpenSpecId::V1] {
-            let ctx = config.context_for_next_block_with(
-                &parent,
-                next_block_attributes(),
-                HeaderExtra::new(version, DA_RATE),
-            );
+            let ctx = config
+                .context_for_next_block_with(
+                    &parent,
+                    next_block_attributes(),
+                    HeaderExtra::new(version, DA_RATE),
+                )
+                .expect("the stamp picks its own version's config");
             let block = config
                 .assembler
                 .assemble_block(BlockAssemblerInput::new(
