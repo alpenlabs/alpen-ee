@@ -4934,7 +4934,6 @@ dependencies = [
  "libm",
  "rand 0.8.6",
  "sha2",
- "slop-algebra",
  "sp1-lib",
  "sp1-primitives",
 ]
@@ -6242,7 +6241,6 @@ dependencies = [
  "bincode",
  "cfg-if",
  "serde",
- "sha2",
  "sp1-zkvm",
  "zkaleido",
 ]
