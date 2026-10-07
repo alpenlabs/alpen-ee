@@ -98,6 +98,13 @@ DA and proving), these are the other steps:
    their recorded heads. Reth's static files heal themselves.
 5. Upgrade the OL in the same window. A 0.3.0 OL rejects the current EE's
    update transactions, so the EE cannot advance its OL state against it.
+6. If OL switched the EE's key to v1 while 0.3.0 ran, move the chain to v1
+   before the node's first start. With `--allow-writes`, roll back to the
+   tip OL accepted with `drop_chain_above(<hash>)` and commit, then run
+   `set_next_spec_version(<hash>, 1)` and commit (see [Recipes](#recipes)).
+   The prover section then needs `[sequencer.prover.programs.v1]` with the
+   program whose key OL switched to, since the node refuses to start when no
+   program matches OL's key. This step has not been run end to end.
 
 On success `sled/` is renamed to
 `sled.migrated/` for rollback until you delete it (`--keep-sled` leaves the
@@ -609,6 +616,7 @@ until you say otherwise. `.recipes` lists them:
 | `chain_summary()` | nothing; tip and finalized heights, counts, latest batch and chunk |
 | `drop_chain_above(target)` | everything above `target`, a block hash or a height. A hash is the usual form: the EE tip OL has accepted, `0x` or not, checked by `tip_height` first. A height is used as given, with no checks. Above the height: every exec block, with its payload, accessed state, witness, height entry and finalized entry. The witness environment's diffs, where that environment is present. The OL epoch entries whose accepted account state points at a dropped block, so the tracker resumes from the last surviving epoch. Last, the batches and chunks that end above the height, through `revert_batches_from`, or `revert_chunks_from` for the open batch. Chain, witness, batches and chunks are each cut by their own top. So a witness that ran ahead is trimmed even when the chain is already at the height |
 | `tip_height(hash)` | nothing; the height of block `hash`, once it is checked to be a block that can be left as the tip. Fails for a string that is not a 32-byte hash. Fails for a block the store does not hold or the height index does not list. Fails for a block at a finalized height that is not the finalized one. Fails for a block that shares an unfinalized height with another. It does not check that the block connects to the chain below it, which OL's accepted tip always does |
+| `set_next_spec_version(hash, version)` | the version the next block built on block `hash` runs under, given as a number, 1 for v1. For a key switch that sends the EE no message, run once right after `drop_chain_above(hash)` is committed. Fails unless `hash` is the tip and the last block of the last sealed batch. Fails unless `version` is the one after the version the record holds now |
 | `batch_summary()` | nothing; batches and chunks counted by status |
 | `revert_batches_from(idx)` | batches from `idx`, with their id and chunk-list entries, and their chunks through `revert_chunks_from`. Where the prover environment is present, the account prover tasks of those batches under any spec version, their receipts, and the receipts' proof-id index entries |
 | `revert_chunks_from(idx)` | chunks from `idx`, with their id entries. Where the prover environment is present, their prover tasks under any spec version and their receipts. Use it alone only for chunks past the last sealed batch. A sealed batch's chunks go with `revert_batches_from` |
@@ -647,6 +655,31 @@ at hand, such as reth's head after the node was killed.
 Never roll back below the finalized tip, which `chain_summary()` shows as
 `finalized_height`. The recipes don't check this. OL still reports the
 dropped block as finalized, so the node panics with a deep reorg on restart.
+
+A key switch that sends the EE no message leaves the chain on its old
+version. The move from v0 to v1 on the chain 0.3.0 built is one. OL applies
+the new key at once, and nothing on the chain tells the EE. After the
+rollback, the tip's record still says the next block runs under v0, so the
+node would go on building v0 blocks whose proofs OL now rejects.
+`set_next_spec_version` moves it on. It checks committed rows, so commit the
+rollback first, and run both before the node starts:
+
+```
+db> drop_chain_above("0x5f2c09d4…a1e9")
+543
+db> commit()
+…
+db> set_next_spec_version("0x5f2c09d4…a1e9", 1)
+1
+db> commit()
+1
+```
+
+The block builder takes the next block's version from the tip's record. The
+batch builder takes the next batch's version from the record of the last
+sealed batch's last block. Each OL update covers one batch and ends on its
+last block, so after the rollback OL's accepted tip is both. The last batch
+keeps v0, the version its blocks ran under.
 
 A recipe that touches more than one environment stages `node` first.
 `commit()` applies environments in the order they were first staged, and it

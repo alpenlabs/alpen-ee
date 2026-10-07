@@ -92,6 +92,7 @@ mod tests {
             "prover_task",
             "revert_batches_from",
             "revert_chunks_from",
+            "set_next_spec_version",
             "tip_height",
         ] {
             assert!(names.contains(&expected), "missing recipe {expected}");
@@ -506,6 +507,76 @@ mod tests {
             assert!(err.contains(expected), "{target}: {err}");
             assert!(session.db().staged().is_empty(), "{target} staged");
         }
+    }
+
+    /// Rolled back to the end of its last sealed batch, the tip moves to the
+    /// next version, one version at a time, once.
+    #[test]
+    fn set_next_spec_version_moves_the_rolled_back_tip_one_version_on() {
+        let (_datadir, mut session) = seeded_session();
+        // The genesis batch ends at block 0, which is all 0x01.
+        let tip = block_hash(1);
+        let _ = session
+            .eval(&format!(r#"drop_chain_above("{tip}"); commit();"#))
+            .unwrap();
+        let next_version = format!(r#"get("ExecBlockSchema", "{tip}").value.next_spec_version"#);
+        assert_eq!(int(&mut session, &next_version), 0);
+
+        let err = session
+            .eval(&format!(r#"set_next_spec_version("{tip}", 2)"#))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("can only move to 1"), "{err}");
+        assert!(session.db().staged().is_empty());
+
+        assert_eq!(
+            int(
+                &mut session,
+                &format!(r#"set_next_spec_version("{tip}", 1)"#)
+            ),
+            1
+        );
+        let ops = session.db().staged();
+        assert_eq!(ops.len(), 1);
+        assert_eq!(staged_of(&ops, "ExecBlockSchema").len(), 1);
+        assert_eq!(int(&mut session, "commit()"), 1);
+        assert_eq!(int(&mut session, &next_version), 1);
+
+        // A second run fails rather than skipping a version.
+        let err = session
+            .eval(&format!(r#"set_next_spec_version("{tip}", 1)"#))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("can only move to 2"), "{err}");
+    }
+
+    /// The builders continue from the tip and from the last sealed batch's
+    /// last block, so any other block is refused, and so is a full node,
+    /// which seals no batches.
+    #[test]
+    fn set_next_spec_version_refuses_a_block_the_builders_do_not_continue_from() {
+        let refusal = |session: &mut Session, args: &str| {
+            let err = session
+                .eval(&format!("set_next_spec_version({args})"))
+                .unwrap_err()
+                .to_string();
+            assert!(session.db().staged().is_empty(), "staged on refusal");
+            err
+        };
+
+        let (_datadir, mut session) = seeded_session();
+        // Block 2, all 0x03, is the tip, but the genesis batch ends at block 0.
+        let err = refusal(&mut session, &format!(r#""{}", 1"#, block_hash(3)));
+        assert!(err.contains("does not end the last sealed batch"), "{err}");
+        let err = refusal(&mut session, &format!(r#""{}", 1"#, block_hash(2)));
+        assert!(err.contains("is not the tip"), "{err}");
+        let err = refusal(&mut session, &format!(r#""{}", "v1""#, block_hash(3)));
+        assert!(err.contains("as a number"), "{err}");
+
+        let (_datadir, mut session) = full_node_session();
+        let _ = session.eval("drop_chain_above(1); commit();").unwrap();
+        let err = refusal(&mut session, &format!(r#""{}", 1"#, block_hash(2)));
+        assert!(err.contains("no sealed batch"), "{err}");
     }
 
     #[test]
