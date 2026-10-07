@@ -13,8 +13,7 @@
 
 use alpen_common::HeaderSummaryProvider;
 use alpen_da_types::EvmHeaderSummary;
-use alpen_params::{header_spec_version, AlpenSpecId};
-use alpen_reth_evm::da_fee::da_rate_from_extra_data;
+use alpen_params::{AlpenSpecId, HeaderExtra};
 
 /// [`HeaderSummaryProvider`] backed by a Reth [`HeaderProvider`](reth_provider::HeaderProvider).
 pub(crate) struct RethHeaderSummaryProvider<P> {
@@ -53,7 +52,8 @@ fn summarize_header(
     header: &reth_primitives_traits::Header,
     spec_version: AlpenSpecId,
 ) -> eyre::Result<EvmHeaderSummary> {
-    let header_version = header_spec_version(header)?;
+    let header_extra = HeaderExtra::of_header(header)?;
+    let header_version = header_extra.spec_version();
     eyre::ensure!(
         header_version == spec_version,
         "block {} is stamped {header_version:?}, but its batch is {spec_version:?}",
@@ -71,17 +71,13 @@ fn summarize_header(
         })?,
         gas_used: header.gas_used,
         gas_limit: header.gas_limit,
-        // V0 does not publish the rate, so the summary leaves it out too.
-        da_rate: match spec_version {
-            AlpenSpecId::V0 => 0,
-            AlpenSpecId::V1 => da_rate_from_extra_data(&header.extra_data),
-        },
+        // V0 headers have no rate, and V0 summaries leave it out.
+        da_rate: header_extra.da_rate().unwrap_or(0),
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use alpen_params::HeaderExtra;
     use reth_primitives_traits::Header;
 
     use super::*;

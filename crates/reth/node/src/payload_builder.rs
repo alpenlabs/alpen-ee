@@ -10,10 +10,7 @@ use alpen_params::{FeeSpec, HeaderExtra};
 use alpen_reth_evm::{
     base_fee::next_floored_base_fee,
     constants::BRIDGEOUT_PRECOMPILE_ADDRESS,
-    da_fee::{
-        constrain_next_da_rate, stamped_da_rate_from_extra_data, DA_COVERAGE_CAPPED,
-        DA_COVERAGE_UNKNOWN,
-    },
+    da_fee::{constrain_next_da_rate, DA_COVERAGE_CAPPED, DA_COVERAGE_UNKNOWN},
     extract_withdrawal_intents,
 };
 use alpen_reth_primitives::WithdrawalIntent;
@@ -238,12 +235,12 @@ where
 
     // V0 headers have no rate field, so V0 blocks charge no DA fee, just like the blocks the
     // deployed V0 binary builds.
+    let parent_rate = HeaderExtra::of_header(parent_header.header())
+        .map_err(PayloadBuilderError::other)?
+        .da_rate();
     let da_rate = HeaderExtra::new(
         spec_version,
-        constrain_next_da_rate(
-            stamped_da_rate_from_extra_data(&parent_header.extra_data),
-            candidate_da_rate,
-        ),
+        constrain_next_da_rate(parent_rate, candidate_da_rate),
     )
     .da_rate()
     .unwrap_or(0);
@@ -602,7 +599,9 @@ mod tests {
             handle,
             FeeSpec::new(SpecVersioned::new(0)),
         );
+        // Past genesis, so the parent's stamp is decoded rather than exempted.
         let parent = Arc::new(SealedHeader::seal_slow(Header {
+            number: 1,
             gas_limit: 30_000_000,
             base_fee_per_gas: Some(7),
             extra_data: HeaderExtra::new(AlpenSpecId::V1, PARENT_RATE)

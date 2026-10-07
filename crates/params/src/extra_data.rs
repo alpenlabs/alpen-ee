@@ -27,7 +27,7 @@
 
 use std::mem::size_of;
 
-use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, Header};
+use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, BlockHeader, Header};
 use thiserror::Error;
 
 use crate::AlpenSpecId;
@@ -165,6 +165,18 @@ impl HeaderExtra {
                 })
             }
         }
+    }
+
+    /// Decodes `header`'s `extra_data`, with the genesis exemption.
+    ///
+    /// The full-parse counterpart of [`header_spec_version`]: the genesis
+    /// header is [`HeaderExtra::V0`] whatever its `extra_data` holds, and
+    /// every other header goes through the strict [`HeaderExtra::decode`].
+    pub fn of_header(header: &impl BlockHeader) -> Result<Self, HeaderExtraError> {
+        if header.number() == 0 {
+            return Ok(Self::V0);
+        }
+        Self::decode(header.extra_data())
     }
 }
 
@@ -334,6 +346,30 @@ mod tests {
         assert_eq!(
             spec_version_for_block(1, &HeaderExtra::new(AlpenSpecId::V1, 0).encode()),
             Ok(AlpenSpecId::V1)
+        );
+    }
+
+    #[test]
+    fn of_header_exempts_genesis_and_decodes_the_rest() {
+        let header = |number, extra_data: Vec<u8>| Header {
+            number,
+            extra_data: extra_data.into(),
+            ..Default::default()
+        };
+        let v1 = HeaderExtra::new(AlpenSpecId::V1, 42);
+
+        assert_eq!(
+            HeaderExtra::of_header(&header(0, b"SC".to_vec())),
+            Ok(HeaderExtra::V0)
+        );
+        assert_eq!(
+            HeaderExtra::of_header(&header(1, Vec::new())),
+            Ok(HeaderExtra::V0)
+        );
+        assert_eq!(HeaderExtra::of_header(&header(1, v1.encode())), Ok(v1));
+        assert_eq!(
+            HeaderExtra::of_header(&header(1, b"SC".to_vec())),
+            Err(HeaderExtraError::UnknownVersion(0x5343))
         );
     }
 

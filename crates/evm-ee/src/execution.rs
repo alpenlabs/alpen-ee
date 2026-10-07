@@ -12,9 +12,7 @@ use alpen_acct_types::{
 use alpen_chain_types::{ExecInputs, ExecOutputs, OutputMessage};
 use alpen_params::HeaderExtra;
 use alpen_reth_evm::{
-    config::AlpenEvmConfig,
-    da_fee::{stamped_da_rate_from_extra_data, validate_da_rate_against_parent},
-    evm::AlpenEvmFactory,
+    config::AlpenEvmConfig, da_fee::validate_da_rate_against_parent, evm::AlpenEvmFactory,
     extract_withdrawal_intents,
 };
 use reth_chainspec::ChainSpec;
@@ -113,11 +111,11 @@ fn validate_ancestors_against_block(
         .map_err(|_| EnvError::InvalidBlock)?
         .da_rate()
     {
-        validate_da_rate_against_parent(
-            stamped_da_rate_from_extra_data(&parent_header.extra_data),
-            next_rate,
-        )
-        .map_err(|_| EnvError::InvalidBlock)?;
+        let parent_rate = HeaderExtra::of_header(parent_header.inner())
+            .map_err(|_| EnvError::InvalidBlock)?
+            .da_rate();
+        validate_da_rate_against_parent(parent_rate, next_rate)
+            .map_err(|_| EnvError::InvalidBlock)?;
     }
 
     Ok(())

@@ -19,10 +19,9 @@
 //! all the components (rpc, execution, guest) can access it without necessarily
 //! depending on heavy reth crates.
 
-use alpen_params::HeaderExtra;
 use reth_evm::{eth::EthEvmContext, Database};
 use revm::state::EvmState;
-use revm_primitives::{Bytes, KECCAK_EMPTY, U256};
+use revm_primitives::{KECCAK_EMPTY, U256};
 
 const BPS_DENOMINATOR: u64 = 10_000;
 
@@ -175,30 +174,6 @@ pub fn calc_diff_size(state: &EvmState) -> u64 {
     diff_size
 }
 
-/// Decodes the per-block DA rate (wei per byte) from the EVM header `extra_data`.
-///
-/// The rate is a body field of the versioned [`HeaderExtra`] layout, so it is read through
-/// that codec rather than off a fixed offset. A header without a rate (a V0 header, the
-/// genesis label, a corrupt stamp) yields `0`, which disables the DA charge — so the charge
-/// stays dormant until a rate is committed.
-///
-/// Header validation is what rejects malformed `extra_data`; by the time a block reaches
-/// execution its layout has already been checked, so falling back to `0` here is a
-/// belt-and-braces default rather than a policy decision.
-pub fn da_rate_from_extra_data(extra_data: &Bytes) -> u64 {
-    stamped_da_rate_from_extra_data(extra_data).unwrap_or(0)
-}
-
-/// Decodes the rate a header commits to, if its version's layout has one.
-///
-/// V0 headers carry no rate, while an encoded zero under V1 is an active rate. Invalid data is
-/// treated as carrying no rate, which covers the genesis header's label.
-pub fn stamped_da_rate_from_extra_data(extra_data: &Bytes) -> Option<u64> {
-    HeaderExtra::decode(extra_data)
-        .ok()
-        .and_then(|extra| extra.da_rate())
-}
-
 /// Caps a candidate DA rate to the increase covered by the fee-quote safety margin.
 ///
 /// A parent without a rate (V0, or genesis) imposes no bound, so the first V1 block may start
@@ -288,9 +263,8 @@ impl<DB: Database> DaStateAccess for EthEvmContext<DB> {
 
 #[cfg(test)]
 mod tests {
-    use alpen_params::AlpenSpecId;
     use revm::state::{Account, AccountInfo, Bytecode, EvmStorageSlot};
-    use revm_primitives::{Address, B256, U256};
+    use revm_primitives::{Address, Bytes, B256, U256};
 
     use super::*;
 
@@ -461,37 +435,6 @@ mod tests {
         let forward = state_of([a.clone(), b.clone()]);
         let backward = state_of([b, a]);
         assert_eq!(calc_diff_size(&forward), calc_diff_size(&backward));
-    }
-
-    #[test]
-    fn da_rate_extra_data_roundtrips() {
-        for rate in [0, 2_500_000_000] {
-            let extra_data = Bytes::from(HeaderExtra::new(AlpenSpecId::V1, rate).encode());
-            assert_eq!(da_rate_from_extra_data(&extra_data), rate);
-            assert_eq!(stamped_da_rate_from_extra_data(&extra_data), Some(rate));
-        }
-    }
-
-    #[test]
-    fn v0_extra_data_yields_no_rate() {
-        let extra_data = Bytes::from(HeaderExtra::new(AlpenSpecId::V0, 2_500_000_000).encode());
-        assert_eq!(da_rate_from_extra_data(&extra_data), 0);
-        assert_eq!(stamped_da_rate_from_extra_data(&extra_data), None);
-    }
-
-    #[test]
-    fn undecodable_extra_data_yields_no_rate() {
-        // Genesis label / a V0 prefix, which V0's empty layout forbids => no rate => charge is
-        // dormant.
-        assert_eq!(da_rate_from_extra_data(&Bytes::from_static(b"SC")), 0);
-        assert_eq!(
-            stamped_da_rate_from_extra_data(&Bytes::from_static(b"SC")),
-            None
-        );
-        assert_eq!(
-            da_rate_from_extra_data(&Bytes::from_static(&[0x00, 0x00])),
-            0
-        );
     }
 
     #[test]

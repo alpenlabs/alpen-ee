@@ -27,8 +27,7 @@ use alpen_params::{
     header_spec_version, AlpenSpecId, EvmSpec, FeeSpec, HeaderExtra, HeaderExtraError,
 };
 use alpen_reth_evm::{
-    base_fee::expected_floored_base_fee,
-    da_fee::{stamped_da_rate_from_extra_data, validate_da_rate_against_parent},
+    base_fee::expected_floored_base_fee, da_fee::validate_da_rate_against_parent,
 };
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, FullConsensus, HeaderValidator, ReceiptRootBloom};
@@ -202,13 +201,9 @@ impl HeaderValidator for AlpenConsensus {
         // the version prefix, so this parse is what rejects `extra_data`
         // that violates its version's layout. Genesis is exempt — its
         // `extra_data` is the operator-authored genesis document's.
-        let spec_version = if header.number == 0 {
-            AlpenSpecId::V0
-        } else {
-            HeaderExtra::decode(&header.extra_data)
-                .map_err(consensus_error)?
-                .spec_version()
-        };
+        let spec_version = HeaderExtra::of_header(header.header())
+            .map_err(consensus_error)?
+            .spec_version();
         version_indexed(&self.inners, spec_version).validate_header(header)
     }
 
@@ -217,25 +212,21 @@ impl HeaderValidator for AlpenConsensus {
         header: &SealedHeader,
         parent: &SealedHeader,
     ) -> Result<(), ConsensusError> {
+        let header_extra = HeaderExtra::of_header(header.header()).map_err(consensus_error)?;
+        let parent_extra = HeaderExtra::of_header(parent.header()).map_err(consensus_error)?;
         // Upgrades only ever move forward: a chain whose version regresses
         // is structurally invalid regardless of what the inbox ordering
         // would derive.
-        let version = header_spec_version(header.header()).map_err(consensus_error)?;
-        let parent_version = header_spec_version(parent.header()).map_err(consensus_error)?;
+        let version = header_extra.spec_version();
+        let parent_version = parent_extra.spec_version();
         if version < parent_version {
             return Err(ConsensusError::msg(format!(
                 "alpen spec version regressed from {parent_version:?} to {version:?}"
             )));
         }
-        if let Some(next_rate) = HeaderExtra::decode(&header.extra_data)
-            .map_err(consensus_error)?
-            .da_rate()
-        {
-            validate_da_rate_against_parent(
-                stamped_da_rate_from_extra_data(&parent.extra_data),
-                next_rate,
-            )
-            .map_err(ConsensusError::other)?;
+        if let Some(next_rate) = header_extra.da_rate() {
+            validate_da_rate_against_parent(parent_extra.da_rate(), next_rate)
+                .map_err(ConsensusError::other)?;
         }
         version_indexed(&self.inners, version).validate_header_against_parent(header, parent)
     }

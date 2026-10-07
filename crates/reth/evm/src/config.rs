@@ -48,6 +48,7 @@ use alloy_consensus::{
 };
 use alloy_eips::{eip4895::Withdrawals, eip7840::BlobParams, merge::BEACON_NONCE, Encodable2718};
 use alloy_rpc_types_engine::ExecutionData;
+use alpen_params::{HeaderExtra, HeaderExtraError};
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
@@ -63,9 +64,9 @@ use reth_evm::{
 use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{logs_bloom, SealedBlock, SealedHeader, SignedTransaction};
 use revm::{context::Block as _, Inspector};
-use revm_primitives::{Bytes, U256};
+use revm_primitives::U256;
 
-use crate::{da_fee::da_rate_from_extra_data, evm::AlpenEvmFactory};
+use crate::evm::AlpenEvmFactory;
 
 /// The inner reth Ethereum EVM config specialised with the Alpen EVM factory.
 type Inner = EthEvmConfig<ChainSpec, AlpenEvmFactory>;
@@ -76,9 +77,19 @@ type InnerBef = <Inner as ConfigureEvm>::BlockExecutorFactory;
 /// The inner reth Ethereum block assembler.
 type InnerAssembler = <Inner as ConfigureEvm>::BlockAssembler;
 
-/// Reads the per-block DA rate (wei per byte) committed in a header `extra_data`.
-fn da_rate_of(extra_data: &Bytes) -> U256 {
-    U256::from(da_rate_from_extra_data(extra_data))
+/// Returns the DA rate (wei per byte) the in-EVM charge applies for a block's decoded
+/// `extra_data`.
+///
+/// No rate means no charge. The `context_for_*` methods can't fail (the inner config's error
+/// type is `Infallible`), so a stamp that doesn't decode charges nothing too. Header validation
+/// rejects such a block before it executes.
+fn charged_da_rate(header_extra: Result<HeaderExtra, HeaderExtraError>) -> U256 {
+    U256::from(
+        header_extra
+            .ok()
+            .and_then(|extra| extra.da_rate())
+            .unwrap_or(0),
+    )
 }
 
 /// Per-block execution context: the standard Ethereum context plus the block's DA rate.
@@ -420,7 +431,7 @@ impl ConfigureEvm for AlpenEvmConfig {
     ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
         Ok(AlpenBlockExecutionCtx {
             inner: self.inner.context_for_block(block)?,
-            da_rate: da_rate_of(&block.header().extra_data),
+            da_rate: charged_da_rate(HeaderExtra::of_header(block.header())),
         })
     }
 
@@ -447,7 +458,8 @@ impl ConfigureEngineEvm<ExecutionData> for AlpenEvmConfig {
     ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
         Ok(AlpenBlockExecutionCtx {
             inner: self.inner.context_for_payload(payload)?,
-            da_rate: da_rate_of(&payload.payload.as_v1().extra_data),
+            // Payloads are never the genesis block, so no genesis exemption applies.
+            da_rate: charged_da_rate(HeaderExtra::decode(&payload.payload.as_v1().extra_data)),
         })
     }
 
