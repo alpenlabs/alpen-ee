@@ -27,16 +27,16 @@ struct WitnessData {
 
 fn load_witness() -> EthClientExecutorInput {
     // Canonical Reth-shaped witness fixture lives under
-    // crates/test-utils/data/evm_ee/ (shared with the EVM-EE STF tests).
+    // crates/test-utils/data/evm-ee/ (shared with the EVM-EE STF tests).
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../crates/test-utils/data/evm_ee/witness_params.json");
+        .join("../../crates/test-utils/data/evm-ee/rsp_block_witness.json");
     let json = fs::read_to_string(path).expect("read witness JSON");
     let data: WitnessData = serde_json::from_str(&json).expect("parse witness JSON");
     data.witness
 }
 
 /// The dev-network `AlpenParams` this benchmark exercises `process_ee_chunk`
-/// against — chosen because `witness_params.json`'s embedded genesis
+/// against — chosen because `rsp_block_witness.json`'s embedded genesis
 /// (chain id 2892, all hardforks active from genesis) matches it.
 /// The spec version this fixture executes and proves under.
 ///
