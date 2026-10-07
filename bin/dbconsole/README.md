@@ -242,7 +242,8 @@ A bare name resolves while it is unique across environments, which every EE
 table is today and a registry test enforces; the qualified form is accepted
 everywhere and is required only if that ever changes. A table in an absent
 environment is found and refused with a message saying which environment is
-missing, rather than reported as unknown.
+missing, rather than reported as unknown. A script that may run on a full node
+checks with [`has_env`](#has_envname--is-an-environment-attached) first.
 
 MDBX has no transaction spanning environments, so `commit()` runs one
 transaction per environment — see [Writes](#writes).
@@ -508,6 +509,17 @@ keys_where("ChunkProverTaskSchema", |k| k.starts_with("0000"), 100)  // first 10
 `r.key` is rendered in exactly the form `get` accepts, so a key copied out of a
 scan pastes straight into a lookup.
 
+### `has_env(name)` — is an environment attached
+
+A full node has only `node`, and any access to a table in an absent
+environment is refused. A script that reaches into `prover`, `witness` or `da`
+asks first. An unknown name is an error, so a typo does not read as absent.
+
+```rhai
+has_env("prover")                                   // → false on a full node
+if has_env("witness") { last("BlockHashByNumber") } else { () }
+```
+
 ### From the shell
 
 ```bash
@@ -595,7 +607,7 @@ until you say otherwise. `.recipes` lists them:
 | `prover_abandon(table, key, reason)` | the task's status to `PermanentFailure` |
 | `prover_delete(table, key)` | the task, its receipt, and the proof-id index entries of an account receipt |
 | `chain_summary()` | nothing; tip and finalized heights, counts, latest batch and chunk |
-| `drop_chain_above(height)` | every exec block above `height` with its payload, accessed state and witness; the height and finalized entries; the witness environment's diffs above `height`; the OL epoch entries whose accepted account state points at a dropped block, so the tracker resumes from the last surviving epoch; then `revert_batches_from` for the first batch ending above `height`. Chain, witness and batches are each cut by their own top, so a witness that ran ahead is trimmed even when the chain is already at `height` |
+| `drop_chain_above(height)` | every exec block above `height` with its payload, accessed state and witness; the height and finalized entries; the witness environment's diffs above `height`, where that environment is present; the OL epoch entries whose accepted account state points at a dropped block, so the tracker resumes from the last surviving epoch; then `revert_batches_from` for the first batch ending above `height`. Chain, witness and batches are each cut by their own top, so a witness that ran ahead is trimmed even when the chain is already at `height` |
 | `batch_summary()` | nothing; batches and chunks counted by status |
 | `revert_batches_from(idx)` | batches from `idx`, their id and chunk-list entries, and every chunk of those batches |
 | `broadcast_summary()` | nothing; the L1 queue by status, replacement chains, envelopes |
@@ -623,7 +635,9 @@ committed 138 edit(s) to `witness`
 A recipe that touches two environments stages the authoritative one first,
 because `commit()` applies environments in first-staged order and cannot be
 atomic across them. If the witness environment fails after `node` landed, a
-regenerable cache is stale and nothing authoritative is inconsistent.
+regenerable cache is stale and nothing authoritative is inconsistent. A
+recipe skips an environment the datadir does not have, so the chain recipes
+run on a full node too.
 
 To add a recipe: write the function with a `///` doc comment in the fitting
 file under `recipes/`, add a test in `src/dbconsole/recipes.rs` against the

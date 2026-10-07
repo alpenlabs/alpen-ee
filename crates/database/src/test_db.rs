@@ -71,6 +71,13 @@ impl TempDatadir {
         seed_all(&datadir);
         datadir
     }
+
+    /// A full node's datadir, with a fork at the tip; see [`seed_full_node`].
+    pub fn full_node() -> Self {
+        let datadir = Self::new();
+        seed_full_node(&datadir);
+        datadir
+    }
 }
 
 impl Default for TempDatadir {
@@ -138,6 +145,23 @@ pub fn seed_node(datadir: &Path) {
     db.put_block_accessed_state(h1, record).unwrap();
     db.put_bytecode(hash(4), vec![0x60, 0x00]).unwrap();
     db.put_block_witness(h1, vec![1, 2, 3]).unwrap();
+}
+
+/// A full node's datadir: the node environment alone, holding blocks 0..=2
+/// with only genesis finalized, and a second block at height 2 off block 1.
+pub fn seed_full_node(datadir: &Path) {
+    let db = NodeDbMdbx::open(&datadir.join("mdbx").join("node"), &MdbxConfig::small()).unwrap();
+    let (h0, h1, h2, fork) = (hash(1), hash(2), hash(3), hash(4));
+
+    db.save_exec_block(create_exec_block(0, Hash::default(), h0, 0), vec![0xaa; 8])
+        .unwrap();
+    db.save_exec_block(create_exec_block(1, h0, h1, 1), vec![0xbb; 8])
+        .unwrap();
+    db.save_exec_block(create_exec_block(2, h1, h2, 2), vec![0xcc; 8])
+        .unwrap();
+    db.save_exec_block(create_exec_block(2, h1, fork, 2), vec![0xdd; 8])
+        .unwrap();
+    db.init_finalized_chain(h0).unwrap();
 }
 
 /// The prover environment: a task of each kind under the V0 prover, over the

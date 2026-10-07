@@ -342,6 +342,29 @@ mod tests {
         assert_eq!(int(&mut session, "drop_chain_above(2)"), 0);
     }
 
+    /// A drop on a full node's datadir, which has no witness environment,
+    /// cuts the node chain and skips the witness step rather than failing.
+    #[test]
+    fn drop_chain_above_on_a_full_node_cuts_only_the_node_chain() {
+        let (_datadir, mut session) = full_node_session();
+        // Two blocks at height 2, each with its payload, and the height entry.
+        assert_eq!(int(&mut session, "drop_chain_above(1)"), 5);
+        let ops = session.db().staged();
+        assert!(ops.iter().all(|op| op.env() == "node"), "{ops:?}");
+        assert_eq!(staged_of(&ops, "ExecBlockSchema").len(), 2);
+        assert_eq!(staged_of(&ops, "ExecBlocksAtHeightSchema").len(), 1);
+    }
+
+    /// A read-write session over a full node's datadir: only the node
+    /// environment, genesis finalized, two blocks at the unfinalized tip.
+    fn full_node_session() -> (TempDatadir, Session) {
+        let datadir = TempDatadir::full_node();
+        let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
+        let mut session = Session::new(db, Arc::new(AtomicBool::new(false)));
+        install(&mut session).unwrap();
+        (datadir, session)
+    }
+
     #[test]
     fn revert_batches_from_takes_batches_indexes_and_chunks() {
         let (_datadir, mut session) = seeded_session();

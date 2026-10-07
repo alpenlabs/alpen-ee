@@ -28,7 +28,8 @@ fn chain_summary() {
 /// reverts every batch whose last block is above `height`, with its chunks.
 /// The node chain, the witness environment and the batches are each cut
 /// back by their own top, so a witness that ran ahead of the exec tip is
-/// trimmed even when the chain itself is already at `height`. Node edits are
+/// trimmed even when the chain itself is already at `height`. A full node
+/// has no witness environment, and that step is skipped. Node edits are
 /// staged first, so they land first. Returns the count staged.
 fn drop_chain_above(height) {
     let n = 0;
@@ -71,7 +72,7 @@ fn drop_chain_above(height) {
     // The witness environment numbers blocks on its own and may run ahead of
     // the exec tip, so it is cut back to `height` by its own top, not the
     // chain's, and whether or not the chain needed cutting.
-    let witness_top = last("BlockHashByNumber");
+    let witness_top = if has_env("witness") { last("BlockHashByNumber") } else { () };
     if witness_top != () && parse_int(witness_top.key) > height {
         for number in keys_range("BlockHashByNumber", from, witness_top.key) {
             let hash = get("BlockHashByNumber", number).value;
