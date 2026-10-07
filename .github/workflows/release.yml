@@ -1,5 +1,6 @@
-# On a version tag, builds the SP1 guests for every network in params/,
-# attaches them to the tag's GitHub Release and then copies them to S3.
+# On a version tag, builds the SP1 guests for every network in params/ except
+# dev, attaches them to the tag's GitHub Release and then copies them to S3.
+# dev is only for local runs and CI, so it gets no released guests.
 #
 # Releases are immutable once published, so the release is created as a draft,
 # every network attaches its files, and it is only published once it holds
@@ -38,7 +39,7 @@ jobs:
         id: networks
         run: |
           set -euo pipefail
-          networks="$(find params -mindepth 1 -maxdepth 1 -name '*.json' \
+          networks="$(find params -mindepth 1 -maxdepth 1 -name '*.json' ! -name dev.json \
             | sed 's|^params/||; s|\.json$||' | sort | jq -R . | jq -cs .)"
           if [ "$networks" = "[]" ]; then
             echo "::error::no params/<network>.json found"

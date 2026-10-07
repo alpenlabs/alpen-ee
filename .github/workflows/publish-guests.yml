@@ -2,8 +2,9 @@
 # them. The guests bake in that network's params, so each network gets its own
 # ELFs and account predicate.
 #
-# release.yml calls this once per params/<network>.json on a version tag. Run
-# it by hand with params_url to build with params that are not in the repo yet.
+# release.yml calls this once per params/<network>.json, except dev, on a
+# version tag. Run it by hand to build dev, or with params_url to build with
+# params that are not in the repo yet.
 
 name: Publish SP1 Guests
 
