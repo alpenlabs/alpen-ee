@@ -609,35 +609,40 @@ until you say otherwise. `.recipes` lists them:
 | `chain_summary()` | nothing; tip and finalized heights, counts, latest batch and chunk |
 | `drop_chain_above(height)` | every exec block above `height` with its payload, accessed state and witness; the height and finalized entries; the witness environment's diffs above `height`, where that environment is present; the OL epoch entries whose accepted account state points at a dropped block, so the tracker resumes from the last surviving epoch; then `revert_batches_from` for the first batch ending above `height`. Chain, witness and batches are each cut by their own top, so a witness that ran ahead is trimmed even when the chain is already at `height` |
 | `batch_summary()` | nothing; batches and chunks counted by status |
-| `revert_batches_from(idx)` | batches from `idx`, their id and chunk-list entries, and every chunk of those batches |
+| `revert_batches_from(idx)` | batches from `idx`, their id and chunk-list entries, and every chunk of those batches; then, where the prover environment is present, every prover task over those batches and chunks under any spec version, their receipts, and the proof-id index entries of the account receipts |
 | `broadcast_summary()` | nothing; the L1 queue by status, replacement chains, envelopes |
 
 ```
 db> chain_summary()
 { batches: 37, blocks_at_tip: 1, chunks: 36, exec_blocks: 370, finalized_height: 0, … }
 db> drop_chain_above(300)
-513
+543
 db> .staged
-513 staged change(s); `commit()` applies them:
+543 staged change(s); `commit()` applies them:
   node/ExecBlockSchema: 69 del, 0 put
   node/ExecBlockPayloadSchema: 69 del, 0 put
   …
   witness/BlockStateChangesSchema: 69 del, 0 put
   …
   node/BatchByIdxSchema: 6 del, 0 put
+  …
+  prover/AcctProverTaskSchema: 6 del, 0 put
+  …
   (`.staged full` lists every edit)
 db> commit()
 committed 375 edit(s) to `node`
 committed 138 edit(s) to `witness`
-513
+committed 30 edit(s) to `prover`
+543
 ```
 
-A recipe that touches two environments stages the authoritative one first,
-because `commit()` applies environments in first-staged order and cannot be
-atomic across them. If the witness environment fails after `node` landed, a
-regenerable cache is stale and nothing authoritative is inconsistent. A
-recipe skips an environment the datadir does not have, so the chain recipes
-run on a full node too.
+A recipe that touches more than one environment stages the authoritative one
+first, because `commit()` applies environments in first-staged order and
+cannot be atomic across them. If the witness or prover environment fails
+after `node` landed, what is left behind is a regenerable cache or prover work
+for a range that is gone, and nothing authoritative is inconsistent. A recipe
+skips an environment the datadir does not have, so the chain recipes run on a
+full node too.
 
 To add a recipe: write the function with a `///` doc comment in the fitting
 file under `recipes/`, add a test in `src/dbconsole/recipes.rs` against the

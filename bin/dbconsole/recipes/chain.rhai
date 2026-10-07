@@ -25,12 +25,12 @@ fn chain_summary() {
 /// entries, and the witness environment's state diff for those heights; the
 /// OL epoch entries whose accepted account state points at a dropped block,
 /// so the OL tracker resumes from the last epoch whose block survives; then
-/// reverts every batch whose last block is above `height`, with its chunks.
-/// The node chain, the witness environment and the batches are each cut
-/// back by their own top, so a witness that ran ahead of the exec tip is
-/// trimmed even when the chain itself is already at `height`. A full node
-/// has no witness environment, and that step is skipped. Node edits are
-/// staged first, so they land first. Returns the count staged.
+/// reverts every batch whose last block is above `height`, with its chunks
+/// and prover work. The node chain, the witness environment and the batches
+/// are each cut back by their own top, so a witness that ran ahead of the
+/// exec tip is trimmed even when the chain itself is already at `height`. A
+/// full node has no witness environment, and that step is skipped. Node edits
+/// are staged first, so they land first. Returns the count staged.
 fn drop_chain_above(height) {
     let n = 0;
     let from = (height + 1).to_string();

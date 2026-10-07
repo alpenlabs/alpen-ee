@@ -366,7 +366,7 @@ mod tests {
     }
 
     #[test]
-    fn revert_batches_from_takes_batches_indexes_and_chunks() {
+    fn revert_batches_from_takes_batches_indexes_chunks_and_prover_work() {
         let (_datadir, mut session) = seeded_session();
         let staged = int(&mut session, "revert_batches_from(0)");
         let ops = session.db().staged();
@@ -375,15 +375,29 @@ mod tests {
         assert_eq!(staged_of(&ops, "BatchChunksSchema").len(), 1);
         assert_eq!(staged_of(&ops, "ChunkByIdxSchema").len(), 1);
         assert_eq!(staged_of(&ops, "ChunkIdToIdxSchema").len(), 1);
-        assert_eq!(staged, 5);
+        // The seeded tasks and receipts are over the seeded chunk and batch.
+        assert_eq!(staged_of(&ops, "ChunkProverTaskSchema").len(), 1);
+        assert_eq!(staged_of(&ops, "ChunkProofReceiptSchema").len(), 1);
+        assert_eq!(staged_of(&ops, "AcctProverTaskSchema").len(), 1);
+        assert_eq!(staged_of(&ops, "AcctProofReceiptSchema").len(), 1);
+        assert_eq!(staged_of(&ops, "AcctProofIdIndexSchema").len(), 1);
+        assert_eq!(staged, 10);
+        // Node edits were staged before prover edits.
+        assert_eq!(ops[0].env(), "node");
+        assert_eq!(ops.last().unwrap().env(), "prover");
 
-        assert_eq!(int(&mut session, "commit()"), 5);
+        assert_eq!(int(&mut session, "commit()"), 10);
         for table in [
             "BatchByIdxSchema",
             "BatchIdToIdxSchema",
             "BatchChunksSchema",
             "ChunkByIdxSchema",
             "ChunkIdToIdxSchema",
+            "ChunkProverTaskSchema",
+            "ChunkProofReceiptSchema",
+            "AcctProverTaskSchema",
+            "AcctProofReceiptSchema",
+            "AcctProofIdIndexSchema",
         ] {
             assert_eq!(session.db().count(table).unwrap(), 0, "{table}");
         }
