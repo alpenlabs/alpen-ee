@@ -14,15 +14,18 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ROOT_MANIFEST="$ROOT_DIR/Cargo.toml"
+ROOT_LOCKFILE="$ROOT_DIR/Cargo.lock"
 
-# The pinned strata git dependency in the root Cargo.toml is the single source
-# of truth for the strata revision.
-STRATA_GIT_URL="$(sed -n 's/^strata-primitives = { git = "\([^"]*\)".*/\1/p' "$ROOT_MANIFEST" | head -n1)"
-STRATA_GIT_REV="$(sed -n 's/^strata-primitives = .*rev = "\([0-9a-f]\{40\}\)".*/\1/p' "$ROOT_MANIFEST" | head -n1)"
+# The strata git dependency pinned in the root Cargo.toml decides which strata
+# to build. Read it from Cargo.lock, which holds the exact commit cargo resolved
+# the pin to, whether the pin is a rev or a tag. A source line looks like
+# `git+<url>?tag=<tag>#<commit>`.
+STRATA_SOURCE="$(sed -n '/^name = "strata-primitives"$/,/^source = /s/^source = "git+\([^"]*\)"$/\1/p' "$ROOT_LOCKFILE" | head -n1)"
+STRATA_GIT_URL="${STRATA_SOURCE%%[?#]*}"
+STRATA_GIT_REV="${STRATA_SOURCE##*#}"
 
-if [ -z "$STRATA_GIT_URL" ] || [ -z "$STRATA_GIT_REV" ]; then
-    echo "error: could not extract strata git url/rev from $ROOT_MANIFEST" >&2
+if [ -z "$STRATA_SOURCE" ] || ! [[ "$STRATA_GIT_REV" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "error: could not extract strata git url/rev from $ROOT_LOCKFILE" >&2
     exit 1
 fi
 
