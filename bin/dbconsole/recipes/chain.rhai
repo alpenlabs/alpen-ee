@@ -147,3 +147,42 @@ fn tip_height(hash) {
     }
     height
 }
+
+/// Stages the spec version that the next block built on `hash` runs under.
+/// `version` is the version's number, 1 for v1.
+///
+/// This is for a key switch that sends the EE no message, such as the move
+/// from v0 to v1 on the chain that 0.3.0 built. OL applies that switch at
+/// once, so nothing on the chain moves the EE to the next version. Run it
+/// once, with the same hash, after `drop_chain_above(hash)` is committed. It
+/// checks committed rows, so it fails while the rollback is only staged.
+///
+/// The block builder reads the version from the tip's record. The batch
+/// builder reads it from the record of the last sealed batch's last block.
+/// So it fails unless `hash` is both. A block between the two would land in
+/// a batch under the old version. It fails unless `version` is the one after
+/// the version the record holds now, so a second run fails rather than
+/// skipping a version. Returns the count staged.
+fn set_next_spec_version(hash, version) {
+    let kind = version.type_of();
+    if kind != "i64" {
+        throw `set_next_spec_version takes the version as a number, such as 1 for v1, not ${kind}`;
+    }
+    let height = tip_height(hash);
+    let tip = last("ExecBlocksAtHeightSchema");
+    if parse_int(tip.key) != height {
+        throw `block at height ${height} is not the tip, which is at height ${tip.key}; commit drop_chain_above first`;
+    }
+    let block = get("ExecBlockSchema", hash);
+    let batch = last("BatchByIdxSchema");
+    if batch == () { throw `no sealed batch; this needs a sequencer's datadir`; }
+    if batch.value.batch.last_block != block.key {
+        throw `block ${block.key} does not end the last sealed batch ${batch.key}, which ends at ${batch.value.batch.last_block}`;
+    }
+    let current = block.value.next_spec_version;
+    if version != current + 1 {
+        throw `block ${block.key} sets the next version to ${current}; it can only move to ${current + 1}`;
+    }
+    set("ExecBlockSchema", block.key, "next_spec_version", version);
+    1
+}
