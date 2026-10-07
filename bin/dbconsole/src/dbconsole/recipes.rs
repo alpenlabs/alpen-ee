@@ -280,6 +280,41 @@ mod tests {
         assert_eq!(session.db().count("AcctProofIdIndexSchema").unwrap(), 0);
     }
 
+    /// No ranges stage nothing, a range named twice is staged once, and a
+    /// task key typed in uppercase still finds its receipt.
+    #[test]
+    fn prover_delete_ranges_takes_each_range_once() {
+        let (_datadir, mut session) = seeded_session();
+        let (chunk, _) = seeded_tasks(&mut session);
+        let pair = format!("{}:{}", &chunk[4..68], &chunk[68..]);
+
+        assert_eq!(
+            int(
+                &mut session,
+                r#"prover_delete_ranges("ChunkProverTaskSchema", [])"#
+            ),
+            0
+        );
+        // The task and its receipt.
+        assert_eq!(
+            int(
+                &mut session,
+                &format!(r#"prover_delete_ranges("ChunkProverTaskSchema", ["{pair}", "{pair}"])"#)
+            ),
+            2
+        );
+        session.db().abort();
+
+        let upper = chunk.to_uppercase();
+        assert_eq!(
+            int(
+                &mut session,
+                &format!(r#"prover_delete("ChunkProverTaskSchema", "{upper}")"#)
+            ),
+            2
+        );
+    }
+
     #[test]
     fn drop_chain_above_cuts_every_table_back_to_the_height() {
         let (_datadir, mut session) = seeded_session();
