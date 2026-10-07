@@ -20,21 +20,35 @@ fn chain_summary() {
     }
 }
 
-/// Stages the removal of every exec block above `height`. That covers the
-/// block, its payload, accessed state and witness, and its height and
+/// Stages the removal of everything above `target`, which is a block hash or
+/// a height.
+///
+/// A hash is the usual form: the EE tip OL has accepted, as OL reports it,
+/// `0x` or not. `tip_height` checks the block can be left as the tip and
+/// gives its height. A height is used as given, with no checks. It is for
+/// when no hash is at hand, such as reth's head after the node was killed.
+///
+/// Above the height, it stages the removal of every exec block. That covers
+/// the block, its payload, accessed state and witness, and its height and
 /// finalized entries. It covers the witness environment's state diffs for
 /// those heights, where that environment is present. It covers the OL epoch
 /// entries whose accepted account state points at a dropped block, so the OL
 /// tracker resumes from the last epoch whose block survives. Last, it
-/// reverts the batches and chunks that end above `height`, with their prover
-/// work.
+/// reverts the batches and chunks that end above the height, with their
+/// prover work.
 ///
 /// The chain, the witness environment, the batches and the chunks are each
 /// cut back by their own top. So a witness that ran ahead of the exec tip is
-/// trimmed even when the chain is already at `height`, and so are chunks of
-/// the open batch. Node edits are staged first, so they land first. Returns
-/// the count staged.
-fn drop_chain_above(height) {
+/// trimmed even when the chain is already at the height, and so are chunks
+/// of the open batch. Node edits are staged first, so they land first.
+/// Returns the count staged.
+fn drop_chain_above(target) {
+    let kind = target.type_of();
+    if kind != "string" && kind != "i64" {
+        throw `drop_chain_above takes a block hash or a height, not ${kind}`;
+    }
+    let height = if kind == "string" { tip_height(target) } else { target };
+
     let n = 0;
     let from = (height + 1).to_string();
 
@@ -99,15 +113,19 @@ fn drop_chain_above(height) {
     n
 }
 
-/// Stages what `drop_chain_above` does for the height of block `hash`, so
-/// that block is left as the tip. Takes the hash as OL reports it, `0x` or
-/// not. Refuses a block the store does not hold or the height index does
-/// not list. Refuses a block at a finalized height that is not the finalized
-/// one. Refuses a block that shares an unfinalized height with another,
-/// since the node could then pick either as its tip. It does not check that
-/// the block connects to the chain below it. OL's accepted tip always does.
-/// Returns the count staged.
-fn drop_chain_above_block(hash) {
+/// The height of block `hash`, once it is checked to be a block that can be
+/// left as the tip. Fails for a string that is not a 32-byte hash, such as a
+/// height typed in quotes. Fails for a block the store does not hold or the
+/// height index does not list. Fails for a block at a finalized height that
+/// is not the finalized one. Fails for a block that shares an unfinalized
+/// height with another, since the node could then pick either as its tip. It
+/// does not check that the block connects to the chain below it. OL's
+/// accepted tip always does.
+fn tip_height(hash) {
+    let hex = if hash.starts_with("0x") { hash.sub_string(2) } else { hash };
+    if hex.len() != 64 {
+        throw `"${hash}" is not a 32-byte block hash; pass a height as a number`;
+    }
     let block = get("ExecBlockSchema", hash);
     if block == () { throw `no exec block ${hash}`; }
     let height = block.value.blocknum;
@@ -127,5 +145,5 @@ fn drop_chain_above_block(hash) {
             throw `block ${block.key} shares height ${height} with ${others}; the node could pick either as its tip`;
         }
     }
-    drop_chain_above(height)
+    height
 }
