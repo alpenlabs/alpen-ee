@@ -13,6 +13,7 @@ alpen-da-types.workspace = true
 alpen-params = { workspace = true, features = ["test-utils"] }
 ssz.workspace = true
 zkaleido.workspace = true
+zkaleido-perf-report.workspace = true
 
 # proof programs
 alpen-proof-acct.workspace = true
@@ -39,9 +40,12 @@ sp1-sdk.workspace = true
 zkaleido-sp1-host = { workspace = true, optional = true }
 
 anyhow.workspace = true
-argh.workspace = true
-num-format = "0.4.4"
-reqwest.workspace = true
+clap = { workspace = true, features = [
+  "std",
+  "help",
+  "usage",
+  "error-context",
+] }
 serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
