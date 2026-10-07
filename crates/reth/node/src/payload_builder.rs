@@ -6,14 +6,11 @@ use std::{
 
 use alloy_consensus::{Header, Transaction};
 use alloy_eips::eip4895::Withdrawals;
-use alpen_params::FeeSpec;
+use alpen_params::{FeeSpec, HeaderExtra};
 use alpen_reth_evm::{
     base_fee::next_floored_base_fee,
     constants::BRIDGEOUT_PRECOMPILE_ADDRESS,
-    da_fee::{
-        constrain_next_da_rate, stamped_da_rate_from_extra_data, DA_COVERAGE_CAPPED,
-        DA_COVERAGE_UNKNOWN,
-    },
+    da_fee::{constrain_next_da_rate, DA_COVERAGE_CAPPED, DA_COVERAGE_UNKNOWN},
     extract_withdrawal_intents,
 };
 use alpen_reth_primitives::WithdrawalIntent;
@@ -229,17 +226,24 @@ where
         attributes,
         payload_id,
     } = config;
-    let da_rate = constrain_next_da_rate(
-        stamped_da_rate_from_extra_data(&parent_header.extra_data),
-        candidate_da_rate,
-    );
-
     // Refuse a spec version this binary has no variant for: it was resolved by newer code,
     // and failing beats building under rules older than the ones asked for.
     let spec_version = attributes
         .alpen_spec_version()
         .map_err(PayloadBuilderError::other)?;
     let attributes = attributes.inner;
+
+    // V0 headers have no rate field, so V0 blocks charge no DA fee, just like the blocks the
+    // deployed V0 binary builds.
+    let parent_rate = HeaderExtra::of_header(parent_header.header())
+        .map_err(PayloadBuilderError::other)?
+        .da_rate();
+    let da_rate = HeaderExtra::new(
+        spec_version,
+        constrain_next_da_rate(parent_rate, candidate_da_rate),
+    )
+    .da_rate()
+    .unwrap_or(0);
 
     // Pin the per-block DA rate as the config's pending rate (the in-EVM charge reads it via
     // `context_for_next_block` when the block builder's executor is created). The assembler
@@ -595,10 +599,12 @@ mod tests {
             handle,
             FeeSpec::new(SpecVersioned::new(0)),
         );
+        // Past genesis, so the parent's stamp is decoded rather than exempted.
         let parent = Arc::new(SealedHeader::seal_slow(Header {
+            number: 1,
             gas_limit: 30_000_000,
             base_fee_per_gas: Some(7),
-            extra_data: HeaderExtra::new(AlpenSpecId::V0, PARENT_RATE)
+            extra_data: HeaderExtra::new(AlpenSpecId::V1, PARENT_RATE)
                 .encode()
                 .into(),
             ..Default::default()
@@ -610,7 +616,7 @@ mod tests {
                     withdrawals: Some(Vec::new()),
                     ..Default::default()
                 },
-                AlpenSpecId::V0,
+                AlpenSpecId::V1,
             )
         };
 
@@ -635,8 +641,45 @@ mod tests {
         {
             let header_extra = HeaderExtra::decode(&payload.block().header().extra_data)
                 .expect("built payload carries valid header extra data");
-            assert_eq!(header_extra.da_rate(), expected_rate);
+            assert_eq!(header_extra.da_rate(), Some(expected_rate));
         }
+    }
+
+    /// A V0 block commits no rate and charges no DA fee, whatever the live
+    /// rate is, so it matches what the deployed V0 binary builds.
+    #[test]
+    fn v0_payloads_carry_no_da_rate() {
+        let evm_spec: EvmSpec =
+            serde_json::from_str(r#"{"config":{"chainId":2892,"shanghaiTime":0}}"#)
+                .expect("genesis document parses");
+        let (_updater, handle) = da_fee_rate_channel(1_000, u64::MAX);
+        let builder = AlpenPayloadBuilder::new(
+            NoopProvider::default(),
+            NoopTransactionPool::default(),
+            AlpenEvmConfig::new(&evm_spec, AlpenEvmFactory::default()),
+            EthereumBuilderConfig::default(),
+            handle,
+            FeeSpec::new(SpecVersioned::new(0)),
+        );
+        let parent = Arc::new(SealedHeader::seal_slow(Header {
+            gas_limit: 30_000_000,
+            base_fee_per_gas: Some(7),
+            ..Default::default()
+        }));
+        let attributes = AlpenPayloadAttributes::new_from_eth(
+            EthPayloadAttributes {
+                timestamp: 1,
+                withdrawals: Some(Vec::new()),
+                ..Default::default()
+            },
+            AlpenSpecId::V0,
+        );
+
+        let payload = builder
+            .build_empty_payload(PayloadConfig::new(parent, attributes, PayloadId::default()))
+            .expect("empty payload builds");
+
+        assert!(payload.block().header().extra_data.is_empty());
     }
 
     /// The builder holds a block to its own version's floor, so it builds what

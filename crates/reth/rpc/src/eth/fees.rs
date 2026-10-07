@@ -13,10 +13,8 @@ use alloy_rpc_types_eth::{
     state::{EvmOverrides, StateOverride},
     BlockId,
 };
-use alpen_reth_evm::da_fee::{
-    calc_diff_size, constrain_next_da_rate, stamped_da_rate_from_extra_data,
-    DA_RATE_SAFETY_MARGIN_BPS,
-};
+use alpen_params::HeaderExtra;
+use alpen_reth_evm::da_fee::{calc_diff_size, constrain_next_da_rate, DA_RATE_SAFETY_MARGIN_BPS};
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_provider::ProviderError;
@@ -133,7 +131,10 @@ where
                 .map_err(EthApiError::from_eth_err::<ProviderError>)?
                 .ok_or_else(|| EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?,
         };
-        let committed_da_rate = stamped_da_rate_from_extra_data(header.extra_data());
+        let committed_da_rate = HeaderExtra::of_header(header.header())
+            .map_err(ProviderError::other)
+            .map_err(EthApiError::from_eth_err::<ProviderError>)?
+            .da_rate();
         let da_rate = da_rate_override
             .map(|candidate| constrain_next_da_rate(committed_da_rate, candidate))
             .unwrap_or_else(|| committed_da_rate.unwrap_or(0));

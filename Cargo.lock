@@ -1874,6 +1874,7 @@ dependencies = [
  "alloy-network 2.0.4",
  "alloy-primitives",
  "alloy-rpc-types-eth 2.0.4",
+ "alpen-params",
  "alpen-reth-evm",
  "async-trait",
  "eyre",

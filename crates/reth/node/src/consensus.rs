@@ -5,10 +5,10 @@
 //! so one node validates both sides of an upgrade during sync and reorgs.
 //! Beyond dispatch it enforces the shape of the version claim itself:
 //! `validate_header` runs the full [`HeaderExtra`] layout parse (strict — a
-//! malformed or unknown stamp fails the block, though an absent one reads as
-//! [`AlpenSpecId::V0`]), and versions never regress along a chain. Whether the
-//! claimed version *equals* the one derived from the inbox ordering is the
-//! Alpen layer's check, where the inbox data lives.
+//! malformed or unknown stamp fails the block, and an empty field is
+//! [`AlpenSpecId::V0`]'s layout), and versions never regress along a chain.
+//! Whether the claimed version *equals* the one derived from the inbox
+//! ordering is the Alpen layer's check, where the inbox data lives.
 //!
 //! Each per-version unit is a [`FlooredConsensus`]: standard Ethereum
 //! consensus with the fee model's base-fee floor. Only the
@@ -27,8 +27,7 @@ use alpen_params::{
     header_spec_version, AlpenSpecId, EvmSpec, FeeSpec, HeaderExtra, HeaderExtraError,
 };
 use alpen_reth_evm::{
-    base_fee::expected_floored_base_fee,
-    da_fee::{stamped_da_rate_from_extra_data, validate_da_rate_against_parent},
+    base_fee::expected_floored_base_fee, da_fee::validate_da_rate_against_parent,
 };
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, FullConsensus, HeaderValidator, ReceiptRootBloom};
@@ -202,13 +201,9 @@ impl HeaderValidator for AlpenConsensus {
         // the version prefix, so this parse is what rejects `extra_data`
         // that violates its version's layout. Genesis is exempt — its
         // `extra_data` is the operator-authored genesis document's.
-        let spec_version = if header.number == 0 {
-            AlpenSpecId::V0
-        } else {
-            HeaderExtra::decode(&header.extra_data)
-                .map_err(consensus_error)?
-                .spec_version()
-        };
+        let spec_version = HeaderExtra::of_header(header.header())
+            .map_err(consensus_error)?
+            .spec_version();
         version_indexed(&self.inners, spec_version).validate_header(header)
     }
 
@@ -217,24 +212,22 @@ impl HeaderValidator for AlpenConsensus {
         header: &SealedHeader,
         parent: &SealedHeader,
     ) -> Result<(), ConsensusError> {
+        let header_extra = HeaderExtra::of_header(header.header()).map_err(consensus_error)?;
+        let parent_extra = HeaderExtra::of_header(parent.header()).map_err(consensus_error)?;
         // Upgrades only ever move forward: a chain whose version regresses
         // is structurally invalid regardless of what the inbox ordering
         // would derive.
-        let version = header_spec_version(header.header()).map_err(consensus_error)?;
-        let parent_version = header_spec_version(parent.header()).map_err(consensus_error)?;
+        let version = header_extra.spec_version();
+        let parent_version = parent_extra.spec_version();
         if version < parent_version {
             return Err(ConsensusError::msg(format!(
                 "alpen spec version regressed from {parent_version:?} to {version:?}"
             )));
         }
-        let next_rate = HeaderExtra::decode(&header.extra_data)
-            .map_err(consensus_error)?
-            .da_rate();
-        validate_da_rate_against_parent(
-            stamped_da_rate_from_extra_data(&parent.extra_data),
-            next_rate,
-        )
-        .map_err(ConsensusError::other)?;
+        if let Some(next_rate) = header_extra.da_rate() {
+            validate_da_rate_against_parent(parent_extra.da_rate(), next_rate)
+                .map_err(ConsensusError::other)?;
+        }
         version_indexed(&self.inners, version).validate_header_against_parent(header, parent)
     }
 }
@@ -411,6 +404,27 @@ mod tests {
         );
     }
 
+    /// A V0 parent has no rate, so the first V1 block may start at any rate.
+    #[test]
+    fn da_rate_is_unbounded_over_a_v0_parent() {
+        let consensus = test_consensus();
+        let parent = SealedHeader::seal_slow(Header {
+            base_fee_per_gas: Some(DECAYED_BASE_FEE),
+            ..valid_header(1, HeaderExtra::new(AlpenSpecId::V0, 0).encode().into())
+        });
+        let child = SealedHeader::seal_slow(Header {
+            parent_hash: parent.hash(),
+            timestamp: 1,
+            ..valid_header(
+                2,
+                HeaderExtra::new(AlpenSpecId::V1, u64::MAX).encode().into(),
+            )
+        });
+
+        let result = consensus.validate_header_against_parent(&child, &parent);
+        assert!(result.is_ok(), "{result:?}");
+    }
+
     #[test]
     fn unknown_version_is_refused() {
         let consensus = test_consensus();
@@ -426,21 +440,25 @@ mod tests {
     }
 
     /// `validate_header` runs the full layout parse, not just the version
-    /// prefix: bytes past the version's layout fail the header.
+    /// prefix: bytes past the version's layout fail the header, and so does
+    /// any byte under V0, whose layout is empty.
     #[test]
     fn layout_violation_is_refused() {
         let consensus = test_consensus();
-        let mut extra_data = HeaderExtra::new(AlpenSpecId::V1, 0).encode();
-        extra_data.push(0xFF);
-        let header = sealed_header(1, extra_data.into());
+        let mut v1_with_trailing_byte = HeaderExtra::new(AlpenSpecId::V1, 0).encode();
+        v1_with_trailing_byte.push(0xFF);
+        let v0_with_rate = [0u16.to_be_bytes().as_slice(), &1_000u64.to_be_bytes()].concat();
 
-        let err = consensus
-            .validate_header(&header)
-            .expect_err("trailing bytes violate v1's layout");
-        assert!(
-            matches!(&err, ConsensusError::Other(msg) if msg.to_string().contains("layout")),
-            "{err:?}"
-        );
+        for extra_data in [v1_with_trailing_byte, v0_with_rate] {
+            let header = sealed_header(1, extra_data.into());
+            let err = consensus
+                .validate_header(&header)
+                .expect_err("the bytes violate the named version's layout");
+            assert!(
+                matches!(&err, ConsensusError::Other(msg) if msg.to_string().contains("layout")),
+                "{err:?}"
+            );
+        }
     }
 
     /// A child of `parent` stamped with `spec_version` and carrying `base_fee`.
@@ -581,52 +599,34 @@ mod tests {
         assert!(consensus.validate_header(&genesis).is_ok());
     }
 
-    /// An existing chain must be able to cross into the stamped format: a
-    /// newly stamped child validates against a legacy (unstamped) tip, and
-    /// legacy-against-legacy keeps working behind it. Legacy blocks carry the
-    /// unfloored base fee deployed chains have today.
+    /// The deployed chain crosses into V1 from a tip its V0 binary built,
+    /// with empty `extra_data` and the unfloored base fee deployed chains have
+    /// today. V0 children keep validating behind that tip, and the first V1
+    /// child validates against it.
     #[test]
-    fn stamped_child_validates_against_a_legacy_tip() {
+    fn v1_child_validates_against_a_deployed_v0_tip() {
         let consensus = test_consensus();
 
-        let legacy_parent = SealedHeader::seal_slow(Header {
+        let v0_parent = SealedHeader::seal_slow(Header {
             base_fee_per_gas: Some(DECAYED_BASE_FEE),
             ..valid_header(100, Default::default())
         });
+        assert!(consensus.validate_header(&v0_parent).is_ok());
 
-        // legacy tip validates on its own
-        assert!(consensus.validate_header(&legacy_parent).is_ok());
-
-        // legacy -> legacy
-        let legacy_child = SealedHeader::seal_slow(Header {
-            parent_hash: legacy_parent.hash(),
-            timestamp: 1,
-            base_fee_per_gas: Some(DECAYED_BASE_FEE),
-            ..valid_header(101, Default::default())
-        });
-        assert!(consensus.validate_header(&legacy_child).is_ok());
-        assert!(consensus
-            .validate_header_against_parent(&legacy_child, &legacy_parent)
-            .is_ok());
-
-        // legacy -> first stamped child (the activation boundary)
         for (version, base_fee) in [
             (AlpenSpecId::V0, DECAYED_BASE_FEE),
             (AlpenSpecId::V1, BASE_FEE_FLOOR),
         ] {
-            let stamped_child = SealedHeader::seal_slow(Header {
-                parent_hash: legacy_parent.hash(),
+            let child = SealedHeader::seal_slow(Header {
+                parent_hash: v0_parent.hash(),
                 timestamp: 1,
                 base_fee_per_gas: Some(base_fee),
                 ..valid_header(101, HeaderExtra::new(version, 0).encode().into())
             });
-            assert!(
-                consensus.validate_header(&stamped_child).is_ok(),
-                "{version:?}"
-            );
+            assert!(consensus.validate_header(&child).is_ok(), "{version:?}");
             assert!(
                 consensus
-                    .validate_header_against_parent(&stamped_child, &legacy_parent)
+                    .validate_header_against_parent(&child, &v0_parent)
                     .is_ok(),
                 "{version:?}"
             );

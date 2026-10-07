@@ -13,8 +13,7 @@
 
 use alpen_common::HeaderSummaryProvider;
 use alpen_da_types::EvmHeaderSummary;
-use alpen_params::{header_spec_version, AlpenSpecId};
-use alpen_reth_evm::da_fee::da_rate_from_extra_data;
+use alpen_params::{AlpenSpecId, HeaderExtra};
 
 /// [`HeaderSummaryProvider`] backed by a Reth [`HeaderProvider`](reth_provider::HeaderProvider).
 pub(crate) struct RethHeaderSummaryProvider<P> {
@@ -53,7 +52,8 @@ fn summarize_header(
     header: &reth_primitives_traits::Header,
     spec_version: AlpenSpecId,
 ) -> eyre::Result<EvmHeaderSummary> {
-    let header_version = header_spec_version(header)?;
+    let header_extra = HeaderExtra::of_header(header)?;
+    let header_version = header_extra.spec_version();
     eyre::ensure!(
         header_version == spec_version,
         "block {} is stamped {header_version:?}, but its batch is {spec_version:?}",
@@ -71,17 +71,12 @@ fn summarize_header(
         })?,
         gas_used: header.gas_used,
         gas_limit: header.gas_limit,
-        // V0 does not publish the rate, so the summary leaves it out too.
-        da_rate: match spec_version {
-            AlpenSpecId::V0 => 0,
-            AlpenSpecId::V1 => da_rate_from_extra_data(&header.extra_data),
-        },
+        da_rate: header_extra.da_rate(),
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use alpen_params::HeaderExtra;
     use reth_primitives_traits::Header;
 
     use super::*;
@@ -110,15 +105,15 @@ mod tests {
         assert_eq!(summary.base_fee, 1_000_000_000);
         assert_eq!(summary.gas_used, 15_000_000);
         assert_eq!(summary.gas_limit, 36_000_000);
-        assert_eq!(summary.da_rate, 2_500_000_000);
+        assert_eq!(summary.da_rate, Some(2_500_000_000));
     }
 
     #[test]
-    fn summarize_header_drops_the_rate_under_v0() {
+    fn summarize_header_has_no_rate_under_v0() {
         let header = stamped_header(AlpenSpecId::V0, 2_500_000_000);
         let summary = summarize_header(&header, AlpenSpecId::V0).expect("mapping must succeed");
 
-        assert_eq!(summary.da_rate, 0);
+        assert_eq!(summary.da_rate, None);
     }
 
     #[test]

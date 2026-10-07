@@ -56,7 +56,7 @@ class EvmHeaderDigest:
     base_fee: int
     gas_used: int
     gas_limit: int
-    da_rate: int
+    da_rate: int | None
 
 
 @dataclass
@@ -150,7 +150,7 @@ def parse_commit_op_return(script_hex: str, expected_magic: bytes) -> CommitOpRe
 def parse_evm_header_digest(data: bytes, version: int) -> EvmHeaderDigest | None:
     """Parse EvmHeaderDigest (u64 big-endian fields) under a blob version.
 
-    v0 has no DA rate, so it reads as 0.
+    v0 has no DA rate, so it reads as None.
     """
     if len(data) < EVM_HEADER_DIGEST_LEN[version]:
         return None
@@ -160,7 +160,7 @@ def parse_evm_header_digest(data: bytes, version: int) -> EvmHeaderDigest | None
         base_fee=int.from_bytes(data[16:24], "big"),
         gas_used=int.from_bytes(data[24:32], "big"),
         gas_limit=int.from_bytes(data[32:40], "big"),
-        da_rate=int.from_bytes(data[40:48], "big") if version >= 1 else 0,
+        da_rate=int.from_bytes(data[40:48], "big") if version >= 1 else None,
     )
 
 

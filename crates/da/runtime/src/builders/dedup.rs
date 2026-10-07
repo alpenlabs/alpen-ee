@@ -224,7 +224,7 @@ mod tests {
                 base_fee: 100,
                 gas_used: 21_000,
                 gas_limit: 36_000_000,
-                da_rate: 2_500_000_000,
+                da_rate: Some(2_500_000_000),
             },
             state_diff: filtered_diff,
         };

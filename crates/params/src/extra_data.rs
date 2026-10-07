@@ -1,56 +1,60 @@
 //! The versioned layout of the EE block header's [`Header::extra_data`]
 //! field.
 //!
-//! The layout is a fixed prefix followed by a version-defined body. The
-//! prefix is the governing spec version as a big-endian integer, exactly
-//! [`AlpenSpecId`]-wide and the only version-independent part; the body that
-//! follows is defined by that version's layout. [`AlpenSpecId`] is thus also
-//! the version of the layout itself, so the two version spaces coincide.
+//! V0's layout is empty. The deployed V0 binary leaves `extra_data` empty, so
+//! a V0 block is the same whichever binary built it, and the deployed V0
+//! guest can prove it.
 //!
-//! Every version defined so far carries one body field: the block's DA rate
-//! in wei per byte, as a big-endian `u64`. The sequencer freezes the live
-//! rate into it per block, and re-execution reads it back so the in-EVM DA
-//! fee charge always sees the rate the block actually committed to.
+//! From V1 on, the layout is a fixed prefix followed by a version-defined
+//! body. The prefix is the governing spec version as a big-endian integer,
+//! exactly [`AlpenSpecId`]-wide. The body that follows is defined by that
+//! version's layout. [`AlpenSpecId`] is thus also the version of the layout
+//! itself, so the two version spaces coincide.
+//!
+//! V1's body has one field: the block's DA rate in wei per byte, as a
+//! big-endian `u64`. The sequencer freezes the live rate into it per block,
+//! and re-execution reads it back so the in-EVM DA fee charge always sees the
+//! rate the block actually committed to. V0 has no rate field, so V0 blocks
+//! charge no DA fee.
 //!
 //! Decoding is strict: a header claiming a version this binary has no
-//! variant for must fail rather than run under stale rules. Two inputs are
-//! exempt, both standing for "no stamp was ever written":
-//!
-//! - Empty `extra_data` decodes as [`AlpenSpecId::V0`] with a zero DA rate. V0 is the pre-stamp
-//!   state of the chain, so an unstamped header is a V0 header. Only a genuinely empty field
-//!   qualifies — a short but non-empty one is a truncated or corrupt stamp and is rejected, since
-//!   reading it as V0 would run a malformed block under default rules.
-//! - The genesis header, whose `extra_data` is authored by the genesis document and predates the
-//!   layout, is fixed at [`AlpenSpecId::V0`] whatever it holds.
+//! variant for must fail rather than run under stale rules. A short but
+//! non-empty field is a truncated or corrupt stamp, and a non-empty field
+//! that names V0 breaks V0's empty layout, so both are rejected. The one
+//! exemption is the genesis header: its `extra_data` is authored by the
+//! genesis document and predates the layout, so it is fixed at
+//! [`AlpenSpecId::V0`] whatever it holds.
 
 use std::mem::size_of;
 
-use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, Header};
+use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, BlockHeader, Header};
 use thiserror::Error;
 
 use crate::AlpenSpecId;
 
-/// Length of the version-independent spec version prefix.
+/// Length of the spec version prefix that every layout from V1 on starts
+/// with.
 const SPEC_VERSION_LEN: usize = size_of::<AlpenSpecId>();
 
 /// Length of the DA rate body field.
 const DA_RATE_LEN: usize = size_of::<u64>();
 
-/// Total length of the layout every version defines so far: the version
-/// prefix followed by the DA rate.
-const LAYOUT_LEN: usize = SPEC_VERSION_LEN + DA_RATE_LEN;
+/// Total length of the V1 layout: the version prefix followed by the DA rate.
+const V1_LAYOUT_LEN: usize = SPEC_VERSION_LEN + DA_RATE_LEN;
 
 /// The decoded contents of a header's `extra_data`.
 ///
-/// Carries the fields the chain commits in the header beyond the standard
-/// EVM ones. Which fields exist is a per-version fact defined by this type's
-/// codec; today every version carries only the governing spec version.
+/// One variant per spec version. Each carries the fields its version commits
+/// in the header beyond the standard EVM ones.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct HeaderExtra {
-    /// The spec version whose rules govern the block.
-    spec_version: AlpenSpecId,
-    /// The DA rate (wei per byte) the block charges under.
-    da_rate: u64,
+pub enum HeaderExtra {
+    /// The V0 layout: empty.
+    V0,
+    /// The V1 layout: the version prefix followed by the DA rate.
+    V1 {
+        /// The DA rate (wei per byte) the block charges under.
+        da_rate: u64,
+    },
 }
 
 /// An `extra_data` value that does not decode under any layout this binary
@@ -84,37 +88,49 @@ pub enum HeaderExtraError {
 impl HeaderExtra {
     /// Creates the `extra_data` contents of a block governed by
     /// `spec_version` and charging `da_rate` wei per byte.
+    ///
+    /// The rate is kept only if the version's layout has a rate field. V0's
+    /// does not, so a V0 block charges no DA fee whatever `da_rate` is.
     pub fn new(spec_version: AlpenSpecId, da_rate: u64) -> Self {
-        Self {
-            spec_version,
-            da_rate,
+        match spec_version {
+            AlpenSpecId::V0 => Self::V0,
+            AlpenSpecId::V1 => Self::V1 { da_rate },
         }
     }
 
     /// Returns the governing spec version.
     pub fn spec_version(&self) -> AlpenSpecId {
-        self.spec_version
+        match self {
+            Self::V0 => AlpenSpecId::V0,
+            Self::V1 { .. } => AlpenSpecId::V1,
+        }
     }
 
-    /// Returns the DA rate (wei per byte) the block charges under.
-    pub fn da_rate(&self) -> u64 {
-        self.da_rate
+    /// Returns the DA rate (wei per byte) the block charges under, or `None`
+    /// if its version's layout has no rate field.
+    pub fn da_rate(&self) -> Option<u64> {
+        match self {
+            Self::V0 => None,
+            Self::V1 { da_rate } => Some(*da_rate),
+        }
     }
 
     /// Encodes into the `extra_data` bytes under the version's layout.
     pub fn encode(&self) -> Vec<u8> {
-        let mut buf = u16::from(self.spec_version).to_be_bytes().to_vec();
-        match self.spec_version {
-            AlpenSpecId::V0 | AlpenSpecId::V1 => {
-                buf.extend_from_slice(&self.da_rate.to_be_bytes());
+        let buf = match self {
+            Self::V0 => Vec::new(),
+            Self::V1 { da_rate } => {
+                let mut buf = u16::from(self.spec_version()).to_be_bytes().to_vec();
+                buf.extend_from_slice(&da_rate.to_be_bytes());
+                buf
             }
-        }
+        };
         // The whole layout must fit Ethereum's `extra_data` cap, else the
         // block can't round-trip through an engine payload.
         debug_assert!(
             buf.len() <= MAXIMUM_EXTRA_DATA_SIZE,
             "{:?} extra_data layout is {} bytes, over the {}-byte cap",
-            self.spec_version,
+            self.spec_version(),
             buf.len(),
             MAXIMUM_EXTRA_DATA_SIZE
         );
@@ -127,26 +143,40 @@ impl HeaderExtra {
     /// violation. Callers that only route by version can use the cheaper
     /// [`peek_spec_version`].
     pub fn decode(extra_data: &[u8]) -> Result<Self, HeaderExtraError> {
-        if extra_data.is_empty() {
-            return Ok(Self::new(AlpenSpecId::V0, 0));
-        }
         let spec_version = peek_spec_version(extra_data)?;
-        let body = &extra_data[SPEC_VERSION_LEN..];
-        let da_rate = match spec_version {
-            AlpenSpecId::V0 | AlpenSpecId::V1 => {
-                let bytes: [u8; DA_RATE_LEN] =
-                    body.try_into().map_err(|_| HeaderExtraError::WrongLength {
-                        version: spec_version,
-                        expected: LAYOUT_LEN,
-                        len: extra_data.len(),
-                    })?;
-                u64::from_be_bytes(bytes)
-            }
+        let wrong_length = |expected| HeaderExtraError::WrongLength {
+            version: spec_version,
+            expected,
+            len: extra_data.len(),
         };
-        Ok(Self {
-            spec_version,
-            da_rate,
-        })
+        match spec_version {
+            AlpenSpecId::V0 => {
+                if !extra_data.is_empty() {
+                    return Err(wrong_length(0));
+                }
+                Ok(Self::V0)
+            }
+            AlpenSpecId::V1 => {
+                let body: [u8; DA_RATE_LEN] = extra_data[SPEC_VERSION_LEN..]
+                    .try_into()
+                    .map_err(|_| wrong_length(V1_LAYOUT_LEN))?;
+                Ok(Self::V1 {
+                    da_rate: u64::from_be_bytes(body),
+                })
+            }
+        }
+    }
+
+    /// Decodes `header`'s `extra_data`, with the genesis exemption.
+    ///
+    /// The full-parse counterpart of [`header_spec_version`]: the genesis
+    /// header is [`HeaderExtra::V0`] whatever its `extra_data` holds, and
+    /// every other header goes through the strict [`HeaderExtra::decode`].
+    pub fn of_header(header: &impl BlockHeader) -> Result<Self, HeaderExtraError> {
+        if header.number() == 0 {
+            return Ok(Self::V0);
+        }
+        Self::decode(header.extra_data())
     }
 }
 
@@ -156,7 +186,7 @@ impl HeaderExtra {
 /// [`HeaderExtra::decode`]'s job, exercised by consensus header validation),
 /// so version dispatch keeps working on fields a later layout adds.
 pub fn peek_spec_version(extra_data: &[u8]) -> Result<AlpenSpecId, HeaderExtraError> {
-    // An unstamped header is a V0 header; see the module docs.
+    // V0's layout is empty; see the module docs.
     if extra_data.is_empty() {
         return Ok(AlpenSpecId::V0);
     }
@@ -202,27 +232,32 @@ mod tests {
         for version in known_versions() {
             let extra = HeaderExtra::new(version, 1_234_567);
             let bytes = extra.encode();
-            assert_eq!(bytes.len(), LAYOUT_LEN, "{version:?}");
-            assert_eq!(&bytes[..SPEC_VERSION_LEN], u16::from(version).to_be_bytes());
-            assert_eq!(&bytes[SPEC_VERSION_LEN..], 1_234_567u64.to_be_bytes());
             assert_eq!(HeaderExtra::decode(&bytes), Ok(extra), "{version:?}");
             assert_eq!(peek_spec_version(&bytes), Ok(version), "{version:?}");
-            assert_eq!(
-                HeaderExtra::decode(&bytes).unwrap().da_rate(),
-                1_234_567,
-                "{version:?}"
-            );
         }
     }
 
-    /// An unstamped header is the pre-stamp state of the chain: V0, no rate.
+    /// V0 has no rate field: the rate is dropped and the field stays empty.
     #[test]
-    fn empty_extra_data_is_v0() {
-        assert_eq!(
-            HeaderExtra::decode(&[]),
-            Ok(HeaderExtra::new(AlpenSpecId::V0, 0))
-        );
+    fn v0_layout_is_empty() {
+        let extra = HeaderExtra::new(AlpenSpecId::V0, 1_234_567);
+        assert_eq!(extra, HeaderExtra::V0);
+        assert_eq!(extra.da_rate(), None);
+        assert_eq!(extra.encode(), Vec::<u8>::new());
+        assert_eq!(HeaderExtra::decode(&[]), Ok(HeaderExtra::V0));
         assert_eq!(peek_spec_version(&[]), Ok(AlpenSpecId::V0));
+    }
+
+    #[test]
+    fn v1_layout_is_the_prefix_then_the_rate() {
+        let bytes = HeaderExtra::new(AlpenSpecId::V1, 1_234_567).encode();
+        assert_eq!(bytes.len(), V1_LAYOUT_LEN);
+        assert_eq!(&bytes[..SPEC_VERSION_LEN], 1u16.to_be_bytes());
+        assert_eq!(&bytes[SPEC_VERSION_LEN..], 1_234_567u64.to_be_bytes());
+        assert_eq!(
+            HeaderExtra::decode(&bytes).unwrap().da_rate(),
+            Some(1_234_567)
+        );
     }
 
     /// A short but non-empty prefix is a truncated stamp, not an absent one.
@@ -236,6 +271,24 @@ mod tests {
         assert_eq!(peek_spec_version(extra_data), Err(err));
     }
 
+    /// V0 is empty, so any bytes that name it break its layout. The peek
+    /// still routes them to V0.
+    #[test]
+    fn decode_rejects_a_v0_prefix() {
+        let with_rate = [0x0000u16.to_be_bytes().as_slice(), &9u64.to_be_bytes()].concat();
+        for extra_data in [&0x0000u16.to_be_bytes()[..], &with_rate] {
+            assert_eq!(
+                HeaderExtra::decode(extra_data),
+                Err(HeaderExtraError::WrongLength {
+                    version: AlpenSpecId::V0,
+                    expected: 0,
+                    len: extra_data.len(),
+                })
+            );
+            assert_eq!(peek_spec_version(extra_data), Ok(AlpenSpecId::V0));
+        }
+    }
+
     /// The version prefix alone, with the body missing, is a layout violation.
     #[test]
     fn decode_rejects_a_missing_body() {
@@ -244,7 +297,7 @@ mod tests {
             HeaderExtra::decode(&extra_data),
             Err(HeaderExtraError::WrongLength {
                 version: AlpenSpecId::V1,
-                expected: LAYOUT_LEN,
+                expected: V1_LAYOUT_LEN,
                 len: SPEC_VERSION_LEN,
             })
         );
@@ -272,8 +325,8 @@ mod tests {
             HeaderExtra::decode(&extra_data),
             Err(HeaderExtraError::WrongLength {
                 version: AlpenSpecId::V1,
-                expected: LAYOUT_LEN,
-                len: LAYOUT_LEN + 1,
+                expected: V1_LAYOUT_LEN,
+                len: V1_LAYOUT_LEN + 1,
             })
         );
         assert_eq!(peek_spec_version(&extra_data), Ok(AlpenSpecId::V1));
@@ -297,6 +350,30 @@ mod tests {
     }
 
     #[test]
+    fn of_header_exempts_genesis_and_decodes_the_rest() {
+        let header = |number, extra_data: Vec<u8>| Header {
+            number,
+            extra_data: extra_data.into(),
+            ..Default::default()
+        };
+        let v1 = HeaderExtra::new(AlpenSpecId::V1, 42);
+
+        assert_eq!(
+            HeaderExtra::of_header(&header(0, b"SC".to_vec())),
+            Ok(HeaderExtra::V0)
+        );
+        assert_eq!(
+            HeaderExtra::of_header(&header(1, Vec::new())),
+            Ok(HeaderExtra::V0)
+        );
+        assert_eq!(HeaderExtra::of_header(&header(1, v1.encode())), Ok(v1));
+        assert_eq!(
+            HeaderExtra::of_header(&header(1, b"SC".to_vec())),
+            Err(HeaderExtraError::UnknownVersion(0x5343))
+        );
+    }
+
+    #[test]
     fn header_spec_version_reads_number_and_extra_data() {
         let header = Header {
             number: 7,
@@ -313,12 +390,11 @@ mod tests {
         assert_eq!(header_spec_version(&genesis), Ok(AlpenSpecId::V0));
     }
 
-    /// Headers produced before the layout existed carry empty `extra_data` (the
-    /// repo's block 1-4 witnesses are exactly this). They must resolve to v0, or
-    /// upgrading an existing datadir breaks historical sync and re-execution.
+    /// The deployed V0 binary leaves `extra_data` empty (the repo's block 1-4
+    /// witnesses are exactly this). Those headers must resolve to V0, or this
+    /// binary can't sync or re-execute the deployed chain.
     #[test]
-    fn legacy_unstamped_headers_resolve_to_v0() {
-        // Non-genesis headers with empty extra_data.
+    fn deployed_v0_headers_resolve_to_v0() {
         for number in 1..=4u64 {
             let h = Header {
                 number,
@@ -331,12 +407,7 @@ mod tests {
                 "block {number}"
             );
         }
-        // Genesis "SC" still exempt.
-        assert_eq!(spec_version_for_block(0, b"SC"), Ok(AlpenSpecId::V0));
         // And the full parse agrees, so consensus validate_header passes too.
-        assert_eq!(
-            HeaderExtra::decode(&[]),
-            Ok(HeaderExtra::new(AlpenSpecId::V0, 0))
-        );
+        assert_eq!(HeaderExtra::decode(&[]), Ok(HeaderExtra::V0));
     }
 }
