@@ -538,12 +538,9 @@ where
         .flat_map(|receipt| receipt.logs.iter())
         .filter(|log| log.address == BRIDGEOUT_PRECOMPILE_ADDRESS)
         .count();
-    let withdrawal_intents: Vec<WithdrawalIntent> = extract_withdrawal_intents(
-        &txns,
-        &receipts,
-        versioned_config.evm_factory().bridge_params(),
-    )
-    .map_err(PayloadBuilderError::other)?;
+    let withdrawal_intents: Vec<WithdrawalIntent> =
+        extract_withdrawal_intents(&txns, &receipts, versioned_config.bridge_params())
+            .map_err(PayloadBuilderError::other)?;
     if bridgeout_log_count > 0 || !withdrawal_intents.is_empty() {
         info!(
             target: "payload_builder",
@@ -570,14 +567,13 @@ where
 mod tests {
     use alloy_rpc_types::engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
     use alpen_params::{AlpenSpecId, EvmSpec, HeaderExtra, SpecVersioned};
-    use alpen_reth_evm::evm::AlpenEvmFactory;
     use reth_node_api::BuiltPayload;
     use reth_primitives_traits::SealedHeader;
     use reth_storage_api::noop::NoopProvider;
     use reth_transaction_pool::noop::NoopTransactionPool;
 
     use super::*;
-    use crate::{da_fee_rate_channel, payload::AlpenPayloadAttributes};
+    use crate::{da_fee_rate_channel, evm_config::test_params, payload::AlpenPayloadAttributes};
 
     #[test]
     fn payload_attempts_sample_rates_independently_and_bound_increases() {
@@ -589,7 +585,7 @@ mod tests {
         let evm_spec: EvmSpec =
             serde_json::from_str(r#"{"config":{"chainId":2892,"shanghaiTime":0}}"#)
                 .expect("genesis document parses");
-        let evm_config = AlpenEvmConfig::new(&evm_spec, AlpenEvmFactory::default());
+        let evm_config = AlpenEvmConfig::new(&test_params(evm_spec));
         let (updater, handle) = da_fee_rate_channel(INITIAL_RATE, u64::MAX);
         let builder = AlpenPayloadBuilder::new(
             NoopProvider::default(),
@@ -656,7 +652,7 @@ mod tests {
         let builder = AlpenPayloadBuilder::new(
             NoopProvider::default(),
             NoopTransactionPool::default(),
-            AlpenEvmConfig::new(&evm_spec, AlpenEvmFactory::default()),
+            AlpenEvmConfig::new(&test_params(evm_spec)),
             EthereumBuilderConfig::default(),
             handle,
             FeeSpec::new(SpecVersioned::new(0)),
@@ -700,7 +696,7 @@ mod tests {
         let builder = AlpenPayloadBuilder::new(
             NoopProvider::default(),
             NoopTransactionPool::default(),
-            AlpenEvmConfig::new(&evm_spec, AlpenEvmFactory::default()),
+            AlpenEvmConfig::new(&test_params(evm_spec)),
             EthereumBuilderConfig::default(),
             handle,
             FeeSpec::new(SpecVersioned::new(0).with(AlpenSpecId::V1, BASE_FEE_FLOOR)),

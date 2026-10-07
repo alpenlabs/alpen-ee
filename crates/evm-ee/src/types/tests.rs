@@ -371,12 +371,9 @@ fn test_evm_partial_state_rejects_invalid_ancestor_parent_hash() {
 /// into hash digests, losing the resolved trie data needed for execution.
 #[test]
 fn test_evm_partial_state_codec_roundtrip_execution() {
-    use std::sync::Arc;
-
     use alpen_acct_types::{ExecBlock, ExecPayload, ExecutionEnvironment};
     use alpen_chain_types::ExecInputs;
-    use alpen_reth_evm::evm::AlpenEvmFactory;
-    use reth_chainspec::ChainSpec;
+    use alpen_params::{AlpenParams, AlpenSpecId, DEV_PARAMS_JSON};
     use reth_primitives_traits::Block as _;
 
     use crate::EvmExecutionEnvironment;
@@ -394,8 +391,10 @@ fn test_evm_partial_state_codec_roundtrip_execution() {
     let body = EvmBlockBody::from_alloy_body(witness.current_block.body().clone());
     let block = EvmBlock::new(EvmHeader::new(header.clone()), body);
 
-    let chain_spec: Arc<ChainSpec> = Arc::new((&witness.genesis).try_into().unwrap());
-    let ee = EvmExecutionEnvironment::new(chain_spec, AlpenEvmFactory::default());
+    // The fixture was produced on the dev network's genesis, under V0.
+    let params: AlpenParams =
+        serde_json::from_str(DEV_PARAMS_JSON).expect("dev params should parse");
+    let ee = EvmExecutionEnvironment::new(&params, AlpenSpecId::V0);
     let intrinsics = block.get_header().get_intrinsics();
     let payload = ExecPayload::new(&intrinsics, block.get_body());
     let inputs = ExecInputs::new_empty();

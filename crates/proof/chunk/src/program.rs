@@ -108,7 +108,7 @@ impl EeChunkProgram {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::PathBuf, sync::Arc};
+    use std::{fs, path::PathBuf};
 
     use alpen_acct_types::{ExecBlock, ExecHeader, ExecPayload, ExecutionEnvironment};
     use alpen_chain_types::{ChunkTransition, ExecInputs};
@@ -117,7 +117,6 @@ mod tests {
         EvmBlock, EvmBlockBody, EvmExecutionEnvironment, EvmHeader, EvmPartialState,
     };
     use alpen_params::{AlpenSpecId, DEV_PARAMS_JSON};
-    use alpen_reth_evm::evm::AlpenEvmFactory;
     use reth_primitives_traits::Block as _;
     use rsp_client_executor::io::EthClientExecutorInput;
     use serde::Deserialize;
@@ -190,9 +189,7 @@ mod tests {
 
         // Execute the block to get outputs, against the same params `params`
         // will hand to `process_ee_chunk` below.
-        let chain_spec: Arc<reth_chainspec::ChainSpec> =
-            params.evm_spec().chain_spec(FIXTURE_SPEC_VERSION).clone();
-        let ee = EvmExecutionEnvironment::new(chain_spec, AlpenEvmFactory::default());
+        let ee = EvmExecutionEnvironment::new(&params, FIXTURE_SPEC_VERSION);
         let header_intrinsics = block.get_header().get_intrinsics();
         let exec_payload = ExecPayload::new(&header_intrinsics, block.get_body());
         let inputs = ExecInputs::new_empty();

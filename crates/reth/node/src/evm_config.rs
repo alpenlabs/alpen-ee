@@ -5,8 +5,8 @@
 //! Alpen spec version governing a block is decided per block, from the version
 //! carried in the header's `extra_data` (see [`alpen_params::HeaderExtra`]).
 //! This config keeps `NodeTypes::ChainSpec` and the surrounding generics
-//! untouched: it holds the whole per-version table — total over the closed
-//! [`AlpenSpecId`] enum by [`EvmSpec`]'s construction — and dispatches each
+//! untouched: it holds the whole per-version table — one config for every
+//! known [`AlpenSpecId`], all built from the same params — and dispatches each
 //! [`ConfigureEvm`] call by the block's stamp. Nothing ever switches — every
 //! version's rules stay live, which is what lets one node execute both sides
 //! of an upgrade during sync, reorgs, and historical re-execution.
@@ -26,13 +26,14 @@
 //! stamps the context's version into every block it assembles, so the version
 //! that selected the build rules is the version import resolves from.
 
-use std::{convert::Infallible, io};
+use std::{convert::Infallible, io, iter};
 
 use alloy_eips::Decodable2718;
 use alloy_primitives::Bytes;
 use alloy_rpc_types::engine::payload::ExecutionData;
 use alpen_params::{
-    header_spec_version, peek_spec_version, AlpenSpecId, EvmSpec, HeaderExtra, HeaderExtraError,
+    header_spec_version, peek_spec_version, AlpenParams, AlpenSpecId, EvmSpec, HeaderExtra,
+    HeaderExtraError,
 };
 use alpen_reth_evm::{
     config::{
@@ -76,15 +77,15 @@ pub struct AlpenEvmConfig {
 }
 
 impl AlpenEvmConfig {
-    /// Creates the config over `evm_spec`'s per-version chain spec table.
-    pub fn new(evm_spec: &EvmSpec, evm_factory: AlpenEvmFactory) -> Self {
-        let configs: Vec<VersionedEvmConfig> = evm_spec
-            .chain_specs()
-            .iter()
-            .map(|spec| DaEvmConfig::new(spec.clone(), evm_factory.clone()))
-            .collect();
+    /// Creates the config over the rules of every known spec version in
+    /// `params`.
+    pub fn new(params: &AlpenParams) -> Self {
+        let configs: Vec<VersionedEvmConfig> =
+            iter::successors(Some(AlpenSpecId::V0), |version| version.successor().ok())
+                .map(|version| DaEvmConfig::new(params, version))
+                .collect();
 
-        Self::from_configs(evm_spec.clone(), configs)
+        Self::from_configs(params.evm_spec().clone(), configs)
     }
 
     /// Rebuilds the outer table's dispatchers over `configs`.
@@ -393,11 +394,25 @@ pub fn payload_spec_version(payload: &ExecutionData) -> Result<AlpenSpecId, Head
     peek_spec_version(&payload.payload.as_v1().extra_data)
 }
 
+/// Returns placeholder params around `evm_spec`, for tests that build the
+/// config from a genesis document of their own.
+#[cfg(test)]
+pub(crate) fn test_params(evm_spec: EvmSpec) -> AlpenParams {
+    let defaults = AlpenParams::default();
+    AlpenParams::new(
+        defaults.strata_exec_account_id(),
+        *defaults.bridge_params(),
+        defaults.blob_spec(),
+        defaults.spec_schedule().clone(),
+        evm_spec,
+        defaults.fee_spec().clone(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use alloy_primitives::Bytes;
     use alpen_params::{AlpenSpecId, EvmSpec, HeaderExtra, HeaderExtraError};
-    use alpen_reth_evm::evm::AlpenEvmFactory;
     use reth_evm::{
         eth::EthBlockExecutionCtx,
         execute::{BlockAssembler, BlockAssemblerInput, BlockBuilder},
@@ -408,7 +423,9 @@ mod tests {
     use reth_storage_api::noop::NoopProvider;
     use revm::{database::State, primitives::hardfork::SpecId};
 
-    use super::{infallible, AlpenBlockExecutionCtx, AlpenEvmConfig, DaBlockExecutionCtx, U256};
+    use super::{
+        infallible, test_params, AlpenBlockExecutionCtx, AlpenEvmConfig, DaBlockExecutionCtx, U256,
+    };
 
     /// A non-zero DA rate, so the tests catch a stamp that silently drops it.
     const DA_RATE: u64 = 1_500_000_000;
@@ -420,8 +437,7 @@ mod tests {
             r#"{"config":{"chainId":2892,"shanghaiTime":0,"cancunTime":0,"pragueTime":0}}"#,
         )
         .expect("genesis document parses");
-        AlpenEvmConfig::new(&evm_spec, AlpenEvmFactory::default())
-            .with_pending_da_rate(U256::from(DA_RATE))
+        AlpenEvmConfig::new(&test_params(evm_spec)).with_pending_da_rate(U256::from(DA_RATE))
     }
 
     fn stamped_header(spec_version: AlpenSpecId) -> Header {
@@ -501,6 +517,7 @@ mod tests {
         let evm_spec: EvmSpec =
             serde_json::from_str(r#"{"config":{"chainId":2892,"shanghaiTime":0}}"#)
                 .expect("genesis document parses");
+        let params = test_params(evm_spec);
         let parent = SealedHeader::seal_slow(Header {
             gas_limit: 30_000_000,
             base_fee_per_gas: Some(7),
@@ -511,7 +528,7 @@ mod tests {
         for version in [AlpenSpecId::V0, AlpenSpecId::V1] {
             // The rate this version charges, as the payload builder resolves it.
             let header_extra = HeaderExtra::new(version, DA_RATE);
-            let config = AlpenEvmConfig::new(&evm_spec, AlpenEvmFactory::default())
+            let config = AlpenEvmConfig::new(&params)
                 .with_pending_da_rate(U256::from(header_extra.da_rate().unwrap_or(0)));
             let mut db = State::builder()
                 .with_database(StateProviderDatabase::new(&provider))

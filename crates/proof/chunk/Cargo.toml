@@ -10,11 +10,9 @@ alpen-chain-types.workspace = true
 alpen-chunk-runtime.workspace = true
 alpen-evm-ee.workspace = true
 alpen-params.workspace = true
-alpen-reth-evm.workspace = true
 strata-predicate.workspace = true
 
 k256.workspace = true
-reth-chainspec.workspace = true
 rkyv.workspace = true
 ssz.workspace = true
 zkaleido.workspace = true

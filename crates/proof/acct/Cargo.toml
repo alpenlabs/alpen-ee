@@ -12,13 +12,11 @@ alpen-da-runtime.workspace = true
 alpen-da-types.workspace = true
 alpen-evm-ee.workspace = true
 alpen-params.workspace = true
-alpen-reth-evm.workspace = true
 strata-predicate.workspace = true
 strata-snark-acct-runtime.workspace = true
 strata-snark-acct-types.workspace = true
 
 k256.workspace = true
-reth-chainspec.workspace = true
 rkyv.workspace = true
 ssz.workspace = true
 zkaleido.workspace = true

@@ -44,37 +44,29 @@ const TX_GAS_LIMIT_BLOCK_MULTIPLE: u64 = 4;
 /// [`AlpenAlloyEvm::da_report_handle`](crate::apis::AlpenAlloyEvm::da_report_handle)). Both
 /// therefore ride the per-execution EVM rather than shared factory state, which keeps
 /// concurrent executions race-free.
+///
+/// The factory must not depend on the Alpen spec version. reth creates the EVM before it has
+/// the block's execution context, and the node's multi-version config hands every version the
+/// same factory. A per-version EVM setting has to travel on the execution context and be
+/// applied in [`create_executor`](reth_evm::block::BlockExecutorFactory::create_executor),
+/// the way the DA rate is.
+///
+/// Only [`crate::config::AlpenEvmConfig`] builds one, from the chain params, so the node and
+/// the provers cannot end up with different withdrawal policies.
 #[derive(Debug, Clone)]
 pub struct AlpenEvmFactory {
     bridge_params: BridgeParams,
 }
 
-// Manual instead of derived: `BridgeParams` has no `Default` (denomination
-// zero is invalid).
-impl Default for AlpenEvmFactory {
-    /// Placeholder withdrawal policy for tests and benchmarks that construct
-    /// an `AlpenEvmFactory` but don't exercise bridge-out validation. Not
-    /// valid params for any real network.
-    fn default() -> Self {
-        Self {
-            bridge_params: BridgeParams::new_with_descriptor_limit(
-                100_000_000,
-                Some(1_000_000_000),
-                81,
-            )
-            .expect("valid bridge params"),
-        }
-    }
-}
-
 impl AlpenEvmFactory {
+    /// Creates a factory whose precompiles validate against `bridge_params`.
+    pub(crate) fn new(bridge_params: BridgeParams) -> Self {
+        Self { bridge_params }
+    }
+
+    /// Returns the bridge withdrawal policy the precompiles validate against.
     pub fn bridge_params(&self) -> &BridgeParams {
         &self.bridge_params
-    }
-
-    /// Creates an [`AlpenEvmFactory`] from [`BridgeParams`].
-    pub fn from_bridge_params(bp: &BridgeParams) -> Self {
-        Self { bridge_params: *bp }
     }
 }
 

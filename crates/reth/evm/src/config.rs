@@ -1,6 +1,10 @@
 //! Alpen EVM configuration.
 //!
-//! [`AlpenEvmConfig`] is the single seam through which the per-block data-availability (DA)
+//! [`AlpenEvmConfig`] executes blocks under one Alpen spec version. It is built from the chain
+//! params and that version, so the node and the provers take the chain spec and the bridge
+//! params from the same source.
+//!
+//! It is also the single seam through which the per-block data-availability (DA)
 //! rate reaches the in-EVM DA fee charge. It wraps reth's [`EthEvmConfig`] parameterised
 //! with [`AlpenEvmFactory`] and threads a `da_rate` through the one value every block
 //! execution funnels through: the [`BlockExecutorFactory::ExecutionCtx`].
@@ -48,7 +52,7 @@ use alloy_consensus::{
 };
 use alloy_eips::{eip4895::Withdrawals, eip7840::BlobParams, merge::BEACON_NONCE, Encodable2718};
 use alloy_rpc_types_engine::ExecutionData;
-use alpen_params::{HeaderExtra, HeaderExtraError};
+use alpen_params::{AlpenParams, AlpenSpecId, HeaderExtra, HeaderExtraError};
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
@@ -65,6 +69,7 @@ use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{logs_bloom, SealedBlock, SealedHeader, SignedTransaction};
 use revm::{context::Block as _, Inspector};
 use revm_primitives::U256;
+use strata_bridge_params::BridgeParams;
 
 use crate::evm::AlpenEvmFactory;
 
@@ -356,6 +361,8 @@ impl BlockAssembler<AlpenBlockExecutorFactory> for AlpenBlockAssembler {
 /// See the [module docs](self) for how the per-block DA rate is threaded.
 #[derive(Debug, Clone)]
 pub struct AlpenEvmConfig {
+    /// The spec version whose rules this config executes.
+    spec_version: AlpenSpecId,
     inner: Inner,
     executor_factory: AlpenBlockExecutorFactory,
     block_assembler: AlpenBlockAssembler,
@@ -366,10 +373,16 @@ pub struct AlpenEvmConfig {
 }
 
 impl AlpenEvmConfig {
-    /// Creates an [`AlpenEvmConfig`] from a chain spec and the Alpen EVM factory.
-    pub fn new(chain_spec: Arc<ChainSpec>, evm_factory: AlpenEvmFactory) -> Self {
-        let inner = EthEvmConfig::new_with_evm_factory(chain_spec, evm_factory);
+    /// Creates the config that executes blocks under `spec_version`, with that version's chain
+    /// spec and the bridge params from `params`.
+    pub fn new(params: &AlpenParams, spec_version: AlpenSpecId) -> Self {
+        let evm_factory = AlpenEvmFactory::new(*params.bridge_params());
+        let inner = EthEvmConfig::new_with_evm_factory(
+            params.chain_spec(spec_version).clone(),
+            evm_factory,
+        );
         Self {
+            spec_version,
             executor_factory: AlpenBlockExecutorFactory {
                 inner: inner.executor_factory.clone(),
             },
@@ -379,6 +392,16 @@ impl AlpenEvmConfig {
             inner,
             pending_da_rate: U256::ZERO,
         }
+    }
+
+    /// Returns the spec version whose rules this config executes.
+    pub const fn spec_version(&self) -> AlpenSpecId {
+        self.spec_version
+    }
+
+    /// Returns the bridge withdrawal policy the precompiles validate against.
+    pub fn bridge_params(&self) -> &BridgeParams {
+        self.executor_factory.evm_factory().bridge_params()
     }
 
     /// Sets the DA rate (wei per byte) applied when building the next block.

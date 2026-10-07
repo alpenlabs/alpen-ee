@@ -25,7 +25,6 @@ use alpen_engine::{sync_chainstate_to_engine, AlpenRethExecEngine};
 use alpen_exec_chain::{init_exec_chain_state_from_storage, ExecChainState};
 use alpen_exex::{AccessedStateGenerator, StateDiffGenerator};
 use alpen_genesis::{ensure_batch_genesis, ensure_finalized_exec_chain_genesis};
-use alpen_reth_evm::evm::AlpenEvmFactory;
 use alpen_reth_node::{
     AlpenEngineTypes, AlpenEthereumNode, AlpenGossipProtocolHandler, AlpenGossipState,
     AlpenNodeMode,
@@ -279,13 +278,10 @@ pub(crate) async fn run(
         writer_config,
     };
 
-    let evm_factory = AlpenEvmFactory::from_bridge_params(common.params.bridge_params());
     let node = AlpenEthereumNode::new(
-        evm_factory,
-        common.params.evm_spec().clone(),
+        common.params.clone(),
         AlpenNodeMode::sequencer(),
         da_fee_rate_handle,
-        common.params.fee_spec().clone(),
     );
 
     let consensus_watcher = common.ol_tracker.consensus_watcher();
