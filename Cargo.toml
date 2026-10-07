@@ -32,6 +32,7 @@ members = [
   "crates/rpc/server",
   "crates/rpc/types",
   "crates/sequencer",
+  "crates/test-utils/evm-workload",
   "crates/test-utils/simple-ee",
   "crates/witness",
   "provers/sp1",
@@ -99,6 +100,7 @@ alpen-rpc-server = { path = "crates/rpc/server" }
 alpen-rpc-types = { path = "crates/rpc/types" }
 alpen-sequencer = { path = "crates/sequencer" }
 alpen-simple-ee = { path = "crates/test-utils/simple-ee" }
+alpen-test-utils-evm-workload = { path = "crates/test-utils/evm-workload" }
 alpen-witness = { path = "crates/witness" }
 
 # strata dependencies, pinned to a release tag of the pre-split repo so the EE
@@ -219,6 +221,8 @@ alloy-rpc-types-eth = { version = "2.0.4", default-features = false, features = 
   "serde",
 ] }
 alloy-serde = { version = "2.0.4", default-features = false }
+alloy-signer = "2.0.4"
+alloy-signer-local = "2.0.4"
 alloy-sol-types = "1.5.6"
 alloy-trie = { version = "0.9.4", default-features = false, features = ["std"] }
 revm = { version = "38.0.0", features = [
@@ -240,6 +244,7 @@ reth-cli-util = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
 reth-consensus = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0", default-features = false }
 reth-consensus-common = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
 reth-db = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-db-common = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
 reth-engine-local = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
 reth-engine-primitives = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
 reth-errors = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
