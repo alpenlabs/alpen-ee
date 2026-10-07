@@ -178,9 +178,9 @@ pub fn calc_diff_size(state: &EvmState) -> u64 {
 /// Decodes the per-block DA rate (wei per byte) from the EVM header `extra_data`.
 ///
 /// The rate is a body field of the versioned [`HeaderExtra`] layout, so it is read through
-/// that codec rather than off a fixed offset. Anything that does not decode under the
-/// layout (the genesis label, an empty field, a corrupt stamp) yields `0`, which disables
-/// the DA charge — so the charge stays dormant until a rate is committed.
+/// that codec rather than off a fixed offset. A header without a rate (a V0 header, the
+/// genesis label, a corrupt stamp) yields `0`, which disables the DA charge — so the charge
+/// stays dormant until a rate is committed.
 ///
 /// Header validation is what rejects malformed `extra_data`; by the time a block reaches
 /// execution its layout has already been checked, so falling back to `0` here is a
@@ -189,26 +189,22 @@ pub fn da_rate_from_extra_data(extra_data: &Bytes) -> u64 {
     stamped_da_rate_from_extra_data(extra_data).unwrap_or(0)
 }
 
-/// Decodes a rate only when the header carries an explicit [`HeaderExtra`] stamp.
+/// Decodes the rate a header commits to, if its version's layout has one.
 ///
-/// Empty `extra_data` is the legacy pre-stamp representation, while an encoded zero is an active
-/// rate. Invalid non-empty data is treated as unstamped for the genesis-header fallback.
+/// V0 headers carry no rate, while an encoded zero under V1 is an active rate. Invalid data is
+/// treated as carrying no rate, which covers the genesis header's label.
 pub fn stamped_da_rate_from_extra_data(extra_data: &Bytes) -> Option<u64> {
-    if extra_data.is_empty() {
-        return None;
-    }
-
     HeaderExtra::decode(extra_data)
         .ok()
-        .map(|extra| extra.da_rate())
+        .and_then(|extra| extra.da_rate())
 }
 
 /// Caps a candidate DA rate to the increase covered by the fee-quote safety margin.
 ///
-/// An unstamped parent is pre-activation, so the first rate-bearing block may bootstrap directly
-/// to the configured candidate. After activation, decreases are unrestricted while increases are
-/// limited to 10% of the parent rate, with a minimum one-wei step so zero and small integer rates
-/// can recover instead of becoming absorbing states.
+/// A parent without a rate (V0, or genesis) imposes no bound, so the first V1 block may start
+/// straight at the configured candidate. After activation, decreases are unrestricted while
+/// increases are limited to 10% of the parent rate, with a minimum one-wei step so zero and small
+/// integer rates can recover instead of becoming absorbing states.
 pub fn constrain_next_da_rate(parent_rate: Option<u64>, candidate_rate: u64) -> u64 {
     let Some(parent_rate) = parent_rate else {
         return candidate_rate;
@@ -223,7 +219,7 @@ pub fn constrain_next_da_rate(parent_rate: Option<u64>, candidate_rate: u64) -> 
 
 /// Validates a committed DA rate against the per-block increase bound.
 ///
-/// An unstamped parent is the activation boundary and imposes no bound. Rate decreases are
+/// A parent without a rate is the V0 to V1 boundary and imposes no bound. Rate decreases are
 /// always valid.
 pub fn validate_da_rate_against_parent(
     parent_rate: Option<u64>,
@@ -469,29 +465,29 @@ mod tests {
 
     #[test]
     fn da_rate_extra_data_roundtrips() {
-        for version in [AlpenSpecId::V0, AlpenSpecId::V1] {
-            for rate in [0, 2_500_000_000] {
-                let extra_data = Bytes::from(HeaderExtra::new(version, rate).encode());
-                assert_eq!(da_rate_from_extra_data(&extra_data), rate, "{version:?}");
-                assert_eq!(
-                    stamped_da_rate_from_extra_data(&extra_data),
-                    Some(rate),
-                    "{version:?}"
-                );
-            }
+        for rate in [0, 2_500_000_000] {
+            let extra_data = Bytes::from(HeaderExtra::new(AlpenSpecId::V1, rate).encode());
+            assert_eq!(da_rate_from_extra_data(&extra_data), rate);
+            assert_eq!(stamped_da_rate_from_extra_data(&extra_data), Some(rate));
         }
     }
 
     #[test]
+    fn v0_extra_data_yields_no_rate() {
+        let extra_data = Bytes::from(HeaderExtra::new(AlpenSpecId::V0, 2_500_000_000).encode());
+        assert_eq!(da_rate_from_extra_data(&extra_data), 0);
+        assert_eq!(stamped_da_rate_from_extra_data(&extra_data), None);
+    }
+
+    #[test]
     fn undecodable_extra_data_yields_no_rate() {
-        // Genesis label / empty field / truncated stamp => no rate => charge is dormant.
+        // Genesis label / a V0 prefix, which V0's empty layout forbids => no rate => charge is
+        // dormant.
         assert_eq!(da_rate_from_extra_data(&Bytes::from_static(b"SC")), 0);
-        assert_eq!(da_rate_from_extra_data(&Bytes::new()), 0);
         assert_eq!(
             stamped_da_rate_from_extra_data(&Bytes::from_static(b"SC")),
             None
         );
-        assert_eq!(stamped_da_rate_from_extra_data(&Bytes::new()), None);
         assert_eq!(
             da_rate_from_extra_data(&Bytes::from_static(&[0x00, 0x00])),
             0

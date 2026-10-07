@@ -122,9 +122,10 @@ impl AlpenEvmConfig {
     /// Sets the DA rate (wei per byte) applied when building the next block,
     /// on every version's inner config.
     ///
-    /// The rate is version-independent — which version governs the build is
-    /// decided separately, by the payload attributes — so pinning it across
-    /// the whole table keeps the two concerns orthogonal.
+    /// The payload attributes pick the version later, so the caller must pass
+    /// the rate that version charges: zero for V0, which has no rate field
+    /// (see [`HeaderExtra::new`]). The assembler refuses a block that charged
+    /// a rate its header can't commit to.
     pub fn with_pending_da_rate(self, da_rate: U256) -> Self {
         let configs = self
             .configs
@@ -234,10 +235,10 @@ impl BlockExecutorFactory for AlpenBlockExecutorFactory {
 /// header's `extra_data`.
 ///
 /// Stamping happens per assembled block, not via the inner assemblers'
-/// static `extra_data` field: the layout is per-block data (future versions
-/// add sequencer-set fields like the L1 fee rate), and taking the version
-/// from the same context that selected the executor makes a skew between
-/// build rules and stamp unrepresentable.
+/// static `extra_data` field: the layout is per-block data (V1 adds the
+/// sequencer-set DA rate), and taking the version from the same context
+/// that selected the executor makes a skew between build rules and stamp
+/// unrepresentable.
 #[derive(Debug, Clone)]
 pub struct AlpenBlockAssembler {
     inners: Vec<VersionedAssembler>,
@@ -252,6 +253,18 @@ impl BlockAssembler<AlpenBlockExecutorFactory> for AlpenBlockAssembler {
     ) -> Result<Self::Block, BlockExecutionError> {
         let spec_version = input.execution_ctx.spec_version;
         let da_rate = input.execution_ctx.inner.da_rate();
+        // Stamp both per-block commitments from the one context that produced
+        // the block: the version that selected its rules, and the DA rate its
+        // execution charged. Taking them from anywhere else would let the
+        // header disagree with what actually ran.
+        let header_extra = HeaderExtra::new(spec_version, da_rate.saturating_to());
+        // V0 has no rate field, so a V0 block that charged a rate would
+        // re-execute without the charge and reach a different state root.
+        if U256::from(header_extra.da_rate().unwrap_or(0)) != da_rate {
+            return Err(BlockExecutionError::msg(format!(
+                "{spec_version:?} block charged DA rate {da_rate}, which its header can't commit to"
+            )));
+        }
         let assembler = version_indexed(&self.inners, spec_version);
         let mut block =
             assembler.assemble_block(BlockAssemblerInput::<VersionedExecutorFactory>::new(
@@ -264,13 +277,7 @@ impl BlockAssembler<AlpenBlockExecutorFactory> for AlpenBlockAssembler {
                 input.state_provider,
                 input.state_root,
             ))?;
-        // Stamp both per-block commitments from the one context that produced
-        // the block: the version that selected its rules, and the DA rate its
-        // execution charged. Taking them from anywhere else would let the
-        // header disagree with what actually ran.
-        block.header.extra_data = HeaderExtra::new(spec_version, da_rate.saturating_to())
-            .encode()
-            .into();
+        block.header.extra_data = header_extra.encode().into();
         Ok(block)
     }
 }
@@ -440,25 +447,8 @@ mod tests {
         assert_eq!(v1_env.cfg_env.spec, SpecId::OSAKA);
     }
 
-    /// An unstamped header is the chain's pre-stamp state, so it resolves to
-    /// v0 rather than failing.
-    #[test]
-    fn unstamped_headers_resolve_to_v0() {
-        let config = test_config();
-
-        let unstamped = Header {
-            number: 1,
-            ..Default::default()
-        };
-        let env = config
-            .evm_env(&unstamped)
-            .expect("unstamped resolves to v0");
-        assert_eq!(env.cfg_env.spec, SpecId::PRAGUE);
-    }
-
     /// Strict resolution: a truncated or future stamp fails instead of
-    /// silently executing under some version's rules. Only a wholly absent
-    /// stamp gets the v0 reading above.
+    /// silently executing under some version's rules.
     #[test]
     fn malformed_or_future_stamps_are_refused() {
         let config = test_config();
@@ -511,8 +501,6 @@ mod tests {
         let evm_spec: EvmSpec =
             serde_json::from_str(r#"{"config":{"chainId":2892,"shanghaiTime":0}}"#)
                 .expect("genesis document parses");
-        let config = AlpenEvmConfig::new(&evm_spec, AlpenEvmFactory::default())
-            .with_pending_da_rate(U256::from(DA_RATE));
         let parent = SealedHeader::seal_slow(Header {
             gas_limit: 30_000_000,
             base_fee_per_gas: Some(7),
@@ -521,6 +509,10 @@ mod tests {
         let provider = NoopProvider::default();
 
         for version in [AlpenSpecId::V0, AlpenSpecId::V1] {
+            // The rate this version charges, as the payload builder resolves it.
+            let header_extra = HeaderExtra::new(version, DA_RATE);
+            let config = AlpenEvmConfig::new(&evm_spec, AlpenEvmFactory::default())
+                .with_pending_da_rate(U256::from(header_extra.da_rate().unwrap_or(0)));
             let mut db = State::builder()
                 .with_database(StateProviderDatabase::new(&provider))
                 .with_bundle_update()
@@ -552,7 +544,7 @@ mod tests {
 
             assert_eq!(
                 outcome.block.header().extra_data,
-                Bytes::from(HeaderExtra::new(version, DA_RATE).encode()),
+                Bytes::from(header_extra.encode()),
                 "{version:?}"
             );
         }
@@ -560,7 +552,8 @@ mod tests {
 
     /// The assembler stamps the context's version into the built header —
     /// the same version that selected the build rules, closing the
-    /// production/import loop.
+    /// production/import loop. It refuses a V0 context that charged a rate,
+    /// since V0's header has no field to commit it.
     #[test]
     fn assembled_blocks_carry_the_contexts_version_stamp() {
         let config = test_config();
@@ -569,7 +562,15 @@ mod tests {
         let bundle_state = Default::default();
         let provider = NoopProvider::default();
 
-        for version in [AlpenSpecId::V0, AlpenSpecId::V1] {
+        for (version, da_rate, expected) in [
+            (AlpenSpecId::V0, 0, Some(HeaderExtra::V0)),
+            (AlpenSpecId::V0, DA_RATE, None),
+            (
+                AlpenSpecId::V1,
+                DA_RATE,
+                Some(HeaderExtra::V1 { da_rate: DA_RATE }),
+            ),
+        ] {
             let ctx = AlpenBlockExecutionCtx {
                 inner: DaBlockExecutionCtx::new(
                     EthBlockExecutionCtx {
@@ -581,28 +582,25 @@ mod tests {
                         tx_count_hint: None,
                         slot_number: None,
                     },
-                    U256::from(DA_RATE),
+                    U256::from(da_rate),
                 ),
                 spec_version: version,
             };
-            let block = config
-                .assembler
-                .assemble_block(BlockAssemblerInput::new(
-                    EvmEnv::default(),
-                    ctx,
-                    &parent,
-                    Vec::new(),
-                    &output,
-                    &bundle_state,
-                    &provider,
-                    Default::default(),
-                ))
-                .expect("empty block assembles");
+            let block = config.assembler.assemble_block(BlockAssemblerInput::new(
+                EvmEnv::default(),
+                ctx,
+                &parent,
+                Vec::new(),
+                &output,
+                &bundle_state,
+                &provider,
+                Default::default(),
+            ));
 
             assert_eq!(
-                block.header.extra_data,
-                Bytes::from(HeaderExtra::new(version, DA_RATE).encode()),
-                "{version:?}"
+                block.ok().map(|block| block.header.extra_data),
+                expected.map(|extra| Bytes::from(extra.encode())),
+                "{version:?} at rate {da_rate}"
             );
         }
     }

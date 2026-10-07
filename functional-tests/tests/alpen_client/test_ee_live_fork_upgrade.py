@@ -108,6 +108,9 @@ def _spec_version_from_extra_data(extra_data_hex: str) -> int:
     """
     hex_body = extra_data_hex[2:] if extra_data_hex.startswith("0x") else extra_data_hex
     raw = bytes.fromhex(hex_body)
+    # V0's layout is empty.
+    if not raw:
+        return 0
     if len(raw) < 2:
         raise ValueError(f"extra_data {extra_data_hex!r} shorter than the spec version prefix")
     return int.from_bytes(raw[:2], "big")

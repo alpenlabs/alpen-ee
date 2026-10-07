@@ -109,14 +109,16 @@ fn validate_ancestors_against_block(
         .ancestor_headers()
         .get(&parent_number)
         .ok_or(EnvError::InvalidBlock)?;
-    let next_rate = HeaderExtra::decode(header_intrinsics.extra_data())
+    if let Some(next_rate) = HeaderExtra::decode(header_intrinsics.extra_data())
         .map_err(|_| EnvError::InvalidBlock)?
-        .da_rate();
-    validate_da_rate_against_parent(
-        stamped_da_rate_from_extra_data(&parent_header.extra_data),
-        next_rate,
-    )
-    .map_err(|_| EnvError::InvalidBlock)?;
+        .da_rate()
+    {
+        validate_da_rate_against_parent(
+            stamped_da_rate_from_extra_data(&parent_header.extra_data),
+            next_rate,
+        )
+        .map_err(|_| EnvError::InvalidBlock)?;
+    }
 
     Ok(())
 }
