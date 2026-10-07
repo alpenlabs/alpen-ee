@@ -7,9 +7,12 @@
 //! preview and `commit()` the act, which is the dry-run default the console
 //! is built around. `.recipes` lists them with their doc comments.
 //!
-//! Recipes that touch two environments stage the authoritative one first,
-//! because `commit()` applies environments in first-staged order and cannot
-//! be atomic across them; the witness side is a regenerable cache.
+//! A recipe that touches more than one environment stages `node` first.
+//! `commit()` applies environments in the order they were first staged, and
+//! it cannot make them land together. What follows the node edits is either
+//! a regenerable cache (`witness`) or prover work derived from node rows
+//! (`prover`). The chain and batch recipes check `has_env` before they touch
+//! an environment a full node lacks.
 
 use super::session::Session;
 

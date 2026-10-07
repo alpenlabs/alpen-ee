@@ -647,13 +647,15 @@ Never roll back below the finalized tip, which `chain_summary()` shows as
 `finalized_height`. The recipes don't check this. OL still reports the
 dropped block as finalized, so the node panics with a deep reorg on restart.
 
-A recipe that touches more than one environment stages the authoritative one
-first, because `commit()` applies environments in first-staged order and
-cannot be atomic across them. If the witness or prover environment fails
-after `node` landed, what is left behind is a regenerable cache or prover work
-for a range that is gone, and nothing authoritative is inconsistent. A recipe
-skips an environment the datadir does not have, so the chain recipes run on a
-full node too.
+A recipe that touches more than one environment stages `node` first.
+`commit()` applies environments in the order they were first staged, and it
+cannot make them land together. So if `witness` or `prover` fails after
+`node` landed, nothing authoritative is wrong. What is left is a stale cache,
+or prover work for a range that is gone.
+
+The chain and batch recipes skip an environment the datadir does not have, so
+they run on a full node too. The prover and broadcast recipes need their
+environments and fail on a full node.
 
 To add a recipe: write the function with a `///` doc comment in the fitting
 file under `recipes/`, add a test in `src/dbconsole/recipes.rs` against the

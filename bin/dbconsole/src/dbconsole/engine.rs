@@ -113,9 +113,9 @@ fn register_reads(engine: &mut Engine, db: Rc<ConsoleDb>) {
         },
     );
 
-    // A full node has no `prover`, `witness` or `da` environment, and every
-    // access to a table in one is refused, so a recipe that reaches into them
-    // asks first.
+    // A full node has no `prover`, `witness` or `da` environment. The console
+    // refuses any access to a table in an absent environment, so a recipe
+    // that reaches into one checks first.
     let env_db = db.clone();
     engine.register_fn(
         "has_env",
