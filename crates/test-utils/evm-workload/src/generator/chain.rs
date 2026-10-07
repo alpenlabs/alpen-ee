@@ -169,7 +169,7 @@ impl DevChain {
             &self.parent,
             attributes,
             HeaderExtra::new(SPEC_VERSION, DA_RATE),
-        );
+        )?;
         let mut builder = self.evm_config.create_block_builder(evm, &self.parent, ctx);
         let da_report = builder.evm().da_report_handle();
         builder.apply_pre_execution_changes()?;
