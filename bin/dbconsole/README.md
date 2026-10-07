@@ -642,6 +642,10 @@ To roll back to the EE tip OL has accepted, pass that tip's hash straight in:
 bytes of the `extra_data` of the EE account's latest update
 (`strata_getSnarkAcctUpdateManifest`).
 
+Never roll back below the finalized tip, which `chain_summary()` shows as
+`finalized_height`. The recipes don't check this. OL still reports the
+dropped block as finalized, so the node panics with a deep reorg on restart.
+
 A recipe that touches more than one environment stages the authoritative one
 first, because `commit()` applies environments in first-staged order and
 cannot be atomic across them. If the witness or prover environment fails
