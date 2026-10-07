@@ -1,5 +1,6 @@
-# On a version tag, builds the SP1 guests for every network in params/,
-# attaches them to the tag's GitHub Release and then copies them to S3.
+# On a version tag, builds the SP1 guests for every network in params/ except
+# dev, attaches them to the tag's GitHub Release and then copies them to S3.
+# dev is only for local runs and CI, so it gets no released guests.
 #
 # Releases are immutable once published, so the release is created as a draft,
 # every network attaches its files, and it is only published once it holds
@@ -38,7 +39,7 @@ jobs:
         id: networks
         run: |
           set -euo pipefail
-          networks="$(find params -mindepth 1 -maxdepth 1 -name '*.json' \
+          networks="$(find params -mindepth 1 -maxdepth 1 -name '*.json' ! -name dev.json \
             | sed 's|^params/||; s|\.json$||' | sort | jq -R . | jq -cs .)"
           if [ "$networks" = "[]" ]; then
             echo "::error::no params/<network>.json found"
@@ -93,11 +94,19 @@ jobs:
           persist-credentials: false
           sparse-checkout: .github/scripts
 
-      - name: Add account predicates to release notes
+      - name: Download account program IDs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: alpen-acct-program-id-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/program-ids
+
+      - name: Add account program IDs and predicates to release notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
           WORK_DIR: ${{ runner.temp }}/notes
+          PROGRAM_IDS_DIR: ${{ runner.temp }}/program-ids
         run: python3 .github/scripts/guest_publish.py notes
 
       - name: Check files and publish release

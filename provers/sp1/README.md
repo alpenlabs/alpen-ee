@@ -42,8 +42,9 @@ directory and commit its `Cargo.lock`.
 
 ## Publishing
 
-The params are baked into the guests, so each network has its own ELFs and
-account predicate. Each network's params live in `params/<network>.json`.
+The params are baked into the guests, so each network has its own ELFs,
+account program ID and predicate. Each network's params live in
+`params/<network>.json`.
 
 `.github/workflows/publish-guests.yml` builds the guests for one network with
 `docker-build` and publishes these files:
@@ -53,12 +54,20 @@ account predicate. Each network's params live in `params/<network>.json`.
   that the OL uses to check account proofs
 - `<network>-alpen-params.json`, the params baked into both guests
 
+It also writes the account guest's program ID: SP1's program vkey hash of the
+account ELF as `0x<hex>`, the value `cargo prove vkey --elf <file>` prints. The
+predicate holds this program ID folded into one curve point, and its other
+bytes are the same for every build, so compare program IDs to tell builds
+apart. The program ID is not a release file. It goes in the run summary, the
+`alpen-acct-program-id-<network>` workflow artifact and the release notes.
+
 The files always go to a workflow artifact. Pushing a `v*` tag runs
 `.github/workflows/release.yml`. It creates a draft GitHub Release, runs
-`publish-guests.yml` for every network in `params/` and attaches the files. It
-then puts each network's account predicate in the release notes. Once the draft
-holds exactly the files that were built, and the tag still points at the commit
-they were built from, it publishes the release.
+`publish-guests.yml` for every network in `params/` except `dev` and attaches
+the files. It then puts each network's account program ID and predicate in
+the release notes. Once the draft holds exactly the files that were built, and
+the tag still points at the commit they were built from, it publishes the
+release.
 
 After the release is published, `.github/workflows/publish-guests-s3.yml`
 checks each file against the release attestation and copies it to
@@ -71,9 +80,9 @@ The copy waits for a reviewer to approve it in the `sp1-artifacts`
 environment. It fails if the `ALPEN_GUESTS_S3_BUCKET` or
 `ALPEN_GUESTS_S3_ROLE_ARN` repo variable is not set.
 
-To build with params that are not in the repo yet, run `publish-guests.yml` by
-hand with `params_url`. Releases are immutable once published, so `release_tag`
-only works while that release is still a draft.
+To build `dev`, run `publish-guests.yml` by hand. To build with params that are
+not in the repo yet, run it with `params_url`. Releases are immutable once
+published, so `release_tag` only works while that release is still a draft.
 
 To check published files, rebuild at the same commit with
 `--features docker-build` and `SP1_ALPEN_PARAMS_PATH` pointing at the published

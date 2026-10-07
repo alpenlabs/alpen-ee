@@ -7,10 +7,11 @@ Subcommands:
     validate    Check the workflow inputs before any network or build work.
     params      Fetch the network's params JSON from a URL, or copy it from
                 params/<network>.json in the repo, to $OUTPUT_PATH.
-    stage       Copy the built guests, predicate and params into $DIST_DIR under
+    stage       Copy the built guests, predicate and params into $DIST_DIR, and
+                the account program ID into $PROGRAM_IDS_DIR, under
                 network-prefixed names.
-    notes       Put each network's account predicate and the rebuild command at
-                the top of the draft release's notes.
+    notes       Put each network's account program ID and predicate, and the
+                rebuild command, at the top of the draft release's notes.
     publish     Check the draft release holds exactly the files built for
                 $NETWORKS and that the tag still points at $SOURCE_SHA, then
                 publish it.
@@ -101,6 +102,19 @@ def published_names(network: str) -> dict[str, str]:
         "guest-alpen-acct.elf": f"{network}-guest-alpen-acct.elf",
         "alpen-acct.predicate": f"{network}-alpen-acct.predicate",
     }
+
+
+# The account guest's program ID file in provers/sp1/generated/. It goes in the
+# release notes but not in the release, so it is staged apart from the
+# published files.
+ACCT_PROGRAM_ID = "alpen-acct.program-id"
+
+
+def acct_program_id(program_ids_dir: Path, network: str) -> str:
+    path = program_ids_dir / f"{network}-{ACCT_PROGRAM_ID}"
+    if not path.is_file():
+        fail(f"program ID file missing: {path}")
+    return path.read_text(encoding="utf-8").strip()
 
 
 def params_name(network: str) -> str:
@@ -199,9 +213,15 @@ def cmd_params() -> None:
 # ---- stage -----------------------------------------------------------------
 
 
+def copy_build_output(src: Path, dst: Path) -> None:
+    if not src.is_file() or src.stat().st_size == 0:
+        fail(f"expected build output missing or empty: {src}")
+    shutil.copyfile(src, dst)
+
+
 def cmd_stage() -> None:
     """Env: NETWORK, GEN_DIR, PARAMS_PATH, PARAMS_SOURCE, SOURCE_REF, SOURCE_SHA,
-    DIST_DIR, GITHUB_OUTPUT, GITHUB_STEP_SUMMARY."""
+    DIST_DIR, PROGRAM_IDS_DIR, GITHUB_OUTPUT, GITHUB_STEP_SUMMARY."""
     network = validate_network(os.environ["NETWORK"])
     gen_dir = Path(os.environ["GEN_DIR"])
     params_path = Path(os.environ["PARAMS_PATH"])
@@ -210,13 +230,15 @@ def cmd_stage() -> None:
     source_sha = os.environ["SOURCE_SHA"]
     dist_dir = Path(os.environ["DIST_DIR"])
     dist_dir.mkdir(parents=True, exist_ok=True)
+    program_ids_dir = Path(os.environ["PROGRAM_IDS_DIR"])
+    program_ids_dir.mkdir(parents=True, exist_ok=True)
 
     names = published_names(network)
     for src_name, dst_name in names.items():
-        src = gen_dir / src_name
-        if not src.is_file() or src.stat().st_size == 0:
-            fail(f"expected build output missing or empty: {src}")
-        shutil.copyfile(src, dist_dir / dst_name)
+        copy_build_output(gen_dir / src_name, dist_dir / dst_name)
+    copy_build_output(
+        gen_dir / ACCT_PROGRAM_ID, program_ids_dir / f"{network}-{ACCT_PROGRAM_ID}"
+    )
     shutil.copyfile(params_path, dist_dir / params_name(network))
 
     published = [*names.values(), params_name(network)]
@@ -231,6 +253,7 @@ def cmd_stage() -> None:
             f"- source: `{source_ref}` @ `{source_sha}`",
             f"- params: `{params_source}`",
             f"- version: `{version}`",
+            f"- account program ID: `{acct_program_id(program_ids_dir, network)}`",
             "",
             "| File | sha256 |",
             "|------|--------|",
@@ -254,15 +277,18 @@ NOTES_END = "<!-- /sp1-guests -->"
 
 
 def cmd_notes() -> None:
-    """Env: TAG, WORK_DIR, GH_TOKEN, GITHUB_REPOSITORY.
+    """Env: TAG, WORK_DIR, PROGRAM_IDS_DIR, GH_TOKEN, GITHUB_REPOSITORY.
 
-    The predicates go in the notes so they can be read without downloading
-    anything.
+    The account program IDs and predicates go in the notes so they can be read
+    without downloading anything. The predicates come from the release, and the
+    program IDs from each network's guest build, since they are not release
+    files.
     """
     tag = os.environ["TAG"]
     repo = os.environ["GITHUB_REPOSITORY"]
     work_dir = Path(os.environ["WORK_DIR"])
     work_dir.mkdir(parents=True, exist_ok=True)
+    program_ids_dir = Path(os.environ["PROGRAM_IDS_DIR"])
 
     gh(
         "release",
@@ -298,11 +324,32 @@ def cmd_notes() -> None:
         "  cargo build --release --locked -p alpen-sp1-guest-builder --features docker-build",
         "```",
         "",
-        "The build writes the ELFs and the account predicate to `provers/sp1/generated/`.",
+        (
+            "The build writes the ELFs and the account program ID and predicate to"
+            " `provers/sp1/generated/`."
+        ),
+        "",
+        (
+            "The account program ID is SP1's program vkey hash of the account ELF, which"
+            " `cargo prove vkey --elf <network>-guest-alpen-acct.elf` prints. Most of a"
+            " predicate's bytes are the same for every build, so compare program IDs to"
+            " tell builds apart."
+        ),
         "",
     ]
     for network, predicate in predicates.items():
-        lines += [f"### `{network}` account predicate", "", "```", predicate, "```", ""]
+        lines += [
+            f"### `{network}`",
+            "",
+            f"Account program ID: `{acct_program_id(program_ids_dir, network)}`",
+            "",
+            "Account predicate:",
+            "",
+            "```",
+            predicate,
+            "```",
+            "",
+        ]
     lines.append(NOTES_END)
 
     body = gh("release", "view", tag, "--repo", repo, "--json", "body", "--jq", ".body")

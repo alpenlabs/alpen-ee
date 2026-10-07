@@ -1,9 +1,10 @@
 # Builds the SP1 guests for one network in SP1's Docker image and publishes
 # them. The guests bake in that network's params, so each network gets its own
-# ELFs and account predicate.
+# ELFs, account program ID and predicate.
 #
-# release.yml calls this once per params/<network>.json on a version tag. Run
-# it by hand with params_url to build with params that are not in the repo yet.
+# release.yml calls this once per params/<network>.json, except dev, on a
+# version tag. Run it by hand to build dev, or with params_url to build with
+# params that are not in the repo yet.
 
 name: Publish SP1 Guests
 
@@ -136,7 +137,7 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build guest ELFs and predicate
+      - name: Build guest ELFs, account program ID and predicate
         env:
           SP1_ALPEN_PARAMS_PATH: ${{ runner.temp }}/alpen-params.json
         run: cargo build --release --locked -p alpen-sp1-guest-builder --features docker-build
@@ -151,6 +152,7 @@ jobs:
           SOURCE_REF: ${{ inputs.ref || github.ref }}
           SOURCE_SHA: ${{ steps.resolve-sha.outputs.sha }}
           DIST_DIR: dist
+          PROGRAM_IDS_DIR: program-ids
         run: python3 .github/scripts/guest_publish.py stage
 
       - name: Upload workflow artifact
@@ -158,6 +160,16 @@ jobs:
         with:
           name: alpen-guests-${{ inputs.network }}-${{ steps.stage.outputs.version }}
           path: dist/
+          if-no-files-found: error
+          retention-days: 90
+
+      # The program ID goes in the release notes but is not a release file, so
+      # release.yml reads it from this artifact.
+      - name: Upload account program ID
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: alpen-acct-program-id-${{ inputs.network }}
+          path: program-ids/
           if-no-files-found: error
           retention-days: 90
 
