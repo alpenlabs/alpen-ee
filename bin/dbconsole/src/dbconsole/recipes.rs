@@ -40,10 +40,20 @@ mod tests {
 
     use super::*;
 
-    /// A read-write session over a datadir with a row in every table. The
-    /// datadir is returned with it and must outlive the session.
+    /// A read-write session over a datadir with a row in every table.
     fn seeded_session() -> (TempDatadir, Session) {
-        let datadir = TempDatadir::seeded();
+        session_over(TempDatadir::seeded())
+    }
+
+    /// A read-write session over a full node's datadir: only the node
+    /// environment, genesis finalized, two blocks at the unfinalized tip.
+    fn full_node_session() -> (TempDatadir, Session) {
+        session_over(TempDatadir::full_node())
+    }
+
+    /// A read-write session over `datadir`. The datadir is returned with it
+    /// and must outlive the session.
+    fn session_over(datadir: TempDatadir) -> (TempDatadir, Session) {
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
         let mut session = Session::new(db, Arc::new(AtomicBool::new(false)));
         install(&mut session).unwrap();
@@ -389,16 +399,6 @@ mod tests {
         assert!(ops.iter().all(|op| op.env() == "node"), "{ops:?}");
         assert_eq!(staged_of(&ops, "ExecBlockSchema").len(), 2);
         assert_eq!(staged_of(&ops, "ExecBlocksAtHeightSchema").len(), 1);
-    }
-
-    /// A read-write session over a full node's datadir: only the node
-    /// environment, genesis finalized, two blocks at the unfinalized tip.
-    fn full_node_session() -> (TempDatadir, Session) {
-        let datadir = TempDatadir::full_node();
-        let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
-        let mut session = Session::new(db, Arc::new(AtomicBool::new(false)));
-        install(&mut session).unwrap();
-        (datadir, session)
     }
 
     /// The hash of the seeded block whose bytes are all `seed`, as OL
