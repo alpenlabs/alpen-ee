@@ -4,6 +4,7 @@ Creates Strata sequencer and fullnode instances.
 """
 
 import contextlib
+import json
 import os
 import shutil
 from pathlib import Path
@@ -33,12 +34,21 @@ from common.datatool import (
 from common.prover_backend import NATIVE_BACKEND, ProverBackend
 from common.services import StrataProps, StrataService
 
+# ASM execution params for the OL node: trust the always-accept predicate at
+# genesis and run it with the spec 0 ASM. Same as alpen's
+# `docker/configs/dev/asm-execution-params.json`.
+DEV_ASM_EXECUTION_PARAMS = {
+    "genesis_predicate": "AlwaysAccept",
+    "targets": [{"predicate": "AlwaysAccept", "spec_id": 0}],
+}
+
 
 class StrataNodeParams(NamedTuple):
     """Generated parameter files for a Strata node."""
 
     ee_params: Path
     ol_params: Path
+    asm_execution: Path
     asm_params: Path
 
 
@@ -147,7 +157,9 @@ class StrataFactory(flexitest.Factory):
             if l1_reorg_safe_depth is not None
             else BtcioConfig()
         )
+        asm_execution_path = datadir / "asm-execution-params.json"
         config = StrataConfig(
+            asm_execution=asm_execution_path.name,
             bitcoind=bconfig,
             client=client_config,
             logging=logging_config,
@@ -178,8 +190,11 @@ class StrataFactory(flexitest.Factory):
             asm_params_path = datadir / "asm-params.json"
             shutil.copyfile(shared_params.ee_params, ee_params_path)
             shutil.copyfile(shared_params.ol_params, ol_params_path)
+            shutil.copyfile(shared_params.asm_execution, asm_execution_path)
             shutil.copyfile(shared_params.asm_params, asm_params_path)
         else:
+            asm_execution_path.write_text(json.dumps(DEV_ASM_EXECUTION_PARAMS, indent=2))
+
             # Generate the sequencer key + operator pubkeys consumed when building ASM params.
             seq_artifacts = generate_sequencer_artifacts(datadir, use_unchecked_cred_rule)
             if prover.ee_params_path is not None:
@@ -214,6 +229,7 @@ class StrataFactory(flexitest.Factory):
         node_params = StrataNodeParams(
             ee_params=ee_params_path,
             ol_params=ol_params_path,
+            asm_execution=asm_execution_path,
             asm_params=asm_params_path,
         )
 
