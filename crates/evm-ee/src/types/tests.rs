@@ -178,12 +178,12 @@ fn test_evm_header_summary_layout_follows_spec_version() {
 
     let v1 = summary_bytes(AlpenSpecId::V1);
     let summary = EvmHeaderSummary::decode_exact(AlpenSpecId::V1, &v1).expect("decode v1 summary");
-    assert_eq!(summary.da_rate, 2_500_000_000);
+    assert_eq!(summary.da_rate, Some(2_500_000_000));
 
     // V0 keeps the layout it had before the rate was added.
     let v0 = summary_bytes(AlpenSpecId::V0);
     let summary = EvmHeaderSummary::decode_exact(AlpenSpecId::V0, &v0).expect("decode v0 summary");
-    assert_eq!(summary.da_rate, 0);
+    assert_eq!(summary.da_rate, None);
     assert_eq!(v0[..], v1[..v0.len()]);
 }
 

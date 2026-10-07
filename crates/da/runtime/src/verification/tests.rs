@@ -9,7 +9,7 @@ use alpen_da_types::{
     L1DaBlockInclusion,
 };
 use alpen_evm_ee::EvmPartialState;
-use alpen_params::AlpenSpecId;
+use alpen_params::{AlpenSpecId, HeaderExtra};
 use alpen_reth_statediff::{
     apply_batch_state_diff_to_ethereum_state, AccountChange, AccountDiff, BatchStateDiff,
 };
@@ -209,7 +209,7 @@ fn valid_fixture_for(
         base_fee: 100,
         gas_used: 21_000,
         gas_limit: 36_000_000,
-        da_rate: 2_500_000_000,
+        da_rate: HeaderExtra::new(spec_version, 2_500_000_000).da_rate(),
     };
     let pre_state = EvmPartialState::new(
         EthereumState {
@@ -271,7 +271,7 @@ fn verify_da_witness_accepts_deduped_bytecode_from_private_witness() {
         base_fee: 100,
         gas_used: 21_000,
         gas_limit: 36_000_000,
-        da_rate: 2_500_000_000,
+        da_rate: Some(2_500_000_000),
     };
     let mut pre_state = EvmPartialState::new(
         EthereumState {
@@ -371,7 +371,7 @@ fn verify_da_blob_metadata_rejects_missing_deployed_bytecode() {
         base_fee: 100,
         gas_used: 21_000,
         gas_limit: 36_000_000,
-        da_rate: 2_500_000_000,
+        da_rate: Some(2_500_000_000),
     };
     // An account references a code hash that is neither published in the blob nor
     // supplied as a preimage, so verification must reject it.
@@ -518,7 +518,7 @@ fn verify_da_witness_rejects_chunk_summary_in_another_layout() {
         base_fee: 100,
         gas_used: 21_000,
         gas_limit: 36_000_000,
-        da_rate: 2_500_000_000,
+        da_rate: Some(2_500_000_000),
     };
     let v1_ee_input = rebuild_ee_input(
         ee_input.raw_partial_pre_state(),
@@ -577,7 +577,7 @@ fn verify_da_witness_rejects_evm_header_mismatch() {
         base_fee: 100,
         gas_used: 21_000,
         gas_limit: 36_000_000,
-        da_rate: 2_500_000_000,
+        da_rate: Some(2_500_000_000),
     };
     let bad_ee_input = rebuild_ee_input(
         ee_input.raw_partial_pre_state(),
@@ -601,7 +601,7 @@ fn verify_da_witness_rejects_da_rate_mismatch() {
         base_fee: 100,
         gas_used: 21_000,
         gas_limit: 36_000_000,
-        da_rate: 2_500_000_001,
+        da_rate: Some(2_500_000_001),
     };
     let bad_ee_input = rebuild_ee_input(
         ee_input.raw_partial_pre_state(),
@@ -627,7 +627,7 @@ fn verify_da_witness_rejects_state_root_mismatch() {
         base_fee: 100,
         gas_used: 21_000,
         gas_limit: 36_000_000,
-        da_rate: 2_500_000_000,
+        da_rate: Some(2_500_000_000),
     };
     let bad_ee_input = rebuild_ee_input(
         ee_input.raw_partial_pre_state(),

@@ -70,7 +70,7 @@ mod tests {
                 base_fee: 1_000_000_000,
                 gas_used: 15_000_000,
                 gas_limit: 36_000_000,
-                da_rate: 2_500_000_000,
+                da_rate: Some(2_500_000_000),
             },
             state_diff: BatchStateDiff::default(),
         }

@@ -201,7 +201,7 @@ impl ExecHeader for EvmHeader {
                 .expect("Alpen EVM headers must include base_fee_per_gas from genesis"),
             gas_used: self.header.gas_used,
             gas_limit: self.header.gas_limit,
-            da_rate: header_extra.da_rate().unwrap_or(0),
+            da_rate: header_extra.da_rate(),
         };
         let encoded = payload
             .encode_to_vec(header_extra.spec_version())

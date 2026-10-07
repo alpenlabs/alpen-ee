@@ -71,8 +71,7 @@ fn summarize_header(
         })?,
         gas_used: header.gas_used,
         gas_limit: header.gas_limit,
-        // V0 headers have no rate, and V0 summaries leave it out.
-        da_rate: header_extra.da_rate().unwrap_or(0),
+        da_rate: header_extra.da_rate(),
     })
 }
 
@@ -106,15 +105,15 @@ mod tests {
         assert_eq!(summary.base_fee, 1_000_000_000);
         assert_eq!(summary.gas_used, 15_000_000);
         assert_eq!(summary.gas_limit, 36_000_000);
-        assert_eq!(summary.da_rate, 2_500_000_000);
+        assert_eq!(summary.da_rate, Some(2_500_000_000));
     }
 
     #[test]
-    fn summarize_header_drops_the_rate_under_v0() {
+    fn summarize_header_has_no_rate_under_v0() {
         let header = stamped_header(AlpenSpecId::V0, 2_500_000_000);
         let summary = summarize_header(&header, AlpenSpecId::V0).expect("mapping must succeed");
 
-        assert_eq!(summary.da_rate, 0);
+        assert_eq!(summary.da_rate, None);
     }
 
     #[test]

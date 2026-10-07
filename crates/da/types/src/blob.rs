@@ -94,16 +94,18 @@ pub struct EvmHeaderSummary {
     pub gas_used: u64,
     /// Gas limit of the last EVM block.
     pub gas_limit: u64,
-    /// DA rate (wei per byte) stamped in the last EVM block's `extra_data`.
+    /// DA rate (wei per byte) committed in the last EVM block's header.
     ///
-    /// V0 does not publish the rate, so a V0 summary always holds `0`. That
-    /// `0` means the rate is unknown, not that it was zero. A reader bounding
-    /// the next block's rate must treat it as an unstamped parent.
-    pub da_rate: u64,
+    /// `None` under V0, whose headers have no rate. Under V1 a zero is a
+    /// real rate, so the missing V0 rate is not written as `0`.
+    pub da_rate: Option<u64>,
 }
 
 impl EvmHeaderSummary {
     /// Encodes the summary under the layout `spec_version` defines.
+    ///
+    /// Errs if `da_rate` doesn't fit the layout: V0 has no rate field, and V1
+    /// requires one.
     pub fn encode(
         &self,
         spec_version: AlpenSpecId,
@@ -114,13 +116,18 @@ impl EvmHeaderSummary {
         self.base_fee.encode(enc)?;
         self.gas_used.encode(enc)?;
         self.gas_limit.encode(enc)?;
-        match spec_version {
-            AlpenSpecId::V0 => Ok(()),
-            AlpenSpecId::V1 => self.da_rate.encode(enc),
+        match (spec_version, self.da_rate) {
+            (AlpenSpecId::V0, None) => Ok(()),
+            (AlpenSpecId::V1, Some(da_rate)) => da_rate.encode(enc),
+            (AlpenSpecId::V0, Some(_)) | (AlpenSpecId::V1, None) => {
+                Err(CodecError::MalformedField("EvmHeaderSummary.da_rate"))
+            }
         }
     }
 
     /// Encodes the summary into a newly allocated vec.
+    ///
+    /// Errs as [`Self::encode`] does.
     pub fn encode_to_vec(&self, spec_version: AlpenSpecId) -> Result<Vec<u8>, CodecError> {
         let mut buf = Vec::new();
         self.encode(spec_version, &mut buf)?;
@@ -135,8 +142,8 @@ impl EvmHeaderSummary {
         let gas_used = u64::decode(dec)?;
         let gas_limit = u64::decode(dec)?;
         let da_rate = match spec_version {
-            AlpenSpecId::V0 => 0,
-            AlpenSpecId::V1 => u64::decode(dec)?,
+            AlpenSpecId::V0 => None,
+            AlpenSpecId::V1 => Some(u64::decode(dec)?),
         };
         Ok(Self {
             block_num,
@@ -249,18 +256,22 @@ impl Decoder for MultiSliceDecoder<'_> {
 
 #[cfg(test)]
 mod tests {
+    use alpen_params::HeaderExtra;
+
     use super::*;
 
     const VERSIONS: [AlpenSpecId; 2] = [AlpenSpecId::V0, AlpenSpecId::V1];
 
-    fn sample_summary() -> EvmHeaderSummary {
+    /// A summary of a header governed by `spec_version`, so it carries the
+    /// rate only where that version's header has one.
+    fn sample_summary(spec_version: AlpenSpecId) -> EvmHeaderSummary {
         EvmHeaderSummary {
             block_num: 10,
             timestamp: 1_700_000_000,
             base_fee: 100,
             gas_used: 21_000,
             gas_limit: 36_000_000,
-            da_rate: 2_500_000_000,
+            da_rate: HeaderExtra::new(spec_version, 2_500_000_000).da_rate(),
         }
     }
 
@@ -268,14 +279,14 @@ mod tests {
         DaBlob {
             spec_version,
             update_seq_no: 7,
-            evm_header: sample_summary(),
+            evm_header: sample_summary(spec_version),
             state_diff: BatchStateDiff::new(),
         }
     }
 
     #[test]
     fn v0_summary_layout_omits_da_rate() {
-        let summary = sample_summary();
+        let summary = sample_summary(AlpenSpecId::V0);
         let encoded = summary.encode_to_vec(AlpenSpecId::V0).unwrap();
 
         let expected: Vec<u8> = [10u64, 1_700_000_000, 100, 21_000, 36_000_000]
@@ -285,20 +296,16 @@ mod tests {
         assert_eq!(encoded, expected);
 
         let decoded = EvmHeaderSummary::decode_exact(AlpenSpecId::V0, &encoded).unwrap();
-        assert_eq!(decoded.da_rate, 0);
-        assert_eq!(
-            decoded,
-            EvmHeaderSummary {
-                da_rate: 0,
-                ..summary
-            }
-        );
+        assert_eq!(decoded.da_rate, None);
+        assert_eq!(decoded, summary);
     }
 
     #[test]
     fn v1_summary_layout_appends_da_rate() {
-        let summary = sample_summary();
-        let v0 = summary.encode_to_vec(AlpenSpecId::V0).unwrap();
+        let summary = sample_summary(AlpenSpecId::V1);
+        let v0 = sample_summary(AlpenSpecId::V0)
+            .encode_to_vec(AlpenSpecId::V0)
+            .unwrap();
         let v1 = summary.encode_to_vec(AlpenSpecId::V1).unwrap();
 
         assert_eq!(v1[..v0.len()], v0[..]);
@@ -309,11 +316,32 @@ mod tests {
         );
     }
 
+    /// A rate that doesn't fit the layout is refused rather than dropped or
+    /// made up.
+    #[test]
+    fn summary_rate_must_fit_the_layout() {
+        for (summary_version, layout) in [
+            (AlpenSpecId::V1, AlpenSpecId::V0),
+            (AlpenSpecId::V0, AlpenSpecId::V1),
+        ] {
+            assert!(
+                matches!(
+                    sample_summary(summary_version).encode_to_vec(layout),
+                    Err(CodecError::MalformedField(_))
+                ),
+                "{summary_version:?} summary under the {layout:?} layout"
+            );
+        }
+    }
+
     #[test]
     fn summary_does_not_decode_under_another_layout() {
-        let summary = sample_summary();
-        let v0 = summary.encode_to_vec(AlpenSpecId::V0).unwrap();
-        let v1 = summary.encode_to_vec(AlpenSpecId::V1).unwrap();
+        let v0 = sample_summary(AlpenSpecId::V0)
+            .encode_to_vec(AlpenSpecId::V0)
+            .unwrap();
+        let v1 = sample_summary(AlpenSpecId::V1)
+            .encode_to_vec(AlpenSpecId::V1)
+            .unwrap();
 
         assert!(matches!(
             EvmHeaderSummary::decode_exact(AlpenSpecId::V0, &v1),
