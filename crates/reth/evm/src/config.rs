@@ -4,10 +4,10 @@
 //! params and that version, so the node and the provers take the chain spec and the bridge
 //! params from the same source.
 //!
-//! It is also the single seam through which the per-block data-availability (DA)
-//! rate reaches the in-EVM DA fee charge. It wraps reth's [`EthEvmConfig`] parameterised
-//! with [`AlpenEvmFactory`] and threads a `da_rate` through the one value every block
-//! execution funnels through: the [`BlockExecutorFactory::ExecutionCtx`].
+//! It is also the single seam through which a block's `extra_data` stamp ([`HeaderExtra`]: the
+//! spec version and, from V1 on, the data-availability (DA) rate) reaches execution. It wraps
+//! reth's [`EthEvmConfig`] parameterised with [`AlpenEvmFactory`] and carries the stamp in the one
+//! value every block execution funnels through: the [`BlockExecutorFactory::ExecutionCtx`].
 //!
 //! # Why the execution context
 //!
@@ -17,17 +17,19 @@
 //! - engine `newPayload` validation on full nodes (`context_for_payload`),
 //! - live sync and the EE-STF chunk executor and the ZK proof guest (`BasicBlockExecutor` →
 //!   `context_for_block`),
-//! - block building on the sequencer (`context_for_next_block`).
+//! - block building on the sequencer ([`AlpenEvmConfig::context_for_next_block_with`]).
 //!
-//! Deriving the rate when the context is built — from the block/payload `extra_data` on the
-//! re-execution paths, from the pending rate on the build path — and stamping it onto the
-//! EVM inside [`AlpenBlockExecutorFactory::create_executor`] means the charge always sees
-//! the block's committed rate with no per-call-site plumbing, and no path can silently
-//! charge a stale rate. Deriving it in `evm_for_block` alone is *not* sufficient: the engine
-//! validator builds its EVM via `evm_with_env` + `create_executor` and never calls
-//! `evm_for_block`.
+//! On the re-execution paths the context methods decode the stamp from the block or payload
+//! `extra_data`, and a stamp that does not decode fails the block. On the build path the caller
+//! passes the stamp in. [`AlpenBlockExecutorFactory::create_executor`] then sets the stamp's DA
+//! rate on the EVM (a V0 stamp has none, so V0 blocks charge no DA fee), and
+//! [`AlpenBlockAssembler`] writes the same stamp into the header it builds. So the charge always
+//! sees the block's committed rate with no per-call-site plumbing, and a built block cannot claim a
+//! rate other than the one it charged. Deriving the rate in `evm_for_block` alone is *not*
+//! sufficient: the engine validator builds its EVM via `evm_with_env` + `create_executor` and never
+//! calls `evm_for_block`.
 //!
-//! Because the rate rides the per-execution context/EVM rather than shared factory state,
+//! Because the stamp rides the per-execution context rather than shared config state,
 //! concurrent executions (e.g. RPC re-execution racing the builder) cannot cross rates.
 //!
 //! The per-transaction DA-coverage report is a separate, determinism-neutral *output* side
@@ -40,10 +42,10 @@
 //! reth's `EthBlockAssembler` is bound to
 //! `ExecutionCtx = EthBlockExecutionCtx`, so a custom context obliges a custom
 //! [`BlockAssembler`]. [`AlpenBlockAssembler::assemble_block`] mirrors reth's header
-//! assembly (the DA rate does not affect assembly — it only affects execution — so the
-//! header logic is a faithful copy); keep it in sync when bumping reth.
+//! assembly, except that it takes `extra_data` from the context's stamp; keep it in sync
+//! when bumping reth.
 
-use std::sync::Arc;
+use std::{convert::Infallible, sync::Arc};
 
 use alloy_consensus::{
     proofs::{self, calculate_receipt_root},
@@ -82,50 +84,32 @@ type InnerBef = <Inner as ConfigureEvm>::BlockExecutorFactory;
 /// The inner reth Ethereum block assembler.
 type InnerAssembler = <Inner as ConfigureEvm>::BlockAssembler;
 
-/// Returns the DA rate (wei per byte) the in-EVM charge applies for a block's decoded
-/// `extra_data`.
-///
-/// No rate means no charge. The `context_for_*` methods can't fail (the inner config's error
-/// type is `Infallible`), so a stamp that doesn't decode charges nothing too. Header validation
-/// rejects such a block before it executes.
-fn charged_da_rate(header_extra: Result<HeaderExtra, HeaderExtraError>) -> U256 {
-    U256::from(
-        header_extra
-            .ok()
-            .and_then(|extra| extra.da_rate())
-            .unwrap_or(0),
-    )
+fn infallible<T>(result: Result<T, Infallible>) -> T {
+    result.unwrap_or_else(|never| match never {})
 }
 
-/// Per-block execution context: the standard Ethereum context plus the block's DA rate.
+/// Per-block execution context: the standard Ethereum context plus the block's `extra_data`
+/// stamp.
+///
+/// Only [`AlpenEvmConfig`]'s context methods build one, so a context always carries the stamp
+/// its config resolved for the block.
 #[derive(Debug, Clone)]
 pub struct AlpenBlockExecutionCtx<'a> {
     inner: EthBlockExecutionCtx<'a>,
-    da_rate: U256,
-}
-
-impl<'a> AlpenBlockExecutionCtx<'a> {
-    /// Creates a context pairing a standard Ethereum context with the
-    /// block's DA rate.
-    pub const fn new(inner: EthBlockExecutionCtx<'a>, da_rate: U256) -> Self {
-        Self { inner, da_rate }
-    }
+    header_extra: HeaderExtra,
 }
 
 impl AlpenBlockExecutionCtx<'_> {
-    /// Returns the DA rate (wei per byte) this block executes under.
-    ///
-    /// The block assembler reads it back to commit the same rate into the
-    /// header, so what a block charges and what it claims cannot diverge.
-    pub const fn da_rate(&self) -> U256 {
-        self.da_rate
+    /// Returns the stamp the block executes under: its spec version and DA rate.
+    pub const fn header_extra(&self) -> HeaderExtra {
+        self.header_extra
     }
 }
 
 /// Block executor factory that stamps the per-block DA rate onto the EVM before execution.
 ///
-/// Wraps reth's `EthBlockExecutorFactory`: the
-/// DA rate travels in [`AlpenBlockExecutionCtx`] and is applied to the EVM in
+/// Wraps reth's `EthBlockExecutorFactory`: the block's stamp travels in
+/// [`AlpenBlockExecutionCtx`], and its DA rate is applied to the EVM in
 /// [`create_executor`](Self::create_executor); everything else delegates unchanged.
 #[derive(Debug, Clone)]
 pub struct AlpenBlockExecutorFactory {
@@ -156,7 +140,7 @@ impl BlockExecutorFactory for AlpenBlockExecutorFactory {
     {
         // The one chokepoint: every block execution path reaches `create_executor`, so the
         // committed rate is applied here regardless of how the EVM was created.
-        evm.set_da_rate(ctx.da_rate);
+        evm.set_da_rate(U256::from(ctx.header_extra.da_rate().unwrap_or(0)));
         AlpenBlockExecutor {
             inner: self.inner.create_executor(evm, ctx.inner),
         }
@@ -253,8 +237,11 @@ where
 /// Block assembler mirroring reth's `EthBlockAssembler`.
 ///
 /// A custom [`BlockExecutorFactory::ExecutionCtx`] forces a custom assembler (reth's is bound
-/// to `EthBlockExecutionCtx`). Header assembly is DA-rate independent, so this is a faithful
-/// copy of reth's `assemble_block` reading the wrapped Ethereum context.
+/// to `EthBlockExecutionCtx`). This is a faithful copy of reth's `assemble_block` reading the
+/// wrapped Ethereum context, except for `extra_data`.
+///
+/// It writes the context's stamp into `extra_data`. The stamp is the one execution charged
+/// under, so the header always commits to the version and DA rate the block actually ran with.
 #[derive(Debug, Clone)]
 pub struct AlpenBlockAssembler {
     inner: InnerAssembler,
@@ -276,6 +263,7 @@ impl BlockAssembler<AlpenBlockExecutorFactory> for AlpenBlockAssembler {
             state_root,
             ..
         } = input;
+        let header_extra = ctx.header_extra;
         let ctx = ctx.inner;
         let chain_spec = &self.inner.chain_spec;
         let receipts = &output.receipts;
@@ -336,7 +324,7 @@ impl BlockAssembler<AlpenBlockExecutorFactory> for AlpenBlockAssembler {
             gas_limit: evm_env.block_env.gas_limit(),
             difficulty: evm_env.block_env.difficulty(),
             gas_used: output.gas_used,
-            extra_data: ctx.extra_data,
+            extra_data: header_extra.encode().into(),
             parent_beacon_block_root: ctx.parent_beacon_block_root,
             blob_gas_used: block_blob_gas_used,
             excess_blob_gas,
@@ -358,7 +346,7 @@ impl BlockAssembler<AlpenBlockExecutorFactory> for AlpenBlockAssembler {
 
 /// Alpen EVM configuration wrapping reth's [`EthEvmConfig`].
 ///
-/// See the [module docs](self) for how the per-block DA rate is threaded.
+/// See the [module docs](self) for how a block's `extra_data` stamp is threaded.
 #[derive(Debug, Clone)]
 pub struct AlpenEvmConfig {
     /// The spec version whose rules this config executes.
@@ -366,10 +354,6 @@ pub struct AlpenEvmConfig {
     inner: Inner,
     executor_factory: AlpenBlockExecutorFactory,
     block_assembler: AlpenBlockAssembler,
-    /// DA rate (wei per byte) stamped when *building* the next block. Only consulted by
-    /// [`context_for_next_block`](ConfigureEvm::context_for_next_block); re-execution paths
-    /// derive the rate from the block's committed `extra_data` instead.
-    pending_da_rate: U256,
 }
 
 impl AlpenEvmConfig {
@@ -390,7 +374,6 @@ impl AlpenEvmConfig {
                 inner: inner.block_assembler.clone(),
             },
             inner,
-            pending_da_rate: U256::ZERO,
         }
     }
 
@@ -404,12 +387,6 @@ impl AlpenEvmConfig {
         self.executor_factory.evm_factory().bridge_params()
     }
 
-    /// Sets the DA rate (wei per byte) applied when building the next block.
-    pub const fn with_pending_da_rate(mut self, da_rate: U256) -> Self {
-        self.pending_da_rate = da_rate;
-        self
-    }
-
     /// Returns the chain specification.
     pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
         self.inner.chain_spec()
@@ -419,11 +396,29 @@ impl AlpenEvmConfig {
     pub const fn inner(&self) -> &Inner {
         &self.inner
     }
+
+    /// Builds the execution context for a new block on top of `parent`, stamped with
+    /// `header_extra`.
+    ///
+    /// This is the block production path. The caller decides the stamp: the version the block
+    /// builds under and the DA rate it charges. The assembler writes the same stamp into the
+    /// built header.
+    pub fn context_for_next_block_with(
+        &self,
+        parent: &SealedHeader,
+        attributes: NextBlockEnvAttributes,
+        header_extra: HeaderExtra,
+    ) -> AlpenBlockExecutionCtx<'_> {
+        AlpenBlockExecutionCtx {
+            inner: infallible(self.inner.context_for_next_block(parent, attributes)),
+            header_extra,
+        }
+    }
 }
 
 impl ConfigureEvm for AlpenEvmConfig {
     type Primitives = EthPrimitives;
-    type Error = <Inner as ConfigureEvm>::Error;
+    type Error = HeaderExtraError;
     type NextBlockEnvCtx = NextBlockEnvAttributes;
     type BlockExecutorFactory = AlpenBlockExecutorFactory;
     type BlockAssembler = AlpenBlockAssembler;
@@ -437,7 +432,7 @@ impl ConfigureEvm for AlpenEvmConfig {
     }
 
     fn evm_env(&self, header: &Header) -> Result<EvmEnvFor<Self>, Self::Error> {
-        self.inner.evm_env(header)
+        Ok(infallible(self.inner.evm_env(header)))
     }
 
     fn next_evm_env(
@@ -445,7 +440,7 @@ impl ConfigureEvm for AlpenEvmConfig {
         parent: &Header,
         attributes: &Self::NextBlockEnvCtx,
     ) -> Result<EvmEnvFor<Self>, Self::Error> {
-        self.inner.next_evm_env(parent, attributes)
+        Ok(infallible(self.inner.next_evm_env(parent, attributes)))
     }
 
     fn context_for_block<'a>(
@@ -453,36 +448,43 @@ impl ConfigureEvm for AlpenEvmConfig {
         block: &'a SealedBlock<Block<TransactionSigned>>,
     ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
         Ok(AlpenBlockExecutionCtx {
-            inner: self.inner.context_for_block(block)?,
-            da_rate: charged_da_rate(HeaderExtra::of_header(block.header())),
+            inner: infallible(self.inner.context_for_block(block)),
+            header_extra: HeaderExtra::of_header(block.header())?,
         })
     }
 
+    /// Builds the context for a speculative next block, such as an RPC simulation.
+    ///
+    /// Block production uses [`AlpenEvmConfig::context_for_next_block_with`] instead. With no
+    /// caller to pick the stamp, this one runs under this config's version and charges no DA
+    /// fee.
     fn context_for_next_block(
         &self,
         parent: &SealedHeader,
         attributes: Self::NextBlockEnvCtx,
     ) -> Result<ExecutionCtxFor<'_, Self>, Self::Error> {
-        Ok(AlpenBlockExecutionCtx {
-            inner: self.inner.context_for_next_block(parent, attributes)?,
-            da_rate: self.pending_da_rate,
-        })
+        Ok(self.context_for_next_block_with(
+            parent,
+            attributes,
+            HeaderExtra::new(self.spec_version, 0),
+        ))
     }
 }
 
 impl ConfigureEngineEvm<ExecutionData> for AlpenEvmConfig {
     fn evm_env_for_payload(&self, payload: &ExecutionData) -> Result<EvmEnvFor<Self>, Self::Error> {
-        self.inner.evm_env_for_payload(payload)
+        Ok(infallible(self.inner.evm_env_for_payload(payload)))
     }
 
     fn context_for_payload<'a>(
         &self,
         payload: &'a ExecutionData,
     ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
+        // No genesis exemption: the genesis block is initialized locally and never arrives
+        // as a payload.
         Ok(AlpenBlockExecutionCtx {
-            inner: self.inner.context_for_payload(payload)?,
-            // Payloads are never the genesis block, so no genesis exemption applies.
-            da_rate: charged_da_rate(HeaderExtra::decode(&payload.payload.as_v1().extra_data)),
+            inner: infallible(self.inner.context_for_payload(payload)),
+            header_extra: HeaderExtra::decode(&payload.payload.as_v1().extra_data)?,
         })
     }
 
@@ -490,6 +492,6 @@ impl ConfigureEngineEvm<ExecutionData> for AlpenEvmConfig {
         &self,
         payload: &ExecutionData,
     ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
-        self.inner.tx_iterator_for_payload(payload)
+        Ok(infallible(self.inner.tx_iterator_for_payload(payload)))
     }
 }

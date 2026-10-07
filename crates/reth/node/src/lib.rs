@@ -17,7 +17,7 @@ pub use block_witness::{build_block_witness_from_executed_state, BlockWitnessRec
 pub use consensus::{AlpenConsensus, AlpenConsensusBuilder};
 pub use da_fee_rate::{da_fee_rate_channel, DaFeeRateHandle, DaFeeRateUpdater};
 pub use engine::{AlpenEngineTypes, AlpenEngineValidator};
-pub use evm_config::{payload_spec_version, AlpenEvmConfig, VersionedEvmConfig};
+pub use evm_config::{payload_spec_version, MultiSpecEvmConfig};
 pub use gossip::{
     AlpenGossipCommand, AlpenGossipConnection, AlpenGossipConnectionHandler, AlpenGossipEvent,
     AlpenGossipMessage, AlpenGossipPackage, AlpenGossipProtocolHandler, AlpenGossipState,

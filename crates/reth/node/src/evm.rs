@@ -6,7 +6,7 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{components::ExecutorBuilder, BuilderContext};
 
-use crate::evm_config::AlpenEvmConfig;
+use crate::evm_config::MultiSpecEvmConfig;
 
 /// Builds the version-aware block executor over the custom EVM.
 #[derive(Debug, Clone)]
@@ -24,9 +24,9 @@ impl<Node> ExecutorBuilder<Node> for AlpenExecutorBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
 {
-    type EVM = AlpenEvmConfig;
+    type EVM = MultiSpecEvmConfig;
 
     async fn build_evm(self, _ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
-        Ok(AlpenEvmConfig::new(&self.params))
+        Ok(MultiSpecEvmConfig::new(&self.params))
     }
 }
