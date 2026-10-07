@@ -89,6 +89,7 @@ mod tests {
             "prover_summary",
             "prover_task",
             "revert_batches_from",
+            "revert_chunks_from",
         ] {
             assert!(names.contains(&expected), "missing recipe {expected}");
         }
@@ -346,13 +347,20 @@ mod tests {
         assert_eq!(staged_of(&ops, "BlockStateChangesSchema").len(), 1);
         // The genesis batch ends at block 0 and stays.
         assert!(staged_of(&ops, "BatchByIdxSchema").is_empty());
+        // The seeded chunk ends at block 2, past every sealed batch, as a
+        // chunk of the open batch would. It goes with its prover work.
+        assert_eq!(staged_of(&ops, "ChunkByIdxSchema").len(), 1);
+        assert_eq!(staged_of(&ops, "ChunkIdToIdxSchema").len(), 1);
+        assert_eq!(staged_of(&ops, "ChunkProverTaskSchema").len(), 1);
+        assert_eq!(staged_of(&ops, "ChunkProofReceiptSchema").len(), 1);
+        assert!(staged_of(&ops, "AcctProverTaskSchema").is_empty());
         // The seeded epoch's account state points at block 2, which is gone,
         // so the epoch goes with it.
         assert_eq!(staged_of(&ops, "OLBlockAtEpochSchema").len(), 1);
         assert_eq!(staged_of(&ops, "AccountStateAtOLEpochSchema").len(), 1);
-        // Node edits were staged before witness edits.
+        // Node edits were staged first, prover edits last.
         assert_eq!(ops[0].env(), "node");
-        assert_eq!(ops.last().unwrap().env(), "witness");
+        assert_eq!(ops.last().unwrap().env(), "prover");
 
         assert_eq!(int(&mut session, "commit()"), staged);
         let db = session.db();
@@ -364,6 +372,9 @@ mod tests {
         assert_eq!(db.count("BlockAccessedStateSchema").unwrap(), 1);
         assert_eq!(db.count("OLBlockAtEpochSchema").unwrap(), 0);
         assert_eq!(db.count("AccountStateAtOLEpochSchema").unwrap(), 0);
+        assert_eq!(db.count("ChunkByIdxSchema").unwrap(), 0);
+        assert_eq!(db.count("ChunkProverTaskSchema").unwrap(), 0);
+        assert_eq!(db.count("AcctProverTaskSchema").unwrap(), 1);
 
         // Nothing above the tip: nothing staged.
         assert_eq!(int(&mut session, "drop_chain_above(1)"), 0);

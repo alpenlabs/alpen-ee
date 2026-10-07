@@ -20,17 +20,20 @@ fn chain_summary() {
     }
 }
 
-/// Stages the removal of every exec block above `height`: the block, its
-/// payload, accessed state and witness, the height index and finalized
-/// entries, and the witness environment's state diff for those heights; the
-/// OL epoch entries whose accepted account state points at a dropped block,
-/// so the OL tracker resumes from the last epoch whose block survives; then
-/// reverts every batch whose last block is above `height`, with its chunks
-/// and prover work. The node chain, the witness environment and the batches
-/// are each cut back by their own top, so a witness that ran ahead of the
-/// exec tip is trimmed even when the chain itself is already at `height`. A
-/// full node has no witness environment, and that step is skipped. Node edits
-/// are staged first, so they land first. Returns the count staged.
+/// Stages the removal of every exec block above `height`. That covers the
+/// block, its payload, accessed state and witness, and its height and
+/// finalized entries. It covers the witness environment's state diffs for
+/// those heights, where that environment is present. It covers the OL epoch
+/// entries whose accepted account state points at a dropped block, so the OL
+/// tracker resumes from the last epoch whose block survives. Last, it
+/// reverts the batches and chunks that end above `height`, with their prover
+/// work.
+///
+/// The chain, the witness environment, the batches and the chunks are each
+/// cut back by their own top. So a witness that ran ahead of the exec tip is
+/// trimmed even when the chain is already at `height`, and so are chunks of
+/// the open batch. Node edits are staged first, so they land first. Returns
+/// the count staged.
 fn drop_chain_above(height) {
     let n = 0;
     let from = (height + 1).to_string();
@@ -82,9 +85,16 @@ fn drop_chain_above(height) {
         }
     }
 
+    // A sealed batch that ends above `height` takes its chunks with it.
+    // Without one, the open batch may still have chunks that end above it.
     let stale = scan_where("BatchByIdxSchema", |r| r.value.batch.last_blocknum > height, 1);
-    if stale.len() > 0 {
+    if !stale.is_empty() {
         n += revert_batches_from(parse_int(stale[0].key));
+    } else {
+        let stale = scan_where("ChunkByIdxSchema", |r| r.value.chunk.last_blocknum > height, 1);
+        if !stale.is_empty() {
+            n += revert_chunks_from(parse_int(stale[0].key));
+        }
     }
     n
 }
