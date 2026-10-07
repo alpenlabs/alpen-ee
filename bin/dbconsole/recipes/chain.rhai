@@ -100,10 +100,12 @@ fn drop_chain_above(height) {
 }
 
 /// Stages what `drop_chain_above` does for the height of block `hash`, so
-/// that block becomes the tip. Takes the hash as OL reports it, `0x` or not.
-/// Refuses a block the store does not hold, a block at a finalized height
-/// that is not the finalized one, and a block that shares an unfinalized
-/// height with another, since the node could then pick either as its tip.
+/// that block is left as the tip. Takes the hash as OL reports it, `0x` or
+/// not. Refuses a block the store does not hold or the height index does
+/// not list. Refuses a block at a finalized height that is not the finalized
+/// one. Refuses a block that shares an unfinalized height with another,
+/// since the node could then pick either as its tip. It does not check that
+/// the block connects to the chain below it. OL's accepted tip always does.
 /// Returns the count staged.
 fn drop_chain_above_block(hash) {
     let block = get("ExecBlockSchema", hash);
@@ -116,7 +118,11 @@ fn drop_chain_above_block(hash) {
             throw `block ${block.key} is not on the finalized chain; height ${height} holds ${finalized.value}`;
         }
     } else {
-        let others = get("ExecBlocksAtHeightSchema", height.to_string()).value.filter(|h| h != block.key);
+        let at_height = get("ExecBlocksAtHeightSchema", height.to_string());
+        if at_height == () || !(block.key in at_height.value) {
+            throw `the height index does not list block ${block.key} at height ${height}`;
+        }
+        let others = at_height.value.filter(|h| h != block.key);
         if !others.is_empty() {
             throw `block ${block.key} shares height ${height} with ${others}; the node could pick either as its tip`;
         }

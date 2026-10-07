@@ -476,6 +476,15 @@ mod tests {
             ),
             5
         );
+        session.db().abort();
+
+        // A block the height index does not list is refused by name, not
+        // with an error about a missing property.
+        let _ = session
+            .eval(r#"del("ExecBlocksAtHeightSchema", "2"); commit();"#)
+            .unwrap();
+        let err = refusal(&mut session, &block_hash(3));
+        assert!(err.contains("height index does not list"), "{err}");
     }
 
     #[test]
