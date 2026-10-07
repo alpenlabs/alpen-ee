@@ -7,9 +7,12 @@
 //! preview and `commit()` the act, which is the dry-run default the console
 //! is built around. `.recipes` lists them with their doc comments.
 //!
-//! Recipes that touch two environments stage the authoritative one first,
-//! because `commit()` applies environments in first-staged order and cannot
-//! be atomic across them; the witness side is a regenerable cache.
+//! A recipe that touches more than one environment stages `node` first.
+//! `commit()` applies environments in the order they were first staged, and
+//! it cannot make them land together. What follows the node edits is either
+//! a regenerable cache (`witness`) or prover work derived from node rows
+//! (`prover`). The chain and batch recipes check `has_env` before they touch
+//! an environment a full node lacks.
 
 use super::session::Session;
 
@@ -40,10 +43,20 @@ mod tests {
 
     use super::*;
 
-    /// A read-write session over a datadir with a row in every table. The
-    /// datadir is returned with it and must outlive the session.
+    /// A read-write session over a datadir with a row in every table.
     fn seeded_session() -> (TempDatadir, Session) {
-        let datadir = TempDatadir::seeded();
+        session_over(TempDatadir::seeded())
+    }
+
+    /// A read-write session over a full node's datadir: only the node
+    /// environment, genesis finalized, two blocks at the unfinalized tip.
+    fn full_node_session() -> (TempDatadir, Session) {
+        session_over(TempDatadir::full_node())
+    }
+
+    /// A read-write session over `datadir`. The datadir is returned with it
+    /// and must outlive the session.
+    fn session_over(datadir: TempDatadir) -> (TempDatadir, Session) {
         let db = ConsoleDb::attach_readwrite(&datadir).unwrap();
         let mut session = Session::new(db, Arc::new(AtomicBool::new(false)));
         install(&mut session).unwrap();
@@ -78,6 +91,8 @@ mod tests {
             "prover_summary",
             "prover_task",
             "revert_batches_from",
+            "revert_chunks_from",
+            "tip_height",
         ] {
             assert!(names.contains(&expected), "missing recipe {expected}");
         }
@@ -279,6 +294,41 @@ mod tests {
         assert_eq!(session.db().count("AcctProofIdIndexSchema").unwrap(), 0);
     }
 
+    /// No ranges stage nothing, a range named twice is staged once, and a
+    /// task key typed in uppercase still finds its receipt.
+    #[test]
+    fn prover_delete_ranges_takes_each_range_once() {
+        let (_datadir, mut session) = seeded_session();
+        let (chunk, _) = seeded_tasks(&mut session);
+        let pair = format!("{}:{}", &chunk[4..68], &chunk[68..]);
+
+        assert_eq!(
+            int(
+                &mut session,
+                r#"prover_delete_ranges("ChunkProverTaskSchema", [])"#
+            ),
+            0
+        );
+        // The task and its receipt.
+        assert_eq!(
+            int(
+                &mut session,
+                &format!(r#"prover_delete_ranges("ChunkProverTaskSchema", ["{pair}", "{pair}"])"#)
+            ),
+            2
+        );
+        session.db().abort();
+
+        let upper = chunk.to_uppercase();
+        assert_eq!(
+            int(
+                &mut session,
+                &format!(r#"prover_delete("ChunkProverTaskSchema", "{upper}")"#)
+            ),
+            2
+        );
+    }
+
     #[test]
     fn drop_chain_above_cuts_every_table_back_to_the_height() {
         let (_datadir, mut session) = seeded_session();
@@ -300,13 +350,20 @@ mod tests {
         assert_eq!(staged_of(&ops, "BlockStateChangesSchema").len(), 1);
         // The genesis batch ends at block 0 and stays.
         assert!(staged_of(&ops, "BatchByIdxSchema").is_empty());
+        // The seeded chunk ends at block 2, past every sealed batch, as a
+        // chunk of the open batch would. It goes with its prover work.
+        assert_eq!(staged_of(&ops, "ChunkByIdxSchema").len(), 1);
+        assert_eq!(staged_of(&ops, "ChunkIdToIdxSchema").len(), 1);
+        assert_eq!(staged_of(&ops, "ChunkProverTaskSchema").len(), 1);
+        assert_eq!(staged_of(&ops, "ChunkProofReceiptSchema").len(), 1);
+        assert!(staged_of(&ops, "AcctProverTaskSchema").is_empty());
         // The seeded epoch's account state points at block 2, which is gone,
         // so the epoch goes with it.
         assert_eq!(staged_of(&ops, "OLBlockAtEpochSchema").len(), 1);
         assert_eq!(staged_of(&ops, "AccountStateAtOLEpochSchema").len(), 1);
-        // Node edits were staged before witness edits.
+        // Node edits were staged first, prover edits last.
         assert_eq!(ops[0].env(), "node");
-        assert_eq!(ops.last().unwrap().env(), "witness");
+        assert_eq!(ops.last().unwrap().env(), "prover");
 
         assert_eq!(int(&mut session, "commit()"), staged);
         let db = session.db();
@@ -318,6 +375,9 @@ mod tests {
         assert_eq!(db.count("BlockAccessedStateSchema").unwrap(), 1);
         assert_eq!(db.count("OLBlockAtEpochSchema").unwrap(), 0);
         assert_eq!(db.count("AccountStateAtOLEpochSchema").unwrap(), 0);
+        assert_eq!(db.count("ChunkByIdxSchema").unwrap(), 0);
+        assert_eq!(db.count("ChunkProverTaskSchema").unwrap(), 0);
+        assert_eq!(db.count("AcctProverTaskSchema").unwrap(), 1);
 
         // Nothing above the tip: nothing staged.
         assert_eq!(int(&mut session, "drop_chain_above(1)"), 0);
@@ -342,8 +402,114 @@ mod tests {
         assert_eq!(int(&mut session, "drop_chain_above(2)"), 0);
     }
 
+    /// A drop on a full node's datadir, which has no witness environment,
+    /// cuts the node chain and skips the witness step rather than failing.
     #[test]
-    fn revert_batches_from_takes_batches_indexes_and_chunks() {
+    fn drop_chain_above_on_a_full_node_cuts_only_the_node_chain() {
+        let (_datadir, mut session) = full_node_session();
+        // Two blocks at height 2, each with its payload, and the height entry.
+        assert_eq!(int(&mut session, "drop_chain_above(1)"), 5);
+        let ops = session.db().staged();
+        assert!(ops.iter().all(|op| op.env() == "node"), "{ops:?}");
+        assert_eq!(staged_of(&ops, "ExecBlockSchema").len(), 2);
+        assert_eq!(staged_of(&ops, "ExecBlocksAtHeightSchema").len(), 1);
+    }
+
+    /// The hash of the seeded block whose bytes are all `seed`, as OL
+    /// reports it.
+    fn block_hash(seed: u8) -> String {
+        format!("0x{}", hex::encode([seed; 32]))
+    }
+
+    #[test]
+    fn drop_chain_above_a_hash_drops_what_its_height_would() {
+        let (_datadir, mut session) = seeded_session();
+        // Block 1 of the seeded chain is all 0x02.
+        let by_hash = int(
+            &mut session,
+            &format!(r#"drop_chain_above("{}")"#, block_hash(2)),
+        );
+        let ops_by_hash = session.db().staged();
+        session.db().abort();
+
+        let by_height = int(&mut session, "drop_chain_above(1)");
+        assert_eq!(by_hash, by_height);
+        assert_eq!(ops_by_hash, session.db().staged());
+    }
+
+    #[test]
+    fn drop_chain_above_refuses_a_hash_that_cannot_be_the_tip() {
+        let (_datadir, mut session) = seeded_session();
+        let refusal = |session: &mut Session, hash: &str| {
+            let err = session
+                .eval(&format!(r#"drop_chain_above("{hash}")"#))
+                .unwrap_err()
+                .to_string();
+            assert!(session.db().staged().is_empty(), "staged on refusal");
+            err
+        };
+
+        let err = refusal(&mut session, &block_hash(0xee));
+        assert!(err.contains("no exec block"), "{err}");
+
+        // A copy of block 1 under another hash sits at a finalized height
+        // without being the finalized block there.
+        let copy = "ef".repeat(32);
+        let _ = session
+            .eval(&format!(
+                r#"
+                put("ExecBlockSchema", "{copy}", edit("ExecBlockSchema", "{}"));
+                commit();
+                "#,
+                block_hash(2)
+            ))
+            .unwrap();
+        let err = refusal(&mut session, &copy);
+        assert!(err.contains("not on the finalized chain"), "{err}");
+
+        // On the full node, height 2 is unfinalized and holds two blocks.
+        let (_datadir, mut session) = full_node_session();
+        let err = refusal(&mut session, &block_hash(3));
+        assert!(err.contains("shares height 2"), "{err}");
+        // Block 1 has its height to itself, and both blocks above it go.
+        assert_eq!(
+            int(
+                &mut session,
+                &format!(r#"drop_chain_above("{}")"#, block_hash(2))
+            ),
+            5
+        );
+        session.db().abort();
+
+        // A block the height index does not list is refused by name, not
+        // with an error about a missing property.
+        let _ = session
+            .eval(r#"del("ExecBlocksAtHeightSchema", "2"); commit();"#)
+            .unwrap();
+        let err = refusal(&mut session, &block_hash(3));
+        assert!(err.contains("height index does not list"), "{err}");
+    }
+
+    /// A height typed as a string is read as a hash and refused, and
+    /// anything that is neither a string nor an integer is refused by type.
+    #[test]
+    fn drop_chain_above_takes_only_a_hash_or_a_height() {
+        let (_datadir, mut session) = seeded_session();
+        for (target, expected) in [
+            (r#""1""#, "pass a height as a number"),
+            ("1.5", "takes a block hash or a height"),
+        ] {
+            let err = session
+                .eval(&format!("drop_chain_above({target})"))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains(expected), "{target}: {err}");
+            assert!(session.db().staged().is_empty(), "{target} staged");
+        }
+    }
+
+    #[test]
+    fn revert_batches_from_takes_batches_indexes_chunks_and_prover_work() {
         let (_datadir, mut session) = seeded_session();
         let staged = int(&mut session, "revert_batches_from(0)");
         let ops = session.db().staged();
@@ -352,15 +518,29 @@ mod tests {
         assert_eq!(staged_of(&ops, "BatchChunksSchema").len(), 1);
         assert_eq!(staged_of(&ops, "ChunkByIdxSchema").len(), 1);
         assert_eq!(staged_of(&ops, "ChunkIdToIdxSchema").len(), 1);
-        assert_eq!(staged, 5);
+        // The seeded tasks and receipts are over the seeded chunk and batch.
+        assert_eq!(staged_of(&ops, "ChunkProverTaskSchema").len(), 1);
+        assert_eq!(staged_of(&ops, "ChunkProofReceiptSchema").len(), 1);
+        assert_eq!(staged_of(&ops, "AcctProverTaskSchema").len(), 1);
+        assert_eq!(staged_of(&ops, "AcctProofReceiptSchema").len(), 1);
+        assert_eq!(staged_of(&ops, "AcctProofIdIndexSchema").len(), 1);
+        assert_eq!(staged, 10);
+        // Node edits were staged before prover edits.
+        assert_eq!(ops[0].env(), "node");
+        assert_eq!(ops.last().unwrap().env(), "prover");
 
-        assert_eq!(int(&mut session, "commit()"), 5);
+        assert_eq!(int(&mut session, "commit()"), 10);
         for table in [
             "BatchByIdxSchema",
             "BatchIdToIdxSchema",
             "BatchChunksSchema",
             "ChunkByIdxSchema",
             "ChunkIdToIdxSchema",
+            "ChunkProverTaskSchema",
+            "ChunkProofReceiptSchema",
+            "AcctProverTaskSchema",
+            "AcctProofReceiptSchema",
+            "AcctProofIdIndexSchema",
         ] {
             assert_eq!(session.db().count(table).unwrap(), 0, "{table}");
         }

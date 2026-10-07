@@ -363,6 +363,7 @@ fn print_help() {
     println!("  scan_prefix(table, hex, |r| ... [, n])       keys starting with hex");
     println!("  scan_rev_range / scan_rev_prefix   the same from the top end");
     println!("  keys_range(table, from, to) / keys_prefix(table, hex)");
+    println!("  has_env(name)                      whether an environment is attached");
     println!();
     println!("a record is {{ key, value }}: `r.key` is where it lives,");
     println!("`r.value.<field>` is what it holds");

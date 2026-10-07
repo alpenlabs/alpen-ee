@@ -113,6 +113,22 @@ fn register_reads(engine: &mut Engine, db: Rc<ConsoleDb>) {
         },
     );
 
+    // A full node has no `prover`, `witness` or `da` environment. The console
+    // refuses any access to a table in an absent environment, so a recipe
+    // that reaches into one checks first.
+    let env_db = db.clone();
+    engine.register_fn(
+        "has_env",
+        move |name: ImmutableString| -> Result<bool, Box<EvalAltResult>> {
+            env_db
+                .envs()
+                .into_iter()
+                .find(|env| env.name == name.as_str())
+                .map(|env| env.present)
+                .ok_or_else(|| format!("unknown environment `{name}`").into())
+        },
+    );
+
     let count_db = db.clone();
     engine.register_fn(
         "count",

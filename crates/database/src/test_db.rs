@@ -71,6 +71,13 @@ impl TempDatadir {
         seed_all(&datadir);
         datadir
     }
+
+    /// A full node's datadir, with a fork at the tip; see [`seed_full_node`].
+    pub fn full_node() -> Self {
+        let datadir = Self::new();
+        seed_full_node(&datadir);
+        datadir
+    }
 }
 
 impl Default for TempDatadir {
@@ -104,8 +111,9 @@ fn hash(seed: u8) -> Hash {
     Hash::from([seed; 32])
 }
 
-/// The node environment, through the node's own storage trait.
-pub fn seed_node(datadir: &Path) {
+/// Opens the node environment and saves blocks 0..=2 with genesis finalized.
+/// Returns the store and the three block hashes.
+fn seed_base_chain(datadir: &Path) -> (NodeDbMdbx, [Hash; 3]) {
     let db = NodeDbMdbx::open(&datadir.join("mdbx").join("node"), &MdbxConfig::small()).unwrap();
     let (h0, h1, h2) = (hash(1), hash(2), hash(3));
 
@@ -116,6 +124,12 @@ pub fn seed_node(datadir: &Path) {
     db.save_exec_block(create_exec_block(2, h1, h2, 2), vec![0xcc; 8])
         .unwrap();
     db.init_finalized_chain(h0).unwrap();
+    (db, [h0, h1, h2])
+}
+
+/// The node environment, through the node's own storage trait.
+pub fn seed_node(datadir: &Path) {
+    let (db, [h0, h1, h2]) = seed_base_chain(datadir);
     db.extend_finalized_chain(h2).unwrap();
 
     let batch = Batch::new_genesis_batch(h0, 0).unwrap();
@@ -138,6 +152,14 @@ pub fn seed_node(datadir: &Path) {
     db.put_block_accessed_state(h1, record).unwrap();
     db.put_bytecode(hash(4), vec![0x60, 0x00]).unwrap();
     db.put_block_witness(h1, vec![1, 2, 3]).unwrap();
+}
+
+/// A full node's datadir: the node environment alone, holding blocks 0..=2
+/// with only genesis finalized, and a second block at height 2 off block 1.
+pub fn seed_full_node(datadir: &Path) {
+    let (db, [_, h1, _]) = seed_base_chain(datadir);
+    db.save_exec_block(create_exec_block(2, h1, hash(4), 2), vec![0xdd; 8])
+        .unwrap();
 }
 
 /// The prover environment: a task of each kind under the V0 prover, over the

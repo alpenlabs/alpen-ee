@@ -36,8 +36,10 @@ fn prover_receipt_table(table) {
 }
 
 /// The `prev:last` pair a task key ends with, or () for a string too short
-/// to be one.
+/// to be one. The pair is lowercase, the way keys render, so it can be
+/// matched against a scan's keys.
 fn task_pair(key) {
+    let key = key.to_lower();
     let key = if key.starts_with("0x") { key.sub_string(2) } else { key };
     let n = key.len();
     if n < 128 { return (); }
@@ -60,24 +62,41 @@ fn prover_abandon(table, key, reason) {
 /// Stages the removal of a task and whatever receipt it points to, including
 /// the proof-id index entries of an account receipt. Returns the count staged.
 fn prover_delete(table, key) {
-    let n = 0;
     del(table, key);
-    n += 1;
-    let receipt = prover_receipt(table, key);
-    if receipt == () { return n; }
+    1 + prover_delete_receipts(table, [task_pair(key)])
+}
 
+/// Stages the removal of every task in `table` over one of the `prev:last`
+/// ranges in `pairs`, under any spec version. Also stages the removal of the
+/// receipts of those ranges, which can outlive their tasks. Returns the count
+/// staged.
+fn prover_delete_ranges(table, pairs) {
+    if pairs.is_empty() { return 0; }
+    let wanted = #{};
+    for pair in pairs { wanted[pair] = true; }
+    let tasks = keys_where(table, |key| task_pair(key) in wanted);
+    let n = if tasks.is_empty() { 0 } else { del(table, tasks) };
+    n + prover_delete_receipts(table, pairs)
+}
+
+/// Stages the removal of the receipts behind `table`'s tasks for each
+/// `prev:last` pair in `pairs`, with the proof-id index entries of account
+/// receipts. It matches receipts by key, so no proof is decoded. Returns the
+/// count staged.
+fn prover_delete_receipts(table, pairs) {
     let receipts = prover_receipt_table(table);
-    del(receipts, receipt.key);
-    n += 1;
+    let wanted = #{};
+    for pair in pairs {
+        if pair != () { wanted[pair] = true; }
+    }
+    if receipts == () || wanted.is_empty() { return 0; }
+
+    let stale = keys_where(receipts, |key| key in wanted);
+    let n = if stale.is_empty() { 0 } else { del(receipts, stale) };
     if receipts == "AcctProofReceiptSchema" {
-        let pair = task_pair(key);
-        let prev = pair.sub_string(0, 64);
-        let last = pair.sub_string(65);
-        let stale = scan_where("AcctProofIdIndexSchema", |r| r.value.prev_block == prev && r.value.last_block == last);
-        for entry in stale {
-            del("AcctProofIdIndexSchema", entry.key);
-            n += 1;
-        }
+        let index = scan_where("AcctProofIdIndexSchema", |r| `${r.value.prev_block}:${r.value.last_block}` in wanted)
+            .map(|r| r.key);
+        if !index.is_empty() { n += del("AcctProofIdIndexSchema", index); }
     }
     n
 }

@@ -242,7 +242,8 @@ A bare name resolves while it is unique across environments, which every EE
 table is today and a registry test enforces; the qualified form is accepted
 everywhere and is required only if that ever changes. A table in an absent
 environment is found and refused with a message saying which environment is
-missing, rather than reported as unknown.
+missing, rather than reported as unknown. A script that may run on a full node
+checks with [`has_env`](#has_envname--is-an-environment-attached) first.
 
 MDBX has no transaction spanning environments, so `commit()` runs one
 transaction per environment — see [Writes](#writes).
@@ -508,6 +509,17 @@ keys_where("ChunkProverTaskSchema", |k| k.starts_with("0000"), 100)  // first 10
 `r.key` is rendered in exactly the form `get` accepts, so a key copied out of a
 scan pastes straight into a lookup.
 
+### `has_env(name)` — is an environment attached
+
+A full node has only `node`, and any access to a table in an absent
+environment is refused. A script that reaches into `prover`, `witness` or `da`
+asks first. An unknown name is an error, so a typo does not read as absent.
+
+```rhai
+has_env("prover")                                   // → false on a full node
+if has_env("witness") { last("BlockHashByNumber") } else { () }
+```
+
 ### From the shell
 
 ```bash
@@ -595,35 +607,56 @@ until you say otherwise. `.recipes` lists them:
 | `prover_abandon(table, key, reason)` | the task's status to `PermanentFailure` |
 | `prover_delete(table, key)` | the task, its receipt, and the proof-id index entries of an account receipt |
 | `chain_summary()` | nothing; tip and finalized heights, counts, latest batch and chunk |
-| `drop_chain_above(height)` | every exec block above `height` with its payload, accessed state and witness; the height and finalized entries; the witness environment's diffs above `height`; the OL epoch entries whose accepted account state points at a dropped block, so the tracker resumes from the last surviving epoch; then `revert_batches_from` for the first batch ending above `height`. Chain, witness and batches are each cut by their own top, so a witness that ran ahead is trimmed even when the chain is already at `height` |
+| `drop_chain_above(target)` | everything above `target`, a block hash or a height. A hash is the usual form: the EE tip OL has accepted, `0x` or not, checked by `tip_height` first. A height is used as given, with no checks. Above the height: every exec block, with its payload, accessed state, witness, height entry and finalized entry. The witness environment's diffs, where that environment is present. The OL epoch entries whose accepted account state points at a dropped block, so the tracker resumes from the last surviving epoch. Last, the batches and chunks that end above the height, through `revert_batches_from`, or `revert_chunks_from` for the open batch. Chain, witness, batches and chunks are each cut by their own top. So a witness that ran ahead is trimmed even when the chain is already at the height |
+| `tip_height(hash)` | nothing; the height of block `hash`, once it is checked to be a block that can be left as the tip. Fails for a string that is not a 32-byte hash. Fails for a block the store does not hold or the height index does not list. Fails for a block at a finalized height that is not the finalized one. Fails for a block that shares an unfinalized height with another. It does not check that the block connects to the chain below it, which OL's accepted tip always does |
 | `batch_summary()` | nothing; batches and chunks counted by status |
-| `revert_batches_from(idx)` | batches from `idx`, their id and chunk-list entries, and every chunk of those batches |
+| `revert_batches_from(idx)` | batches from `idx`, with their id and chunk-list entries, and their chunks through `revert_chunks_from`. Where the prover environment is present, the account prover tasks of those batches under any spec version, their receipts, and the receipts' proof-id index entries |
+| `revert_chunks_from(idx)` | chunks from `idx`, with their id entries. Where the prover environment is present, their prover tasks under any spec version and their receipts. Use it alone only for chunks past the last sealed batch. A sealed batch's chunks go with `revert_batches_from` |
 | `broadcast_summary()` | nothing; the L1 queue by status, replacement chains, envelopes |
 
 ```
 db> chain_summary()
 { batches: 37, blocks_at_tip: 1, chunks: 36, exec_blocks: 370, finalized_height: 0, … }
-db> drop_chain_above(300)
-513
+db> drop_chain_above("0x5f2c09d4…a1e9")      // the block at height 300
+543
 db> .staged
-513 staged change(s); `commit()` applies them:
+543 staged change(s); `commit()` applies them:
   node/ExecBlockSchema: 69 del, 0 put
   node/ExecBlockPayloadSchema: 69 del, 0 put
   …
   witness/BlockStateChangesSchema: 69 del, 0 put
   …
   node/BatchByIdxSchema: 6 del, 0 put
+  …
+  prover/AcctProverTaskSchema: 6 del, 0 put
+  …
   (`.staged full` lists every edit)
 db> commit()
 committed 375 edit(s) to `node`
 committed 138 edit(s) to `witness`
-513
+committed 30 edit(s) to `prover`
+543
 ```
 
-A recipe that touches two environments stages the authoritative one first,
-because `commit()` applies environments in first-staged order and cannot be
-atomic across them. If the witness environment fails after `node` landed, a
-regenerable cache is stale and nothing authoritative is inconsistent.
+The hash to roll back to is the EE tip OL has accepted. OL holds it as
+`new_tip_blkid`, the first 32 bytes of the `extra_data` of the EE account's
+latest update (`strata_getSnarkAcctUpdateManifest`). A height works too, as
+in `drop_chain_above(300)`, but it is not checked. Use it only when no hash is
+at hand, such as reth's head after the node was killed.
+
+Never roll back below the finalized tip, which `chain_summary()` shows as
+`finalized_height`. The recipes don't check this. OL still reports the
+dropped block as finalized, so the node panics with a deep reorg on restart.
+
+A recipe that touches more than one environment stages `node` first.
+`commit()` applies environments in the order they were first staged, and it
+cannot make them land together. So if `witness` or `prover` fails after
+`node` landed, nothing authoritative is wrong. What is left is a stale cache,
+or prover work for a range that is gone.
+
+The chain and batch recipes skip an environment the datadir does not have, so
+they run on a full node too. The prover and broadcast recipes need their
+environments and fail on a full node.
 
 To add a recipe: write the function with a `///` doc comment in the fitting
 file under `recipes/`, add a test in `src/dbconsole/recipes.rs` against the
