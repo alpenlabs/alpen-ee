@@ -120,6 +120,7 @@ def observe_da_transport(
                     commit_txid=txid,
                     commit_height=commit_height,
                     total_chunks=0,
+                    version=commit.version,
                     reveal_txid=reveal.reveal_txid,
                     reveal_wtxid=reveal.reveal_wtxid,
                     reveal_height=reveal.reveal_height,

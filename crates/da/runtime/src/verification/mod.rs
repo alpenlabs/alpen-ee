@@ -16,12 +16,13 @@ use alloy_primitives::{keccak256, B256};
 use alpen_acct_runtime::ArchivedEePrivateInput;
 use alpen_chain_types::ChunkTransition;
 use alpen_da_types::{
-    compute_bitcoin_merkle_root_from_proof, extract_da_chunks as parse_da_chunks,
+    compute_bitcoin_merkle_root_from_proof, da_blob_version, extract_da_chunks as parse_da_chunks,
     read_commit_marker_payload, reassemble_da_blob, ArchivedBitcoinMerkleProof,
     ArchivedDaBlockWitness, ArchivedDaWitness, ArchivedDedupWitness, DaBlob, DaParseError,
-    EvmHeaderSummary, DA_BLOB_VERSION, EE_DA_MAGIC_BYTES,
+    EvmHeaderSummary, EE_DA_MAGIC_BYTES,
 };
 use alpen_evm_ee::EvmPartialState;
+use alpen_params::AlpenSpecId;
 use alpen_reth_statediff::{
     apply_batch_state_diff_to_ethereum_state, AccountChange, BatchStateDiff,
 };
@@ -41,11 +42,15 @@ use strata_snark_acct_types::{LedgerRefs, UpdateProofPubParams};
 /// (header summary, deployed bytecodes, state-diff applied to the partial
 /// pre-state matches the last chunk's `tip_state_root`). there is no
 /// downstream consumer for the blob itself, so nothing is returned.
+///
+/// `spec_version` is the version governing the batch. It selects the layout
+/// both the blob and the last chunk's header summary are decoded under.
 pub fn verify_da_witness(
     ee_input: &ArchivedEePrivateInput,
     da_witness: &ArchivedDaWitness,
     pub_params: &UpdateProofPubParams,
     expected_pre_state_root: [u8; 32],
+    spec_version: AlpenSpecId,
 ) -> DaVerificationResult {
     if da_witness.blocks().is_empty() {
         return if ee_input.chunks().is_empty() {
@@ -64,8 +69,9 @@ pub fn verify_da_witness(
         included_txs.extend(verify_block_witness(block, pub_params.ledger_refs())?);
     }
 
-    let encoded_chunks = extract_and_verify_da_chunks(included_txs.iter())?;
-    let blob = reassemble_da_blob(&encoded_chunks).map_err(DaVerificationError::Reassembly)?;
+    let encoded_chunks = extract_and_verify_da_chunks(included_txs.iter(), spec_version)?;
+    let blob = reassemble_da_blob(&encoded_chunks, spec_version)
+        .map_err(DaVerificationError::Reassembly)?;
     let last_chunk = decode_last_chunk_transition(ee_input)?;
     verify_da_blob_metadata(
         &blob,
@@ -159,6 +165,7 @@ fn verify_l1_ref_binding(
 /// marker matches the proof's expected magic + version.
 fn extract_and_verify_da_chunks<'a>(
     txs: impl Iterator<Item = &'a Transaction>,
+    spec_version: AlpenSpecId,
 ) -> DaVerificationResult<Vec<Vec<u8>>> {
     let txs: Vec<&Transaction> = txs.collect();
     let chunks = parse_da_chunks(txs.iter().copied())?;
@@ -167,11 +174,11 @@ fn extract_and_verify_da_chunks<'a>(
         .copied()
         .find(|tx| read_commit_marker_payload(tx).ok().flatten().is_some())
         .ok_or(DaVerificationError::Parse(DaParseError::MissingCommit))?;
-    verify_commit_marker(commit)?;
+    verify_commit_marker(commit, spec_version)?;
     Ok(chunks)
 }
 
-fn verify_commit_marker(commit: &Transaction) -> DaVerificationResult {
+fn verify_commit_marker(commit: &Transaction, spec_version: AlpenSpecId) -> DaVerificationResult {
     let payload = read_commit_marker_payload(commit)?
         .ok_or(DaVerificationError::Parse(DaParseError::MissingCommit))?;
     let actual_magic: [u8; 4] = payload[..4]
@@ -188,9 +195,10 @@ fn verify_commit_marker(commit: &Transaction) -> DaVerificationResult {
         .try_into()
         .expect("payload length checked by parser");
     let actual_version = u32::from_be_bytes(version_bytes);
-    if actual_version != DA_BLOB_VERSION {
+    let expected_version = da_blob_version(spec_version);
+    if actual_version != expected_version {
         return Err(DaVerificationError::CommitVersionMismatch {
-            expected: DA_BLOB_VERSION,
+            expected: expected_version,
             actual: actual_version,
         });
     }
@@ -214,9 +222,11 @@ fn verify_da_blob_metadata(
         });
     }
 
-    let expected_header: EvmHeaderSummary =
-        decode_buf_exact(last_chunk.tip_exec_header_summary().opaque_bytes())
-            .map_err(DaVerificationError::ExecHeaderSummaryDecode)?;
+    let expected_header = EvmHeaderSummary::decode_exact(
+        blob.spec_version,
+        last_chunk.tip_exec_header_summary().opaque_bytes(),
+    )
+    .map_err(DaVerificationError::ExecHeaderSummaryDecode)?;
     if blob.evm_header != expected_header {
         return Err(DaVerificationError::EvmHeaderMismatch {
             expected: expected_header,

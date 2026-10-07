@@ -16,6 +16,7 @@ mod inclusion;
 use alloy_primitives::B256;
 use alpen_common::L1DaBlockRef;
 use alpen_da_types::DaWitness;
+use alpen_params::AlpenSpecId;
 use bitcoind_async_client::traits::Reader;
 pub use dedup::{DaDedupResolver, DedupWitnessResolver};
 pub use error::DaWitnessBuildError;
@@ -29,16 +30,18 @@ use self::inclusion::{collect_l1_inclusion_blocks, reassemble_da_blob_from_txs};
 /// This is the single entry point the prover calls. It walks the batch's L1
 /// blocks, reassembles the published blob (the "established as published" handoff
 /// between the generic inclusion layer and the EVM dedup resolution), and returns
-/// the [`DaWitness`].
+/// the [`DaWitness`]. `spec_version` is the version governing the batch, which
+/// names the layout the blob was published under.
 pub async fn build_da_witness(
     da_refs: &[L1DaBlockRef],
     batch_block_hashes: &[Hash],
+    spec_version: AlpenSpecId,
     btc: &(impl Reader + Sync),
     resolver: &(impl DedupWitnessResolver + Sync),
 ) -> Result<DaWitness, DaWitnessBuildError> {
     let (blocks, included_txs) = collect_l1_inclusion_blocks(da_refs, btc).await?;
 
-    let blob = reassemble_da_blob_from_txs(&included_txs)?;
+    let blob = reassemble_da_blob_from_txs(&included_txs, spec_version)?;
 
     let block_hashes: Vec<B256> = batch_block_hashes.iter().map(|h| B256::from(h.0)).collect();
     let dedup_da_witness = resolver.resolve_dedup_witness(&blob, &block_hashes).await?;

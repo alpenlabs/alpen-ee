@@ -29,4 +29,5 @@ tracing.workspace = true
 
 [dev-dependencies]
 alpen-database = { workspace = true, features = ["test-utils"] }
+alpen-params.workspace = true
 tokio.workspace = true

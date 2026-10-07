@@ -81,6 +81,7 @@ pub fn process_ee_acct_update(
         da_witness,
         &update_pub_params,
         expected_pre_state_root,
+        spec_version,
     )
     .expect("DA witness verification failed");
 

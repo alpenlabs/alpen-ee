@@ -193,6 +193,7 @@ fn build_batch_state_diff(
 mod tests {
     use alloy_primitives::{Address, Bytes, U256};
     use alpen_da_types::EvmHeaderSummary;
+    use alpen_params::AlpenSpecId;
     use alpen_reth_statediff::AccountDiff;
 
     use super::*;
@@ -215,6 +216,7 @@ mod tests {
             .insert(code_hash, bytecode.clone());
 
         let blob = DaBlob {
+            spec_version: AlpenSpecId::V1,
             update_seq_no: 7,
             evm_header: EvmHeaderSummary {
                 block_num: 10,
@@ -222,6 +224,7 @@ mod tests {
                 base_fee: 100,
                 gas_used: 21_000,
                 gas_limit: 36_000_000,
+                da_rate: 2_500_000_000,
             },
             state_diff: filtered_diff,
         };

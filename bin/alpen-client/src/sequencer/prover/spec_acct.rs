@@ -393,6 +393,7 @@ impl AcctSpec {
         let da_witness = build_da_witness(
             &da_refs,
             &batch_block_hashes,
+            batch.spec_version(),
             &*self.btc_client,
             &da_dedup_resolver,
         )
