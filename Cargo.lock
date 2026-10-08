@@ -1147,6 +1147,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "alpen-acct-state"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alpen-acct-runtime",
+ "alpen-acct-types",
+ "strata-acct-types",
+ "strata-codec",
+ "strata-msg-fmt",
+ "strata-snark-acct-runtime",
+ "strata-snark-acct-types",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "alpen-acct-types"
 version = "0.3.0-alpha.1"
 dependencies = [
@@ -1168,6 +1182,19 @@ dependencies = [
  "thiserror 2.0.20",
  "tree_hash 0.17.0",
  "tree_hash_derive 0.17.0",
+]
+
+[[package]]
+name = "alpen-batch-replay"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alloy-primitives",
+ "alpen-da-types",
+ "alpen-reth-statediff",
+ "rsp-mpt",
+ "strata-identifiers",
+ "strata-snark-acct-types",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -1356,6 +1383,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "alpen-da-l1-extraction"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alpen-da-types",
+ "alpen-params",
+ "bitcoin",
+ "bitcoind-async-client",
+ "futures",
+ "strata-btc-types",
+ "strata-codec",
+ "strata-common",
+ "strata-identifiers",
+ "strata-l1-envelope-fmt",
+ "strata-l1-txfmt",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "alpen-da-provider"
 version = "0.3.0-alpha.1"
 dependencies = [
@@ -1425,6 +1472,55 @@ dependencies = [
 ]
 
 [[package]]
+name = "alpen-da-verifier"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alpen-acct-state",
+ "alpen-acct-types",
+ "alpen-batch-replay",
+ "alpen-chain-types",
+ "alpen-da-l1-extraction",
+ "alpen-da-provider",
+ "alpen-da-types",
+ "alpen-database",
+ "alpen-evm-ee",
+ "alpen-genesis",
+ "alpen-l1-reconstruction",
+ "alpen-params",
+ "alpen-reth-statediff",
+ "anyhow",
+ "async-trait",
+ "bitcoin",
+ "bitcoind-async-client",
+ "clap",
+ "eyre",
+ "futures",
+ "jsonrpsee",
+ "serde",
+ "serde_json",
+ "ssz",
+ "strata-acct-types",
+ "strata-btc-types",
+ "strata-codec",
+ "strata-common",
+ "strata-identifiers",
+ "strata-l1-envelope-fmt",
+ "strata-logging",
+ "strata-ol-rpc-api",
+ "strata-ol-rpc-types",
+ "strata-predicate",
+ "strata-service",
+ "strata-snark-acct-types",
+ "strata-tasks",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "toml 0.5.11",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "alpen-database"
 version = "0.3.0-alpha.1"
 dependencies = [
@@ -1432,6 +1528,8 @@ dependencies = [
  "alpen-acct-types",
  "alpen-chain-types",
  "alpen-common",
+ "alpen-da-l1-extraction",
+ "alpen-da-types",
  "alpen-mdbx",
  "alpen-params",
  "alpen-reth-statediff",
@@ -1444,10 +1542,12 @@ dependencies = [
  "hex",
  "serde",
  "serde_bytes",
+ "signet-libmdbx",
  "ssz",
  "ssz_derive",
  "ssz_types",
  "strata-acct-types",
+ "strata-codec",
  "strata-db-macros",
  "strata-db-tests",
  "strata-db-types",
@@ -1456,6 +1556,7 @@ dependencies = [
  "strata-paas",
  "strata-predicate",
  "strata-storage-common",
+ "tempfile",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
@@ -1624,6 +1725,22 @@ dependencies = [
  "strata-acct-types",
  "strata-identifiers",
  "tracing",
+]
+
+[[package]]
+name = "alpen-l1-reconstruction"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alloy-primitives",
+ "alpen-batch-replay",
+ "alpen-da-l1-extraction",
+ "alpen-da-types",
+ "alpen-params",
+ "alpen-reth-statediff",
+ "bitcoin",
+ "strata-identifiers",
+ "strata-snark-acct-types",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

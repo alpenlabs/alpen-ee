@@ -1,0 +1,20 @@
+[package]
+edition = "2021"
+name = "alpen-acct-state"
+version = "0.3.0-alpha.1"
+
+[lints]
+workspace = true
+
+[dependencies]
+alpen-acct-runtime.workspace = true
+alpen-acct-types.workspace = true
+strata-acct-types.workspace = true
+strata-snark-acct-runtime.workspace = true
+strata-snark-acct-types.workspace = true
+
+thiserror.workspace = true
+
+[dev-dependencies]
+strata-codec.workspace = true
+strata-msg-fmt.workspace = true

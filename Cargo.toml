@@ -3,11 +3,14 @@ resolver = "2"
 
 members = [
   "crates/acct-runtime",
+  "crates/acct-state",
   "crates/acct-types",
+  "crates/batch-replay",
   "crates/block-assembly",
   "crates/chain-types",
   "crates/chunk-runtime",
   "crates/common",
+  "crates/da/l1-extraction",
   "crates/da/provider",
   "crates/da/runtime",
   "crates/da/types",
@@ -18,6 +21,7 @@ members = [
   "crates/exec-chain",
   "crates/exex",
   "crates/genesis",
+  "crates/l1-reconstruction",
   "crates/mdbx",
   "crates/ol-tracker",
   "crates/params",
@@ -38,6 +42,7 @@ members = [
 
   # binaries listed separately
   "bin/alpen-client",
+  "bin/alpen-da-verifier",
   "bin/dbconsole",
   "bin/openrpc-spec",
   "bin/prover-perf",
@@ -69,11 +74,14 @@ rustdoc.all = "warn"
 
 [workspace.dependencies]
 alpen-acct-runtime = { path = "crates/acct-runtime" }
+alpen-acct-state = { path = "crates/acct-state" }
 alpen-acct-types = { path = "crates/acct-types" }
+alpen-batch-replay = { path = "crates/batch-replay" }
 alpen-block-assembly = { path = "crates/block-assembly" }
 alpen-chain-types = { path = "crates/chain-types" }
 alpen-chunk-runtime = { path = "crates/chunk-runtime" }
 alpen-common = { path = "crates/common" }
+alpen-da-l1-extraction = { path = "crates/da/l1-extraction" }
 alpen-da-provider = { path = "crates/da/provider" }
 alpen-da-runtime = { path = "crates/da/runtime" }
 alpen-da-types = { path = "crates/da/types" }
@@ -84,6 +92,7 @@ alpen-evm-ee = { path = "crates/evm-ee" }
 alpen-exec-chain = { path = "crates/exec-chain" }
 alpen-exex = { path = "crates/exex" }
 alpen-genesis = { path = "crates/genesis" }
+alpen-l1-reconstruction = { path = "crates/l1-reconstruction" }
 alpen-mdbx = { path = "crates/mdbx" }
 alpen-ol-tracker = { path = "crates/ol-tracker" }
 alpen-params = { path = "crates/params" }
@@ -386,6 +395,7 @@ tracing = "0.1"
 tracing-appender = "0.2"
 tracing-opentelemetry = "0.32"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+url = { version = "2.5", features = ["serde"] }
 uuid = { version = "1.23", features = ["v4", "serde"] }
 zeroize = { version = "1.8.1", features = ["derive"] }
 

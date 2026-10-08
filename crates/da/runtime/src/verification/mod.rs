@@ -1,6 +1,6 @@
 //! Proof-side DA correctness checks for the EE outer proof.
 //!
-//! Reassembles the DA blob from witnessed commit/reveal transactions,
+//! Decodes the DA blob from witnessed commit/reveal transactions,
 //! verifies the commit marker matches the active proof's magic/version,
 //! ties the parsed `EvmHeaderSummary` and bytecodes to chunk public values,
 //! and applies the state diff to the partial pre-state to confirm it
@@ -16,8 +16,8 @@ use alloy_primitives::{keccak256, B256};
 use alpen_acct_runtime::ArchivedEePrivateInput;
 use alpen_chain_types::ChunkTransition;
 use alpen_da_types::{
-    compute_bitcoin_merkle_root_from_proof, da_blob_version, extract_da_chunks as parse_da_chunks,
-    read_commit_marker_payload, reassemble_da_blob, ArchivedBitcoinMerkleProof,
+    compute_bitcoin_merkle_root_from_proof, da_blob_version, decode_da_blob_from_chunks,
+    extract_da_chunks as parse_da_chunks, read_commit_marker_payload, ArchivedBitcoinMerkleProof,
     ArchivedDaBlockWitness, ArchivedDaWitness, ArchivedDedupWitness, DaBlob, DaParseError,
     EvmHeaderSummary, EE_DA_MAGIC_BYTES,
 };
@@ -38,7 +38,7 @@ use strata_snark_acct_types::{LedgerRefs, UpdateProofPubParams};
 ///
 /// An update with no DA witness blocks AND no chunks is treated as a valid
 /// empty-update no-op; any other combination of emptiness is an error. The
-/// reassembled blob is verified against the chunk public values internally
+/// decoded blob is verified against the chunk public values internally
 /// (header summary, deployed bytecodes, state-diff applied to the partial
 /// pre-state matches the last chunk's `tip_state_root`). there is no
 /// downstream consumer for the blob itself, so nothing is returned.
@@ -70,8 +70,8 @@ pub fn verify_da_witness(
     }
 
     let encoded_chunks = extract_and_verify_da_chunks(included_txs.iter(), spec_version)?;
-    let blob = reassemble_da_blob(&encoded_chunks, spec_version)
-        .map_err(DaVerificationError::Reassembly)?;
+    let blob = decode_da_blob_from_chunks(&encoded_chunks, spec_version)
+        .map_err(DaVerificationError::Decode)?;
     let last_chunk = decode_last_chunk_transition(ee_input)?;
     verify_da_blob_metadata(
         &blob,

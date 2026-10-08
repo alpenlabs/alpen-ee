@@ -1,0 +1,66 @@
+[package]
+edition.workspace = true
+name = "alpen-da-verifier"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "alpen-da-verifier"
+path = "src/main.rs"
+
+[dependencies]
+alpen-acct-state.workspace = true
+alpen-acct-types.workspace = true
+alpen-batch-replay.workspace = true
+alpen-da-l1-extraction.workspace = true
+alpen-database.workspace = true
+alpen-evm-ee.workspace = true
+alpen-genesis.workspace = true
+alpen-l1-reconstruction.workspace = true
+alpen-params.workspace = true
+strata-acct-types.workspace = true
+strata-btc-types.workspace = true
+strata-codec.workspace = true
+strata-common = { workspace = true, features = ["async"] }
+strata-identifiers.workspace = true
+strata-logging.workspace = true
+strata-ol-rpc-api = { workspace = true, features = ["client"] }
+strata-ol-rpc-types.workspace = true
+strata-service.workspace = true
+strata-snark-acct-types.workspace = true
+strata-tasks.workspace = true
+
+anyhow.workspace = true
+async-trait.workspace = true
+bitcoin.workspace = true
+bitcoind-async-client.workspace = true
+clap = { workspace = true, features = [
+  "error-context",
+  "help",
+  "std",
+  "usage",
+] }
+eyre.workspace = true
+futures.workspace = true
+jsonrpsee = { workspace = true, features = ["http-client"] }
+serde.workspace = true
+serde_json.workspace = true
+ssz.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tracing.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+alpen-chain-types.workspace = true
+alpen-da-provider.workspace = true
+alpen-da-types.workspace = true
+alpen-reth-statediff = { workspace = true, features = ["test-utils"] }
+strata-l1-envelope-fmt = { workspace = true, features = ["test-utils"] }
+strata-predicate.workspace = true
