@@ -31,6 +31,7 @@ revm-primitives.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+alpen-params = { workspace = true, features = ["test-utils"] }
 secp256k1.workspace = true
 strata-crypto.workspace = true
 proptest.workspace = true

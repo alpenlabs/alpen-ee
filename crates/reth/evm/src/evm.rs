@@ -14,7 +14,9 @@ use revm::{
 use revm_primitives::{hardfork::SpecId, U256};
 use strata_bridge_params::BridgeParams;
 
-use crate::{apis::AlpenAlloyEvm, da_fee::DA_COVERAGE_UNKNOWN, precompiles::factory};
+use crate::{
+    apis::AlpenAlloyEvm, da_fee::DA_COVERAGE_UNKNOWN, precompiles::create_precompiles_map,
+};
 
 /// Per-transaction gas-limit cap, as a multiple of the block gas limit.
 ///
@@ -102,7 +104,7 @@ impl EvmFactory for AlpenEvmFactory {
                 .map_or(tx_gas_cap, |c| c.min(tx_gas_cap)),
         );
 
-        let precompiles = factory::create_precompiles_map(input.cfg_env.spec, self.bridge_params);
+        let precompiles = create_precompiles_map(input.cfg_env.spec, self.bridge_params);
 
         let evm = Context::mainnet()
             .with_db(db)

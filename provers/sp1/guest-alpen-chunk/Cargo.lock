@@ -2955,13 +2955,14 @@ dependencies = [
 [[package]]
 name = "p256"
 version = "0.13.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9863ad85fa8f4460f9c48cb909d38a0d689dba1f6f6988a5e3e0d31071bcd4b"
+source = "git+https://github.com/sp1-patches/elliptic-curves?tag=patch-p256-13.2-sp1-6.0.0#923794180d3d7716ba3eed94459d4b434f844090"
 dependencies = [
  "ecdsa 0.16.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "elliptic-curve",
+ "hex",
  "primeorder",
  "sha2",
+ "sp1-lib",
 ]
 
 [[package]]
@@ -3297,9 +3298,8 @@ dependencies = [
 
 [[package]]
 name = "primeorder"
-version = "0.13.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "353e1ca18966c16d9deb1c69278edbc5f194139612772bd9537af60ac231e1e6"
+version = "0.13.1"
+source = "git+https://github.com/sp1-patches/elliptic-curves?tag=patch-p256-13.2-sp1-6.0.0#923794180d3d7716ba3eed94459d4b434f844090"
 dependencies = [
  "elliptic-curve",
 ]

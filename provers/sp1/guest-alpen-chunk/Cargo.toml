@@ -18,3 +18,4 @@ sha2 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", package = "sh
 substrate-bn = { git = "https://github.com/sp1-patches/bn", tag = "patch-0.6.0-sp1-6.0.0-substrate-bn" }
 sha3 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", package = "sha3", tag = "patch-sha3-0.11.0-sp1-6.0.0" }
 k256 = { git = "https://github.com/sp1-patches/elliptic-curves", tag = "patch-k256-13.4-sp1-6.0.0" }
+p256 = { git = "https://github.com/sp1-patches/elliptic-curves", tag = "patch-p256-13.2-sp1-6.0.0" }

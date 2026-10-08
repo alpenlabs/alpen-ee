@@ -1,23 +1,26 @@
 use std::borrow::Cow;
 
+use reth_evm::precompiles::DynPrecompile;
 use revm::precompile::{
-    eth_precompile_fn, utilities::right_pad, EthPrecompileOutput, EthPrecompileResult, Precompile,
-    PrecompileHalt, PrecompileId,
+    eth_precompile_fn, utilities::right_pad, EthPrecompileOutput, EthPrecompileResult,
+    PrecompileFn, PrecompileHalt, PrecompileId,
 };
 use revm_primitives::Bytes;
 use strata_crypto::schnorr::verify_schnorr_sig;
 use strata_primitives::buf::{Buf32, Buf64};
 
-use crate::constants::{SCHNORR_PRECOMPILE_ADDRESS, SCHNORR_PRECOMPILE_PRECOMPILE_ID};
+use crate::constants::SCHNORR_PRECOMPILE_PRECOMPILE_ID;
 
 /// Fixed raw EVM gas charged for Schnorr signature verification.
 const SCHNORR_VERIFY_GAS: u64 = 3_000;
 
-pub(crate) const SCHNORR_SIGNATURE_VALIDATION: Precompile = Precompile::new(
-    PrecompileId::Custom(Cow::Borrowed(SCHNORR_PRECOMPILE_PRECOMPILE_ID)),
-    SCHNORR_PRECOMPILE_ADDRESS,
-    verify_schnorr_precompile_fn,
-);
+/// Returns the Schnorr signature verification precompile.
+pub(crate) fn schnorr_signature_validation() -> DynPrecompile {
+    DynPrecompile::from((
+        PrecompileId::Custom(Cow::Borrowed(SCHNORR_PRECOMPILE_PRECOMPILE_ID)),
+        verify_schnorr_precompile_fn as PrecompileFn,
+    ))
+}
 
 // Adapts the gas-limit-only precompile to revm's reservoir-aware `PrecompileFn` signature.
 eth_precompile_fn!(verify_schnorr_precompile_fn, verify_schnorr_precompile);
