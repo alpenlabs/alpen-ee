@@ -25,7 +25,7 @@ pub use traits::{
     },
     ol_client::{
         chain_status_checked, get_inbox_messages_checked, OLAccountStateView, OLBlockData,
-        OLClient, OLClientError, SequencerOLClient,
+        OLBlockLink, OLClient, OLClientError, SequencerOLClient,
     },
     prover::{BatchProver, ProofGenerationStatus},
     storage::{
