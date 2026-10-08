@@ -1,22 +1,12 @@
-# Builds the alpen-client Docker image on merge to main (or manual dispatch)
-# and pushes to the shared ECR account (private) and the public ECR gallery.
+# Builds the alpen-client Docker image on manual dispatch and pushes it to the
+# shared ECR account (private) and the public ECR gallery.
+#
+# The image does not ship the SP1 guest ELFs. Each network's guests bake in
+# its params, so release.yml publishes them per network instead.
 
 name: CI — Build and Push Images
 
 on:
-  schedule:
-    - cron: '30 4,10,16,22 * * *'  # Every 6hr
-  push:
-    branches: [main]
-    paths:
-      # Only trigger when source code or Dockerfiles change
-      - "bin/**"
-      - "crates/**"
-      - "docker/alpen-client/**"
-      - "provers/sp1/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "rust-toolchain.toml"
   workflow_dispatch:
     inputs:
       ref:
@@ -34,124 +24,10 @@ concurrency:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Skip scheduled runs if no new commits since last successful build
-  # ---------------------------------------------------------------------------
-  check-new-commits:
-    name: Check for new commits
-    if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    permissions:
-      actions: read
-    outputs:
-      should_run: ${{ steps.check.outputs.should_run }}
-    steps:
-      - name: Check for new commits since last success
-        id: check
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          REPO="${{ github.repository }}"
-          LAST_SUCCESS=$(gh run list -R "${REPO}" \
-            --workflow ci-build.yml \
-            --branch main \
-            --status success \
-            --limit 1 \
-            --json headSha \
-            --jq '.[0].headSha // ""')
-
-          if [ "${LAST_SUCCESS}" = "${GITHUB_SHA}" ]; then
-            echo "No new commits since last successful build — skipping"
-            echo "should_run=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "New commits found — running"
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
-          fi
-
-  # ---------------------------------------------------------------------------
-  # Build SP1 guest ELFs consumed by the alpen-client image
-  # ---------------------------------------------------------------------------
-  build-sp1-artifacts:
-    name: Build SP1 artifacts
-    needs: [check-new-commits]
-    if: always() && (needs.check-new-commits.result == 'skipped' || needs.check-new-commits.outputs.should_run == 'true')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      # Inline cleanup before checkout — the local composite action needs the
-      # repo to exist, but the repo is too large to clone without freeing space.
-      - name: Free up disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /usr/local/.ghcup \
-            /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" /usr/share/swift \
-            /usr/local/share/powershell /usr/local/share/chromium /usr/local/lib/node_modules
-
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.ref || github.sha }}
-          persist-credentials: false
-
-      - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable (pinned 2026-04-21)
-        with:
-          toolchain: stable
-
-      - name: Install protoc
-        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          key: sp1-artifacts-builder
-          cache-on-failure: true
-
-      - name: Install SP1 core runner override
-        uses: $/.github/actions/sp1-core-runner-override
-
-      - name: Install SP1 toolchain
-        run: |
-          curl -fsSL --proto '=https' --tlsv1.2 https://sp1.succinct.xyz | bash
-          ~/.sp1/bin/sp1up
-          echo "$HOME/.sp1/bin" >> "$GITHUB_PATH"
-          export PATH="$HOME/.sp1/bin:$PATH"
-          cargo prove --version
-
-      - name: Build SP1 guest ELFs
-        env:
-          # Canonical dev-network params baked into the guest ELFs. Without this,
-          # the build script skips guest compilation entirely (see provers/sp1/build.rs).
-          # Must be absolute — build scripts run with CWD set to provers/sp1/, not
-          # the repo root, so a relative path here would resolve against the wrong base.
-          SP1_ALPEN_PARAMS_PATH: ${{ github.workspace }}/params/dev.json
-        run: |
-          # The guest builder's build script compiles the guest programs and
-          # writes the ELFs to provers/sp1/generated/.
-          cargo build --release -p alpen-sp1-guest-builder
-
-          mkdir -p artifacts/elfs/sp1
-          cp -v provers/sp1/generated/guest-alpen-chunk.elf \
-               provers/sp1/generated/guest-alpen-acct.elf \
-            artifacts/elfs/sp1/
-
-          ls -la artifacts/ artifacts/elfs/sp1/
-
-      - name: Upload SP1 artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: sp1-artifacts
-          path: artifacts/
-          retention-days: 1
-
-  # ---------------------------------------------------------------------------
   # Build and push the alpen-client image
   # ---------------------------------------------------------------------------
   build-and-push:
     name: Build alpen-client
-    needs: [build-sp1-artifacts]
-    if: always() && needs.build-sp1-artifacts.result == 'success'
     runs-on: ubuntu-latest
     environment: prod
     permissions:
@@ -205,20 +81,6 @@ jobs:
         run: |
           aws ecr-public get-login-password --region us-east-1 \
             | docker login --username AWS --password-stdin public.ecr.aws
-
-      - name: Download SP1 artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: sp1-artifacts
-          path: sp1-artifacts/
-
-      - name: Stage SP1 ELFs for alpen-client
-        run: |
-          mkdir -p docker/alpen-client/artifacts/elfs/sp1
-          cp -v sp1-artifacts/elfs/sp1/guest-alpen-chunk.elf \
-               sp1-artifacts/elfs/sp1/guest-alpen-acct.elf \
-            docker/alpen-client/artifacts/elfs/sp1/
-          ls -la docker/alpen-client/artifacts/elfs/sp1/
 
       # --- Build and push via Buildx ------------------------------------------
       - name: Build and push Docker image

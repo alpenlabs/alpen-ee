@@ -16,7 +16,7 @@ post-split params/keys flow is in place (see the repo-split notes).
 
 | Directory | Image |
 |---|---|
-| `alpen-client/` | EE node, plus the `dbconsole` database console (`Dockerfile` for CI/registry builds, `Dockerfile.local` for local compose builds) |
+| `alpen-client/` | EE node, plus the `dbconsole` database console |
 | `bitcoind/` | Regtest bitcoind used by the test composes |
 
 ## Configs

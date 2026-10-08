@@ -75,9 +75,6 @@ RUN mkdir -p /app/data /app/.cache /app/.local/share && \
 COPY --from=builder /usr/local/bin/alpen-client /usr/local/bin/alpen-client
 COPY --from=builder /usr/local/bin/dbconsole /usr/local/bin/dbconsole
 COPY docker/alpen-client/entrypoint.sh /usr/local/bin/entrypoint.sh
-# SP1 guest ELFs staged by CI (build-sp1-artifacts job).
-# For local builds use Dockerfile.local instead (no ELFs, uses the native prover backend).
-COPY docker/alpen-client/artifacts/elfs /app/elfs
 RUN chmod 0555 /usr/local/bin/alpen-client /usr/local/bin/dbconsole /usr/local/bin/entrypoint.sh
 
 USER alpen
