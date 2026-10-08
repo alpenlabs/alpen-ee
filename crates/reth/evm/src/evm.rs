@@ -104,7 +104,7 @@ impl EvmFactory for AlpenEvmFactory {
                 .map_or(tx_gas_cap, |c| c.min(tx_gas_cap)),
         );
 
-        let precompiles = create_precompiles_map(self.bridge_params);
+        let precompiles = create_precompiles_map(input.cfg_env.spec, self.bridge_params);
 
         let evm = Context::mainnet()
             .with_db(db)
