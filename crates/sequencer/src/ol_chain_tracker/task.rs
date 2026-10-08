@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-use alpen_common::{
-    get_inbox_messages_checked, ExecBlockStorage, OLBlockData, OLFinalizedStatus, SequencerOLClient,
-};
+use alpen_common::{ExecBlockStorage, OLBlockData, OLFinalizedStatus, SequencerOLClient};
 use eyre::eyre;
 use strata_identifiers::OLBlockCommitment;
 use tokio::{
@@ -11,7 +9,10 @@ use tokio::{
 };
 use tracing::{error, warn};
 
-use super::state::OLChainTrackerState;
+use super::{
+    fetch::{fetch_blocks_after, Extension},
+    state::OLChainTrackerState,
+};
 use crate::ol_chain_tracker::state::InboxMessages;
 
 pub(crate) enum OLChainTrackerQuery {
@@ -146,35 +147,24 @@ async fn track_ol_state(
         return Ok(TrackAction::Reorg(remote_finalized_ol_block));
     }
     if remote_finalized_ol_block.slot() > best_ol_block.slot() {
-        let blocks = get_inbox_messages_checked(
-            ol_client,
-            best_ol_block.slot(),
-            remote_finalized_ol_block.slot(),
-        )
-        .await?;
+        let extension =
+            fetch_blocks_after(ol_client, best_ol_block, remote_finalized_ol_block.slot()).await?;
 
-        let (block_at_finalized_height, blocks) = {
-            let mut iter = blocks.into_iter();
-            let first = iter.next().expect("checked");
+        return match extension {
+            Extension::Blocks(blocks) => Ok(TrackAction::Extend(blocks)),
+            Extension::Diverged(remote_block) => {
+                // The block we know to be finalized locally is not present in the OL chain.
+                // OL chain has seen a deep reorg.
+                // Avoid corrupting local data and exit to await manual resolution.
+                warn!(
+                    local = ?best_ol_block,
+                    remote = ?remote_block,
+                    "local finalized OL block not present in OL"
+                );
 
-            (first, iter)
+                Ok(TrackAction::Reorg(remote_block))
+            }
         };
-
-        if block_at_finalized_height.commitment != best_ol_block {
-            // The block we know to be finalized locally is not present in the OL chain.
-            // OL chain has seen a deep reorg.
-            // Avoid corrupting local data and exit to await manual resolution.
-
-            warn!(
-                local = ?best_ol_block,
-                remote = ?block_at_finalized_height.commitment,
-                "local finalized OL block not present in OL"
-            );
-
-            return Ok(TrackAction::Reorg(block_at_finalized_height.commitment));
-        }
-
-        return Ok(TrackAction::Extend(blocks.collect()));
     }
 
     unreachable!("all valid cases should have been handled above");
@@ -205,7 +195,7 @@ mod tests {
     use super::*;
     use crate::ol_chain_tracker::test_utils::{
         create_block_data_chain, create_mock_exec_record, create_ol_block_chain, make_block,
-        make_block_data, make_block_with_id,
+        make_block_link, make_block_with_id,
     };
 
     mod track_ol_state_tests {
@@ -314,14 +304,20 @@ mod tests {
             let state = OLChainTrackerState::new_empty(local_block, 0);
             let ol_status = make_finalized_status(remote_block);
 
-            // Create block chain from slot 10 to 13
-            let ol_blocks = create_ol_block_chain(10, 4); // slots 10, 11, 12, 13
+            // Create block chain from slot 11 to 13
+            let ol_blocks = create_ol_block_chain(11, 3); // slots 11, 12, 13
             let block_data = create_block_data_chain(&ol_blocks, 0);
 
             let mut mock_client = MockSequencerOLClient::new();
             mock_client
+                .expect_get_block_link()
+                .withf(|slot| *slot == 11)
+                .times(1)
+                .returning(move |_| Ok(make_block_link(make_block(11), local_block)));
+            // The local block itself is not fetched again.
+            mock_client
                 .expect_get_inbox_messages()
-                .withf(|min, max| *min == 10 && *max == 13)
+                .withf(|min, max| *min == 11 && *max == 13)
                 .times(1)
                 .returning(move |_, _| Ok(block_data.clone()));
 
@@ -331,7 +327,6 @@ mod tests {
 
             match result {
                 TrackAction::Extend(blocks) => {
-                    // Should return blocks 11, 12, 13 (excluding the first one which is local)
                     assert_eq!(blocks.len(), 3);
                     assert_eq!(blocks[0].commitment.slot(), 11);
                     assert_eq!(blocks[1].commitment.slot(), 12);
@@ -357,20 +352,14 @@ mod tests {
             let state = OLChainTrackerState::new_empty(local_block, 0);
             let ol_status = make_finalized_status(remote_block);
 
-            // Remote has a different block at slot 10
+            // Remote block at slot 11 builds on a different block at slot 10
             let remote_block_at_10 = make_block_with_id(10, 0xBB);
-            let block_data = vec![
-                make_block_data(remote_block_at_10, vec![], 0),
-                make_block_data(make_block(11), vec![], 0),
-                make_block_data(make_block(12), vec![], 0),
-                make_block_data(make_block(13), vec![], 0),
-            ];
 
             let mut mock_client = MockSequencerOLClient::new();
             mock_client
-                .expect_get_inbox_messages()
+                .expect_get_block_link()
                 .times(1)
-                .returning(move |_, _| Ok(block_data.clone()));
+                .returning(move |_| Ok(make_block_link(make_block(11), remote_block_at_10)));
 
             let result = track_ol_state(&state, ol_status, &mock_client)
                 .await
@@ -401,6 +390,10 @@ mod tests {
             let ol_status = make_finalized_status(remote_block);
 
             let mut mock_client = MockSequencerOLClient::new();
+            mock_client
+                .expect_get_block_link()
+                .times(1)
+                .returning(move |_| Ok(make_block_link(make_block(11), local_block)));
             mock_client
                 .expect_get_inbox_messages()
                 .times(1)

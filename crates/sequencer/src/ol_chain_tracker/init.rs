@@ -1,7 +1,9 @@
-use alpen_common::{get_inbox_messages_checked, ExecBlockStorage, SequencerOLClient};
+use alpen_common::{ExecBlockStorage, SequencerOLClient};
 use eyre::eyre;
+use strata_identifiers::OLBlockCommitment;
 use tracing::error;
 
+use super::fetch::{fetch_blocks_after, Extension};
 use crate::OLChainTrackerState;
 
 /// Initializes tracker state by syncing from local storage and the OL client.
@@ -37,42 +39,38 @@ pub async fn init_ol_chain_tracker_state<TStorage: ExecBlockStorage, TClient: Se
         ));
     }
 
+    // The exec block records the OL's inbox index at its OL block, so the OL
+    // doesn't have to serve that block again.
+    let mut state = OLChainTrackerState::new_empty(
+        local_finalized_ol_block,
+        finalized_exec_block.next_inbox_msg_idx(),
+    );
+
+    if remote_finalized_ol_block.slot() == local_finalized_ol_block.slot() {
+        if remote_finalized_ol_block != local_finalized_ol_block {
+            return Err(deep_reorg_error(
+                local_finalized_ol_block,
+                remote_finalized_ol_block,
+            ));
+        }
+        return Ok(state);
+    }
+
     // TODO(STR-3682): retry
     // TODO(STR-3682): chunk calls by slot range
-    let blocks = get_inbox_messages_checked(
+    let extension = fetch_blocks_after(
         ol_client,
-        local_finalized_ol_block.slot(),
+        local_finalized_ol_block,
         remote_finalized_ol_block.slot(),
     )
     .await?;
 
-    let (block_at_finalized_height, blocks) = {
-        let mut iter = blocks.into_iter();
-        // Safe: get_inbox_messages_checked guarantees (max_slot - min_slot + 1) >= 1 blocks.
-        let first = iter.next().expect("at least one block guaranteed");
-
-        (first, iter)
+    let blocks = match extension {
+        Extension::Blocks(blocks) => blocks,
+        Extension::Diverged(remote_block) => {
+            return Err(deep_reorg_error(local_finalized_ol_block, remote_block));
+        }
     };
-
-    if block_at_finalized_height.commitment != local_finalized_ol_block {
-        // The block we know to be finalized locally is not present in the OL chain.
-        // OL chain has seen a deep reorg.
-        // Avoid corrupting local data and exit to await manual resolution.
-        error!(
-            local = ?local_finalized_ol_block,
-            remote = ?block_at_finalized_height.commitment,
-            "local finalized OL block not present in OL"
-        );
-
-        return Err(eyre!(
-            "local finalized state not present in OL chain. Deep reorg detected."
-        ));
-    }
-
-    let mut state = OLChainTrackerState::new_empty(
-        local_finalized_ol_block,
-        block_at_finalized_height.next_inbox_msg_idx,
-    );
 
     // Everything looks ok now. Build local state.
     for block in blocks {
@@ -86,6 +84,20 @@ pub async fn init_ol_chain_tracker_state<TStorage: ExecBlockStorage, TClient: Se
     Ok(state)
 }
 
+/// Logs and builds the error for a local finalized OL block that the OL chain doesn't
+/// contain.
+///
+/// The OL chain has seen a deep reorg. Exiting avoids corrupting local data while
+/// waiting for manual resolution.
+fn deep_reorg_error(local: OLBlockCommitment, remote: OLBlockCommitment) -> eyre::Report {
+    error!(
+        ?local,
+        ?remote,
+        "local finalized OL block not present in OL"
+    );
+    eyre!("local finalized state not present in OL chain. Deep reorg detected.")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -97,7 +109,8 @@ mod tests {
 
         use super::*;
         use crate::ol_chain_tracker::test_utils::{
-            create_block_data_chain, create_mock_exec_record, make_block_data, make_block_with_id,
+            create_block_data_chain, create_mock_exec_record,
+            create_mock_exec_record_with_inbox_idx, make_block_link, make_block_with_id,
             make_chain_status,
         };
 
@@ -138,6 +151,18 @@ mod tests {
                 .returning(move |_, _| Ok(block_data.clone()));
         }
 
+        /// Sets up mock OL client to return the given block link.
+        fn setup_mock_client_block_link(
+            mock_client: &mut MockSequencerOLClient,
+            link: alpen_common::OLBlockLink,
+        ) {
+            mock_client
+                .expect_get_block_link()
+                .withf(move |slot| *slot == link.commitment.slot())
+                .times(1)
+                .returning(move |_| Ok(link));
+        }
+
         // =========================================================================
         // Tests
         // =========================================================================
@@ -149,21 +174,17 @@ mod tests {
             // Local chain:   [...] -> [slot=10, id=10] (finalized)
             // Remote chain:  [...] -> [slot=10, id=10] (finalized)
             //
-            // Expected: Empty state with base at slot 10
+            // Expected: Empty state with base at slot 10, no blocks fetched
 
             let finalized_block = make_block_with_id(10, 10);
             let exec_record = create_mock_exec_record(finalized_block);
             let chain_status = make_chain_status(finalized_block);
-            // When local == remote, get_inbox_messages_checked(10, 10) is called
-            // which returns a single block (the finalized block itself)
-            let block_data = vec![make_block_data(finalized_block, vec![], 0)];
 
             let mut mock_storage = MockExecBlockStorage::new();
             let mut mock_client = MockSequencerOLClient::new();
 
             setup_mock_storage_finalized(&mut mock_storage, exec_record);
             setup_mock_client_chain_status(&mut mock_client, chain_status);
-            setup_mock_client_inbox_messages(&mut mock_client, block_data);
 
             let state = init_ol_chain_tracker_state(&mock_storage, &mock_client)
                 .await
@@ -171,6 +192,32 @@ mod tests {
 
             assert_eq!(state.best_block(), finalized_block);
             assert!(state.blocks().is_empty());
+        }
+
+        #[tokio::test]
+        async fn takes_base_inbox_idx_from_local_record() {
+            // Scenario: Local and remote are synced; the local exec record says the
+            // OL inbox index at its OL block is 7.
+            //
+            // Expected: The tracker's base index is 7, without asking the OL.
+
+            let finalized_block = make_block_with_id(10, 10);
+            let exec_record = create_mock_exec_record_with_inbox_idx(finalized_block, 7);
+            let chain_status = make_chain_status(finalized_block);
+
+            let mut mock_storage = MockExecBlockStorage::new();
+            let mut mock_client = MockSequencerOLClient::new();
+
+            setup_mock_storage_finalized(&mut mock_storage, exec_record);
+            setup_mock_client_chain_status(&mut mock_client, chain_status);
+
+            let state = init_ol_chain_tracker_state(&mock_storage, &mock_client)
+                .await
+                .unwrap();
+
+            let messages = state.get_inbox_messages(11, 11).unwrap();
+            assert!(messages.messages().is_empty());
+            assert_eq!(messages.next_inbox_msg_idx(), 7);
         }
 
         #[tokio::test]
@@ -186,9 +233,8 @@ mod tests {
             let local_finalized = make_block_with_id(10, 10);
             let remote_finalized = make_block_with_id(13, 13);
 
-            // Create block chain from slot 10 to 13
-            // Use make_block_with_id to ensure block at slot 10 matches local_finalized
-            let ol_blocks: Vec<_> = (10..=13)
+            // Blocks after the local finalized block
+            let ol_blocks: Vec<_> = (11..=13)
                 .map(|slot| make_block_with_id(slot, slot as u8))
                 .collect();
             let block_data = create_block_data_chain(&ol_blocks, 0);
@@ -201,6 +247,10 @@ mod tests {
 
             setup_mock_storage_finalized(&mut mock_storage, exec_record);
             setup_mock_client_chain_status(&mut mock_client, chain_status);
+            setup_mock_client_block_link(
+                &mut mock_client,
+                make_block_link(ol_blocks[0], local_finalized),
+            );
             setup_mock_client_inbox_messages(&mut mock_client, block_data);
 
             let state = init_ol_chain_tracker_state(&mock_storage, &mock_client)
@@ -275,7 +325,7 @@ mod tests {
 
         #[tokio::test]
         async fn errors_on_deep_reorg() {
-            // Scenario: Same slot but different block ID (deep reorg)
+            // Scenario: Remote's next block builds on a different block (deep reorg)
             //
             // Local chain:   [...] -> [slot=10, id=0xAA] (finalized)
             // Remote chain:  [...] -> [slot=10, id=0xBB] -> [slot=11] (finalized)
@@ -285,14 +335,7 @@ mod tests {
 
             let local_finalized = make_block_with_id(10, 0xAA);
             let remote_finalized = make_block_with_id(11, 11);
-
-            // Remote returns different block at slot 10
             let remote_block_at_10 = make_block_with_id(10, 0xBB);
-            let remote_block_at_11 = make_block_with_id(11, 11);
-            let block_data = vec![
-                make_block_data(remote_block_at_10, vec![], 0),
-                make_block_data(remote_block_at_11, vec![], 0),
-            ];
 
             let exec_record = create_mock_exec_record(local_finalized);
             let chain_status = make_chain_status(remote_finalized);
@@ -302,11 +345,43 @@ mod tests {
 
             setup_mock_storage_finalized(&mut mock_storage, exec_record);
             setup_mock_client_chain_status(&mut mock_client, chain_status);
-            setup_mock_client_inbox_messages(&mut mock_client, block_data);
+            setup_mock_client_block_link(
+                &mut mock_client,
+                make_block_link(remote_finalized, remote_block_at_10),
+            );
 
             let result = init_ol_chain_tracker_state(&mock_storage, &mock_client).await;
 
             assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("Deep reorg detected"));
+        }
+
+        #[tokio::test]
+        async fn errors_on_same_slot_different_block() {
+            // Scenario: Remote finalized block is at the local slot but differs
+            //
+            // Local chain:   [...] -> [slot=10, id=0xAA] (finalized)
+            // Remote chain:  [...] -> [slot=10, id=0xBB] (finalized)
+            //
+            // Expected: Error "Deep reorg detected"
+
+            let local_finalized = make_block_with_id(10, 0xAA);
+            let remote_finalized = make_block_with_id(10, 0xBB);
+
+            let exec_record = create_mock_exec_record(local_finalized);
+            let chain_status = make_chain_status(remote_finalized);
+
+            let mut mock_storage = MockExecBlockStorage::new();
+            let mut mock_client = MockSequencerOLClient::new();
+
+            setup_mock_storage_finalized(&mut mock_storage, exec_record);
+            setup_mock_client_chain_status(&mut mock_client, chain_status);
+
+            let result = init_ol_chain_tracker_state(&mock_storage, &mock_client).await;
+
             assert!(result
                 .unwrap_err()
                 .to_string()
@@ -359,6 +434,10 @@ mod tests {
 
             setup_mock_storage_finalized(&mut mock_storage, exec_record);
             setup_mock_client_chain_status(&mut mock_client, chain_status);
+            setup_mock_client_block_link(
+                &mut mock_client,
+                make_block_link(remote_finalized, local_finalized),
+            );
             mock_client
                 .expect_get_inbox_messages()
                 .returning(|_, _| Err(OLClientError::network("timeout fetching messages")));
