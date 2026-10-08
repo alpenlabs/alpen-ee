@@ -157,9 +157,13 @@ impl OLChainTrackerState {
     }
 
     /// Returns inbox messages for blocks in the given slot range (inclusive).
+    ///
+    /// Errors when `from_slot` is at or below the base block. The tracker no longer holds
+    /// those blocks, so it can't return their messages. A caller asking for them is behind
+    /// the tracker, for example after a rollback of the exec chain below its tip.
     pub(crate) fn get_inbox_messages(
         &self,
-        mut from_slot: u64,
+        from_slot: u64,
         mut to_slot: u64,
     ) -> eyre::Result<InboxMessages> {
         if from_slot > to_slot {
@@ -167,22 +171,22 @@ impl OLChainTrackerState {
                 "invalid query: from > to; from = {from_slot}, to = {to_slot}"
             ));
         }
+        if from_slot <= self.base_block.slot() {
+            return Err(eyre!(
+                "invalid query: from at or below base; from = {from_slot}, base = {}",
+                self.base_block.slot()
+            ));
+        }
 
-        let (min_slot, max_slot) = match (self.blocks.front(), self.blocks.back()) {
-            (Some(min_block), Some(max_block)) => (min_block.slot(), max_block.slot()),
-            _ => {
+        // Tracked blocks start right after the base, so `from_slot` is never below the
+        // first one.
+        let max_slot = match self.blocks.back() {
+            Some(max_block) => max_block.slot(),
+            None => {
                 warn!("requested inbox messages from empty tracker");
                 return Ok(InboxMessages::new_empty(self.base_block_next_inbox_msg_idx));
             }
         };
-        if from_slot < min_slot {
-            warn!(
-                min = min_slot,
-                requested = from_slot,
-                "requested inbox messages below min slot"
-            );
-            from_slot = min_slot;
-        }
         if to_slot > max_slot {
             warn!(
                 max = max_slot,
@@ -469,7 +473,7 @@ mod tests {
 
             state.prune_blocks(block11).unwrap();
 
-            let messages = state.get_inbox_messages(11, 11).unwrap();
+            let messages = state.get_inbox_messages(12, 12).unwrap();
             assert!(messages.messages.is_empty());
             assert_eq!(messages.next_inbox_msg_idx(), 1);
         }
@@ -512,7 +516,7 @@ mod tests {
             let base = make_block(10);
             let state = OLChainTrackerState::new_empty(base, 0);
 
-            let result = state.get_inbox_messages(10, 15).unwrap();
+            let result = state.get_inbox_messages(11, 15).unwrap();
             assert!(result.messages.is_empty());
         }
 
@@ -571,7 +575,7 @@ mod tests {
         }
 
         #[test]
-        fn clamps_from_slot_to_min() {
+        fn errors_when_from_slot_at_or_below_base() {
             let base = make_block(10);
             let mut state = OLChainTrackerState::new_empty(base, 0);
 
@@ -582,10 +586,13 @@ mod tests {
                 .append_block(make_block(12), vec![make_message(200)], 2)
                 .unwrap();
 
-            // Request from slot 5, but min is 11
-            let messages = state.get_inbox_messages(5, 12).unwrap();
-            assert_eq!(messages.messages.len(), 2);
-            assert_eq!(messages.next_inbox_msg_idx(), 2);
+            for from_slot in [5, 10] {
+                let result = state.get_inbox_messages(from_slot, 12);
+                assert!(result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("from at or below base"));
+            }
         }
 
         #[test]

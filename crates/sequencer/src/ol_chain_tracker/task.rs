@@ -463,10 +463,9 @@ mod tests {
 
             // After pruning to slot 13, only slots 14 and 15 should remain
             assert_eq!(state.best_block().slot(), 15);
-            // The base should now be slot 13
-            let messages = state.get_inbox_messages(11, 13);
-            assert!(messages.is_ok());
-            assert!(messages.unwrap().messages().is_empty()); // These were pruned or clamped
+            // The base should now be slot 13, so slots up to 13 are no longer served
+            assert!(state.get_inbox_messages(11, 13).is_err());
+            assert!(state.get_inbox_messages(14, 15).is_ok());
         }
 
         #[tokio::test]
