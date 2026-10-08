@@ -1,40 +1,20 @@
-use std::env;
-
-use argh::FromArgs;
+use clap::Parser;
+use zkaleido_perf_report::GithubReportArgs;
 
 use crate::programs::GuestProgram;
 
-fn default_github_repo() -> String {
-    env::var("GITHUB_REPOSITORY").unwrap_or_default()
-}
-
 /// Evaluate the performance of SP1 on programs.
-#[derive(Debug, Clone, FromArgs)]
+#[derive(Debug, Clone, Parser)]
 pub struct EvalArgs {
-    /// whether to post on github or run locally and only log the results
-    #[argh(switch)]
-    pub post_to_gh: bool,
+    /// GitHub reporting options. The report is posted to the PR only when at least one of these is
+    /// passed.
+    #[command(flatten)]
+    pub github: Option<GithubReportArgs>,
 
-    /// the GitHub token for authentication
-    #[argh(option, default = "String::new()")]
-    pub github_token: String,
-
-    /// the GitHub PR number
-    #[argh(option, default = "String::new()")]
-    pub pr_number: String,
-
-    /// the commit hash
-    #[argh(option, default = "String::from(\"local_commit\")")]
-    pub commit_hash: String,
-
-    /// the GitHub repository in `owner/repo` format
-    #[argh(option, default = "default_github_repo()")]
-    pub github_repo: String,
-
-    /// programs to run (comma-delimited and/or repeated),
+    /// Programs to run (comma-delimited and/or repeated),
     /// e.g. `--programs alpen-chunk,alpen-acct` or `--programs alpen-chunk
-    /// --programs alpen-acct`
-    #[argh(option)]
+    /// --programs alpen-acct`.
+    #[arg(long)]
     pub programs: Vec<String>,
 }
 
