@@ -1,6 +1,6 @@
 use alpen_common::{
-    OLAccountStateView, OLBlockData, OLChainStatus, OLClient, OLClientError, SequencerOLClient,
-    SnarkAccountEpochSummary, SnarkAccountUpdateInfo,
+    OLAccountStateView, OLBlockData, OLBlockLink, OLChainStatus, OLClient, OLClientError,
+    SequencerOLClient, SnarkAccountEpochSummary, SnarkAccountUpdateInfo,
 };
 use async_trait::async_trait;
 use http::{header::AUTHORIZATION, HeaderMap, HeaderValue};
@@ -16,7 +16,7 @@ use strata_common::{
 use strata_identifiers::{
     AccountId, Epoch, EpochCommitment, Hash, L1Height, OLBlockCommitment, OLTxId,
 };
-use strata_ol_rpc_api::{OLClientRpcClient, OLSubmitRpcClient};
+use strata_ol_rpc_api::{OLClientRpcClient, OLFullNodeRpcClient, OLSubmitRpcClient};
 use strata_ol_rpc_types::{
     OLBlockTag, RpcOLTransaction, RpcSnarkAccountUpdate, RpcTransactionPayload, RpcTxConstraints,
 };
@@ -327,6 +327,29 @@ impl SequencerOLClient for RpcOLClient {
             );
         }
         Ok(blocks)
+    }
+
+    async fn get_block_link(&self, slot: u64) -> Result<OLBlockLink, OLClientError> {
+        retry_with_backoff_async(
+            "ol_client_get_block_link",
+            DEFAULT_ENGINE_CALL_MAX_RETRIES,
+            &ExponentialBackoff::default(),
+            || async {
+                let headers = call_read_rpc!(self, get_headers_in_range(slot, slot))?;
+                let [header] = headers.as_slice() else {
+                    return Err(OLClientError::UnexpectedBlockCount {
+                        expected: 1,
+                        actual: headers.len(),
+                    });
+                };
+
+                Ok(OLBlockLink {
+                    commitment: OLBlockCommitment::new(header.slot(), header.blkid()),
+                    parent_blkid: header.parent_blkid(),
+                })
+            },
+        )
+        .await
     }
 
     /// Retrieves latest account state in the OL Chain for this account.

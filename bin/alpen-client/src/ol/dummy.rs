@@ -5,7 +5,7 @@
 //! in isolation without needing to run a full OL node.
 
 #[cfg(feature = "sequencer")]
-use alpen_common::{OLAccountStateView, OLBlockData, SequencerOLClient};
+use alpen_common::{OLAccountStateView, OLBlockData, OLBlockLink, SequencerOLClient};
 use alpen_common::{OLChainStatus, OLClient, OLClientError, SnarkAccountEpochSummary};
 #[cfg(feature = "sequencer")]
 use alpen_proof_acct::EeAcctProgram;
@@ -106,6 +106,16 @@ impl SequencerOLClient for DummyOLClient {
             })
         }
         Ok(blocks)
+    }
+
+    async fn get_block_link(&self, slot: u64) -> Result<OLBlockLink, OLClientError> {
+        let parent_slot = slot
+            .checked_sub(1)
+            .ok_or_else(|| OLClientError::rpc(format!("block at slot {slot} has no parent")))?;
+        Ok(OLBlockLink {
+            commitment: self.slot_to_block_commitment(slot),
+            parent_blkid: *self.slot_to_block_commitment(parent_slot).blkid(),
+        })
     }
 
     async fn get_latest_account_state(&self) -> Result<OLAccountStateView, OLClientError> {

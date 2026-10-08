@@ -19,7 +19,7 @@ mod services;
 
 use std::sync::Arc;
 
-use alpen_common::{require_latest_batch, BlockNumHash, SequencerOLClient};
+use alpen_common::{require_latest_batch, BlockNumHash, ExecBlockStorage, SequencerOLClient};
 use alpen_database::{NodeStorage, SequencerDatabases, Stores};
 use alpen_engine::{sync_chainstate_to_engine, AlpenRethExecEngine};
 use alpen_exec_chain::{init_exec_chain_state_from_storage, ExecChainState};
@@ -188,14 +188,18 @@ async fn init_boot_state(
     storage: &NodeStorage,
     ol_client: &(impl SequencerOLClient + Send + Sync),
 ) -> eyre::Result<SequencerBootState> {
-    let ol_chain_tracker = init_ol_chain_tracker_state(storage, ol_client)
-        .instrument(info_span!("init_ol_chain_tracker", component = "alpen"))
-        .await
-        .context("ol chain tracker state initialization should not fail")?;
     let exec_chain = init_exec_chain_state_from_storage(storage)
         .instrument(info_span!("init_exec_chain", component = "alpen"))
         .await
         .context("exec chain state initialization should not fail")?;
+    let exec_tip = storage
+        .get_exec_block(exec_chain.tip_blockhash())
+        .await?
+        .ok_or_else(|| eyre::eyre!("exec chain tip block missing from storage"))?;
+    let ol_chain_tracker = init_ol_chain_tracker_state(storage, &exec_tip, ol_client)
+        .instrument(info_span!("init_ol_chain_tracker", component = "alpen"))
+        .await
+        .context("ol chain tracker state initialization should not fail")?;
     let batch_builder = init_batch_builder_state(storage)
         .instrument(info_span!("init_batch_builder", component = "alpen"))
         .await

@@ -2,7 +2,7 @@
 
 use alpen_acct_types::EeAccountState;
 use alpen_chain_types::{ExecBlockCommitment, ExecBlockPackage, ExecInputs, ExecOutputs};
-use alpen_common::{ExecBlockRecord, OLBlockData, OLChainStatus};
+use alpen_common::{ExecBlockRecord, OLBlockData, OLBlockLink, OLChainStatus};
 use alpen_params::AlpenSpecId;
 use strata_acct_types::{AccountId, BitcoinAmount, Hash, MessageEntry, MsgPayload};
 use strata_identifiers::{Buf32, EpochCommitment, OLBlockCommitment, OLBlockId};
@@ -62,6 +62,14 @@ pub(crate) fn make_block_data(
     }
 }
 
+/// Helper to create an OLBlockLink for a block and its parent.
+pub(crate) fn make_block_link(block: OLBlockCommitment, parent: OLBlockCommitment) -> OLBlockLink {
+    OLBlockLink {
+        commitment: block,
+        parent_blkid: *parent.blkid(),
+    }
+}
+
 /// Creates a chain of OL blocks starting from base_slot.
 ///
 /// Returns blocks with slots [base_slot, base_slot+1, ..., base_slot+count-1]
@@ -93,6 +101,15 @@ pub(crate) fn create_block_data_chain(
 
 /// Creates a mock ExecBlockRecord that references the given OL block.
 pub(crate) fn create_mock_exec_record(ol_block: OLBlockCommitment) -> ExecBlockRecord {
+    create_mock_exec_record_with_inbox_idx(ol_block, 0)
+}
+
+/// Creates a mock ExecBlockRecord that references the given OL block and records
+/// the given next inbox message index for it.
+pub(crate) fn create_mock_exec_record_with_inbox_idx(
+    ol_block: OLBlockCommitment,
+    next_inbox_msg_idx: u64,
+) -> ExecBlockRecord {
     let hash_bytes = [ol_block.slot() as u8; 32];
     let hash = Hash::from(Buf32::new(hash_bytes));
 
@@ -111,7 +128,7 @@ pub(crate) fn create_mock_exec_record(ol_block: OLBlockCommitment) -> ExecBlockR
         ol_block,
         1_000_000,
         Hash::default(),
-        0,
+        next_inbox_msg_idx,
         0,
         AlpenSpecId::V0,
         vec![],

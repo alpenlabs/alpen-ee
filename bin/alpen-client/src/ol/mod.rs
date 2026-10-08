@@ -4,7 +4,7 @@ mod dummy;
 mod rpc;
 
 #[cfg(feature = "sequencer")]
-use alpen_common::{OLAccountStateView, OLBlockData, SequencerOLClient};
+use alpen_common::{OLAccountStateView, OLBlockData, OLBlockLink, SequencerOLClient};
 use alpen_common::{OLChainStatus, OLClient, OLClientError, SnarkAccountEpochSummary};
 use async_trait::async_trait;
 use strata_identifiers::{Epoch, EpochCommitment};
@@ -72,6 +72,13 @@ impl SequencerOLClient for OLClientKind {
         match self {
             Self::Rpc(client) => client.get_inbox_messages(min_slot, max_slot).await,
             Self::Dummy(client) => client.get_inbox_messages(min_slot, max_slot).await,
+        }
+    }
+
+    async fn get_block_link(&self, slot: u64) -> Result<OLBlockLink, OLClientError> {
+        match self {
+            Self::Rpc(client) => client.get_block_link(slot).await,
+            Self::Dummy(client) => client.get_block_link(slot).await,
         }
     }
 

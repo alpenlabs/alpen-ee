@@ -1,6 +1,8 @@
 use async_trait::async_trait;
 use strata_acct_types::MessageEntry;
-use strata_identifiers::{Epoch, EpochCommitment, Hash, L1Height, OLBlockCommitment, OLTxId};
+use strata_identifiers::{
+    Epoch, EpochCommitment, Hash, L1Height, OLBlockCommitment, OLBlockId, OLTxId,
+};
 use strata_predicate::PredicateKey;
 use strata_snark_acct_types::{ProofState, Seqno, SnarkAccountUpdate};
 use thiserror::Error;
@@ -53,6 +55,13 @@ pub struct OLBlockData {
     pub next_inbox_msg_idx: u64,
 }
 
+/// An OL block and the ID of its parent, read from the block's header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OLBlockLink {
+    pub commitment: OLBlockCommitment,
+    pub parent_blkid: OLBlockId,
+}
+
 /// View of OL Account State used by EE.
 #[derive(Debug, Clone)]
 pub struct OLAccountStateView {
@@ -83,6 +92,12 @@ pub trait SequencerOLClient {
         min_slot: u64,
         max_slot: u64,
     ) -> Result<Vec<OLBlockData>, OLClientError>;
+
+    /// Retrieves the canonical OL block at `slot` together with its parent's ID.
+    ///
+    /// Reads only that block's header, so it works on an OL node that holds no
+    /// block bodies at or below the parent's slot.
+    async fn get_block_link(&self, slot: u64) -> Result<OLBlockLink, OLClientError>;
 
     /// Retrieves latest account state in the OL Chain for this account.
     async fn get_latest_account_state(&self) -> Result<OLAccountStateView, OLClientError>;

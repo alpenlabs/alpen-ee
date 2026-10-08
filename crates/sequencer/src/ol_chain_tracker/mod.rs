@@ -1,4 +1,5 @@
 //! Track OL chain and store inbox messages for finalized blocks for use in block assembly.
+mod fetch;
 mod handle;
 mod init;
 mod state;
