@@ -126,8 +126,11 @@ impl OLChainTrackerState {
     }
 
     /// Prunes blocks up to and including `next_base`, which becomes the new base.
+    ///
+    /// A `next_base` below the current base is a noop. After a restart the tracker can
+    /// start above the OL block of the last finalized exec block.
     pub(crate) fn prune_blocks(&mut self, next_base: OLBlockCommitment) -> eyre::Result<()> {
-        if next_base == self.base_block {
+        if next_base == self.base_block || next_base.slot() < self.base_block.slot() {
             // noop
             return Ok(());
         }
@@ -369,6 +372,20 @@ mod tests {
             let result = state.prune_blocks(base);
             assert!(result.is_ok());
             assert_eq!(state.blocks.len(), 2);
+        }
+
+        #[test]
+        fn noop_when_pruning_below_base() {
+            let base = make_block(10);
+            let mut state = OLChainTrackerState::new_empty(base, 3);
+
+            state.append_block(make_block(11), vec![], 4).unwrap();
+
+            state.prune_blocks(make_block(8)).unwrap();
+
+            assert_eq!(state.base_block, base);
+            assert_eq!(state.base_block_next_inbox_msg_idx, 3);
+            assert_eq!(state.blocks.len(), 1);
         }
 
         #[test]
