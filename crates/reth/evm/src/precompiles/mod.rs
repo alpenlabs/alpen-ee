@@ -1,42 +1,32 @@
 use std::sync::OnceLock;
 
-use revm::{
-    handler::EthPrecompiles,
-    precompile::{bls12_381, Precompiles},
-};
-use revm_primitives::hardfork::SpecId;
+use reth_evm::precompiles::{DynPrecompile, PrecompilesMap};
+use revm::precompile::{bls12_381, PrecompileId, Precompiles};
+use strata_bridge_params::BridgeParams;
+
+use crate::constants::{BRIDGEOUT_PRECOMPILE_ADDRESS, BRIDGEOUT_PRECOMPILE_ID};
 
 mod bridge;
-pub mod factory;
 mod schnorr;
 
-/// A custom precompile that contains static precompiles.
-#[expect(
-    missing_debug_implementations,
-    reason = "Precompiles struct contains static precompiles that don't need debug implementation"
-)]
-#[derive(Clone)]
-pub struct AlpenEvmPrecompiles {
-    pub inner: EthPrecompiles,
+/// Creates the precompiles of a new EVM.
+pub fn create_precompiles_map(bridge_params: BridgeParams) -> PrecompilesMap {
+    let mut precompiles = PrecompilesMap::from_static(static_precompiles());
+
+    // Bridge-out is added per EVM, not kept in the static set: it is stateful, and the closure
+    // captures the withdrawal params it validates amounts against.
+    precompiles.apply_precompile(&BRIDGEOUT_PRECOMPILE_ADDRESS, |_| {
+        Some(DynPrecompile::new_stateful(
+            PrecompileId::custom(BRIDGEOUT_PRECOMPILE_ID),
+            move |input| bridge::bridge_context_call(input, bridge_params),
+        ))
+    });
+
+    precompiles
 }
 
-impl AlpenEvmPrecompiles {
-    #[inline]
-    pub fn new(spec: SpecId) -> Self {
-        let precompiles = load_precompiles();
-        Self {
-            inner: EthPrecompiles { precompiles, spec },
-        }
-    }
-
-    #[inline]
-    pub fn precompiles(&self) -> &'static Precompiles {
-        self.inner.precompiles
-    }
-}
-
-/// Returns precompiles for the spec.
-pub fn load_precompiles() -> &'static Precompiles {
+/// Returns the precompiles that are the same for every EVM.
+fn static_precompiles() -> &'static Precompiles {
     static INSTANCE: OnceLock<Precompiles> = OnceLock::new();
     INSTANCE.get_or_init(|| {
         // Alpen EVM supports all Ethereum precompiles up to the Pectra fork.
