@@ -298,8 +298,9 @@ where
     }
 
     let evm = evm_config.evm_with_env(&mut db, evm_env);
-    let block_ctx =
-        evm_config.context_for_next_block_with(&parent_header, next_block_attrs, header_extra);
+    let block_ctx = evm_config
+        .context_for_next_block_with(&parent_header, next_block_attrs, header_extra)
+        .map_err(PayloadBuilderError::other)?;
     let mut builder = evm_config.create_block_builder(evm, &parent_header, block_ctx);
 
     // Shared handle to *this build EVM's* DA-coverage cell: the in-EVM charge writes it per
