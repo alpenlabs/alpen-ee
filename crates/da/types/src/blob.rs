@@ -13,7 +13,7 @@ pub const EE_DA_MAGIC_BYTES: [u8; 4] = *b"ALPN";
 /// Returns the DA blob version for a batch governed by `spec_version`.
 ///
 /// The commit transaction carries this version next to the EE DA magic bytes
-/// in OP_RETURN, so L1 scanners can tell which layout a reassembled blob uses.
+/// in OP_RETURN, so L1 scanners can tell which layout a decoded blob uses.
 /// The version is the spec version itself, so the two version spaces
 /// coincide, and V0 blobs keep the `0` they always carried.
 pub fn da_blob_version(spec_version: AlpenSpecId) -> u32 {
@@ -166,13 +166,26 @@ impl EvmHeaderSummary {
     }
 }
 
-/// Reassembles a [`DaBlob`] from raw chunk payloads.
+/// Decodes a [`DaBlob`] from contiguous payload bytes.
+///
+/// Trailing bytes after a complete `DaBlob` are rejected.
+/// `spec_version` names the layout the blob was encoded under.
+pub fn decode_da_blob(payload: &[u8], spec_version: AlpenSpecId) -> Result<DaBlob, CodecError> {
+    let mut dec = BufDecoder::new(payload);
+    let blob = DaBlob::decode(spec_version, &mut dec)?;
+    if dec.remaining() > 0 {
+        return Err(CodecError::ExtraInput);
+    }
+    Ok(blob)
+}
+
+/// Decodes a [`DaBlob`] across ordered payload chunks.
 ///
 /// `chunks` must be in commit-output order. The blob is decoded directly across
 /// the chunk slices (no intermediate contiguous copy), and any trailing bytes
-/// after a complete `DaBlob` are rejected — matching `decode_buf_exact`.
+/// after a complete `DaBlob` are rejected, matching contiguous decoding.
 /// `spec_version` names the layout the blob was encoded under.
-pub fn reassemble_da_blob(
+pub fn decode_da_blob_from_chunks(
     chunks: &[Vec<u8>],
     spec_version: AlpenSpecId,
 ) -> Result<DaBlob, CodecError> {
@@ -191,7 +204,7 @@ pub fn reassemble_da_blob(
 /// A [`Decoder`] that reads across a sequence of byte chunks without first
 /// concatenating them into one contiguous buffer.
 ///
-/// Lets [`reassemble_da_blob`] decode a [`DaBlob`] straight from its
+/// Lets [`decode_da_blob_from_chunks`] decode a [`DaBlob`] straight from its
 /// commit/reveal chunk payloads, avoiding an O(blob) allocation + copy on the
 /// proof-verification path.
 struct MultiSliceDecoder<'a> {
@@ -357,7 +370,7 @@ mod tests {
     }
 
     #[test]
-    fn reassembles_across_arbitrary_chunk_boundaries() {
+    fn decodes_across_arbitrary_chunk_boundaries() {
         for spec_version in VERSIONS {
             let encoded = sample_blob(spec_version).encode_to_vec().unwrap();
 
@@ -365,7 +378,8 @@ mod tests {
             // the single-buffer path (compared via re-encoding, as DaBlob is not Eq).
             for chunk_size in 1..=encoded.len() {
                 let chunks: Vec<Vec<u8>> = encoded.chunks(chunk_size).map(|c| c.to_vec()).collect();
-                let got = reassemble_da_blob(&chunks, spec_version).expect("decode across chunks");
+                let got = decode_da_blob_from_chunks(&chunks, spec_version)
+                    .expect("decode across chunks");
                 assert_eq!(
                     got.encode_to_vec().unwrap(),
                     encoded,
@@ -377,7 +391,37 @@ mod tests {
 
     #[test]
     fn empty_chunks_is_error() {
-        assert!(reassemble_da_blob(&[], AlpenSpecId::V1).is_err());
+        assert!(decode_da_blob_from_chunks(&[], AlpenSpecId::V1).is_err());
+    }
+
+    #[test]
+    fn decodes_contiguous_payload() {
+        for spec_version in VERSIONS {
+            let encoded = sample_blob(spec_version).encode_to_vec().unwrap();
+            let got = decode_da_blob(&encoded, spec_version).expect("decode contiguous payload");
+            assert_eq!(got.encode_to_vec().unwrap(), encoded);
+        }
+    }
+
+    #[test]
+    fn contiguous_payload_does_not_decode_under_another_layout() {
+        let v0 = sample_blob(AlpenSpecId::V0).encode_to_vec().unwrap();
+        let v1 = sample_blob(AlpenSpecId::V1).encode_to_vec().unwrap();
+
+        assert!(decode_da_blob(&v0, AlpenSpecId::V1).is_err());
+        assert!(decode_da_blob(&v1, AlpenSpecId::V0).is_err());
+    }
+
+    #[test]
+    fn contiguous_trailing_bytes_are_rejected() {
+        for spec_version in VERSIONS {
+            let mut encoded = sample_blob(spec_version).encode_to_vec().unwrap();
+            encoded.push(0xFF);
+            assert!(matches!(
+                decode_da_blob(&encoded, spec_version),
+                Err(CodecError::ExtraInput)
+            ));
+        }
     }
 
     #[test]
@@ -386,7 +430,7 @@ mod tests {
             let mut encoded = sample_blob(spec_version).encode_to_vec().unwrap();
             encoded.push(0xFF);
             assert!(matches!(
-                reassemble_da_blob(&[encoded], spec_version),
+                decode_da_blob_from_chunks(&[encoded], spec_version),
                 Err(CodecError::ExtraInput)
             ));
         }
