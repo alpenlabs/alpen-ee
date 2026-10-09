@@ -204,13 +204,16 @@ where
 /// `(code_hash, raw_bytecode)` pair returned alongside each block's
 /// accessed-state record so the caller can persist bytecodes into the
 /// content-addressed bytecode tree.
-type BytecodeEntry = (Hash, Vec<u8>);
+pub type BytecodeEntry = (Hash, Vec<u8>);
 
 /// CPU-heavy half of `commit`, hoisted out so it can run inside
 /// [`tokio::task::spawn_blocking`]. Reads the parent state via reth
 /// (depth = 1 at production time), re-executes the block, and extracts
 /// the `(record, bytecodes)` pair.
-fn build_accessed_state<P, E>(
+///
+/// Public so tools that build blocks off-node, such as the EVM workload
+/// generator, record exactly what the exex would have stored.
+pub fn build_accessed_state<P, E>(
     provider: P,
     evm_config: E,
     block_num: u64,

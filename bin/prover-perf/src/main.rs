@@ -23,6 +23,12 @@ async fn main() -> Result<()> {
 
     let programs = parse_programs(&args.programs).map_err(anyhow::Error::msg)?;
 
+    #[cfg(feature = "sp1")]
+    if args.generate_proof {
+        programs::gen_and_save_sp1_proofs(&programs).await;
+        return Ok(());
+    }
+
     // Resolve the reporting target first, so a misconfiguration fails before the guests run.
     let reporter = args
         .github

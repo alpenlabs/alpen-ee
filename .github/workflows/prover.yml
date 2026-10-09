@@ -100,3 +100,7 @@ jobs:
           # the build script skips guest compilation entirely (see provers/sp1/build.rs),
           # and the perf binary then has no ELF to read.
           SP1_ALPEN_PARAMS_PATH: ${{ github.workspace }}/params/dev.json
+          # The account guest verifies the checked-in chunk proof, which this
+          # run's chunk ELF did not make. This bakes the proof's program ID
+          # into the account guest instead (see bin/prover-perf/README.md).
+          SP1_ALPEN_CHUNK_PROOF_PATH: ${{ github.workspace }}/bin/prover-perf/proofs/alpen-chunk_SP1_v6.1.0.proof

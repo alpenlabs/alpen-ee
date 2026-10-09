@@ -1,136 +1,168 @@
 //! Perf input for the alpen-chunk SP1 guest.
 //!
-//! Mirrors the setup in `alpen-chunk`'s `test_native_chunk_execution`,
-//! reusing the EVM witness fixture from `proof-impl/evm-ee-stf/test_data`
-//! to produce a single-block chunk transition.
+//! Proves the checked-in mixed workload as one chunk: 100 V1 blocks of
+//! transfers, token and pool calls, bridge-outs, precompile calls and
+//! deposits. The input is assembled the way the sequencer's chunk prover does
+//! it (`ChunkSpec::fetch_input` in alpen-client).
 
-use std::{fs, path::PathBuf};
-
+use alloy_consensus::Header;
 use alpen_acct_types::{ExecBlock, ExecHeader, ExecPayload, ExecutionEnvironment};
-use alpen_chain_types::ExecInputs;
+use alpen_chain_types::{
+    ChunkTransition, ExecInputs, ExecOutputs, OutputMessage, OutputTransfer, SubjectDepositData,
+};
 use alpen_chunk_runtime::{PrivateInput, RawBlockData, RawChunkData};
 use alpen_evm_ee::{EvmBlock, EvmBlockBody, EvmExecutionEnvironment, EvmHeader, EvmPartialState};
 use alpen_params::{AlpenParams, AlpenSpecId, DEV_PARAMS_JSON};
 use alpen_proof_chunk::{EeChunkProgram, EeChunkProofInput};
-use reth_primitives_traits::Block as _;
-use rsp_client_executor::io::EthClientExecutorInput;
-use serde::Deserialize;
-use strata_acct_types::Hash;
-use strata_codec::encode_to_vec;
+use alpen_test_utils_evm_workload::{workload_dir, Workload, WorkloadBlock, MIXED_WORKLOAD};
+use reth_ethereum_primitives::Block;
+use strata_acct_types::{BitcoinAmount, Hash, SubjectId};
+use strata_codec::{decode_buf_exact, encode_to_vec};
 use tracing::info;
-use zkaleido::{ExecutionSummary, ZkVmHost, ZkVmProgram};
+use zkaleido::{ExecutionSummary, ProofReceiptWithMetadata, ZkVmHost, ZkVmProgram};
 
-#[derive(Deserialize)]
-struct WitnessData {
-    witness: EthClientExecutorInput,
-}
+/// The spec version the workload's blocks are stamped with and the guests
+/// prove under.
+pub(super) const PERF_SPEC_VERSION: AlpenSpecId = AlpenSpecId::V1;
 
-fn load_witness() -> EthClientExecutorInput {
-    // Canonical Reth-shaped witness fixture lives under
-    // crates/test-utils/data/evm_ee/ (shared with the EVM-EE STF tests).
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../crates/test-utils/data/evm_ee/witness_params.json");
-    let json = fs::read_to_string(path).expect("read witness JSON");
-    let data: WitnessData = serde_json::from_str(&json).expect("parse witness JSON");
-    data.witness
-}
-
-/// The dev-network `AlpenParams` this benchmark exercises `process_ee_chunk`
-/// against — chosen because `witness_params.json`'s embedded genesis
-/// (chain id 2892, all hardforks active from genesis) matches it.
-/// The spec version this fixture executes and proves under.
-///
-/// Shared by the witness execution below and by the program that replays it,
-/// so the benchmark cannot end up measuring a replay under rules the block
-/// was never executed with.
-const PERF_SPEC_VERSION: AlpenSpecId = AlpenSpecId::V1;
-
+/// The dev-network params the workload was generated with, the same ones the
+/// SP1 guests bake in.
 pub(super) fn perf_alpen_params() -> AlpenParams {
     serde_json::from_str(DEV_PARAMS_JSON).expect("dev params should parse")
 }
 
-/// Builds an EeChunkProofInput from the canonical EVM witness fixture.
-/// Pub-super so the sibling `alpen_acct` module can reuse the same
-/// chunk to drive its perf input (one realistic chunk → one acct
-/// update aggregating it).
-pub(super) fn prepare_input() -> EeChunkProofInput {
-    info!("Preparing input for Alpen Chunk");
-    let witness = load_witness();
+pub(super) fn load_workload() -> Workload {
+    let dir = workload_dir(MIXED_WORKLOAD);
+    Workload::load(&dir).unwrap_or_else(|e| panic!("load workload from {}: {e}", dir.display()))
+}
 
-    let parent_header = witness
-        .ancestor_headers
-        .last()
-        .expect("need at least one ancestor header")
-        .clone();
-    let parent_evm_header = EvmHeader::new(parent_header);
+/// A chunk proof input and the transition it proves.
+pub(super) struct Chunk {
+    pub(super) input: EeChunkProofInput,
+    pub(super) transition: ChunkTransition,
+}
+
+/// Builds the chunk over all of `workload`'s blocks.
+pub(super) fn build_chunk(workload: &Workload) -> Chunk {
+    let prev_header: Header =
+        alloy_rlp::decode_exact(&workload.prev_header_rlp[..]).expect("decode prev header");
+    let parent_evm_header = EvmHeader::new(prev_header);
     let parent_blkid: Hash = parent_evm_header.compute_block_id();
 
-    let pre_state = EvmPartialState::new(
-        witness.parent_state.clone(),
-        // This RSP fixture stores bytecodes as a Vec without original code-hash
-        // keys. Re-hashing keeps the fixture behavior; production range
-        // witnesses preserve the AccessedStateGenerator keys instead.
-        witness
-            .bytecodes
-            .clone()
-            .into_iter()
-            .map(|bytecode| (bytecode.hash_slow(), bytecode))
-            .collect(),
-        witness.ancestor_headers.clone(),
-    );
-
-    let header = witness.current_block.header().clone();
-    let evm_header = EvmHeader::new(header.clone());
-    let body = EvmBlockBody::from_alloy_body(witness.current_block.body().clone());
-    let block = EvmBlock::new(evm_header, body);
-    let tip_blkid: Hash = block.get_header().compute_block_id();
-    let tip_state_root = block.get_header().get_state_root();
-    let tip_exec_header_summary = block.get_header().get_exec_header_summary();
-
+    // Production takes each block's outputs from its exec record. Replaying
+    // the blocks here derives the same outputs and checks the workload
+    // executes before any guest sees it.
     let params = perf_alpen_params();
     let ee = EvmExecutionEnvironment::new(&params, PERF_SPEC_VERSION);
-    let header_intrinsics = block.get_header().get_intrinsics();
-    let exec_payload = ExecPayload::new(&header_intrinsics, block.get_body());
-    let inputs = ExecInputs::new_empty();
-    let output = ee
-        .execute_block_body(&pre_state, &exec_payload, &inputs)
-        .expect("block execution should succeed");
-    let outputs = output.outputs().clone();
+    let mut state: EvmPartialState =
+        decode_buf_exact(&workload.chunk_pre_state).expect("decode chunk pre-state");
 
-    let chunk_transition = alpen_chain_types::ChunkTransition::new(
+    let mut chunk_inputs = ExecInputs::new_empty();
+    let mut chunk_outputs = ExecOutputs::new_empty();
+    let mut block_datas = Vec::with_capacity(workload.blocks.len());
+    let mut tip = None;
+    for workload_block in &workload.blocks {
+        let block = evm_block(workload_block);
+        let inputs = block_inputs(workload_block);
+
+        let header_intrinsics = block.get_header().get_intrinsics();
+        let payload = ExecPayload::new(&header_intrinsics, block.get_body());
+        let output = ee
+            .execute_block_body(&state, &payload, &inputs)
+            .expect("workload block executes");
+        ee.merge_write_into_state(&mut state, output.write_batch())
+            .expect("merge block writes");
+        ee.update_partial_state_after_block(&mut state, block.get_header())
+            .expect("update state after block");
+        let outputs = output.outputs().clone();
+
+        extend_exec_inputs(&mut chunk_inputs, &inputs);
+        extend_exec_outputs(&mut chunk_outputs, &outputs);
+        block_datas.push(
+            RawBlockData::from_block::<EvmExecutionEnvironment>(&block, inputs, outputs)
+                .expect("encode block"),
+        );
+        tip = Some(block);
+    }
+    let tip = tip.expect("workload has blocks");
+
+    let transition = ChunkTransition::new(
         parent_blkid,
-        tip_blkid,
-        tip_state_root,
-        tip_exec_header_summary,
-        inputs.clone(),
-        outputs.clone(),
+        tip.get_header().compute_block_id(),
+        tip.get_header().get_state_root(),
+        tip.get_header().get_exec_header_summary(),
+        chunk_inputs,
+        chunk_outputs,
     );
-
-    // Single-block chunk: the chunk-level pre-state is just this block's
-    // pre-state, anchored at the parent root.
-    let raw_chunk_pre_state = encode_to_vec(&pre_state).expect("encode pre-state");
-    let raw_block_data =
-        RawBlockData::from_block::<EvmExecutionEnvironment>(&block, inputs, outputs)
-            .expect("encode block");
-    let raw_chunk = RawChunkData::new(vec![raw_block_data], parent_blkid);
-    let raw_prev_header = encode_to_vec(&parent_evm_header).expect("encode prev header");
-
     let private_input = PrivateInput::new(
-        chunk_transition,
-        raw_chunk,
-        raw_prev_header,
-        raw_chunk_pre_state,
+        transition.clone(),
+        RawChunkData::new(block_datas, parent_blkid),
+        encode_to_vec(&parent_evm_header).expect("encode prev header"),
+        workload.chunk_pre_state.clone(),
     );
 
-    EeChunkProofInput { private_input }
+    Chunk {
+        input: EeChunkProofInput { private_input },
+        transition,
+    }
+}
+
+fn evm_block(workload_block: &WorkloadBlock) -> EvmBlock {
+    let block: Block =
+        alloy_rlp::decode_exact(&workload_block.block_rlp[..]).expect("decode workload block");
+    EvmBlock::new(
+        EvmHeader::new(block.header),
+        EvmBlockBody::from_alloy_body(block.body),
+    )
+}
+
+fn block_inputs(workload_block: &WorkloadBlock) -> ExecInputs {
+    let mut inputs = ExecInputs::new_empty();
+    for deposit in &workload_block.deposits {
+        inputs.add_subject_deposit(SubjectDepositData::new(
+            SubjectId::from(deposit.dest_subject),
+            BitcoinAmount::try_from(deposit.sats).expect("deposit amount fits"),
+        ));
+    }
+    inputs
+}
+
+// TODO(STR-3553): these mirror the chunk-level aggregation helpers in
+// alpen-client's `spec_chunk.rs`. Use the upstream `ExecOutputs::extend_from`
+// in both places once it lands.
+fn extend_exec_inputs(dst: &mut ExecInputs, src: &ExecInputs) {
+    for deposit in src.subject_deposits() {
+        dst.add_subject_deposit(deposit.clone());
+    }
+}
+
+fn extend_exec_outputs(dst: &mut ExecOutputs, src: &ExecOutputs) {
+    for transfer in src.output_transfers() {
+        dst.add_transfer(OutputTransfer::new(transfer.dest(), transfer.value()));
+    }
+    for message in src.output_messages() {
+        dst.add_message(OutputMessage::new(
+            message.dest(),
+            message.payload().clone(),
+        ));
+    }
+    if let Some(new_predicate) = src.new_predicate() {
+        dst.set_new_predicate(Some(new_predicate.clone()));
+    }
 }
 
 pub(crate) fn gen_perf_report(host: &impl ZkVmHost) -> (String, ExecutionSummary) {
     info!("Generating execution summary for Alpen Chunk");
-    let input = prepare_input();
-    let summary =
-        <EeChunkProgram as ZkVmProgram>::execute(&input, host).expect("alpen-chunk execution");
+    let chunk = build_chunk(&load_workload());
+    let summary = <EeChunkProgram as ZkVmProgram>::execute(&chunk.input, host)
+        .expect("alpen-chunk execution");
     (EeChunkProgram::name(), summary)
+}
+
+pub(crate) fn gen_proof(host: &impl ZkVmHost) -> ProofReceiptWithMetadata {
+    info!("Generating proof for Alpen Chunk");
+    let chunk = build_chunk(&load_workload());
+    <EeChunkProgram as ZkVmProgram>::prove(&chunk.input, host).expect("alpen-chunk proof")
 }
 
 #[cfg(test)]
@@ -139,13 +171,20 @@ mod tests {
 
     #[test]
     fn test_alpen_chunk_native_execution() {
-        let input = prepare_input();
+        let workload = load_workload();
+        let chunk = build_chunk(&workload);
         let output = EeChunkProgram::new(perf_alpen_params(), PERF_SPEC_VERSION)
-            .execute(&input)
-            .unwrap();
-        // The chunk transition's parent/tip blkids must match the block
-        // hashes computed during input prep — sanity that the perf
-        // fixture produces a self-consistent transition.
-        assert_ne!(output.parent_exec_blkid(), output.tip_exec_blkid());
+            .execute(&chunk.input)
+            .expect("native execution");
+        assert_eq!(output, chunk.transition);
+        assert_eq!(
+            output.inputs().subject_deposits().len(),
+            workload
+                .blocks
+                .iter()
+                .map(|block| block.deposits.len())
+                .sum::<usize>()
+        );
+        assert!(!output.outputs().output_messages().is_empty());
     }
 }

@@ -11,6 +11,12 @@ pub struct EvalArgs {
     #[command(flatten)]
     pub github: Option<GithubReportArgs>,
 
+    /// Prove the programs and save the proofs under `proofs/` instead of
+    /// reporting cycle counts. Proving alpen-acct needs a saved alpen-chunk
+    /// proof, so pass both to refresh them as a pair.
+    #[arg(long, conflicts_with = "github_token")]
+    pub generate_proof: bool,
+
     /// Programs to run (comma-delimited and/or repeated),
     /// e.g. `--programs alpen-chunk,alpen-acct` or `--programs alpen-chunk
     /// --programs alpen-acct`.
