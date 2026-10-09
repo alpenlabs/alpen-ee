@@ -58,7 +58,7 @@ mod tests {
     use crate::AdminRpcServer;
 
     async fn spawn_admin_server(secret: JwtSecret) -> (SocketAddr, ServerHandle) {
-        let module = AdminRpcServer::new("test-version", false).into_rpc();
+        let module = AdminRpcServer::new("test-version", None).into_rpc();
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
         start_authenticated_rpc_server(addr, secret, module)
             .await

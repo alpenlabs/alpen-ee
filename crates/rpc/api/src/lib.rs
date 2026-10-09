@@ -35,6 +35,15 @@ pub trait AlpenAdminRpc {
     /// Returns basic node status for operators.
     #[method(name = "getAdminStatus")]
     async fn get_admin_status(&self) -> RpcResult<AdminStatusResponse>;
+
+    /// Resumes sequencer block production.
+    #[method(name = "startBlockProduction")]
+    async fn start_block_production(&self) -> RpcResult<()>;
+
+    /// Stops sequencer block production once the tip reaches `after_block`,
+    /// or immediately when omitted.
+    #[method(name = "stopBlockProduction")]
+    async fn stop_block_production(&self, after_block: Option<u64>) -> RpcResult<()>;
 }
 
 struct RpcB256;
@@ -125,6 +134,28 @@ impl AlpenAdminRpcOpenRpc {
             vec![],
             result,
             "Returns basic node status for operators.",
+            Some("Alpen EE Admin".to_string()),
+            false,
+        );
+
+        builder.add_method(
+            "alpenadmin",
+            "startBlockProduction",
+            vec![],
+            None,
+            "Resumes sequencer block production.",
+            Some("Alpen EE Admin".to_string()),
+            false,
+        );
+
+        let inputs =
+            vec![builder.create_content_descriptor::<u64>("after_block", None, None, false)];
+        builder.add_method(
+            "alpenadmin",
+            "stopBlockProduction",
+            inputs,
+            None,
+            "Stops sequencer block production once the tip reaches after_block, or immediately when omitted.",
             Some("Alpen EE Admin".to_string()),
             false,
         );
