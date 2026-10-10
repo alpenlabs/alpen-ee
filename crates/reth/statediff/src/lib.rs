@@ -55,8 +55,8 @@ pub mod da_sizing;
 mod reconstruct;
 #[cfg(feature = "serde")]
 mod serde_impl;
-#[cfg(test)]
-pub(crate) mod test_utils;
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils;
 
 // Re-export main types at crate level for convenience
 pub use batch::{
