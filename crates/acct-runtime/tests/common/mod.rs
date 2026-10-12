@@ -197,28 +197,25 @@ pub(crate) fn create_deposit_message(
 }
 
 /// Helper to create an admin-sourced predicate-rotation message entry, staged
-/// the way the OL STF builds it: SPS-52 type `0x20` with the raw SSZ encoding
-/// of the new key as body.
+/// the way the OL STF builds it: SPS-52 type `0x20` with the codec-encoded
+/// `PredicateUpdateMsgData` as body.
 pub(crate) fn create_predicate_update_message(
     new_key: &PredicateKey,
     incl_epoch: u32,
 ) -> MessageEntry {
-    use alpen_acct_types::{MAX_PREDICATE_KEY_BYTES, PREDICATE_UPDATE_MSG_TYPE_ID};
+    use alpen_acct_types::PREDICATE_UPDATE_MSG_TYPE_ID;
     use strata_acct_types::ADMIN_MSG_ACCT_ID;
-    use strata_codec::VarVec;
     use strata_msg_fmt::OwnedMsg;
+    use strata_ol_msg_types::PredicateUpdateMsgData;
 
-    // The body is a strata-codec-encoded VarVec of the new key's raw
-    // serialized bytes, matching the OL STF's PredicateUpdateMsgData wire
-    // format.
-    let key_bytes = VarVec::<u8, { MAX_PREDICATE_KEY_BYTES }>::from_vec(
+    let data = PredicateUpdateMsgData::new(
         new_key
             .try_as_buf_ref()
             .expect("key has a known predicate type")
             .to_bytes(),
     )
     .expect("key bytes fit");
-    let body = encode_to_vec(&key_bytes).expect("encoding should succeed");
+    let body = encode_to_vec(&data).expect("encoding should succeed");
     let msg = OwnedMsg::new(PREDICATE_UPDATE_MSG_TYPE_ID, body).expect("create message");
     let payload_data = msg.to_vec();
 

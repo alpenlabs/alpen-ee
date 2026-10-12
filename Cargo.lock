@@ -1158,6 +1158,7 @@ dependencies = [
  "strata-acct-types",
  "strata-codec",
  "strata-msg-fmt",
+ "strata-ol-msg-types",
  "strata-predicate",
  "strata-snark-acct-runtime",
  "strata-snark-acct-types",
