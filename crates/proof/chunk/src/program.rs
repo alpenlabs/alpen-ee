@@ -214,7 +214,7 @@ mod tests {
         let raw_block_data =
             RawBlockData::from_block::<EvmExecutionEnvironment>(&block, inputs, outputs)
                 .expect("encode block");
-        let raw_chunk = RawChunkData::new(vec![raw_block_data], parent_blkid);
+        let raw_chunk = RawChunkData::new(vec![raw_block_data]);
         let raw_prev_header = encode_to_vec(&parent_evm_header).expect("encode prev header");
 
         let private_input = PrivateInput::new(
