@@ -12,7 +12,7 @@ use crate::{errors::EnvResult, inputs::ExecPayload, outputs::ExecBlockOutput};
 /// to manipulate it and compute state roots.
 pub trait ExecPartialState: Codec + Clone + Sized {
     /// Computes the state root of a partial state.
-    fn compute_state_root(&self) -> EnvResult<Hash>;
+    fn compute_state_root(&self) -> Hash;
 }
 
 /// Represents an execution block header.

@@ -97,7 +97,7 @@ impl BlockAssembler for SimpleExecutionEnvironment {
 
         // Compute state root by applying the write batch
         let post_state = SimplePartialState::new(output.write_batch().accounts().clone());
-        let state_root = post_state.compute_state_root()?;
+        let state_root = post_state.compute_state_root();
 
         Ok(SimpleHeader::new(
             intrinsics.parent_blkid,
@@ -159,7 +159,7 @@ mod tests {
     ) -> SimpleHeader {
         // Compute state root by applying the write batch
         let post_state = SimplePartialState::new(output.write_batch().accounts().clone());
-        let state_root = post_state.compute_state_root().unwrap();
+        let state_root = post_state.compute_state_root();
 
         SimpleHeader::new(intrinsics.parent_blkid, state_root, intrinsics.index)
     }
