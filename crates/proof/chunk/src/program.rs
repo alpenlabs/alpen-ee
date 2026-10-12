@@ -194,7 +194,7 @@ mod tests {
         let exec_payload = ExecPayload::new(&header_intrinsics, block.get_body());
         let inputs = ExecInputs::new_empty();
         let output = ee
-            .execute_block_body(&pre_state, &exec_payload, &inputs)
+            .execute_block_body(&pre_state, &exec_payload)
             .expect("block execution should succeed");
         let outputs = output.outputs().clone();
 

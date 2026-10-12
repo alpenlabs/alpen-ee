@@ -5,7 +5,9 @@ use std::collections::BTreeMap;
 use alpen_acct_types::{
     EnvError, EnvResult, ExecBlock, ExecBlockBody, ExecHeader, ExecPartialState,
 };
-use alpen_chain_types::{ExecHeaderSummary, ExecOutputs, OutputMessage};
+use alpen_chain_types::{
+    ExecHeaderSummary, ExecInputs, ExecOutputs, OutputMessage, SubjectDepositData,
+};
 use digest::Digest;
 use sha2::Sha256;
 use strata_acct_types::{AccountId, BitcoinAmount, Hash, MsgPayload, SubjectId};
@@ -187,19 +189,45 @@ impl Codec for SimpleHeader {
     }
 }
 
-/// Simple block body containing transactions.
+/// Simple block body containing deposits and transactions.
 #[derive(Clone, Debug)]
 pub struct SimpleBlockBody {
+    /// Deposits credited before the transactions run.
+    deposits: Vec<SubjectDepositData>,
     transactions: Vec<SimpleTransaction>,
 }
 
 impl SimpleBlockBody {
+    /// Creates a body with transactions and no deposits.
     pub fn new(transactions: Vec<SimpleTransaction>) -> Self {
-        Self { transactions }
+        Self::with_deposits(Vec::new(), transactions)
+    }
+
+    pub fn with_deposits(
+        deposits: Vec<SubjectDepositData>,
+        transactions: Vec<SimpleTransaction>,
+    ) -> Self {
+        Self {
+            deposits,
+            transactions,
+        }
+    }
+
+    pub fn deposits(&self) -> &[SubjectDepositData] {
+        &self.deposits
     }
 
     pub fn transactions(&self) -> &[SimpleTransaction] {
         &self.transactions
+    }
+
+    /// Returns the [`ExecInputs`] this body's deposits stand for.
+    pub fn exec_inputs(&self) -> ExecInputs {
+        let mut inputs = ExecInputs::new_empty();
+        for d in &self.deposits {
+            inputs.add_subject_deposit(d.clone());
+        }
+        inputs
     }
 }
 
@@ -207,6 +235,13 @@ impl ExecBlockBody for SimpleBlockBody {}
 
 impl Codec for SimpleBlockBody {
     fn encode(&self, enc: &mut impl strata_codec::Encoder) -> Result<(), CodecError> {
+        (self.deposits.len() as u32).encode(enc)?;
+
+        for d in &self.deposits {
+            d.dest().encode(enc)?;
+            d.value().encode(enc)?;
+        }
+
         (self.transactions.len() as u32).encode(enc)?;
 
         for tx in &self.transactions {
@@ -218,13 +253,25 @@ impl Codec for SimpleBlockBody {
 
     fn decode(dec: &mut impl strata_codec::Decoder) -> Result<Self, CodecError> {
         let len = u32::decode(dec)? as usize;
+        let mut deposits = Vec::with_capacity(len);
+
+        for _ in 0..len {
+            let dest = SubjectId::decode(dec)?;
+            let value = BitcoinAmount::decode(dec)?;
+            deposits.push(SubjectDepositData::new(dest, value));
+        }
+
+        let len = u32::decode(dec)? as usize;
         let mut transactions = Vec::with_capacity(len);
 
         for _ in 0..len {
             transactions.push(SimpleTransaction::decode(dec)?);
         }
 
-        Ok(Self { transactions })
+        Ok(Self {
+            deposits,
+            transactions,
+        })
     }
 }
 
