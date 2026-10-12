@@ -1,17 +1,29 @@
 //! Chunk data structures.
 
-use alpen_acct_types::ExecutionEnvironment;
+use alpen_acct_types::{ExecBlock, ExecutionEnvironment};
 use alpen_chain_types::{ExecInputs, ExecOutputs};
 
-/// Chunk of decoded exec env blocks.
+/// Chunk of decoded exec env blocks and the header they extend from.
 #[expect(missing_debug_implementations, reason = "impossible")]
 pub struct Chunk<'c, E: ExecutionEnvironment> {
+    prev_header: <E::Block as ExecBlock>::Header,
     blocks: Vec<ChunkBlock<'c, E>>,
 }
 
 impl<'c, E: ExecutionEnvironment> Chunk<'c, E> {
-    pub fn new(blocks: Vec<ChunkBlock<'c, E>>) -> Self {
-        Self { blocks }
+    pub fn new(
+        prev_header: <E::Block as ExecBlock>::Header,
+        blocks: Vec<ChunkBlock<'c, E>>,
+    ) -> Self {
+        Self {
+            prev_header,
+            blocks,
+        }
+    }
+
+    /// Header of the block the chunk's first block builds on.
+    pub fn prev_header(&self) -> &<E::Block as ExecBlock>::Header {
+        &self.prev_header
     }
 
     pub fn blocks(&self) -> &[ChunkBlock<'c, E>] {

@@ -175,14 +175,15 @@ fn process_chunk_blocks<E: ExecutionEnvironment>(
     Ok(())
 }
 
-/// Verifies a chunk transition using the pre state, parent header, etc.
+/// Verifies a chunk transition using the pre state and the chunk.
 pub fn verify_chunk_transition<E: ExecutionEnvironment>(
     tsn: &ChunkTransition,
     ee: &E,
-    prev_header: &<E::Block as ExecBlock>::Header,
     state: &mut E::PartialState,
     chunk: &Chunk<'_, E>,
 ) -> EnvResult<()> {
+    let prev_header = chunk.prev_header();
+
     // 1. Make sure the parent block ID we have that we're extending from
     // matches the chunk transition.
     let computed_prev_blkid = prev_header.compute_block_id();
@@ -352,7 +353,7 @@ mod tests {
             ChunkBlock::new(&inp2, &out2, block2),
             ChunkBlock::new(&inp3, &out3, block3),
         ];
-        let chunk = Chunk::new(chunk_blocks);
+        let chunk = Chunk::new(genesis_header, chunk_blocks);
 
         // Process starting from the initial state.
         let mut state = initial_state;
@@ -411,10 +412,13 @@ mod tests {
             ExecInputs::new_empty(),
         );
 
-        let chunk = Chunk::new(vec![
-            ChunkBlock::new(&inp1, &out1, block1),
-            ChunkBlock::new(&inp2, &out2, block2),
-        ]);
+        let chunk = Chunk::new(
+            genesis_header,
+            vec![
+                ChunkBlock::new(&inp1, &out1, block1),
+                ChunkBlock::new(&inp2, &out2, block2),
+            ],
+        );
         let mut state = initial_state;
 
         let err = process_chunk_blocks(
@@ -480,10 +484,13 @@ mod tests {
         let mut chunk_outputs = ExecOutputs::new_empty();
         chunk_outputs.set_new_predicate(Some(new_key));
 
-        let chunk = Chunk::new(vec![
-            ChunkBlock::new(&inp1, &out1, block1),
-            ChunkBlock::new(&inp2, &out2, block2),
-        ]);
+        let chunk = Chunk::new(
+            genesis_header,
+            vec![
+                ChunkBlock::new(&inp1, &out1, block1),
+                ChunkBlock::new(&inp2, &out2, block2),
+            ],
+        );
         let mut state = initial_state;
 
         let err = process_chunk_blocks(
@@ -543,10 +550,13 @@ mod tests {
         let mut chunk_outputs = ExecOutputs::new_empty();
         chunk_outputs.set_new_predicate(Some(new_key));
 
-        let chunk = Chunk::new(vec![
-            ChunkBlock::new(&inp1, &out1, block1),
-            ChunkBlock::new(&inp2, &out2, block2),
-        ]);
+        let chunk = Chunk::new(
+            genesis_header,
+            vec![
+                ChunkBlock::new(&inp1, &out1, block1),
+                ChunkBlock::new(&inp2, &out2, block2),
+            ],
+        );
         let mut state = initial_state;
 
         process_chunk_blocks(
@@ -596,10 +606,10 @@ mod tests {
             inputs.clone(),
             outputs.clone(),
         );
-        let chunk = Chunk::new(vec![ChunkBlock::new(&inputs, &outputs, block)]);
+        let chunk = Chunk::new(prev_header, vec![ChunkBlock::new(&inputs, &outputs, block)]);
         let mut state = initial_state;
 
-        let err = verify_chunk_transition(&chunk_transition, &ee, &prev_header, &mut state, &chunk)
+        let err = verify_chunk_transition(&chunk_transition, &ee, &mut state, &chunk)
             .expect_err("wrong tip state root must be rejected");
         assert!(matches!(err, EnvError::MismatchedChainSegment));
     }
@@ -638,10 +648,10 @@ mod tests {
             inputs.clone(),
             outputs.clone(),
         );
-        let chunk = Chunk::new(vec![ChunkBlock::new(&inputs, &outputs, block)]);
+        let chunk = Chunk::new(prev_header, vec![ChunkBlock::new(&inputs, &outputs, block)]);
         let mut state = initial_state;
 
-        let err = verify_chunk_transition(&chunk_transition, &ee, &prev_header, &mut state, &chunk)
+        let err = verify_chunk_transition(&chunk_transition, &ee, &mut state, &chunk)
             .expect_err("wrong tip header summary must be rejected");
         assert!(matches!(err, EnvError::MismatchedChainSegment));
     }
