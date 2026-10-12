@@ -5,10 +5,12 @@
 
 mod chunk;
 mod chunk_processing;
+mod errors;
 mod private_inputs;
 mod runtime;
 
 pub use chunk::*;
 pub use chunk_processing::*;
+pub use errors::*;
 pub use private_inputs::*;
 pub use runtime::*;
