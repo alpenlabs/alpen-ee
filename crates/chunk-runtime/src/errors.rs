@@ -49,15 +49,6 @@ pub enum ChunkRuntimeError {
         got: Hash,
     },
 
-    /// A block does not build on the block before it.
-    #[error("parent mismatch: expected {expected:?}, got {got:?}")]
-    ParentMismatch {
-        /// ID of the previous block.
-        expected: Hash,
-        /// Parent ID in the block's header.
-        got: Hash,
-    },
-
     /// A block's header does not commit to its body.
     #[error("block header does not match its body")]
     HeaderBodyMismatch,

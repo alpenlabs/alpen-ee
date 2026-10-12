@@ -89,13 +89,26 @@ pub trait ExecutionEnvironment: Sized + 'static {
     /// or complete a block header.
     type BlockOutput: Sized;
 
+    /// Checks a block header on its own and against its parent's header.
+    ///
+    /// This must check that `header` builds on `parent`, meaning its parent
+    /// ID is `parent`'s block ID. Callers rely on that to treat a run of
+    /// blocks as one chain. It also checks every other rule the environment
+    /// puts on a header, such as its number, timestamp and fee fields.
+    fn verify_header(
+        &self,
+        parent: &<Self::Block as ExecBlock>::Header,
+        header: &<Self::Block as ExecBlock>::Header,
+    ) -> EnvResult<()>;
+
     /// Executes a block payload on top of a pre-state, returning the execution
     /// output.
     ///
     /// When assembling a block, the output is used to complete its header. When
     /// verifying a block, execution alone is not enough: the caller must also
-    /// check the inputs with [`Self::verify_inputs_against_block`] and the
-    /// output with [`Self::verify_outputs_against_header`].
+    /// check the header with [`Self::verify_header`], the inputs with
+    /// [`Self::verify_inputs_against_block`] and the output with
+    /// [`Self::verify_outputs_against_header`].
     fn execute_block_body(
         &self,
         pre_state: &Self::PartialState,

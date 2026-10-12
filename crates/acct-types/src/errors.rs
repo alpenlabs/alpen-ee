@@ -36,6 +36,10 @@ pub enum EnvError {
     #[error("provided partial state insufficient for block being executed")]
     InsufficientPartialState,
 
+    /// A block header breaks the environment's header rules.
+    #[error("invalid block header")]
+    InvalidHeader,
+
     /// There was an invalid block within a segment, for some reason.
     #[error("invalid block")]
     InvalidBlock,
