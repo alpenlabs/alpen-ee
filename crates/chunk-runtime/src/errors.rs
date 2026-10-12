@@ -1,16 +1,20 @@
 //! Error types for the chunk runtime.
 
-use alpen_acct_types::{EnvError, Hash};
+use alpen_acct_types::Hash;
 use alpen_chain_types::{ChunkTransition, ExecOutputs};
 use ssz::DecodeError;
 use strata_codec::CodecError;
 use thiserror::Error;
 
+/// Why a chunk failed verification.
+///
+/// `EnvErr` is the execution environment's own error, which says which of its
+/// checks the block broke.
 #[derive(Debug, Error)]
-pub enum ChunkRuntimeError {
-    /// Execution environment error.
+pub enum ChunkRuntimeError<EnvErr> {
+    /// A check or the execution in the execution environment failed.
     #[error("execution environment: {0}")]
-    Env(#[from] EnvError),
+    Env(#[from] EnvErr),
 
     /// The claimed chunk transition could not be decoded.
     #[error("decode chunk transition: {0:?}")]
@@ -85,4 +89,4 @@ pub enum ChunkRuntimeError {
     },
 }
 
-pub type ChunkRuntimeResult<T> = Result<T, ChunkRuntimeError>;
+pub type ChunkRuntimeResult<T, EnvErr> = Result<T, ChunkRuntimeError<EnvErr>>;

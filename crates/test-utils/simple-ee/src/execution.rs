@@ -17,6 +17,7 @@ impl ExecutionEnvironment for SimpleExecutionEnvironment {
     type Block = SimpleBlock;
     type WriteBatch = SimpleWriteBatch;
     type BlockOutput = ();
+    type Error = EnvError;
 
     fn verify_header(&self, parent: &SimpleHeader, header: &SimpleHeader) -> EnvResult<()> {
         if header.get_parent_id() != parent.compute_block_id()

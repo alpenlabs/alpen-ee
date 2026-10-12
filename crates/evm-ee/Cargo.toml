@@ -46,6 +46,7 @@ bincode.workspace = true
 
 # Utilities
 itertools.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 alloy-eips.workspace = true
