@@ -10,5 +10,5 @@ mod accessed_state_exex;
 pub mod alloy2reth;
 mod state_diff_exex;
 
-pub use accessed_state_exex::AccessedStateGenerator;
+pub use accessed_state_exex::{build_accessed_state, AccessedStateGenerator, BytecodeEntry};
 pub use state_diff_exex::StateDiffGenerator;

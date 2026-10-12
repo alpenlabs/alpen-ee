@@ -32,6 +32,12 @@
 //!   in place, the same as `SP1_SKIP_PROGRAM_BUILD`. Must be absolute: build scripts run with CWD
 //!   set to this crate's own directory, not the invocation directory, so a relative path would
 //!   resolve against the wrong base.
+//! - **`SP1_ALPEN_CHUNK_PROOF_PATH`** — absolute path to a saved alpen-chunk proof. When set, the
+//!   account guest accepts proofs from the chunk program that made this proof, instead of from the
+//!   chunk guest built alongside it. Cycle counts do not change, since only the baked program ID
+//!   differs. prover-perf sets it so the account guest can verify a checked-in chunk proof made
+//!   from an earlier or differently built chunk ELF. Never set it for a guest that will run on a
+//!   chain: `docker-build` (release) builds refuse it.
 
 use std::{
     env, fs,
@@ -45,6 +51,7 @@ use sp1_sdk::{
     HashableKey, ProvingKey, SP1VerifyingKey,
 };
 use sp1_verifier::{GROTH16_VK_BYTES, VK_ROOT_BYTES};
+use zkaleido::ProofReceiptWithMetadata;
 use zkaleido_sp1_groth16_verifier::SP1Groth16Verifier;
 
 const GENERATED_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/generated");
@@ -55,6 +62,7 @@ const ALPEN_ACCT: &str = "guest-alpen-acct";
 fn main() {
     println!("cargo:rerun-if-env-changed=SP1_SKIP_PROGRAM_BUILD");
     println!("cargo:rerun-if-env-changed=SP1_ALPEN_PARAMS_PATH");
+    println!("cargo:rerun-if-env-changed=SP1_ALPEN_CHUNK_PROOF_PATH");
 
     if skip_elf_build() {
         println!(
@@ -94,13 +102,13 @@ fn main() {
     // The account guest embeds the chunk guest's predicate condition, so the
     // chunk guest must be built (and its VK derived) first.
     build_guest(ALPEN_CHUNK);
-    write_chunk_predicate_const(&sp1_predicate(&program_vkey(ALPEN_CHUNK)));
+    write_chunk_predicate_const(&sp1_predicate(accepted_chunk_program_id()));
     build_guest(ALPEN_ACCT);
     let acct_vk = program_vkey(ALPEN_ACCT);
 
     // The acct guest's own predicate is not consumed by any guest. It is what
     // the OL holds as the account's `update_vk` to check account proofs.
-    write_acct_predicate_file(&sp1_predicate(&acct_vk));
+    write_acct_predicate_file(&sp1_predicate(acct_vk.bytes32_raw()));
     write_acct_program_id_file(&acct_vk);
 }
 
@@ -172,15 +180,52 @@ fn program_vkey(program: &str) -> SP1VerifyingKey {
     vk.clone()
 }
 
+/// Returns the program ID of the chunk program whose proofs the account guest
+/// accepts: the freshly built chunk guest's, unless `SP1_ALPEN_CHUNK_PROOF_PATH`
+/// names a saved proof whose program ID to use instead.
+fn accepted_chunk_program_id() -> [u8; 32] {
+    let built = program_vkey(ALPEN_CHUNK).bytes32_raw();
+    let Some(proof_path) = env::var_os("SP1_ALPEN_CHUNK_PROOF_PATH") else {
+        return built;
+    };
+    if cfg!(feature = "docker-build") {
+        panic!(
+            "SP1_ALPEN_CHUNK_PROOF_PATH is for prover-perf only: a release guest must accept \
+             proofs from the chunk guest built with it"
+        );
+    }
+    let proof_path = Path::new(&proof_path);
+    if !proof_path.is_absolute() {
+        panic!(
+            "SP1_ALPEN_CHUNK_PROOF_PATH must be an absolute path (build scripts run with CWD set \
+             to the crate root, not the invocation directory) — got {}",
+            proof_path.display()
+        );
+    }
+    println!("cargo:rerun-if-changed={}", proof_path.display());
+
+    let proof = ProofReceiptWithMetadata::load(proof_path)
+        .unwrap_or_else(|e| panic!("load chunk proof {}: {e}", proof_path.display()));
+    let program_id = proof.metadata().program_id().0;
+    if program_id != built {
+        println!(
+            "cargo:warning=guest-alpen-acct accepts proofs from chunk program 0x{} (the proof at \
+             {}), not from the guest-alpen-chunk built here; use these ELFs for prover-perf only",
+            hex(&program_id),
+            proof_path.display()
+        );
+    }
+    program_id
+}
+
 /// Derives the condition bytes of a guest's `Sp1Groth16` predicate from its
-/// verifying key. These are the canonical uncompressed encoding of an
-/// [`SP1Groth16Verifier`] (embedding the guest's verifying key) that the
-/// runtime predicate verifier in `strata-predicate` decodes via
+/// program ID (its verifying key hash). These are the canonical uncompressed
+/// encoding of an [`SP1Groth16Verifier`] (embedding the guest's verifying key)
+/// that the runtime predicate verifier in `strata-predicate` decodes via
 /// `SP1Groth16Verifier::parse`.
-fn sp1_predicate(vk: &SP1VerifyingKey) -> Vec<u8> {
-    let verifier =
-        SP1Groth16Verifier::load(&GROTH16_VK_BYTES, vk.bytes32_raw(), *VK_ROOT_BYTES, true)
-            .unwrap_or_else(|e| panic!("load SP1 Groth16 verifier: {e}"));
+fn sp1_predicate(program_id: [u8; 32]) -> Vec<u8> {
+    let verifier = SP1Groth16Verifier::load(&GROTH16_VK_BYTES, program_id, *VK_ROOT_BYTES, true)
+        .unwrap_or_else(|e| panic!("load SP1 Groth16 verifier: {e}"));
     verifier.to_uncompressed_bytes()
 }
 
@@ -202,12 +247,8 @@ fn write_acct_program_id_file(vk: &SP1VerifyingKey) {
 /// so it drops straight into an OL params document. A text file rather than a
 /// generated constant because its consumers are outside the Rust build.
 fn write_acct_predicate_file(condition: &[u8]) {
-    let hex = condition
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect::<String>();
     let out_path = Path::new(GENERATED_DIR).join("alpen-acct.predicate");
-    fs::write(&out_path, format!("Sp1Groth16:{hex}"))
+    fs::write(&out_path, format!("Sp1Groth16:{}", hex(condition)))
         .unwrap_or_else(|e| panic!("write {}: {e}", out_path.display()));
 }
 
@@ -265,6 +306,10 @@ fn write_alpen_params_const(path: &Path) {
     );
     let out_path = Path::new(GENERATED_DIR).join("alpen_params.rs");
     fs::write(&out_path, content).unwrap_or_else(|e| panic!("write {}: {e}", out_path.display()));
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// Returns `true` when sp1-build itself would skip the build — under

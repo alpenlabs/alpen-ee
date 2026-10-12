@@ -245,6 +245,8 @@ mdbx/
 
 # Build specific files
 data/
+# Checked-in test fixtures, not a node datadir.
+!crates/test-utils/data/
 jwt.hex
 seq_key.bin
 

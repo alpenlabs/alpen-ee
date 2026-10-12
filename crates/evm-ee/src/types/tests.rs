@@ -24,15 +24,15 @@ struct TestData {
 }
 
 /// Helper function to load witness test data from the canonical fixture
-/// under test-utils/data/evm_ee.
+/// under test-utils/data/evm-ee.
 fn load_witness_test_data() -> EthClientExecutorInput {
     let test_data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
-        .join("test-utils/data/evm_ee/witness_params.json");
+        .join("test-utils/data/evm-ee/rsp_block_witness.json");
 
     let json_content = read_to_string(&test_data_path)
-        .expect("Failed to read witness_params.json from test-utils/data/evm_ee");
+        .expect("Failed to read rsp_block_witness.json from test-utils/data/evm-ee");
 
     let test_data: TestData =
         serde_json::from_str(&json_content).expect("Failed to parse test data");

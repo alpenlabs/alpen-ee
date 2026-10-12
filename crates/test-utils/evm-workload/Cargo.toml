@@ -1,0 +1,96 @@
+[package]
+edition.workspace = true
+name = "alpen-test-utils-evm-workload"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "generate-evm-workload"
+path = "src/main.rs"
+required-features = ["generator"]
+
+[dependencies]
+bincode.workspace = true
+serde = { workspace = true, features = ["derive"] }
+
+# generator
+alloy-consensus = { workspace = true, optional = true }
+alloy-eips = { workspace = true, optional = true }
+alloy-primitives = { workspace = true, optional = true }
+alloy-rlp = { workspace = true, optional = true }
+alloy-signer = { workspace = true, optional = true }
+alloy-signer-local = { workspace = true, optional = true }
+alloy-sol-types = { workspace = true, optional = true }
+alpen-common = { workspace = true, optional = true }
+alpen-evm-ee = { workspace = true, optional = true }
+alpen-exex = { workspace = true, optional = true }
+alpen-params = { workspace = true, features = ["test-utils"], optional = true }
+alpen-reth-evm = { workspace = true, optional = true }
+alpen-reth-node = { workspace = true, optional = true }
+alpen-reth-statediff = { workspace = true, optional = true }
+alpen-witness = { workspace = true, optional = true }
+async-trait = { workspace = true, optional = true }
+clap = { workspace = true, features = [
+  "std",
+  "help",
+  "usage",
+  "error-context",
+], optional = true }
+eyre = { workspace = true, optional = true }
+k256 = { workspace = true, optional = true }
+rand_chacha = { workspace = true, optional = true }
+reth-chainspec = { workspace = true, optional = true }
+reth-db-common = { workspace = true, optional = true }
+reth-ethereum-primitives = { workspace = true, optional = true }
+reth-evm = { workspace = true, optional = true }
+reth-primitives-traits = { workspace = true, optional = true }
+reth-provider = { workspace = true, features = ["test-utils"], optional = true }
+reth-revm = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+strata-acct-types = { workspace = true, optional = true }
+strata-codec = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+tracing-subscriber = { workspace = true, optional = true }
+
+[features]
+# Builds the generator binary and the reth-backed chain it drives.
+generator = [
+  "dep:alloy-consensus",
+  "dep:alloy-eips",
+  "dep:alloy-primitives",
+  "dep:alloy-rlp",
+  "dep:alloy-signer",
+  "dep:alloy-signer-local",
+  "dep:alloy-sol-types",
+  "dep:alpen-common",
+  "dep:alpen-evm-ee",
+  "dep:alpen-exex",
+  "dep:alpen-params",
+  "dep:alpen-reth-evm",
+  "dep:alpen-reth-node",
+  "dep:alpen-reth-statediff",
+  "dep:alpen-witness",
+  "dep:async-trait",
+  "dep:clap",
+  "dep:eyre",
+  "dep:k256",
+  "dep:rand_chacha",
+  "dep:reth-chainspec",
+  "dep:reth-db-common",
+  "dep:reth-ethereum-primitives",
+  "dep:reth-evm",
+  "dep:reth-primitives-traits",
+  "dep:reth-provider",
+  "dep:reth-revm",
+  "dep:serde_json",
+  "dep:strata-acct-types",
+  "dep:strata-codec",
+  "dep:tokio",
+  "dep:tracing",
+  "dep:tracing-subscriber",
+]
