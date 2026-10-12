@@ -1,8 +1,8 @@
 //! Simple execution environment implementation.
 
 use alpen_acct_types::{
-    BlockAssembler, EnvError, EnvResult, ExecBlock, ExecBlockOutput, ExecPartialState, ExecPayload,
-    ExecutionEnvironment,
+    BlockAssembler, EnvError, EnvResult, ExecBlock, ExecBlockOutput, ExecHeader, ExecPartialState,
+    ExecPayload, ExecutionEnvironment,
 };
 use alpen_chain_types::{ExecInputs, ExecOutputs};
 
@@ -17,6 +17,15 @@ impl ExecutionEnvironment for SimpleExecutionEnvironment {
     type Block = SimpleBlock;
     type WriteBatch = SimpleWriteBatch;
     type BlockOutput = ();
+
+    fn verify_header(&self, parent: &SimpleHeader, header: &SimpleHeader) -> EnvResult<()> {
+        if header.get_parent_id() != parent.compute_block_id()
+            || parent.index().checked_add(1) != Some(header.index())
+        {
+            return Err(EnvError::InvalidHeader);
+        }
+        Ok(())
+    }
 
     fn execute_block_body(
         &self,

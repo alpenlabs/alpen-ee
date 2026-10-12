@@ -10,24 +10,33 @@ use crate::{
 
 /// Processes a block from a chunk with associated inputs, merging results into
 /// the passed state.
+///
+/// `parent_header` is the header of the block this one builds on.
 pub fn process_block<E: ExecutionEnvironment>(
     ee: &E,
     state: &mut E::PartialState,
+    parent_header: &<E::Block as ExecBlock>::Header,
     block: &ChunkBlock<'_, E>,
 ) -> ChunkRuntimeResult<()> {
-    // Repackage the block into the payload we can execute.
     let eb = block.exec_block();
-    if !E::Block::check_header_matches_body(eb.get_header(), eb.get_body()) {
+    let header = eb.get_header();
+
+    // This also checks the block builds on its parent.
+    ee.verify_header(parent_header, header)?;
+
+    if !E::Block::check_header_matches_body(header, eb.get_body()) {
         return Err(ChunkRuntimeError::HeaderBodyMismatch);
     }
-    let header_intrinsics = eb.get_header().get_intrinsics();
+
+    // Repackage the block into the payload we can execute.
+    let header_intrinsics = header.get_intrinsics();
     let epl = ExecPayload::new(&header_intrinsics, eb.get_body());
 
     // Check the inputs against the block, then execute it and check the
     // outputs against the header.
     ee.verify_inputs_against_block(eb, block.inputs())?;
     let exec_outp = ee.execute_block_body(state, &epl)?;
-    ee.verify_outputs_against_header(eb.get_header(), &exec_outp)?;
+    ee.verify_outputs_against_header(header, &exec_outp)?;
 
     // Check that the EVM-derivable outputs match the chunk block.
     //
@@ -50,14 +59,14 @@ pub fn process_block<E: ExecutionEnvironment>(
     // Merge the changes and return the outputs.
     ee.merge_write_into_state(state, exec_outp.write_batch())?;
     let computed_state_root = state.compute_state_root()?;
-    let header_state_root = eb.get_header().get_state_root();
+    let header_state_root = header.get_state_root();
     if computed_state_root != header_state_root {
         return Err(ChunkRuntimeError::PostStateRootMismatch {
             expected: header_state_root,
             got: computed_state_root,
         });
     }
-    ee.update_partial_state_after_block(state, eb.get_header())?;
+    ee.update_partial_state_after_block(state, header)?;
 
     Ok(())
 }
@@ -122,23 +131,9 @@ fn process_chunk_blocks<E: ExecutionEnvironment>(
     let mut chunk_io = ChunkIo::new_empty();
     let mut parent_header = chunk.prev_header();
     for cb in chunk.blocks() {
-        let header = cb.exec_block().get_header();
-
-        // Verify it builds on the previous block.
-        let parent_blkid = parent_header.compute_block_id();
-        if header.get_parent_id() != parent_blkid {
-            return Err(ChunkRuntimeError::ParentMismatch {
-                expected: parent_blkid,
-                got: header.get_parent_id(),
-            });
-        }
-
-        // Verify the block itself.
-        process_block(ee, state, cb)?;
-
+        process_block(ee, state, parent_header, cb)?;
         chunk_io.extend_from_block(cb.inputs(), cb.outputs())?;
-
-        parent_header = header;
+        parent_header = cb.exec_block().get_header();
     }
 
     Ok((chunk_io.inputs, chunk_io.outputs))
@@ -195,7 +190,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use alpen_acct_types::{
-        BlockAssembler, ExecBlock, ExecBlockOutput, ExecHeader, ExecPayload, Hash,
+        BlockAssembler, EnvError, ExecBlock, ExecBlockOutput, ExecHeader, ExecPayload, Hash,
     };
     use alpen_chain_types::{ExecInputs, ExecOutputs};
     use alpen_simple_ee::{
@@ -369,6 +364,79 @@ mod tests {
         assert!(matches!(
             err,
             ChunkRuntimeError::PostStateRootMismatch { .. }
+        ));
+    }
+
+    /// The runtime leaves the parent link to `verify_header`, so a block that
+    /// doesn't build on the one before it must still stop the chunk.
+    #[test]
+    fn process_chunk_blocks_rejects_a_block_off_the_parent() {
+        let ee = SimpleExecutionEnvironment;
+
+        let mut accounts = BTreeMap::new();
+        accounts.insert(alice(), 1000);
+        let initial_state = SimplePartialState::new(accounts);
+
+        let (block, inp, out, _state) = build_block(
+            &ee,
+            &initial_state,
+            Hash::from([7u8; 32]),
+            1,
+            SimpleBlockBody::new(vec![SimpleTransaction::Transfer {
+                from: alice(),
+                to: bob(),
+                value: 200,
+            }]),
+        );
+
+        let chunk = Chunk::new(
+            SimpleHeader::genesis(),
+            vec![ChunkBlock::new(&inp, &out, block)],
+        );
+        let mut state = initial_state;
+
+        let err = process_chunk_blocks(&ee, &mut state, &chunk)
+            .expect_err("a block off the parent must be rejected");
+        assert!(matches!(
+            err,
+            ChunkRuntimeError::Env(EnvError::InvalidHeader)
+        ));
+    }
+
+    /// A header the environment refuses stops the chunk, even when the block
+    /// links to its parent and executes. The simple EE refuses a block whose
+    /// index skips one.
+    #[test]
+    fn process_chunk_blocks_rejects_a_header_the_environment_refuses() {
+        let ee = SimpleExecutionEnvironment;
+
+        let mut accounts = BTreeMap::new();
+        accounts.insert(alice(), 1000);
+        let initial_state = SimplePartialState::new(accounts);
+
+        let genesis_header = SimpleHeader::genesis();
+        let genesis_blkid = genesis_header.compute_block_id();
+
+        let (block, inp, out, _state) = build_block(
+            &ee,
+            &initial_state,
+            genesis_blkid,
+            2,
+            SimpleBlockBody::new(vec![SimpleTransaction::Transfer {
+                from: alice(),
+                to: bob(),
+                value: 200,
+            }]),
+        );
+
+        let chunk = Chunk::new(genesis_header, vec![ChunkBlock::new(&inp, &out, block)]);
+        let mut state = initial_state;
+
+        let err = process_chunk_blocks(&ee, &mut state, &chunk)
+            .expect_err("a header that skips an index must be rejected");
+        assert!(matches!(
+            err,
+            ChunkRuntimeError::Env(EnvError::InvalidHeader)
         ));
     }
 
