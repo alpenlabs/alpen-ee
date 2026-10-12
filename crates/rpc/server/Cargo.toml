@@ -21,6 +21,7 @@ reth-rpc-layer.workspace = true
 strata-identifiers.workspace = true
 tokio.workspace = true
 tower.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 alpen-rpc-api = { workspace = true, features = ["client"] }

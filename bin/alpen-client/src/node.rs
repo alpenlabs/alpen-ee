@@ -23,6 +23,7 @@ use alpen_params::AlpenParams;
 use alpen_reth_node::{AlpenEngineTypes, AlpenGossipEvent};
 use alpen_rpc_server::{
     get_or_create_jwt_secret, start_authenticated_rpc_server, AdminRpcServer, AlpenAdminRpcServer,
+    RpcBlockProductionControl,
 };
 use eyre::Context;
 use jsonrpsee::server::ServerHandle;
@@ -154,6 +155,10 @@ async fn bootstrap_node(
 
     let datadir = builder.config().datadir().data_dir().to_path_buf();
 
+    // Shared by the admin RPC (writer) and the sequencer's block builder.
+    let block_production = Arc::new(RpcBlockProductionControl::default());
+    let sequencer = !matches!(alpen_config.mode, NodeMode::FullNode(_));
+
     // Admin RPC: JWT-authenticated, on its own port, enabled only when
     // `[admin_rpc]` is configured. Independent of reth's RPC and of the node
     // mode, so it comes up here alongside the health check server rather than
@@ -163,7 +168,7 @@ async fn bootstrap_node(
             start_admin_rpc(
                 admin_rpc_config,
                 &datadir,
-                !matches!(alpen_config.mode, NodeMode::FullNode(_)),
+                sequencer.then(|| block_production.clone()),
             )
             .await?,
         ),
@@ -227,6 +232,7 @@ async fn bootstrap_node(
             db,
             ol_client,
             genesis_epoch,
+            block_production,
         },
     })
 }
@@ -320,15 +326,16 @@ async fn start_health_check(
 /// long as the server should run: dropping it stops the server. The JWT secret
 /// is read from the path [`AdminRpcConfig::jwtsecret_path`] resolves,
 /// generating and persisting a new random secret when the file does not exist.
+/// `block_production` is `None` on a full node.
 async fn start_admin_rpc(
     config: &AdminRpcConfig,
     datadir: &Path,
-    sequencer: bool,
+    block_production: Option<Arc<RpcBlockProductionControl>>,
 ) -> eyre::Result<ServerHandle> {
     let jwt_path = config.jwtsecret_path(datadir);
     let secret = get_or_create_jwt_secret(&jwt_path)
         .map_err(|e| eyre::eyre!("failed to load admin RPC JWT secret from {jwt_path:?}: {e}"))?;
-    let admin_module = AdminRpcServer::new(env!("CARGO_PKG_VERSION"), sequencer).into_rpc();
+    let admin_module = AdminRpcServer::new(env!("CARGO_PKG_VERSION"), block_production).into_rpc();
     let (admin_addr, admin_handle) = start_authenticated_rpc_server(
         SocketAddr::new(config.host, config.port),
         secret,

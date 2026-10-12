@@ -73,6 +73,10 @@ pub struct AdminStatusResponse {
 
     /// True when the node runs in sequencer mode.
     pub sequencer: bool,
+
+    /// Last block number the sequencer will produce before stopping. `0` means stopped now.
+    /// `None` when production is unbounded or the node is not a sequencer.
+    pub block_production_stop_after: Option<u64>,
 }
 
 #[cfg(test)]
@@ -114,6 +118,7 @@ mod tests {
         let response = AdminStatusResponse {
             version: "0.3.0-alpha.1".to_string(),
             sequencer: true,
+            block_production_stop_after: Some(42),
         };
         let encoded = serde_json::to_string(&response).unwrap();
         let decoded: AdminStatusResponse = serde_json::from_str(&encoded).unwrap();
