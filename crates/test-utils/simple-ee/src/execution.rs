@@ -49,6 +49,17 @@ impl ExecutionEnvironment for SimpleExecutionEnvironment {
         Ok(ExecBlockOutput::new(write_batch, (), outputs))
     }
 
+    fn verify_inputs_against_block(
+        &self,
+        _block: &Self::Block,
+        _inputs: &ExecInputs,
+    ) -> EnvResult<()> {
+        // The simple block body has no record of its deposits to check against.
+        // Wrong inputs change the post state, so the state root check catches
+        // them instead.
+        Ok(())
+    }
+
     fn verify_outputs_against_header(
         &self,
         _header: &<Self::Block as ExecBlock>::Header,
