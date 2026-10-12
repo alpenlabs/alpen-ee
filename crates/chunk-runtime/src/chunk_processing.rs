@@ -58,7 +58,7 @@ pub fn process_block<E: ExecutionEnvironment>(
 
     // Merge the changes and return the outputs.
     ee.merge_write_into_state(state, exec_outp.write_batch())?;
-    let computed_state_root = state.compute_state_root()?;
+    let computed_state_root = state.compute_state_root();
     let header_state_root = header.get_state_root();
     if computed_state_root != header_state_root {
         return Err(ChunkRuntimeError::PostStateRootMismatch {
@@ -160,7 +160,7 @@ pub fn compute_chunk_transition<E: ExecutionEnvironment>(
     };
 
     // 2. Make sure the state matches the parent block's state root.
-    let computed_pre_sr = state.compute_state_root()?;
+    let computed_pre_sr = state.compute_state_root();
     if computed_pre_sr != prev_header.get_state_root() {
         return Err(ChunkRuntimeError::PreStateRootMismatch {
             expected: prev_header.get_state_root(),
@@ -173,7 +173,7 @@ pub fn compute_chunk_transition<E: ExecutionEnvironment>(
     let (inputs, outputs) = process_chunk_blocks(ee, state, chunk)?;
 
     // 4. Compute the final state root and make sure it matches the tip.
-    let tip_state_root = state.compute_state_root()?;
+    let tip_state_root = state.compute_state_root();
     if tip_state_root != tip_header.get_state_root() {
         return Err(ChunkRuntimeError::PostStateRootMismatch {
             expected: tip_header.get_state_root(),
@@ -569,8 +569,7 @@ mod tests {
         accounts.insert(alice(), 1000);
         let initial_state = SimplePartialState::new(accounts);
 
-        let prev_header =
-            SimpleHeader::new(Hash::zero(), initial_state.compute_state_root().unwrap(), 0);
+        let prev_header = SimpleHeader::new(Hash::zero(), initial_state.compute_state_root(), 0);
         let prev_blkid = prev_header.compute_block_id();
         let (block, inputs, outputs, post_state) = build_block(
             &ee,
@@ -587,7 +586,7 @@ mod tests {
         let chunk_transition = ChunkTransition::new(
             prev_blkid,
             block.get_header().compute_block_id(),
-            post_state.compute_state_root().unwrap(),
+            post_state.compute_state_root(),
             block.get_header().get_exec_header_summary(),
             inputs.clone(),
             outputs.clone(),

@@ -607,10 +607,7 @@ mod tests {
         env.merge_write_into_state(&mut pre_state, output.write_batch())
             .expect("merging the write batch should succeed");
         assert_eq!(
-            pre_state
-                .compute_state_root()
-                .expect("state root should be computable")
-                .as_ref(),
+            pre_state.compute_state_root().as_ref(),
             header.state_root.as_slice(),
             "merged state root should match the witness header"
         );
