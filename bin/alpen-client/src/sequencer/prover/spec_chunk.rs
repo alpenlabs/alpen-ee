@@ -277,7 +277,7 @@ impl ChunkSpec {
             aggregated_outputs,
         );
 
-        let raw_chunk = RawChunkData::new(block_datas, parent_blkid);
+        let raw_chunk = RawChunkData::new(block_datas);
         let private_input = PrivateInput::new(
             chunk_transition,
             raw_chunk,

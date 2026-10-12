@@ -5,7 +5,6 @@ use alpen_chain_types::{ChunkTransition, ExecInputs, ExecOutputs};
 use rkyv::{Archive, Deserialize, Serialize};
 use rkyv_impl::archive_impl;
 use ssz::{Decode, DecodeError, Encode};
-use strata_acct_types::Hash;
 use strata_codec::CodecError;
 
 /// Private inputs we expose to the runtime.
@@ -82,26 +81,15 @@ impl ArchivedPrivateInput {
 #[rkyv(derive(Debug))]
 pub struct RawChunkData {
     blocks: Vec<RawBlockData>,
-    prev_exec_blkid: [u8; 32],
 }
 
 impl RawChunkData {
-    pub fn new(blocks: Vec<RawBlockData>, prev_exec_blkid: Hash) -> Self {
-        Self {
-            blocks,
-            prev_exec_blkid: prev_exec_blkid.0,
-        }
+    pub fn new(blocks: Vec<RawBlockData>) -> Self {
+        Self { blocks }
     }
 
     pub fn blocks(&self) -> &[RawBlockData] {
         &self.blocks
-    }
-}
-
-#[archive_impl]
-impl RawChunkData {
-    pub fn prev_exec_blkid(&self) -> Hash {
-        self.prev_exec_blkid.into()
     }
 }
 
