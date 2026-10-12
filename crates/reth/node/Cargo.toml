@@ -26,7 +26,6 @@ futures.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-chainspec.workspace = true
 reth-consensus.workspace = true
-reth-consensus-common.workspace = true
 reth-errors.workspace = true
 reth-eth-wire.workspace = true
 reth-ethereum-engine-primitives.workspace = true
