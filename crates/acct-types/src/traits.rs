@@ -100,14 +100,13 @@ pub trait ExecutionEnvironment: Sized + 'static {
         &self,
         pre_state: &Self::PartialState,
         exec_payload: &ExecPayload<'_, Self::Block>,
-        inputs: &ExecInputs,
     ) -> EnvResult<ExecBlockOutput<Self>>;
 
     /// Checks that the inputs match what the block applies.
     ///
-    /// Inputs go into execution, so unlike outputs they can't be compared
-    /// against what execution produced. Each environment has to tie them to
-    /// the block itself, for example to a deposit list in the body.
+    /// Execution reads the block, not the inputs, so the inputs are a claim
+    /// about the block. Each environment checks that claim against the block
+    /// itself, for example against a deposit list in the body.
     fn verify_inputs_against_block(
         &self,
         block: &Self::Block,

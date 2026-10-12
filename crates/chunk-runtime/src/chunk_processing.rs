@@ -23,7 +23,7 @@ pub fn process_block<E: ExecutionEnvironment>(
     // Check the inputs against the block, then execute it and check the
     // outputs against the header.
     ee.verify_inputs_against_block(eb, block.inputs())?;
-    let exec_outp = ee.execute_block_body(state, &epl, block.inputs())?;
+    let exec_outp = ee.execute_block_body(state, &epl)?;
     ee.verify_outputs_against_header(eb.get_header(), &exec_outp)?;
 
     // Check that the EVM-derivable outputs match the chunk block.
@@ -205,15 +205,15 @@ mod tests {
         parent_blkid: Hash,
         index: u64,
         body: SimpleBlockBody,
-        inputs: ExecInputs,
     ) -> (SimpleBlock, ExecInputs, ExecOutputs, SimplePartialState) {
         let intrinsics = SimpleHeaderIntrinsics {
             parent_blkid,
             index,
         };
+        let inputs = body.exec_inputs();
         let payload = ExecPayload::new(&intrinsics, &body);
         let output: ExecBlockOutput<SimpleExecutionEnvironment> =
-            ee.execute_block_body(state, &payload, &inputs).unwrap();
+            ee.execute_block_body(state, &payload).unwrap();
 
         let header = ee.complete_header(&payload, &output).unwrap();
         let block = SimpleBlock::new(header, body);
@@ -249,7 +249,6 @@ mod tests {
                 to: bob(),
                 value: 200,
             }]),
-            ExecInputs::new_empty(),
         );
         let blkid1 = block1.get_header().compute_block_id();
 
@@ -264,7 +263,6 @@ mod tests {
                 to: bob(),
                 value: 300,
             }]),
-            ExecInputs::new_empty(),
         );
         let blkid2 = block2.get_header().compute_block_id();
 
@@ -279,7 +277,6 @@ mod tests {
                 to: bob(),
                 value: 100,
             }]),
-            ExecInputs::new_empty(),
         );
 
         // Build the chunk.
@@ -323,7 +320,6 @@ mod tests {
                 to: bob(),
                 value: 200,
             }]),
-            ExecInputs::new_empty(),
         );
         let forged_header1 = SimpleHeader::new(genesis_blkid, Hash::from([0x42; 32]), 1);
         let block1 = SimpleBlock::new(forged_header1, block1.get_body().clone());
@@ -339,7 +335,6 @@ mod tests {
                 to: bob(),
                 value: 300,
             }]),
-            ExecInputs::new_empty(),
         );
 
         let chunk = Chunk::new(
@@ -382,7 +377,6 @@ mod tests {
                 to: bob(),
                 value: 200,
             }]),
-            ExecInputs::new_empty(),
         );
         let new_key = PredicateKey::always_accept();
         out1.set_new_predicate(Some(new_key));
@@ -399,7 +393,6 @@ mod tests {
                 to: bob(),
                 value: 300,
             }]),
-            ExecInputs::new_empty(),
         );
 
         let chunk = Chunk::new(
@@ -439,7 +432,6 @@ mod tests {
                 to: bob(),
                 value: 200,
             }]),
-            ExecInputs::new_empty(),
         );
         let blkid1 = block1.get_header().compute_block_id();
 
@@ -453,7 +445,6 @@ mod tests {
                 to: bob(),
                 value: 300,
             }]),
-            ExecInputs::new_empty(),
         );
         let new_key = PredicateKey::always_accept();
         out2.set_new_predicate(Some(new_key.clone()));
@@ -496,7 +487,6 @@ mod tests {
                 to: bob(),
                 value: 200,
             }]),
-            ExecInputs::new_empty(),
         );
 
         let chunk_transition = ChunkTransition::new(

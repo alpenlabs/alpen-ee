@@ -164,7 +164,6 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
         &self,
         pre_state: &Self::PartialState,
         exec_payload: &ExecPayload<'_, Self::Block>,
-        _inputs: &ExecInputs,
     ) -> EnvResult<ExecBlockOutput<Self>> {
         // Step 1: Build block from exec_payload and recover senders
         let block = build_and_recover_block(exec_payload)?;
@@ -432,7 +431,7 @@ mod tests {
         let intrinsics = block.get_header().get_intrinsics();
         let exec_payload = ExecPayload::new(&intrinsics, block.get_body());
 
-        let result = env.execute_block_body(&pre_state, &exec_payload, &ExecInputs::new_empty());
+        let result = env.execute_block_body(&pre_state, &exec_payload);
         assert!(
             result.is_err(),
             "ancestors that do not link to the executed block must be rejected"
@@ -531,7 +530,7 @@ mod tests {
 
         // Execute the block
         // Note: This will execute real block data through our implementation
-        let result = env.execute_block_body(&pre_state, &exec_payload, &inputs);
+        let result = env.execute_block_body(&pre_state, &exec_payload);
 
         // For now, we just verify it doesn't panic
         // In the future, we can compare outputs with the reference implementation
@@ -594,9 +593,8 @@ mod tests {
         let block = EvmBlock::new(evm_header, evm_body);
         let intrinsics = block.get_header().get_intrinsics();
         let exec_payload = ExecPayload::new(&intrinsics, block.get_body());
-        let inputs = ExecInputs::new_empty();
         let output = env
-            .execute_block_body(&pre_state, &exec_payload, &inputs)
+            .execute_block_body(&pre_state, &exec_payload)
             .expect("block execution should succeed");
 
         let mut bad_receipts_root = header.clone();

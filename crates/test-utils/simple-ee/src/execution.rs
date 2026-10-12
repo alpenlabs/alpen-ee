@@ -1,7 +1,7 @@
 //! Simple execution environment implementation.
 
 use alpen_acct_types::{
-    BlockAssembler, EnvResult, ExecBlock, ExecBlockOutput, ExecPartialState, ExecPayload,
+    BlockAssembler, EnvError, EnvResult, ExecBlock, ExecBlockOutput, ExecPartialState, ExecPayload,
     ExecutionEnvironment,
 };
 use alpen_chain_types::{ExecInputs, ExecOutputs};
@@ -22,7 +22,6 @@ impl ExecutionEnvironment for SimpleExecutionEnvironment {
         &self,
         pre_state: &Self::PartialState,
         exec_payload: &ExecPayload<'_, Self::Block>,
-        inputs: &ExecInputs,
     ) -> EnvResult<ExecBlockOutput<Self>> {
         let body = exec_payload.body();
 
@@ -30,12 +29,12 @@ impl ExecutionEnvironment for SimpleExecutionEnvironment {
         let mut accounts = pre_state.accounts().clone();
         let mut outputs = ExecOutputs::new_empty();
 
-        // 1. Apply deposits from inputs
-        for deposit in inputs.subject_deposits() {
+        // 1. Apply deposits from the block body
+        for deposit in body.deposits() {
             let balance = accounts.entry(deposit.dest()).or_insert(0);
             *balance = balance
                 .checked_add(deposit.value().to_sat())
-                .ok_or(alpen_acct_types::EnvError::InvalidBlockTx)?;
+                .ok_or(EnvError::InvalidBlockTx)?;
         }
 
         // 2. Apply transactions from the block body
@@ -51,12 +50,12 @@ impl ExecutionEnvironment for SimpleExecutionEnvironment {
 
     fn verify_inputs_against_block(
         &self,
-        _block: &Self::Block,
-        _inputs: &ExecInputs,
+        block: &Self::Block,
+        inputs: &ExecInputs,
     ) -> EnvResult<()> {
-        // The simple block body has no record of its deposits to check against.
-        // Wrong inputs change the post state, so the state root check catches
-        // them instead.
+        if block.get_body().deposits() != inputs.subject_deposits() {
+            return Err(EnvError::InvalidBlock);
+        }
         Ok(())
     }
 
@@ -104,8 +103,9 @@ mod tests {
     use std::collections::BTreeMap;
 
     use alpen_acct_types::{EnvError, EnvResult, ExecHeader, ExecPartialState, ExecPayload};
-    use alpen_chain_types::ExecInputs;
+    use alpen_chain_types::SubjectDepositData;
     use strata_acct_types::{AccountId, BitcoinAmount, Hash, SubjectId};
+    use strata_codec::{decode_buf_exact, encode_to_vec};
 
     use super::*;
     use crate::types::{SimpleBlockBody, SimpleHeader, SimpleHeaderIntrinsics, SimpleTransaction};
@@ -132,10 +132,9 @@ mod tests {
         pre_state: &SimplePartialState,
         intrinsics: &SimpleHeaderIntrinsics,
         body: SimpleBlockBody,
-        inputs: ExecInputs,
     ) -> EnvResult<SimplePartialState> {
         let payload = ExecPayload::new(intrinsics, &body);
-        let output = ee.execute_block_body(pre_state, &payload, &inputs)?;
+        let output = ee.execute_block_body(pre_state, &payload)?;
 
         let mut post_state = pre_state.clone();
         ee.merge_write_into_state(&mut post_state, output.write_batch())?;
@@ -172,14 +171,13 @@ mod tests {
             value: 300,
         };
         let body = SimpleBlockBody::new(vec![tx]);
-        let inputs = ExecInputs::new_empty();
         let intrinsics = SimpleHeaderIntrinsics {
             parent_blkid: Hash::new([0; 32]),
             index: 1,
         };
 
-        let post_state = execute_block(ee, &pre_state, &intrinsics, body, inputs)
-            .expect("execution should succeed");
+        let post_state =
+            execute_block(ee, &pre_state, &intrinsics, body).expect("execution should succeed");
 
         assert_eq!(post_state.accounts().get(&alice()), Some(&700));
         assert_eq!(post_state.accounts().get(&bob()), Some(&300));
@@ -218,14 +216,13 @@ mod tests {
         ];
 
         let body = SimpleBlockBody::new(txs);
-        let inputs = ExecInputs::new_empty();
         let intrinsics = SimpleHeaderIntrinsics {
             parent_blkid: Hash::new([0; 32]),
             index: 1,
         };
 
-        let post_state = execute_block(ee, &pre_state, &intrinsics, body, inputs)
-            .expect("execution should succeed");
+        let post_state =
+            execute_block(ee, &pre_state, &intrinsics, body).expect("execution should succeed");
 
         // alice: 1000 - 200 - 100 = 700
         // bob: 500 + 200 - 300 = 400
@@ -243,20 +240,19 @@ mod tests {
         let pre_state = SimplePartialState::new_empty();
 
         // Create a deposit of 1000 to alice
-        let mut inputs = ExecInputs::new_empty();
-        inputs.add_subject_deposit(alpen_chain_types::SubjectDepositData::new(
+        let deposits = vec![SubjectDepositData::new(
             alice(),
             BitcoinAmount::try_from(1000u64).unwrap(),
-        ));
+        )];
 
-        let body = SimpleBlockBody::new(vec![]);
+        let body = SimpleBlockBody::with_deposits(deposits, vec![]);
         let intrinsics = SimpleHeaderIntrinsics {
             parent_blkid: Hash::new([0; 32]),
             index: 1,
         };
 
-        let post_state = execute_block(ee, &pre_state, &intrinsics, body, inputs)
-            .expect("execution should succeed");
+        let post_state =
+            execute_block(ee, &pre_state, &intrinsics, body).expect("execution should succeed");
 
         assert_eq!(post_state.accounts().get(&alice()), Some(&1000));
     }
@@ -271,28 +267,20 @@ mod tests {
         let pre_state = SimplePartialState::new(accounts);
 
         // Create multiple deposits
-        let mut inputs = ExecInputs::new_empty();
-        inputs.add_subject_deposit(alpen_chain_types::SubjectDepositData::new(
-            alice(),
-            BitcoinAmount::try_from(500u64).unwrap(),
-        ));
-        inputs.add_subject_deposit(alpen_chain_types::SubjectDepositData::new(
-            bob(),
-            BitcoinAmount::try_from(300u64).unwrap(),
-        ));
-        inputs.add_subject_deposit(alpen_chain_types::SubjectDepositData::new(
-            charlie(),
-            BitcoinAmount::try_from(1000u64).unwrap(),
-        ));
+        let deposits = vec![
+            SubjectDepositData::new(alice(), BitcoinAmount::try_from(500u64).unwrap()),
+            SubjectDepositData::new(bob(), BitcoinAmount::try_from(300u64).unwrap()),
+            SubjectDepositData::new(charlie(), BitcoinAmount::try_from(1000u64).unwrap()),
+        ];
 
-        let body = SimpleBlockBody::new(vec![]);
+        let body = SimpleBlockBody::with_deposits(deposits, vec![]);
         let intrinsics = SimpleHeaderIntrinsics {
             parent_blkid: Hash::new([0; 32]),
             index: 1,
         };
 
-        let post_state = execute_block(ee, &pre_state, &intrinsics, body, inputs)
-            .expect("execution should succeed");
+        let post_state =
+            execute_block(ee, &pre_state, &intrinsics, body).expect("execution should succeed");
 
         assert_eq!(post_state.accounts().get(&alice()), Some(&500));
         assert_eq!(post_state.accounts().get(&bob()), Some(&500)); // 200 + 300
@@ -315,7 +303,6 @@ mod tests {
             value: 400,
         };
         let body = SimpleBlockBody::new(vec![tx]);
-        let inputs = ExecInputs::new_empty();
         let intrinsics = SimpleHeaderIntrinsics {
             parent_blkid: Hash::new([0; 32]),
             index: 1,
@@ -323,7 +310,7 @@ mod tests {
 
         let payload = ExecPayload::new(&intrinsics, &body);
         let output = ee
-            .execute_block_body(&pre_state, &payload, &inputs)
+            .execute_block_body(&pre_state, &payload)
             .expect("execution should succeed");
 
         let mut post_state = pre_state.clone();
@@ -372,7 +359,6 @@ mod tests {
         ];
 
         let body = SimpleBlockBody::new(txs);
-        let inputs = ExecInputs::new_empty();
         let intrinsics = SimpleHeaderIntrinsics {
             parent_blkid: Hash::new([0; 32]),
             index: 1,
@@ -380,7 +366,7 @@ mod tests {
 
         let payload = ExecPayload::new(&intrinsics, &body);
         let output = ee
-            .execute_block_body(&pre_state, &payload, &inputs)
+            .execute_block_body(&pre_state, &payload)
             .expect("execution should succeed");
 
         let mut post_state = pre_state.clone();
@@ -422,25 +408,19 @@ mod tests {
 
         // Block 1: Deposit 2000 to alice, 1500 to bob
         {
-            let mut inputs = ExecInputs::new_empty();
-            inputs.add_subject_deposit(alpen_chain_types::SubjectDepositData::new(
-                alice(),
-                BitcoinAmount::try_from(2000u64).unwrap(),
-            ));
-            inputs.add_subject_deposit(alpen_chain_types::SubjectDepositData::new(
-                bob(),
-                BitcoinAmount::try_from(1500u64).unwrap(),
-            ));
+            let deposits = vec![
+                SubjectDepositData::new(alice(), BitcoinAmount::try_from(2000u64).unwrap()),
+                SubjectDepositData::new(bob(), BitcoinAmount::try_from(1500u64).unwrap()),
+            ];
 
-            let body = SimpleBlockBody::new(vec![]);
+            let body = SimpleBlockBody::with_deposits(deposits, vec![]);
             index += 1;
             let intrinsics = SimpleHeaderIntrinsics {
                 parent_blkid,
                 index,
             };
 
-            state = execute_block(ee, &state, &intrinsics, body, inputs)
-                .expect("block 1 should succeed");
+            state = execute_block(ee, &state, &intrinsics, body).expect("block 1 should succeed");
 
             assert_eq!(state.accounts().get(&alice()), Some(&2000));
             assert_eq!(state.accounts().get(&bob()), Some(&1500));
@@ -448,10 +428,7 @@ mod tests {
             // Compute parent_blkid for next block
             let empty_body = SimpleBlockBody::new(vec![]);
             let payload = ExecPayload::new(&intrinsics, &empty_body);
-            let empty_inputs = ExecInputs::new_empty();
-            let output = ee
-                .execute_block_body(&state, &payload, &empty_inputs)
-                .unwrap();
+            let output = ee.execute_block_body(&state, &payload).unwrap();
             let header = complete_header_for_test(&intrinsics, &output);
             parent_blkid = header.compute_block_id();
         }
@@ -472,15 +449,13 @@ mod tests {
             ];
 
             let body = SimpleBlockBody::new(txs);
-            let inputs = ExecInputs::new_empty();
             index += 1;
             let intrinsics = SimpleHeaderIntrinsics {
                 parent_blkid,
                 index,
             };
 
-            state = execute_block(ee, &state, &intrinsics, body, inputs)
-                .expect("block 2 should succeed");
+            state = execute_block(ee, &state, &intrinsics, body).expect("block 2 should succeed");
 
             // alice: 2000 - 400 = 1600
             // bob: 1500 + 400 - 300 = 1600
@@ -491,21 +466,17 @@ mod tests {
 
             let empty_body = SimpleBlockBody::new(vec![]);
             let payload = ExecPayload::new(&intrinsics, &empty_body);
-            let empty_inputs = ExecInputs::new_empty();
-            let output = ee
-                .execute_block_body(&state, &payload, &empty_inputs)
-                .unwrap();
+            let output = ee.execute_block_body(&state, &payload).unwrap();
             let header = complete_header_for_test(&intrinsics, &output);
             parent_blkid = header.compute_block_id();
         }
 
         // Block 3: Deposit 500 to charlie, alice withdraws 600, charlie -> bob: 200
         {
-            let mut inputs = ExecInputs::new_empty();
-            inputs.add_subject_deposit(alpen_chain_types::SubjectDepositData::new(
+            let deposits = vec![SubjectDepositData::new(
                 charlie(),
                 BitcoinAmount::try_from(500u64).unwrap(),
-            ));
+            )];
 
             let txs = vec![
                 SimpleTransaction::EmitTransfer {
@@ -520,7 +491,7 @@ mod tests {
                 },
             ];
 
-            let body = SimpleBlockBody::new(txs);
+            let body = SimpleBlockBody::with_deposits(deposits, txs);
             index += 1;
             let intrinsics = SimpleHeaderIntrinsics {
                 parent_blkid,
@@ -529,7 +500,7 @@ mod tests {
 
             let payload = ExecPayload::new(&intrinsics, &body);
             let output = ee
-                .execute_block_body(&state, &payload, &inputs)
+                .execute_block_body(&state, &payload)
                 .expect("block 3 should succeed");
 
             ee.merge_write_into_state(&mut state, output.write_batch())
@@ -556,11 +527,10 @@ mod tests {
 
         // Block 4: bob withdraws 800, charlie withdraws 400, deposit 1000 to alice
         {
-            let mut inputs = ExecInputs::new_empty();
-            inputs.add_subject_deposit(alpen_chain_types::SubjectDepositData::new(
+            let deposits = vec![SubjectDepositData::new(
                 alice(),
                 BitcoinAmount::try_from(1000u64).unwrap(),
-            ));
+            )];
 
             let account_789 = AccountId::from([78u8; 32]);
             let txs = vec![
@@ -576,7 +546,7 @@ mod tests {
                 },
             ];
 
-            let body = SimpleBlockBody::new(txs);
+            let body = SimpleBlockBody::with_deposits(deposits, txs);
             index += 1;
             let intrinsics = SimpleHeaderIntrinsics {
                 parent_blkid,
@@ -585,7 +555,7 @@ mod tests {
 
             let payload = ExecPayload::new(&intrinsics, &body);
             let output = ee
-                .execute_block_body(&state, &payload, &inputs)
+                .execute_block_body(&state, &payload)
                 .expect("block 4 should succeed");
 
             ee.merge_write_into_state(&mut state, output.write_batch())
@@ -629,13 +599,12 @@ mod tests {
             value: 200,
         };
         let body = SimpleBlockBody::new(vec![tx]);
-        let inputs = ExecInputs::new_empty();
         let intrinsics = SimpleHeaderIntrinsics {
             parent_blkid: Hash::new([0; 32]),
             index: 1,
         };
 
-        let result = execute_block(ee, &pre_state, &intrinsics, body, inputs);
+        let result = execute_block(ee, &pre_state, &intrinsics, body);
         assert!(matches!(result, Err(EnvError::InvalidBlockTx)));
     }
 
@@ -653,13 +622,12 @@ mod tests {
             value: 100,
         };
         let body = SimpleBlockBody::new(vec![tx]);
-        let inputs = ExecInputs::new_empty();
         let intrinsics = SimpleHeaderIntrinsics {
             parent_blkid: Hash::new([0; 32]),
             index: 1,
         };
 
-        let result = execute_block(ee, &pre_state, &intrinsics, body, inputs);
+        let result = execute_block(ee, &pre_state, &intrinsics, body);
         assert!(matches!(result, Err(EnvError::InvalidBlockTx)));
     }
 
@@ -679,13 +647,12 @@ mod tests {
             value: 100,
         };
         let body = SimpleBlockBody::new(vec![tx]);
-        let inputs = ExecInputs::new_empty();
         let intrinsics = SimpleHeaderIntrinsics {
             parent_blkid: Hash::new([0; 32]),
             index: 1,
         };
 
-        let result = execute_block(ee, &pre_state, &intrinsics, body, inputs);
+        let result = execute_block(ee, &pre_state, &intrinsics, body);
         assert!(matches!(result, Err(EnvError::InvalidBlockTx)));
     }
 
@@ -703,13 +670,12 @@ mod tests {
             value: 100,
         };
         let body = SimpleBlockBody::new(vec![tx]);
-        let inputs = ExecInputs::new_empty();
         let intrinsics = SimpleHeaderIntrinsics {
             parent_blkid: Hash::new([0; 32]),
             index: 1,
         };
 
-        let result = execute_block(ee, &pre_state, &intrinsics, body, inputs);
+        let result = execute_block(ee, &pre_state, &intrinsics, body);
         assert!(matches!(result, Err(EnvError::InvalidBlockTx)));
     }
 
@@ -729,7 +695,6 @@ mod tests {
             value: 750,
         };
         let body = SimpleBlockBody::new(vec![tx]);
-        let inputs = ExecInputs::new_empty();
         let intrinsics = SimpleHeaderIntrinsics {
             parent_blkid: Hash::new([0; 32]),
             index: 1,
@@ -737,7 +702,7 @@ mod tests {
 
         let payload = ExecPayload::new(&intrinsics, &body);
         let output = ee
-            .execute_block_body(&pre_state, &payload, &inputs)
+            .execute_block_body(&pre_state, &payload)
             .expect("exact balance withdrawal should succeed");
 
         let mut post_state = pre_state.clone();
@@ -787,13 +752,12 @@ mod tests {
         ];
 
         let body = SimpleBlockBody::new(txs);
-        let inputs = ExecInputs::new_empty();
         let intrinsics = SimpleHeaderIntrinsics {
             parent_blkid: Hash::new([0; 32]),
             index: 1,
         };
 
-        let result = execute_block(ee, &pre_state, &intrinsics, body, inputs);
+        let result = execute_block(ee, &pre_state, &intrinsics, body);
         assert!(
             matches!(result, Err(EnvError::InvalidBlockTx)),
             "Block should fail when any transaction underflows"
@@ -816,13 +780,12 @@ mod tests {
             value: 1000,
         };
         let body = SimpleBlockBody::new(vec![tx]);
-        let inputs = ExecInputs::new_empty();
         let intrinsics = SimpleHeaderIntrinsics {
             parent_blkid: Hash::new([0; 32]),
             index: 1,
         };
 
-        let post_state = execute_block(ee, &pre_state, &intrinsics, body, inputs)
+        let post_state = execute_block(ee, &pre_state, &intrinsics, body)
             .expect("exact balance transfer should succeed");
 
         assert_eq!(post_state.accounts().get(&alice()), Some(&0));
@@ -848,7 +811,6 @@ mod tests {
             data: msg_data.clone(),
         };
         let body = SimpleBlockBody::new(vec![tx]);
-        let inputs = ExecInputs::new_empty();
         let intrinsics = SimpleHeaderIntrinsics {
             parent_blkid: Hash::new([0; 32]),
             index: 1,
@@ -856,7 +818,7 @@ mod tests {
 
         let payload = ExecPayload::new(&intrinsics, &body);
         let output = ee
-            .execute_block_body(&pre_state, &payload, &inputs)
+            .execute_block_body(&pre_state, &payload)
             .expect("execution should succeed");
 
         let mut post_state = pre_state.clone();
@@ -921,7 +883,6 @@ mod tests {
         ];
 
         let body = SimpleBlockBody::new(txs);
-        let inputs = ExecInputs::new_empty();
         let intrinsics = SimpleHeaderIntrinsics {
             parent_blkid: Hash::new([0; 32]),
             index: 1,
@@ -929,7 +890,7 @@ mod tests {
 
         let payload = ExecPayload::new(&intrinsics, &body);
         let output = ee
-            .execute_block_body(&pre_state, &payload, &inputs)
+            .execute_block_body(&pre_state, &payload)
             .expect("execution should succeed");
 
         let mut post_state = pre_state.clone();
@@ -990,13 +951,12 @@ mod tests {
             data: vec![1, 2, 3],
         };
         let body = SimpleBlockBody::new(vec![tx]);
-        let inputs = ExecInputs::new_empty();
         let intrinsics = SimpleHeaderIntrinsics {
             parent_blkid: Hash::new([0; 32]),
             index: 1,
         };
 
-        let result = execute_block(ee, &pre_state, &intrinsics, body, inputs);
+        let result = execute_block(ee, &pre_state, &intrinsics, body);
         assert!(matches!(result, Err(EnvError::InvalidBlockTx)));
     }
 
@@ -1016,13 +976,12 @@ mod tests {
             data: vec![],
         };
         let body = SimpleBlockBody::new(vec![tx]);
-        let inputs = ExecInputs::new_empty();
         let intrinsics = SimpleHeaderIntrinsics {
             parent_blkid: Hash::new([0; 32]),
             index: 1,
         };
 
-        let result = execute_block(ee, &pre_state, &intrinsics, body, inputs);
+        let result = execute_block(ee, &pre_state, &intrinsics, body);
         assert!(matches!(result, Err(EnvError::InvalidBlockTx)));
     }
 
@@ -1075,7 +1034,6 @@ mod tests {
         ];
 
         let body = SimpleBlockBody::new(txs);
-        let inputs = ExecInputs::new_empty();
         let intrinsics = SimpleHeaderIntrinsics {
             parent_blkid: Hash::new([0; 32]),
             index: 1,
@@ -1083,7 +1041,7 @@ mod tests {
 
         let payload = ExecPayload::new(&intrinsics, &body);
         let output = ee
-            .execute_block_body(&pre_state, &payload, &inputs)
+            .execute_block_body(&pre_state, &payload)
             .expect("execution should succeed");
 
         let mut post_state = pre_state.clone();
@@ -1122,5 +1080,49 @@ mod tests {
             msg2.payload().value(),
             BitcoinAmount::try_from(100u64).unwrap()
         );
+    }
+
+    #[test]
+    fn verify_inputs_against_block_checks_body_deposits() {
+        let ee = SimpleExecutionEnvironment;
+        let deposit = SubjectDepositData::new(alice(), BitcoinAmount::try_from(1000u64).unwrap());
+        let body = SimpleBlockBody::with_deposits(vec![deposit], vec![]);
+        let block = SimpleBlock::new(SimpleHeader::genesis(), body.clone());
+
+        ee.verify_inputs_against_block(&block, &body.exec_inputs())
+            .expect("inputs matching the body's deposits should pass");
+
+        let wrong = SimpleBlockBody::with_deposits(
+            vec![SubjectDepositData::new(
+                bob(),
+                BitcoinAmount::try_from(1000u64).unwrap(),
+            )],
+            vec![],
+        );
+        let err = ee
+            .verify_inputs_against_block(&block, &wrong.exec_inputs())
+            .expect_err("inputs that differ from the body's deposits must be rejected");
+        assert!(matches!(err, EnvError::InvalidBlock));
+    }
+
+    #[test]
+    fn block_body_codec_roundtrips_deposits() {
+        let body = SimpleBlockBody::with_deposits(
+            vec![SubjectDepositData::new(
+                alice(),
+                BitcoinAmount::try_from(1000u64).unwrap(),
+            )],
+            vec![SimpleTransaction::Transfer {
+                from: alice(),
+                to: bob(),
+                value: 200,
+            }],
+        );
+
+        let encoded = encode_to_vec(&body).unwrap();
+        let decoded: SimpleBlockBody = decode_buf_exact(&encoded).unwrap();
+
+        assert_eq!(decoded.deposits(), body.deposits());
+        assert_eq!(decoded.transactions(), body.transactions());
     }
 }

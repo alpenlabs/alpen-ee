@@ -76,7 +76,7 @@ mod tests {
     use alpen_acct_types::{
         BlockAssembler, ExecBlock, ExecHeader, ExecPartialState, ExecPayload, Hash,
     };
-    use alpen_chain_types::{ChunkTransition, ExecInputs};
+    use alpen_chain_types::ChunkTransition;
     use alpen_simple_ee::{
         SimpleBlock, SimpleBlockBody, SimpleExecutionEnvironment, SimpleHeader,
         SimpleHeaderIntrinsics, SimplePartialState, SimpleTransaction,
@@ -117,11 +117,9 @@ mod tests {
             to: bob,
             value: 200,
         }]);
-        let inputs = ExecInputs::new_empty();
+        let inputs = body.exec_inputs();
         let payload = ExecPayload::new(&intrinsics, &body);
-        let output = ee
-            .execute_block_body(&pre_state, &payload, &inputs)
-            .unwrap();
+        let output = ee.execute_block_body(&pre_state, &payload).unwrap();
         let header = ee.complete_header(&payload, &output).unwrap();
         let outputs = output.outputs().clone();
         let block = SimpleBlock::new(header, body);
