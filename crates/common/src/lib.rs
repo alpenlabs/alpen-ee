@@ -7,6 +7,7 @@ mod traits;
 mod types;
 mod utils;
 
+pub use alpen_reth_primitives::sats_to_gwei;
 #[cfg(feature = "test-utils")]
 pub use traits::{
     da::MockBatchDaProvider,
@@ -58,6 +59,5 @@ pub use types::{
 };
 pub use utils::{
     clock::{Clock, SystemClock},
-    conversions::sats_to_gwei,
     ledger_refs::build_ledger_refs_from_da,
 };

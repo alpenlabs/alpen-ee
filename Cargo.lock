@@ -1350,6 +1350,7 @@ dependencies = [
  "alpen-da-types",
  "alpen-params",
  "alpen-reth-node",
+ "alpen-reth-primitives",
  "alpen-reth-statediff",
  "async-trait",
  "bincode",
