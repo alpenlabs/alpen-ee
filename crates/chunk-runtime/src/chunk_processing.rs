@@ -17,7 +17,7 @@ pub fn process_block<E: ExecutionEnvironment>(
     state: &mut E::PartialState,
     parent_header: &<E::Block as ExecBlock>::Header,
     block: &ChunkBlock<'_, E>,
-) -> ChunkRuntimeResult<()> {
+) -> ChunkRuntimeResult<(), E::Error> {
     let eb = block.exec_block();
     let header = eb.get_header();
 
@@ -86,11 +86,11 @@ impl ChunkIo {
     }
 
     /// Appends the next block's inputs and outputs.
-    fn extend_from_block(
+    fn extend_from_block<EnvErr>(
         &mut self,
         inps: &ExecInputs,
         outps: &ExecOutputs,
-    ) -> ChunkRuntimeResult<()> {
+    ) -> ChunkRuntimeResult<(), EnvErr> {
         // A rotation ends the chunk. The sequencer stops assembling at one and
         // seals right after it, but that's only host behavior — without this
         // check a proof could carry blocks that ran after the rotation, and
@@ -127,7 +127,7 @@ fn process_chunk_blocks<E: ExecutionEnvironment>(
     ee: &E,
     state: &mut E::PartialState,
     chunk: &Chunk<'_, E>,
-) -> ChunkRuntimeResult<(ExecInputs, ExecOutputs)> {
+) -> ChunkRuntimeResult<(ExecInputs, ExecOutputs), E::Error> {
     let mut chunk_io = ChunkIo::new_empty();
     let mut parent_header = chunk.prev_header();
     for cb in chunk.blocks() {
@@ -145,7 +145,7 @@ pub fn compute_chunk_transition<E: ExecutionEnvironment>(
     ee: &E,
     state: &mut E::PartialState,
     chunk: &Chunk<'_, E>,
-) -> ChunkRuntimeResult<ChunkTransition> {
+) -> ChunkRuntimeResult<ChunkTransition, E::Error> {
     let prev_header = chunk.prev_header();
 
     // 1. Make sure the chunk is nonempty.

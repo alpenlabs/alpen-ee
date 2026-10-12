@@ -1587,6 +1587,7 @@ dependencies = [
  "strata-ol-bridge-types",
  "strata-ol-msg-types",
  "strata-primitives",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

@@ -609,6 +609,7 @@ dependencies = [
  "strata-codec",
  "strata-msg-fmt",
  "strata-ol-msg-types",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

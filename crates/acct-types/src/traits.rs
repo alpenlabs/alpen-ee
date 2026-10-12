@@ -2,11 +2,13 @@
 // crate?  so that chunk-runtime doesn't have to depend on this crate?  maybe
 // do this after repo restructure
 
+use std::error::Error;
+
 use alpen_chain_types::{ExecHeaderSummary, ExecInputs};
 use strata_codec::Codec;
 use strata_identifiers::Hash;
 
-use crate::{errors::EnvResult, inputs::ExecPayload, outputs::ExecBlockOutput};
+use crate::{inputs::ExecPayload, outputs::ExecBlockOutput};
 
 /// Represents a partially-loaded state, including any information we would need
 /// to manipulate it and compute state roots.
@@ -89,6 +91,12 @@ pub trait ExecutionEnvironment: Sized + 'static {
     /// or complete a block header.
     type BlockOutput: Sized;
 
+    /// Why one of this environment's checks or its execution failed.
+    ///
+    /// Each environment names its own failures, so a rejected block says
+    /// which rule it broke.
+    type Error: Error + Send + Sync + 'static;
+
     /// Checks a block header on its own and against its parent's header.
     ///
     /// This must check that `header` builds on `parent`, meaning its parent
@@ -99,7 +107,7 @@ pub trait ExecutionEnvironment: Sized + 'static {
         &self,
         parent: &<Self::Block as ExecBlock>::Header,
         header: &<Self::Block as ExecBlock>::Header,
-    ) -> EnvResult<()>;
+    ) -> Result<(), Self::Error>;
 
     /// Executes a block payload on top of a pre-state, returning the execution
     /// output.
@@ -113,7 +121,7 @@ pub trait ExecutionEnvironment: Sized + 'static {
         &self,
         pre_state: &Self::PartialState,
         exec_payload: &ExecPayload<'_, Self::Block>,
-    ) -> EnvResult<ExecBlockOutput<Self>>;
+    ) -> Result<ExecBlockOutput<Self>, Self::Error>;
 
     /// Checks that the inputs match what the block applies.
     ///
@@ -124,7 +132,7 @@ pub trait ExecutionEnvironment: Sized + 'static {
         &self,
         block: &Self::Block,
         inputs: &ExecInputs,
-    ) -> EnvResult<()>;
+    ) -> Result<(), Self::Error>;
 
     /// Performs any additional checks needed from the block outputs against the
     /// header.
@@ -132,14 +140,14 @@ pub trait ExecutionEnvironment: Sized + 'static {
         &self,
         header: &<Self::Block as ExecBlock>::Header,
         outputs: &ExecBlockOutput<Self>,
-    ) -> EnvResult<()>;
+    ) -> Result<(), Self::Error>;
 
     /// Applies a pending write batch into the partial state.
     fn merge_write_into_state(
         &self,
         state: &mut Self::PartialState,
         wb: &Self::WriteBatch,
-    ) -> EnvResult<()>;
+    ) -> Result<(), Self::Error>;
 
     /// Updates partial state with data derived from a successfully executed block.
     ///
@@ -151,7 +159,7 @@ pub trait ExecutionEnvironment: Sized + 'static {
         &self,
         _state: &mut Self::PartialState,
         _header: &<Self::Block as ExecBlock>::Header,
-    ) -> EnvResult<()> {
+    ) -> Result<(), Self::Error> {
         Ok(())
     }
 }
@@ -171,5 +179,5 @@ pub trait BlockAssembler: ExecutionEnvironment {
         &self,
         exec_payload: &ExecPayload<'_, Self::Block>,
         output: &ExecBlockOutput<Self>,
-    ) -> EnvResult<<Self::Block as ExecBlock>::Header>;
+    ) -> Result<<Self::Block as ExecBlock>::Header, Self::Error>;
 }
