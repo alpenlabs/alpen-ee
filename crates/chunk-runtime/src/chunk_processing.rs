@@ -1,9 +1,12 @@
 use alpen_acct_types::{
-    EnvError, EnvResult, ExecBlock, ExecHeader, ExecPartialState, ExecPayload, ExecutionEnvironment,
+    ExecBlock, ExecHeader, ExecPartialState, ExecPayload, ExecutionEnvironment,
 };
 use alpen_chain_types::{ChunkTransition, ExecInputs, ExecOutputs};
 
-use crate::chunk::{Chunk, ChunkBlock};
+use crate::{
+    ChunkRuntimeError, ChunkRuntimeResult,
+    chunk::{Chunk, ChunkBlock},
+};
 
 /// Processes a block from a chunk with associated inputs, merging results into
 /// the passed state.
@@ -11,11 +14,11 @@ pub fn process_block<E: ExecutionEnvironment>(
     ee: &E,
     state: &mut E::PartialState,
     block: &ChunkBlock<'_, E>,
-) -> EnvResult<()> {
+) -> ChunkRuntimeResult<()> {
     // Repackage the block into the payload we can execute.
     let eb = block.exec_block();
     if !E::Block::check_header_matches_body(eb.get_header(), eb.get_body()) {
-        return Err(EnvError::InvalidBlock);
+        return Err(ChunkRuntimeError::HeaderBodyMismatch);
     }
     let header_intrinsics = eb.get_header().get_intrinsics();
     let epl = ExecPayload::new(&header_intrinsics, eb.get_body());
@@ -38,14 +41,21 @@ pub fn process_block<E: ExecutionEnvironment>(
     if exec_outp.outputs().output_transfers() != block.outputs().output_transfers()
         || exec_outp.outputs().output_messages() != block.outputs().output_messages()
     {
-        return Err(EnvError::InvalidBlock);
+        return Err(ChunkRuntimeError::OutputMismatch {
+            expected: Box::new(block.outputs().clone()),
+            got: Box::new(exec_outp.outputs().clone()),
+        });
     }
 
     // Merge the changes and return the outputs.
     ee.merge_write_into_state(state, exec_outp.write_batch())?;
     let computed_state_root = state.compute_state_root()?;
-    if computed_state_root != eb.get_header().get_state_root() {
-        return Err(EnvError::InvalidBlock);
+    let header_state_root = eb.get_header().get_state_root();
+    if computed_state_root != header_state_root {
+        return Err(ChunkRuntimeError::PostStateRootMismatch {
+            expected: header_state_root,
+            got: computed_state_root,
+        });
     }
     ee.update_partial_state_after_block(state, eb.get_header())?;
 
@@ -67,13 +77,17 @@ impl ChunkIo {
     }
 
     /// Appends the next block's inputs and outputs.
-    fn extend_from_block(&mut self, inps: &ExecInputs, outps: &ExecOutputs) -> EnvResult<()> {
+    fn extend_from_block(
+        &mut self,
+        inps: &ExecInputs,
+        outps: &ExecOutputs,
+    ) -> ChunkRuntimeResult<()> {
         // A rotation ends the chunk. The sequencer stops assembling at one and
         // seals right after it, but that's only host behavior — without this
         // check a proof could carry blocks that ran after the rotation, and
         // they'd be authorized by the predecessor predicate.
         if self.outputs.new_predicate().is_some() {
-            return Err(EnvError::NonTerminalRotation);
+            return Err(ChunkRuntimeError::NonTerminalRotation);
         }
 
         // FIXME(STR-2172): these panic once the chunk's IO goes over the SSZ
@@ -104,21 +118,19 @@ fn process_chunk_blocks<E: ExecutionEnvironment>(
     ee: &E,
     state: &mut E::PartialState,
     chunk: &Chunk<'_, E>,
-) -> EnvResult<(ExecInputs, ExecOutputs)> {
-    // 1. Check that the chunk is nonempty.
-    if chunk.blocks().is_empty() {
-        return Err(EnvError::MalformedChainSegment);
-    }
-
-    // 2. Process each block, collecting the IO and tracking chain continuity.
+) -> ChunkRuntimeResult<(ExecInputs, ExecOutputs)> {
     let mut chunk_io = ChunkIo::new_empty();
     let mut parent_header = chunk.prev_header();
     for cb in chunk.blocks() {
         let header = cb.exec_block().get_header();
 
         // Verify it builds on the previous block.
-        if header.get_parent_id() != parent_header.compute_block_id() {
-            return Err(EnvError::MismatchedChainSegment);
+        let parent_blkid = parent_header.compute_block_id();
+        if header.get_parent_id() != parent_blkid {
+            return Err(ChunkRuntimeError::ParentMismatch {
+                expected: parent_blkid,
+                got: header.get_parent_id(),
+            });
         }
 
         // Verify the block itself.
@@ -138,18 +150,21 @@ pub fn compute_chunk_transition<E: ExecutionEnvironment>(
     ee: &E,
     state: &mut E::PartialState,
     chunk: &Chunk<'_, E>,
-) -> EnvResult<ChunkTransition> {
+) -> ChunkRuntimeResult<ChunkTransition> {
     let prev_header = chunk.prev_header();
 
     // 1. Make sure the chunk is nonempty.
     let Some(tip_header) = chunk.blocks().last().map(|b| b.exec_block().get_header()) else {
-        return Err(EnvError::MalformedChainSegment);
+        return Err(ChunkRuntimeError::EmptyChunk);
     };
 
     // 2. Make sure the state matches the parent block's state root.
     let computed_pre_sr = state.compute_state_root()?;
     if computed_pre_sr != prev_header.get_state_root() {
-        return Err(EnvError::MismatchedCurStateData);
+        return Err(ChunkRuntimeError::PreStateRootMismatch {
+            expected: prev_header.get_state_root(),
+            got: computed_pre_sr,
+        });
     }
 
     // 3. Execute the blocks in the chunk. Each block's post-state root is
@@ -159,7 +174,10 @@ pub fn compute_chunk_transition<E: ExecutionEnvironment>(
     // 4. Compute the final state root and make sure it matches the tip.
     let tip_state_root = state.compute_state_root()?;
     if tip_state_root != tip_header.get_state_root() {
-        return Err(EnvError::MismatchedChainSegment);
+        return Err(ChunkRuntimeError::PostStateRootMismatch {
+            expected: tip_header.get_state_root(),
+            got: tip_state_root,
+        });
     }
 
     Ok(ChunkTransition::new(
@@ -348,7 +366,10 @@ mod tests {
 
         let err = process_chunk_blocks(&ee, &mut state, &chunk)
             .expect_err("forged intermediate state root must be rejected");
-        assert!(matches!(err, EnvError::InvalidBlock));
+        assert!(matches!(
+            err,
+            ChunkRuntimeError::PostStateRootMismatch { .. }
+        ));
     }
 
     /// A chunk whose rotating block is followed by an ordinary block must be
@@ -406,7 +427,7 @@ mod tests {
 
         let err = process_chunk_blocks(&ee, &mut state, &chunk)
             .expect_err("a block after a rotation must be rejected");
-        assert!(matches!(err, EnvError::NonTerminalRotation));
+        assert!(matches!(err, ChunkRuntimeError::NonTerminalRotation));
     }
 
     /// The mirror of the case above: a rotation on the chunk's last block is

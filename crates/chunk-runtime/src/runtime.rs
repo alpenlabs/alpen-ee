@@ -1,6 +1,6 @@
 //! Toplevel proof logic using no-copy input types.
 
-use alpen_acct_types::{EnvError, ExecutionEnvironment};
+use alpen_acct_types::ExecutionEnvironment;
 
 use crate::{
     ArchivedPrivateInput, Chunk, ChunkBlock, ChunkRuntimeError, ChunkRuntimeResult,
@@ -16,38 +16,42 @@ pub fn verify_input<E: ExecutionEnvironment>(
     // 1. Parse the various basic inputs.
     let tsn = input
         .try_decode_chunk_transition()
-        .map_err(|_| EnvError::MalformedChainSegment)?;
+        .map_err(ChunkRuntimeError::DecodeChunkTransition)?;
 
     // FIXME(STR-3685): do we actually need the header or just the blkid+state?
     let prev_header = input
         .try_decode_prev_header::<E>()
-        .map_err(|_| EnvError::MalformedChainSegment)?;
+        .map_err(ChunkRuntimeError::DecodeParentHeader)?;
 
     let mut pre_state = input
         .try_decode_pre_state::<E>()
-        .map_err(|_| EnvError::MalformedChainState)?;
+        .map_err(ChunkRuntimeError::DecodePreState)?;
 
     // 2. Parse the blocks into a chunk we can execute.
     // TODO(STR-3685): rework borrowings here because this is really ugly
     let mut block_inputs = Vec::new();
     let mut block_outputs = Vec::new();
-    for b in input.raw_chunk().blocks() {
+    for (index, b) in input.raw_chunk().blocks().iter().enumerate() {
         block_inputs.push(
             b.try_decode_exec_inputs()
-                .map_err(|_| EnvError::MalformedChainSegment)?,
+                .map_err(|source| ChunkRuntimeError::DecodeBlockInputs { index, source })?,
         );
         block_outputs.push(
             b.try_decode_exec_outputs()
-                .map_err(|_| EnvError::MalformedChainSegment)?,
+                .map_err(|source| ChunkRuntimeError::DecodeBlockOutputs { index, source })?,
         );
     }
 
     let mut blocks = Vec::new();
-    for (i, b) in input.raw_chunk().blocks().iter().enumerate() {
+    for (index, b) in input.raw_chunk().blocks().iter().enumerate() {
         let block = b
             .try_decode_block::<E>()
-            .map_err(|_| EnvError::MalformedChainSegment)?;
-        blocks.push(ChunkBlock::new(&block_inputs[i], &block_outputs[i], block));
+            .map_err(|source| ChunkRuntimeError::DecodeBlock { index, source })?;
+        blocks.push(ChunkBlock::new(
+            &block_inputs[index],
+            &block_outputs[index],
+            block,
+        ));
     }
 
     let chunk = Chunk::<'_, E>::new(prev_header, blocks);

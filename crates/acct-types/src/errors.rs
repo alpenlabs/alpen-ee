@@ -3,9 +3,6 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum EnvError {
-    #[error("malformed chain state data")]
-    MalformedChainState,
-
     /// Malformed extra data.
     #[error("malformed extra data")]
     MalformedExtraData,
@@ -21,11 +18,6 @@ pub enum EnvError {
     /// Tried to verify a chain segment without a waiting commit.
     #[error("tried to consume a chain segment that was not provided")]
     UncommittedChainSegment,
-
-    /// If the header or state provided to start verification off with does not
-    /// match.
-    #[error("mismatched data in current state and whatever")]
-    MismatchedCurStateData,
 
     #[error("mismatched intermediate state")]
     MismatchedIntermediateState,
