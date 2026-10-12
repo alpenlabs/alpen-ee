@@ -47,10 +47,10 @@ pub fn verify_input<E: ExecutionEnvironment>(
         blocks.push(ChunkBlock::new(&block_inputs[i], &block_outputs[i], block));
     }
 
-    let chunk = Chunk::<'_, E>::new(blocks);
+    let chunk = Chunk::<'_, E>::new(prev_header, blocks);
 
     // 3. Verify the chunk against the pre state.
-    verify_chunk_transition(&tsn, ee, &prev_header, &mut pre_state, &chunk)?;
+    verify_chunk_transition(&tsn, ee, &mut pre_state, &chunk)?;
 
     Ok(())
 }
