@@ -20,7 +20,9 @@ pub fn process_block<E: ExecutionEnvironment>(
     let header_intrinsics = eb.get_header().get_intrinsics();
     let epl = ExecPayload::new(&header_intrinsics, eb.get_body());
 
-    // Execute the block, verify consistency.
+    // Check the inputs against the block, then execute it and check the
+    // outputs against the header.
+    ee.verify_inputs_against_block(eb, block.inputs())?;
     let exec_outp = ee.execute_block_body(state, &epl, block.inputs())?;
     ee.verify_outputs_against_header(eb.get_header(), &exec_outp)?;
 
