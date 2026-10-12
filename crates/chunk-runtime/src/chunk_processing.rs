@@ -1,6 +1,5 @@
 use alpen_acct_types::{
-    EnvError, EnvResult, ExecBlock, ExecHeader, ExecPartialState, ExecPayload,
-    ExecutionEnvironment, Hash,
+    EnvError, EnvResult, ExecBlock, ExecHeader, ExecPartialState, ExecPayload, ExecutionEnvironment,
 };
 use alpen_chain_types::{ChunkTransition, ExecInputs, ExecOutputs};
 
@@ -103,7 +102,6 @@ fn process_chunk_blocks<E: ExecutionEnvironment>(
     ee: &E,
     state: &mut E::PartialState,
     chunk: &Chunk<'_, E>,
-    verified_tip: Hash,
 ) -> EnvResult<(ExecInputs, ExecOutputs)> {
     // 1. Check that the chunk is nonempty.
     if chunk.blocks().is_empty() {
@@ -112,12 +110,12 @@ fn process_chunk_blocks<E: ExecutionEnvironment>(
 
     // 2. Process each block, collecting the IO and tracking chain continuity.
     let mut chunk_io = ChunkIo::new_empty();
-    let mut cur_verified_tip_blkid = verified_tip;
+    let mut parent_header = chunk.prev_header();
     for cb in chunk.blocks() {
         let header = cb.exec_block().get_header();
 
         // Verify it builds on the previous block.
-        if header.get_parent_id() != cur_verified_tip_blkid {
+        if header.get_parent_id() != parent_header.compute_block_id() {
             return Err(EnvError::MismatchedChainSegment);
         }
 
@@ -126,7 +124,7 @@ fn process_chunk_blocks<E: ExecutionEnvironment>(
 
         chunk_io.extend_from_block(cb.inputs(), cb.outputs())?;
 
-        cur_verified_tip_blkid = header.compute_block_id();
+        parent_header = header;
     }
 
     Ok((chunk_io.inputs, chunk_io.outputs))
@@ -154,8 +152,7 @@ pub fn compute_chunk_transition<E: ExecutionEnvironment>(
 
     // 3. Execute the blocks in the chunk. Each block's post-state root is
     // verified before its header can be used as the parent of a later block.
-    let parent_blkid = prev_header.compute_block_id();
-    let (inputs, outputs) = process_chunk_blocks(ee, state, chunk, parent_blkid)?;
+    let (inputs, outputs) = process_chunk_blocks(ee, state, chunk)?;
 
     // 4. Compute the final state root and make sure it matches the tip.
     let tip_state_root = state.compute_state_root()?;
@@ -164,7 +161,7 @@ pub fn compute_chunk_transition<E: ExecutionEnvironment>(
     }
 
     Ok(ChunkTransition::new(
-        parent_blkid,
+        prev_header.compute_block_id(),
         tip_header.compute_block_id(),
         tip_state_root,
         tip_header.get_exec_header_summary(),
@@ -177,7 +174,9 @@ pub fn compute_chunk_transition<E: ExecutionEnvironment>(
 mod tests {
     use std::collections::BTreeMap;
 
-    use alpen_acct_types::{BlockAssembler, ExecBlock, ExecBlockOutput, ExecHeader, ExecPayload};
+    use alpen_acct_types::{
+        BlockAssembler, ExecBlock, ExecBlockOutput, ExecHeader, ExecPayload, Hash,
+    };
     use alpen_chain_types::{ExecInputs, ExecOutputs};
     use alpen_simple_ee::{
         SimpleBlock, SimpleBlockBody, SimpleExecutionEnvironment, SimpleHeader,
@@ -291,9 +290,8 @@ mod tests {
 
         // Process starting from the initial state.
         let mut state = initial_state;
-        let (chunk_inputs, chunk_outputs) =
-            process_chunk_blocks(&ee, &mut state, &chunk, genesis_blkid)
-                .expect("multi-block chunk should process successfully");
+        let (chunk_inputs, chunk_outputs) = process_chunk_blocks(&ee, &mut state, &chunk)
+            .expect("multi-block chunk should process successfully");
         assert_eq!(chunk_inputs, ExecInputs::new_empty());
         assert_eq!(chunk_outputs, ExecOutputs::new_empty());
 
@@ -351,7 +349,7 @@ mod tests {
         );
         let mut state = initial_state;
 
-        let err = process_chunk_blocks(&ee, &mut state, &chunk, genesis_blkid)
+        let err = process_chunk_blocks(&ee, &mut state, &chunk)
             .expect_err("forged intermediate state root must be rejected");
         assert!(matches!(err, EnvError::InvalidBlock));
     }
@@ -411,7 +409,7 @@ mod tests {
         );
         let mut state = initial_state;
 
-        let err = process_chunk_blocks(&ee, &mut state, &chunk, genesis_blkid)
+        let err = process_chunk_blocks(&ee, &mut state, &chunk)
             .expect_err("a block after a rotation must be rejected");
         assert!(matches!(err, EnvError::NonTerminalRotation));
     }
@@ -467,7 +465,7 @@ mod tests {
         );
         let mut state = initial_state;
 
-        let (_, chunk_outputs) = process_chunk_blocks(&ee, &mut state, &chunk, genesis_blkid)
+        let (_, chunk_outputs) = process_chunk_blocks(&ee, &mut state, &chunk)
             .expect("a rotation on the last block should process successfully");
         assert_eq!(chunk_outputs.new_predicate(), Some(&new_key));
 
