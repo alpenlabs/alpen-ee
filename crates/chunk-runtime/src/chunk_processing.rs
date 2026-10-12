@@ -2,11 +2,7 @@ use alpen_acct_types::{
     EnvError, EnvResult, ExecBlock, ExecHeader, ExecPartialState, ExecPayload,
     ExecutionEnvironment, Hash,
 };
-use alpen_chain_types::{
-    ChunkTransition, ExecInputs, ExecOutputs, OutputMessage, OutputTransfer, SequenceTracker,
-    SubjectDepositData,
-};
-use strata_predicate::PredicateKey;
+use alpen_chain_types::{ChunkTransition, ExecInputs, ExecOutputs};
 
 use crate::chunk::{Chunk, ChunkBlock};
 
@@ -55,102 +51,67 @@ pub fn process_block<E: ExecutionEnvironment>(
     Ok(())
 }
 
-struct IoTracker<'c> {
-    deposits_tracker: SequenceTracker<'c, SubjectDepositData>,
-    out_msg_tracker: SequenceTracker<'c, OutputMessage>,
-    out_xfr_tracker: SequenceTracker<'c, OutputTransfer>,
-    /// Predicate rotation the chunk-level outputs claim, if any.
-    expected_new_predicate: Option<&'c PredicateKey>,
-    /// Predicate rotation actually observed among the chunk's per-block
-    /// outputs, if any. Once set, `check_update` refuses to accept another
-    /// block, so the rotating block is always the chunk's last one.
-    observed_new_predicate: Option<PredicateKey>,
+/// Chunk-level IO built up from the per-block IO of a chunk's blocks.
+struct ChunkIo {
+    inputs: ExecInputs,
+    outputs: ExecOutputs,
 }
 
-impl<'c> IoTracker<'c> {
-    fn from_io(expected_inputs: &'c ExecInputs, expected_outputs: &'c ExecOutputs) -> Self {
+impl ChunkIo {
+    fn new_empty() -> Self {
         Self {
-            deposits_tracker: SequenceTracker::new(expected_inputs.subject_deposits()),
-            out_msg_tracker: SequenceTracker::new(expected_outputs.output_messages()),
-            out_xfr_tracker: SequenceTracker::new(expected_outputs.output_transfers()),
-            expected_new_predicate: expected_outputs.new_predicate(),
-            observed_new_predicate: None,
+            inputs: ExecInputs::new_empty(),
+            outputs: ExecOutputs::new_empty(),
         }
     }
 
-    /// Processes a pair of inputs and outputs, verifying they're all correct.
-    fn check_update(&mut self, inps: &ExecInputs, outps: &ExecOutputs) -> EnvResult<()> {
+    /// Appends the next block's inputs and outputs.
+    fn extend_from_block(&mut self, inps: &ExecInputs, outps: &ExecOutputs) -> EnvResult<()> {
         // A rotation ends the chunk. The sequencer stops assembling at one and
         // seals right after it, but that's only host behavior — without this
         // check a proof could carry blocks that ran after the rotation, and
         // they'd be authorized by the predecessor predicate.
-        if self.observed_new_predicate.is_some() {
+        if self.outputs.new_predicate().is_some() {
             return Err(EnvError::NonTerminalRotation);
         }
 
-        // Check them first.
-        self.deposits_tracker
-            .check_inputs(inps.subject_deposits())
-            .map_err(|_| EnvError::InconsistentChunkIo)?;
-        self.out_msg_tracker
-            .check_inputs(outps.output_messages())
-            .map_err(|_| EnvError::InconsistentChunkIo)?;
-        self.out_xfr_tracker
-            .check_inputs(outps.output_transfers())
-            .map_err(|_| EnvError::InconsistentChunkIo)?;
+        // FIXME(STR-2172): these panic once the chunk's IO goes over the SSZ
+        // list bounds. Switch to fallible pushes when chain-types has them.
+        for d in inps.subject_deposits() {
+            self.inputs.add_subject_deposit(d.clone());
+        }
+        for t in outps.output_transfers() {
+            self.outputs.add_transfer(t.clone());
+        }
+        for m in outps.output_messages() {
+            self.outputs.add_message(m.clone());
+        }
 
-        // And then advance them after they've all been checked.
-        self.deposits_tracker
-            .advance_unchecked(inps.subject_deposits().len());
-        self.out_msg_tracker
-            .advance_unchecked(outps.output_messages().len());
-        self.out_xfr_tracker
-            .advance_unchecked(outps.output_transfers().len());
-
-        // Track any predicate rotation this block declares. The guard above
-        // makes this block the last one we accept for the chunk.
+        // The guard above makes this block the last one we accept for the
+        // chunk, so its rotation is the chunk's rotation.
         if let Some(key) = outps.new_predicate() {
-            self.observed_new_predicate = Some(key.clone());
+            self.outputs.set_new_predicate(Some(key.clone()));
         }
 
-        Ok(())
-    }
-
-    fn is_all_consumed(&self) -> bool {
-        self.deposits_tracker.is_fully_consumed()
-            && self.out_msg_tracker.is_fully_consumed()
-            && self.out_xfr_tracker.is_fully_consumed()
-    }
-
-    fn verify_all_consumed(&self) -> EnvResult<()> {
-        if !self.is_all_consumed() {
-            return Err(EnvError::InconsistentChunkIo);
-        }
-        // The chunk-level claim must equal exactly what its blocks produced.
-        if self.expected_new_predicate != self.observed_new_predicate.as_ref() {
-            return Err(EnvError::InconsistentChunkIo);
-        }
         Ok(())
     }
 }
 
-/// Processes a chunk's blocks and updates the state, checking the IO against an
-/// expected IO trace.
+/// Processes a chunk's blocks and updates the state, returning the chunk-level
+/// IO built from the blocks' IO.
 fn process_chunk_blocks<E: ExecutionEnvironment>(
     ee: &E,
     state: &mut E::PartialState,
     chunk: &Chunk<'_, E>,
     verified_tip: Hash,
-    expected_inputs: &ExecInputs,
-    expected_outputs: &ExecOutputs,
-) -> EnvResult<()> {
+) -> EnvResult<(ExecInputs, ExecOutputs)> {
     // 1. Check that the chunk is nonempty.
     if chunk.blocks().is_empty() {
         return Err(EnvError::MalformedChainSegment);
     }
 
-    // 2. Process each block, tracking the IO traces and chain continuity.
-    let mut io_tracker = IoTracker::from_io(expected_inputs, expected_outputs);
+    // 2. Process each block, collecting the IO and tracking chain continuity.
+    let mut chunk_io = ChunkIo::new_empty();
     let mut cur_verified_tip_blkid = verified_tip;
     for cb in chunk.blocks() {
         let header = cb.exec_block().get_header();
@@ -163,48 +124,27 @@ fn process_chunk_blocks<E: ExecutionEnvironment>(
         // Verify the block itself.
         process_block(ee, state, cb)?;
 
-        // Check the block's IO.
-        io_tracker.check_update(cb.inputs(), cb.outputs())?;
+        chunk_io.extend_from_block(cb.inputs(), cb.outputs())?;
 
         cur_verified_tip_blkid = header.compute_block_id();
     }
 
-    // 3. Make sure all the trackers are consumed.
-    io_tracker.verify_all_consumed()?;
-
-    Ok(())
+    Ok((chunk_io.inputs, chunk_io.outputs))
 }
 
-/// Verifies a chunk transition using the pre state and the chunk.
-pub fn verify_chunk_transition<E: ExecutionEnvironment>(
-    tsn: &ChunkTransition,
+/// Computes the chunk transition by executing the chunk on top of the pre
+/// state.
+pub fn compute_chunk_transition<E: ExecutionEnvironment>(
     ee: &E,
     state: &mut E::PartialState,
     chunk: &Chunk<'_, E>,
-) -> EnvResult<()> {
+) -> EnvResult<ChunkTransition> {
     let prev_header = chunk.prev_header();
 
-    // 1. Make sure the parent block ID we have that we're extending from
-    // matches the chunk transition.
-    let computed_prev_blkid = prev_header.compute_block_id();
-    if computed_prev_blkid != tsn.parent_exec_blkid() {
-        // TODO(STR-3685): better error type?
-        return Err(EnvError::MismatchedChainSegment);
-    }
-
-    // 2. Make sure the chunk is nonempty and check that the last block matches
-    // the chunk transition.
-    let Some(new_tip_header) = chunk.blocks().last().map(|b| b.exec_block().get_header()) else {
+    // 1. Make sure the chunk is nonempty.
+    let Some(tip_header) = chunk.blocks().last().map(|b| b.exec_block().get_header()) else {
         return Err(EnvError::MalformedChainSegment);
     };
-
-    let computed_new_tip_blkid = new_tip_header.compute_block_id();
-    if computed_new_tip_blkid != tsn.tip_exec_blkid() {
-        return Err(EnvError::MismatchedChainSegment);
-    }
-    if &new_tip_header.get_exec_header_summary() != tsn.tip_exec_header_summary() {
-        return Err(EnvError::MismatchedChainSegment);
-    }
 
     // 2. Make sure the state matches the parent block's state root.
     let computed_pre_sr = state.compute_state_root()?;
@@ -214,25 +154,23 @@ pub fn verify_chunk_transition<E: ExecutionEnvironment>(
 
     // 3. Execute the blocks in the chunk. Each block's post-state root is
     // verified before its header can be used as the parent of a later block.
-    process_chunk_blocks(
-        ee,
-        state,
-        chunk,
-        tsn.parent_exec_blkid(),
-        tsn.inputs(),
-        tsn.outputs(),
-    )?;
+    let parent_blkid = prev_header.compute_block_id();
+    let (inputs, outputs) = process_chunk_blocks(ee, state, chunk, parent_blkid)?;
 
-    // 4. Compute the final state root and make sure it matches.
-    let computed_post_sr = state.compute_state_root()?;
-    if computed_post_sr != new_tip_header.get_state_root() {
-        return Err(EnvError::MismatchedChainSegment);
-    }
-    if computed_post_sr != tsn.tip_state_root() {
+    // 4. Compute the final state root and make sure it matches the tip.
+    let tip_state_root = state.compute_state_root()?;
+    if tip_state_root != tip_header.get_state_root() {
         return Err(EnvError::MismatchedChainSegment);
     }
 
-    Ok(())
+    Ok(ChunkTransition::new(
+        parent_blkid,
+        tip_header.compute_block_id(),
+        tip_state_root,
+        tip_header.get_exec_header_summary(),
+        inputs,
+        outputs,
+    ))
 }
 
 #[cfg(test)]
@@ -240,11 +178,12 @@ mod tests {
     use std::collections::BTreeMap;
 
     use alpen_acct_types::{BlockAssembler, ExecBlock, ExecBlockOutput, ExecHeader, ExecPayload};
-    use alpen_chain_types::{ExecHeaderSummary, ExecInputs, ExecOutputs};
+    use alpen_chain_types::{ExecInputs, ExecOutputs};
     use alpen_simple_ee::{
         SimpleBlock, SimpleBlockBody, SimpleExecutionEnvironment, SimpleHeader,
         SimpleHeaderIntrinsics, SimplePartialState, SimpleTransaction,
     };
+    use strata_predicate::PredicateKey;
 
     use super::*;
     use crate::chunk::{Chunk, ChunkBlock};
@@ -342,11 +281,6 @@ mod tests {
             ExecInputs::new_empty(),
         );
 
-        // Aggregate inputs and outputs across the chunk.
-        let chunk_inputs = ExecInputs::new_empty();
-
-        let chunk_outputs = ExecOutputs::new_empty();
-
         // Build the chunk.
         let chunk_blocks = vec![
             ChunkBlock::new(&inp1, &out1, block1),
@@ -357,15 +291,11 @@ mod tests {
 
         // Process starting from the initial state.
         let mut state = initial_state;
-        process_chunk_blocks(
-            &ee,
-            &mut state,
-            &chunk,
-            genesis_blkid,
-            &chunk_inputs,
-            &chunk_outputs,
-        )
-        .expect("multi-block chunk should process successfully");
+        let (chunk_inputs, chunk_outputs) =
+            process_chunk_blocks(&ee, &mut state, &chunk, genesis_blkid)
+                .expect("multi-block chunk should process successfully");
+        assert_eq!(chunk_inputs, ExecInputs::new_empty());
+        assert_eq!(chunk_outputs, ExecOutputs::new_empty());
 
         // Verify final balances: alice=1000-200-300-100=400, bob=200+300+100=600
         assert_eq!(state.accounts().get(&alice()), Some(&400));
@@ -421,15 +351,8 @@ mod tests {
         );
         let mut state = initial_state;
 
-        let err = process_chunk_blocks(
-            &ee,
-            &mut state,
-            &chunk,
-            genesis_blkid,
-            &ExecInputs::new_empty(),
-            &ExecOutputs::new_empty(),
-        )
-        .expect_err("forged intermediate state root must be rejected");
+        let err = process_chunk_blocks(&ee, &mut state, &chunk, genesis_blkid)
+            .expect_err("forged intermediate state root must be rejected");
         assert!(matches!(err, EnvError::InvalidBlock));
     }
 
@@ -462,7 +385,7 @@ mod tests {
             ExecInputs::new_empty(),
         );
         let new_key = PredicateKey::always_accept();
-        out1.set_new_predicate(Some(new_key.clone()));
+        out1.set_new_predicate(Some(new_key));
         let blkid1 = block1.get_header().compute_block_id();
 
         // Block 2 rides along after it in the same chunk.
@@ -479,11 +402,6 @@ mod tests {
             ExecInputs::new_empty(),
         );
 
-        // The chunk declares exactly the rotation its blocks produced, so the
-        // only thing wrong here is that the rotation isn't terminal.
-        let mut chunk_outputs = ExecOutputs::new_empty();
-        chunk_outputs.set_new_predicate(Some(new_key));
-
         let chunk = Chunk::new(
             genesis_header,
             vec![
@@ -493,15 +411,8 @@ mod tests {
         );
         let mut state = initial_state;
 
-        let err = process_chunk_blocks(
-            &ee,
-            &mut state,
-            &chunk,
-            genesis_blkid,
-            &ExecInputs::new_empty(),
-            &chunk_outputs,
-        )
-        .expect_err("a block after a rotation must be rejected");
+        let err = process_chunk_blocks(&ee, &mut state, &chunk, genesis_blkid)
+            .expect_err("a block after a rotation must be rejected");
         assert!(matches!(err, EnvError::NonTerminalRotation));
     }
 
@@ -547,9 +458,6 @@ mod tests {
         let new_key = PredicateKey::always_accept();
         out2.set_new_predicate(Some(new_key.clone()));
 
-        let mut chunk_outputs = ExecOutputs::new_empty();
-        chunk_outputs.set_new_predicate(Some(new_key));
-
         let chunk = Chunk::new(
             genesis_header,
             vec![
@@ -559,63 +467,16 @@ mod tests {
         );
         let mut state = initial_state;
 
-        process_chunk_blocks(
-            &ee,
-            &mut state,
-            &chunk,
-            genesis_blkid,
-            &ExecInputs::new_empty(),
-            &chunk_outputs,
-        )
-        .expect("a rotation on the last block should process successfully");
+        let (_, chunk_outputs) = process_chunk_blocks(&ee, &mut state, &chunk, genesis_blkid)
+            .expect("a rotation on the last block should process successfully");
+        assert_eq!(chunk_outputs.new_predicate(), Some(&new_key));
 
         assert_eq!(state.accounts().get(&alice()), Some(&500));
         assert_eq!(state.accounts().get(&bob()), Some(&500));
     }
 
     #[test]
-    fn verify_chunk_transition_rejects_wrong_tip_state_root() {
-        let ee = SimpleExecutionEnvironment;
-
-        let mut accounts = BTreeMap::new();
-        accounts.insert(alice(), 1000);
-        let initial_state = SimplePartialState::new(accounts);
-
-        let prev_header =
-            SimpleHeader::new(Hash::zero(), initial_state.compute_state_root().unwrap(), 0);
-        let prev_blkid = prev_header.compute_block_id();
-        let (block, inputs, outputs, _post_state) = build_block(
-            &ee,
-            &initial_state,
-            prev_blkid,
-            1,
-            SimpleBlockBody::new(vec![SimpleTransaction::Transfer {
-                from: alice(),
-                to: bob(),
-                value: 200,
-            }]),
-            ExecInputs::new_empty(),
-        );
-        let tip_blkid = block.get_header().compute_block_id();
-
-        let chunk_transition = ChunkTransition::new(
-            prev_blkid,
-            tip_blkid,
-            Hash::from([9u8; 32]),
-            block.get_header().get_exec_header_summary(),
-            inputs.clone(),
-            outputs.clone(),
-        );
-        let chunk = Chunk::new(prev_header, vec![ChunkBlock::new(&inputs, &outputs, block)]);
-        let mut state = initial_state;
-
-        let err = verify_chunk_transition(&chunk_transition, &ee, &mut state, &chunk)
-            .expect_err("wrong tip state root must be rejected");
-        assert!(matches!(err, EnvError::MismatchedChainSegment));
-    }
-
-    #[test]
-    fn verify_chunk_transition_rejects_wrong_tip_header_summary() {
+    fn compute_chunk_transition_matches_expected() {
         let ee = SimpleExecutionEnvironment;
 
         let mut accounts = BTreeMap::new();
@@ -637,22 +498,21 @@ mod tests {
             }]),
             ExecInputs::new_empty(),
         );
-        let tip_blkid = block.get_header().compute_block_id();
-        let tip_state_root = post_state.compute_state_root().unwrap();
 
         let chunk_transition = ChunkTransition::new(
             prev_blkid,
-            tip_blkid,
-            tip_state_root,
-            ExecHeaderSummary::from_vec(vec![1]).unwrap(),
+            block.get_header().compute_block_id(),
+            post_state.compute_state_root().unwrap(),
+            block.get_header().get_exec_header_summary(),
             inputs.clone(),
             outputs.clone(),
         );
         let chunk = Chunk::new(prev_header, vec![ChunkBlock::new(&inputs, &outputs, block)]);
+
         let mut state = initial_state;
 
-        let err = verify_chunk_transition(&chunk_transition, &ee, &mut state, &chunk)
-            .expect_err("wrong tip header summary must be rejected");
-        assert!(matches!(err, EnvError::MismatchedChainSegment));
+        let computed = compute_chunk_transition(&ee, &mut state, &chunk)
+            .expect("chunk should compute a transition");
+        assert_eq!(computed, chunk_transition);
     }
 }

@@ -22,10 +22,6 @@ pub enum EnvError {
     #[error("tried to consume a chain segment that was not provided")]
     UncommittedChainSegment,
 
-    /// Some computation did not match public state we are constrained by.
-    #[error("conflict with external public state")]
-    ConflictingPublicState,
-
     /// If the header or state provided to start verification off with does not
     /// match.
     #[error("mismatched data in current state and whatever")]
