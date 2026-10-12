@@ -7,6 +7,7 @@ use alloy_consensus::Block as AlloyBlock;
 use alpen_acct_types::{EnvError, EnvResult, ExecPayload};
 use alpen_chain_types::ExecInputs;
 use alpen_reth_evm::subject_to_address;
+use alpen_reth_primitives::sats_to_gwei;
 use reth_ethereum_primitives::{Receipt as EthereumReceipt, TransactionSigned};
 use reth_evm::execute::BlockExecutionOutput;
 use reth_primitives_traits::{Block, RecoveredBlock};
@@ -40,16 +41,6 @@ pub(crate) fn compute_hashed_post_state(
     _block_number: u64,
 ) -> HashedPostState {
     HashedPostState::from_bundle_state::<KeccakKeyHasher>(&execution_output.state.state)
-}
-
-/// Converts satoshis to gwei for EVM compatibility.
-///
-/// In Alpen: 1 BTC = 10^8 sats = 10^9 gwei
-/// Therefore: 1 sat = 10 gwei
-///
-/// Per EIP-4895, withdrawal amounts are stored in Gwei (not Wei).
-fn sats_to_gwei(sats: u64) -> Option<u64> {
-    sats.checked_mul(10)
 }
 
 /// Validates that deposits from ExecInputs match the withdrawals field in the block.

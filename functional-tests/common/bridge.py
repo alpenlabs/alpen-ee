@@ -3,9 +3,8 @@ Real-bridge deposit/withdrawal helpers for functional tests.
 
 Wraps `strata-test-cli compute-drt-output` (DRT output spec) and
 `strata-test-cli create-deposit-tx` (DT signing) and constructs the actual
-on-chain transactions via bitcoind RPC. Use this when testing the real
-bridge subprotocol path; for the lighter debug-subprotocol path, use
-`common.test_cli.create_mock_deposit` instead.
+on-chain transactions via bitcoind RPC. This is the only way to get a
+deposit onto the OL in tests, since ASM v0.4.0 removed the debug subprotocol.
 """
 
 import json

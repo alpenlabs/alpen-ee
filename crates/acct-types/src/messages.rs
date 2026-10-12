@@ -3,8 +3,9 @@
 use strata_acct_types::{MAX_MSG_PAYLOAD_DATA_BYTES, SubjectId};
 use strata_codec::{Codec, VarVec, decode_buf_exact, impl_type_flat_struct};
 use strata_msg_fmt::{Msg, MsgRef, TypeId};
+use strata_ol_msg_types::PredicateUpdateMsgData as OlPredicateUpdateMsgData;
 pub use strata_ol_msg_types::{
-    DEPOSIT_MSG_TYPE_ID, MAX_PREDICATE_KEY_BYTES, PREDICATE_UPDATE_MSG_TYPE_ID,
+    DEPOSIT_MSG_TYPE_ID, DepositMsgData, MAX_PREDICATE_KEY_BYTES, PREDICATE_UPDATE_MSG_TYPE_ID,
 };
 use strata_predicate::{PredicateKey, PredicateKeyBuf};
 use strata_snark_acct_runtime::IAcctMsg;
@@ -63,12 +64,8 @@ impl DecodedEeMessageData {
             }
 
             PREDICATE_UPDATE_MSG_TYPE_ID => {
-                // The body is a strata-codec-encoded VarVec of the new key's
-                // raw serialized bytes (`PredicateKeyBuf::to_bytes`), matching
-                // the OL STF's `PredicateUpdateMsgData` wire format.
-                let key_bytes: VarVec<u8, { MAX_PREDICATE_KEY_BYTES }> =
-                    decode_codec_msg_body(body)?;
-                let new_key = PredicateKeyBuf::try_from(key_bytes.inner().as_slice())
+                let data = decode_codec_msg_body::<OlPredicateUpdateMsgData>(body)?;
+                let new_key = PredicateKeyBuf::try_from(data.predicate_key_bytes())
                     .map_err(|_| MessageDecodeError::InvalidBody)?
                     .to_owned();
                 Ok(DecodedEeMessageData::PredicateUpdate(
@@ -92,13 +89,6 @@ impl IAcctMsg for DecodedEeMessageData {
 /// Decode a message body from a buffer.
 fn decode_codec_msg_body<T: Codec>(buf: &[u8]) -> MessageDecodeResult<T> {
     decode_buf_exact(buf).map_err(|_| MessageDecodeError::InvalidBody)
-}
-
-impl_type_flat_struct! {
-    #[derive(Clone, Debug, Eq, PartialEq)]
-    pub struct DepositMsgData {
-        dest_subject: SubjectId,
-    }
 }
 
 impl_type_flat_struct! {
@@ -128,6 +118,8 @@ impl_type_flat_struct! {
 
 /// Describes a rotation of the account's update predicate key.
 ///
+/// This is the typed form of the OL's raw-bytes `PredicateUpdateMsgData`.
+///
 /// Decoding says nothing about who sent it: a rotation is only meaningful
 /// when the entry's source is the reserved admin account, which consumers
 /// must check on the [`MessageEntry`](strata_acct_types::MessageEntry)
@@ -156,17 +148,16 @@ mod tests {
 
     use super::*;
 
-    /// Builds the message body the OL STF stages for a rotation: a
-    /// strata-codec-encoded `VarVec` of the new key's raw serialized bytes.
+    /// Builds the message body the OL STF stages for a rotation.
     fn predicate_update_body(new_key: &PredicateKey) -> Vec<u8> {
-        let key_bytes = VarVec::<u8, { MAX_PREDICATE_KEY_BYTES }>::from_vec(
+        let data = OlPredicateUpdateMsgData::new(
             new_key
                 .try_as_buf_ref()
                 .expect("key has a known predicate type")
                 .to_bytes(),
         )
         .expect("key bytes fit");
-        encode_to_vec(&key_bytes).expect("encoding should succeed")
+        encode_to_vec(&data).expect("encoding should succeed")
     }
 
     /// Decodes the message shape the OL STF stages for a rotation: SPS-52
