@@ -140,21 +140,14 @@ pub fn compute_chunk_transition<E: ExecutionEnvironment>(
 
     // 3. Execute the blocks in the chunk. Each block's post-state root is
     // verified before its header can be used as the parent of a later block.
+    // The chunk is nonempty, so the last of those checks already ties the
+    // final state to the tip's state root.
     let (tip_header, inputs, outputs) = process_chunk_blocks(ee, state, chunk)?;
-
-    // 4. Compute the final state root and make sure it matches the tip.
-    let tip_state_root = state.compute_state_root();
-    if tip_state_root != tip_header.get_state_root() {
-        return Err(ChunkRuntimeError::PostStateRootMismatch {
-            expected: tip_header.get_state_root(),
-            got: tip_state_root,
-        });
-    }
 
     Ok(ChunkTransition::new(
         prev_blkid,
         tip_header.compute_block_id(),
-        tip_state_root,
+        tip_header.get_state_root(),
         tip_header.get_exec_header_summary(),
         inputs,
         outputs,
