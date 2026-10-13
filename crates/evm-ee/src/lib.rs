@@ -13,6 +13,5 @@ mod utils;
 pub use errors::EvmEnvError;
 pub use execution::EvmExecutionEnvironment;
 pub use types::{
-    EvmBlock, EvmBlockBody, EvmBlockOutput, EvmHeader, EvmHeaderIntrinsics, EvmPartialState,
-    EvmWriteBatch,
+    EvmBlock, EvmBlockBody, EvmHeader, EvmHeaderIntrinsics, EvmPartialState, EvmWriteBatch,
 };

@@ -62,36 +62,6 @@ pub enum EvmEnvError {
     /// A deposit differs from the block's withdrawal at the same position.
     #[error("deposit {index} differs from the block's withdrawal")]
     DepositMismatch { index: usize },
-
-    /// The header's gas used is above its gas limit.
-    #[error("header gas used {gas_used} exceeds gas limit {gas_limit}")]
-    GasUsedExceedsLimit { gas_used: u64, gas_limit: u64 },
-
-    /// The header's receipts root differs from the computed one.
-    #[error("receipts root mismatch: header {expected}, computed {got}")]
-    ReceiptsRootMismatch { expected: B256, got: B256 },
-
-    /// The header's logs bloom differs from the computed one.
-    #[error("logs bloom does not match the header")]
-    LogsBloomMismatch,
-
-    /// The header's gas used differs from what execution used.
-    #[error("gas used mismatch: header {expected}, computed {got}")]
-    GasUsedMismatch { expected: u64, got: u64 },
-
-    /// The header's blob gas used differs from what execution used.
-    #[error("blob gas used mismatch: header {expected:?}, computed {got:?}")]
-    BlobGasUsedMismatch {
-        expected: Option<u64>,
-        got: Option<u64>,
-    },
-
-    /// The header's requests hash differs from the computed one.
-    #[error("requests hash mismatch: header {expected:?}, computed {got:?}")]
-    RequestsHashMismatch {
-        expected: Option<B256>,
-        got: Option<B256>,
-    },
 }
 
 impl From<ConsensusError> for EvmEnvError {

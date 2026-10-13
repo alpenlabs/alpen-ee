@@ -121,7 +121,7 @@ pub trait ExecutionEnvironment: Sized + 'static {
     /// check the header with [`Self::verify_header`], the body with
     /// [`Self::verify_block_pre_execution`], the inputs with
     /// [`Self::verify_inputs_against_block`] and the output with
-    /// [`Self::verify_outputs_against_header`].
+    /// [`Self::verify_block_post_execution`].
     fn execute_block_body(
         &self,
         pre_state: &Self::PartialState,
@@ -139,9 +139,12 @@ pub trait ExecutionEnvironment: Sized + 'static {
         inputs: &ExecInputs,
     ) -> Result<(), Self::Error>;
 
-    /// Performs any additional checks needed from the block outputs against the
-    /// header.
-    fn verify_outputs_against_header(
+    /// Checks a block's execution output against its header.
+    ///
+    /// This must check every commitment the header makes to execution, such
+    /// as the receipts and the gas used. The state root is left to the caller,
+    /// since it only exists once the writes are merged.
+    fn verify_block_post_execution(
         &self,
         header: &<Self::Block as ExecBlock>::Header,
         outputs: &ExecBlockOutput<Self>,

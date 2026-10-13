@@ -74,7 +74,7 @@ impl ExecutionEnvironment for SimpleExecutionEnvironment {
         Ok(())
     }
 
-    fn verify_outputs_against_header(
+    fn verify_block_post_execution(
         &self,
         _header: &<Self::Block as ExecBlock>::Header,
         _outputs: &ExecBlockOutput<Self>,

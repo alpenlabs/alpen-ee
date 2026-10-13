@@ -3,7 +3,6 @@
 //! This module provides the core ExecutionEnvironment implementation for EVM blocks,
 //! using RSP's sparse state and Reth's EVM execution engine.
 
-use alloy_consensus::Block as AlloyBlock;
 use alpen_acct_types::{ExecBlock, ExecBlockOutput, ExecPayload, ExecutionEnvironment};
 use alpen_chain_types::{ExecInputs, ExecOutputs, OutputMessage};
 use alpen_params::{AlpenParams, AlpenSpecId};
@@ -12,9 +11,12 @@ use alpen_reth_evm::{
     consensus::{FlooredConsensus, validate_header_extra_against_parent},
     extract_withdrawal_intents,
 };
-use reth_consensus::{Consensus, HeaderValidator};
-use reth_ethereum_primitives::{Block, Receipt as EthereumReceipt, TransactionSigned};
-use reth_evm::execute::{BasicBlockExecutor, BlockExecutionOutput, Executor};
+use reth_consensus::{Consensus, FullConsensus, HeaderValidator};
+use reth_ethereum_primitives::{Block, BlockBody, Receipt as EthereumReceipt};
+use reth_evm::{
+    block::BlockExecutionResult,
+    execute::{BasicBlockExecutor, BlockExecutionOutput, Executor},
+};
 use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
 use revm::database::WrapDatabaseRef;
 use strata_acct_types::{BRIDGE_GATEWAY_ACCT_ID, BitcoinAmount, MsgPayload};
@@ -24,9 +26,7 @@ use strata_ol_msg_types::{DEFAULT_OPERATOR_FEE, WITHDRAWAL_MSG_TYPE_ID, Withdraw
 
 use crate::{
     errors::EvmEnvError,
-    types::{
-        EvmBlock, EvmBlockOutput, EvmHeader, EvmHeaderIntrinsics, EvmPartialState, EvmWriteBatch,
-    },
+    types::{EvmBlock, EvmHeader, EvmHeaderIntrinsics, EvmPartialState, EvmWriteBatch},
     utils::{build_and_recover_block, compute_hashed_post_state, validate_deposits_against_block},
 };
 
@@ -124,7 +124,7 @@ impl EvmExecutionEnvironment {
 
     fn execute_recovered_block(
         &self,
-        block: &RecoveredBlock<AlloyBlock<TransactionSigned>>,
+        block: &RecoveredBlock<Block>,
         pre_state: &EvmPartialState,
     ) -> Result<BlockExecutionOutput<EthereumReceipt>, EvmEnvError> {
         let db = {
@@ -142,7 +142,7 @@ impl EvmExecutionEnvironment {
 impl ExecutionEnvironment for EvmExecutionEnvironment {
     type PartialState = EvmPartialState;
     type WriteBatch = EvmWriteBatch;
-    type BlockOutput = EvmBlockOutput;
+    type BlockOutput = BlockExecutionResult<EthereumReceipt>;
     type Block = EvmBlock;
     type Error = EvmEnvError;
 
@@ -182,40 +182,32 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
         // Step 1: Build block from exec_payload and recover senders. The header
         // is checked by `verify_header`, its body by `verify_block_pre_execution`,
         // the inputs by `verify_inputs_against_block` and the execution results
-        // by `verify_outputs_against_header`.
+        // by `verify_block_post_execution`.
         let block = build_and_recover_block(exec_payload)?;
 
         // Step 2: Anchor the `BLOCKHASH` ancestors to this block.
         validate_ancestors_against_block(pre_state, exec_payload.header_intrinsics())?;
 
         // Step 3: Execute the block.
-        let execution_output = self.execute_recovered_block(&block, pre_state)?;
+        let BlockExecutionOutput { result, state } =
+            self.execute_recovered_block(&block, pre_state)?;
 
-        // Step 4: Accumulate execution commitments.
-        let header_intrinsics = exec_payload.header_intrinsics();
-        let block_output =
-            EvmBlockOutput::from_header_and_output(header_intrinsics, &execution_output);
-
-        // Step 5: Collect withdrawal intents.
+        // Step 4: Collect withdrawal intents.
         let transactions = block.into_transactions();
         let withdrawal_intents = extract_withdrawal_intents(
             &transactions,
-            &execution_output.receipts,
+            &result.receipts,
             self.evm_config.bridge_params(),
         )?;
 
-        // Step 6: Convert execution outcome to HashedPostState.
-        let block_number = header_intrinsics.number();
-        let hashed_post_state = compute_hashed_post_state(execution_output, block_number);
+        // Step 5: Convert the state changes to a write batch.
+        let write_batch = EvmWriteBatch::new(compute_hashed_post_state(&state));
 
-        // Step 7: Split state writes from execution-derived header commitments.
-        let write_batch = EvmWriteBatch::new(hashed_post_state);
-
-        // Step 8: Create ExecOutputs with withdrawal intent messages.
+        // Step 6: Create ExecOutputs with withdrawal intent messages.
         let mut outputs = ExecOutputs::new_empty();
         convert_withdrawal_intents_to_messages(withdrawal_intents, &mut outputs);
 
-        Ok(ExecBlockOutput::new(write_batch, block_output, outputs))
+        Ok(ExecBlockOutput::new(write_batch, result, outputs))
     }
 
     fn verify_inputs_against_block(
@@ -226,48 +218,23 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
         validate_deposits_against_block(block.get_body().body(), inputs)
     }
 
-    fn verify_outputs_against_header(
+    fn verify_block_post_execution(
         &self,
-        header: &<Self::Block as alpen_acct_types::ExecBlock>::Header,
+        header: &EvmHeader,
         outputs: &ExecBlockOutput<Self>,
     ) -> Result<(), Self::Error> {
-        let header = header.header();
-        let block_output = outputs.block_output();
-
-        if header.gas_used > header.gas_limit {
-            return Err(EvmEnvError::GasUsedExceedsLimit {
-                gas_used: header.gas_used,
-                gas_limit: header.gas_limit,
-            });
-        }
-        if block_output.receipts_root() != header.receipts_root {
-            return Err(EvmEnvError::ReceiptsRootMismatch {
-                expected: header.receipts_root,
-                got: block_output.receipts_root(),
-            });
-        }
-        if block_output.logs_bloom() != header.logs_bloom {
-            return Err(EvmEnvError::LogsBloomMismatch);
-        }
-        if block_output.gas_used() != header.gas_used {
-            return Err(EvmEnvError::GasUsedMismatch {
-                expected: header.gas_used,
-                got: block_output.gas_used(),
-            });
-        }
-        if block_output.blob_gas_used() != header.blob_gas_used {
-            return Err(EvmEnvError::BlobGasUsedMismatch {
-                expected: header.blob_gas_used,
-                got: block_output.blob_gas_used(),
-            });
-        }
-        if block_output.requests_hash() != header.requests_hash {
-            return Err(EvmEnvError::RequestsHashMismatch {
-                expected: header.requests_hash,
-                got: block_output.requests_hash(),
-            });
-        }
-
+        // Reth's rule reads only the header from the block, so the body and
+        // senders are left empty rather than copied. If it ever read the body,
+        // the empty one would fail valid blocks, not pass invalid ones.
+        let block = RecoveredBlock::new_unhashed(
+            Block {
+                header: header.header().clone(),
+                body: BlockBody::default(),
+            },
+            Vec::new(),
+        );
+        self.consensus
+            .validate_block_post_execution(&block, outputs.block_output(), None)?;
         Ok(())
     }
 
@@ -303,7 +270,7 @@ mod tests {
     use alpen_params::{DEV_PARAMS_JSON, HeaderExtra};
     use reth_consensus::ConsensusError;
     use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
-    use reth_ethereum_primitives::Transaction;
+    use reth_ethereum_primitives::{Transaction, TransactionSigned};
     use reth_primitives_traits::Block as RethBlockTrait;
     use revm::{DatabaseRef, state::Bytecode};
     use revm_primitives::{
@@ -711,7 +678,7 @@ mod tests {
         // Check the execution-derived header commitments. This covers the receipts
         // root, logs bloom and gas figures, but not the state root, which this
         // method does not look at.
-        env.verify_outputs_against_header(block.get_header(), &output)
+        env.verify_block_post_execution(block.get_header(), &output)
             .expect("execution-derived commitments should match the witness header");
 
         // The state root only exists once the writes are merged, so check it here.
@@ -724,8 +691,10 @@ mod tests {
         );
     }
 
+    /// Each case breaks one commitment the header makes to execution. The
+    /// proof must refuse the same headers the node does.
     #[test]
-    fn verify_outputs_rejects_mismatched_non_state_commitments() {
+    fn verify_block_post_execution_rejects_what_the_node_rejects() {
         #[derive(Deserialize, Debug)]
         struct TestData {
             witness: EthClientExecutorInput,
@@ -760,25 +729,35 @@ mod tests {
             .execute_block_body(&pre_state, &exec_payload)
             .expect("block execution should succeed");
 
-        let mut bad_receipts_root = header.clone();
-        bad_receipts_root.receipts_root = B256::from([0x11; 32]);
-        assert!(matches!(
-            env.verify_outputs_against_header(&EvmHeader::new(bad_receipts_root), &output),
-            Err(EvmEnvError::ReceiptsRootMismatch { .. })
-        ));
+        type BreakRule = fn(&mut Header);
+        type IsExpected = fn(&ConsensusError) -> bool;
+        let cases: [(BreakRule, IsExpected); 4] = [
+            (
+                |header| header.receipts_root = B256::from([0x11; 32]),
+                |err| matches!(err, ConsensusError::BodyReceiptRootDiff(_)),
+            ),
+            (
+                |header| header.logs_bloom = Bloom::from([0x22; 256]),
+                |err| matches!(err, ConsensusError::BodyBloomLogDiff(_)),
+            ),
+            (
+                |header| header.gas_used += 1,
+                |err| matches!(err, ConsensusError::BlockGasUsed { .. }),
+            ),
+            (
+                |header| header.requests_hash = Some(B256::from([0x33; 32])),
+                |err| matches!(err, ConsensusError::BodyRequestsHashDiff(_)),
+            ),
+        ];
 
-        let mut bad_logs_bloom = header.clone();
-        bad_logs_bloom.logs_bloom = Bloom::from([0x22; 256]);
-        assert!(matches!(
-            env.verify_outputs_against_header(&EvmHeader::new(bad_logs_bloom), &output),
-            Err(EvmEnvError::LogsBloomMismatch)
-        ));
-
-        let mut bad_gas_used = header;
-        bad_gas_used.gas_used = bad_gas_used.gas_used.saturating_add(1);
-        assert!(matches!(
-            env.verify_outputs_against_header(&EvmHeader::new(bad_gas_used), &output),
-            Err(EvmEnvError::GasUsedMismatch { .. })
-        ));
+        for (break_rule, is_expected) in cases {
+            let mut bad_header = header.clone();
+            break_rule(&mut bad_header);
+            let result = env.verify_block_post_execution(&EvmHeader::new(bad_header), &output);
+            assert!(
+                matches!(&result, Err(EvmEnvError::ConsensusRule(err)) if is_expected(err)),
+                "{result:?}"
+            );
+        }
     }
 }
