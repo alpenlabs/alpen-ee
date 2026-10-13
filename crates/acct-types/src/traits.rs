@@ -136,24 +136,13 @@ pub trait ExecutionEnvironment: Sized + 'static {
         outputs: &ExecBlockOutput<Self>,
     ) -> Result<(), Self::Error>;
 
-    /// Applies a pending write batch into the partial state.
+    /// Applies a block's write batch to the partial state.
+    ///
+    /// Besides the state changes, this must record whatever later blocks in
+    /// the chunk need from this one, such as its hash.
     fn merge_write_into_state(
         &self,
         state: &mut Self::PartialState,
         wb: &Self::WriteBatch,
     ) -> Result<(), Self::Error>;
-
-    /// Updates partial state with data derived from a successfully executed block.
-    ///
-    /// Execution environments that expose per-block lookups to later blocks in
-    /// the same chunk must override this method. The default no-op is only safe
-    /// when no post-block metadata, such as block hashes, is needed by subsequent
-    /// executions.
-    fn update_partial_state_after_block(
-        &self,
-        _state: &mut Self::PartialState,
-        _header: &<Self::Block as ExecBlock>::Header,
-    ) -> Result<(), Self::Error> {
-        Ok(())
-    }
 }
