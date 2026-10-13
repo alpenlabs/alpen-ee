@@ -8,7 +8,7 @@ use alpen_acct_types::{ExecBlock, ExecHeader};
 use alpen_da_types::EvmHeaderSummary;
 use alpen_params::{AlpenSpecId, HeaderExtra};
 use reth_ethereum_primitives::Block;
-use reth_primitives_traits::Account;
+use reth_primitives_traits::{Account, SealedHeader};
 use reth_trie::{HashedPostState, HashedStorage, TrieAccount};
 use revm::{DatabaseRef, state::Bytecode};
 use revm_primitives::alloy_primitives::{Address, B256, Bloom, Bytes, U256, keccak256};
@@ -383,7 +383,10 @@ fn test_evm_write_batch_codec_roundtrip() {
     use super::EvmWriteBatch;
 
     let hashed_post_state = HashedPostState::default();
-    let write_batch = EvmWriteBatch::new(hashed_post_state, create_test_header());
+    let write_batch = EvmWriteBatch::new(
+        hashed_post_state,
+        SealedHeader::new_unhashed(create_test_header()),
+    );
 
     // Encode
     let encoded = encode_to_vec(&write_batch).expect("encode failed");
@@ -550,7 +553,7 @@ fn balance_only_write_batch(hashed_address: B256, balance: u64) -> EvmWriteBatch
         }),
     );
 
-    EvmWriteBatch::new(post_state, Header::default())
+    EvmWriteBatch::new(post_state, SealedHeader::new_unhashed(Header::default()))
 }
 
 /// A canonical execution witness omits the storage trie of an account whose
