@@ -18,13 +18,11 @@ zkaleido-perf-report.workspace = true
 
 # proof programs
 alpen-proof-acct.workspace = true
-alpen-proof-chunk.workspace = true
+alpen-proof-chunk = { workspace = true, features = ["test-utils"] }
 
 alpen-acct-runtime.workspace = true
 alpen-acct-types.workspace = true
 alpen-chain-types.workspace = true
-alpen-chunk-runtime.workspace = true
-alpen-evm-ee.workspace = true
 alpen-reth-statediff.workspace = true
 strata-acct-types.workspace = true
 strata-codec.workspace = true
@@ -37,7 +35,6 @@ alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 bitcoin.workspace = true
-reth-ethereum-primitives.workspace = true
 
 # sp1
 alpen-sp1-guest-builder = { path = "../../provers/sp1", optional = true }
