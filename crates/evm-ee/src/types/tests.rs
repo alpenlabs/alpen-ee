@@ -2,11 +2,12 @@
 
 use std::{collections::BTreeMap, fs::read_to_string, path::PathBuf};
 
-use alloy_consensus::{Header, Sealable, constants::EMPTY_ROOT_HASH};
+use alloy_consensus::{BlockBody, Header, Sealable, constants::EMPTY_ROOT_HASH};
 use alloy_rpc_types_debug::ExecutionWitness;
-use alpen_acct_types::ExecHeader;
+use alpen_acct_types::{ExecBlock, ExecHeader};
 use alpen_da_types::EvmHeaderSummary;
 use alpen_params::{AlpenSpecId, HeaderExtra};
+use reth_ethereum_primitives::Block;
 use reth_primitives_traits::Account;
 use reth_trie::{HashedPostState, HashedStorage, TrieAccount};
 use revm::{DatabaseRef, state::Bytecode};
@@ -16,7 +17,7 @@ use rsp_mpt::EthereumState;
 use serde::Deserialize;
 use strata_codec::{decode_buf_exact, encode_to_vec};
 
-use super::{EvmBlock, EvmBlockBody, EvmHeader, EvmPartialState, EvmWriteBatch};
+use super::{EvmBlock, EvmHeader, EvmPartialState, EvmWriteBatch};
 
 #[derive(Deserialize)]
 struct TestData {
@@ -187,58 +188,29 @@ fn test_evm_header_summary_layout_follows_spec_version() {
 }
 
 #[test]
-fn test_evm_block_body_codec_empty() {
-    // Create an empty block body (no transactions, no withdrawals)
-    let body = EvmBlockBody::new(vec![]);
+fn test_evm_block_codec_empty_body() {
+    // Create a block with an empty body (no transactions, no withdrawals)
+    let block = EvmBlock::new(Block {
+        header: create_test_header(),
+        body: BlockBody::default(),
+    });
 
     // Encode
-    let encoded = encode_to_vec(&body).expect("encode failed");
+    let encoded = encode_to_vec(&block).expect("encode failed");
 
     // Decode
-    let decoded: EvmBlockBody = decode_buf_exact(&encoded).expect("decode failed");
+    let decoded: EvmBlock = decode_buf_exact(&encoded).expect("decode failed");
 
     // Verify empty
-    assert_eq!(decoded.transaction_count(), 0);
-    assert!(decoded.transactions().is_empty());
+    assert!(decoded.body().transactions.is_empty());
     assert!(decoded.body().withdrawals.is_none());
-}
-
-#[test]
-fn test_evm_block_body_codec_roundtrip() {
-    // Load witness data and extract block body
-    let witness = load_witness_test_data();
-
-    use reth_primitives_traits::Block;
-    let block_body = witness.current_block.body().clone();
-    let body = EvmBlockBody::from_alloy_body(block_body.clone());
-
-    // Encode
-    let encoded = encode_to_vec(&body).expect("encode failed");
-
-    // Decode
-    let decoded: EvmBlockBody = decode_buf_exact(&encoded).expect("decode failed");
-
-    // Verify the entire body matches (compares all transactions and withdrawals)
-    assert_eq!(
-        decoded.body(),
-        body.body(),
-        "Block body should match exactly"
-    );
 }
 
 #[test]
 fn test_evm_block_codec_roundtrip() {
     // Load witness data and construct block
     let witness = load_witness_test_data();
-
-    use reth_primitives_traits::Block;
-    let header = witness.current_block.header().clone();
-    let evm_header = EvmHeader::new(header.clone());
-
-    let block_body = witness.current_block.body().clone();
-    let evm_body = EvmBlockBody::from_alloy_body(block_body);
-
-    let block = EvmBlock::new(evm_header, evm_body);
+    let block = EvmBlock::new(witness.current_block.clone());
 
     // Encode
     let encoded = encode_to_vec(&block).expect("encode failed");
@@ -248,15 +220,15 @@ fn test_evm_block_codec_roundtrip() {
 
     // Verify header matches
     assert_eq!(
-        decoded.header().header(),
-        block.header().header(),
+        decoded.get_header().header(),
+        block.get_header().header(),
         "Header should match exactly"
     );
 
     // Verify body matches (compares all transactions and withdrawals)
     assert_eq!(
-        decoded.body().body(),
-        block.body().body(),
+        decoded.body(),
+        block.body(),
         "Block body should match exactly"
     );
 }
@@ -372,7 +344,6 @@ fn test_evm_partial_state_rejects_invalid_ancestor_parent_hash() {
 fn test_evm_partial_state_codec_roundtrip_execution() {
     use alpen_acct_types::ExecutionEnvironment;
     use alpen_params::{AlpenParams, AlpenSpecId, DEV_PARAMS_JSON};
-    use reth_primitives_traits::Block as _;
 
     use crate::EvmExecutionEnvironment;
 
@@ -385,9 +356,7 @@ fn test_evm_partial_state_codec_roundtrip_execution() {
         witness.ancestor_headers,
     );
 
-    let header = witness.current_block.header().clone();
-    let body = EvmBlockBody::from_alloy_body(witness.current_block.body().clone());
-    let block = EvmBlock::new(EvmHeader::new(header.clone()), body);
+    let block = EvmBlock::new(witness.current_block.clone());
 
     // The fixture was produced on the dev network's genesis, under V0.
     let params: AlpenParams =

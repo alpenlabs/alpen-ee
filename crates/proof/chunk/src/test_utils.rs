@@ -10,7 +10,7 @@ use alpen_chain_types::{
     ChunkTransition, ExecInputs, ExecOutputs, OutputMessage, OutputTransfer, SubjectDepositData,
 };
 use alpen_chunk_runtime::{PrivateInput, RawBlockData, RawChunkData};
-use alpen_evm_ee::{EvmBlock, EvmBlockBody, EvmExecutionEnvironment, EvmHeader, EvmPartialState};
+use alpen_evm_ee::{EvmBlock, EvmExecutionEnvironment, EvmHeader, EvmPartialState};
 use alpen_params::{AlpenParams, AlpenSpecId};
 use alpen_test_utils_evm_workload::{Workload, WorkloadBlock};
 use reth_ethereum_primitives::Block;
@@ -95,10 +95,7 @@ pub fn build_workload_chunk(
 
 fn evm_block(workload_block: &WorkloadBlock) -> EvmBlock {
     let block: Block = decode_exact(&workload_block.block_rlp[..]).expect("decode workload block");
-    EvmBlock::new(
-        EvmHeader::new(block.header),
-        EvmBlockBody::from_alloy_body(block.body),
-    )
+    EvmBlock::new(block)
 }
 
 fn block_inputs(workload_block: &WorkloadBlock) -> ExecInputs {
