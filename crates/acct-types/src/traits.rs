@@ -4,7 +4,7 @@
 
 use std::error::Error;
 
-use alpen_chain_types::{ExecHeaderSummary, ExecInputs};
+use alpen_chain_types::{ExecHeaderSummary, ExecInputs, ExecOutputs};
 use strata_codec::Codec;
 use strata_identifiers::Hash;
 
@@ -106,8 +106,8 @@ pub trait ExecutionEnvironment: Sized + 'static {
     /// Execution alone does not verify the block: the caller must also check
     /// the header with [`Self::verify_header`], the body with
     /// [`Self::verify_block_pre_execution`], the inputs with
-    /// [`Self::verify_inputs_against_block`] and the output with
-    /// [`Self::verify_block_post_execution`].
+    /// [`Self::verify_inputs_against_block`] and the output and claimed
+    /// outputs with [`Self::verify_block_post_execution`].
     fn execute_block(
         &self,
         pre_state: &Self::PartialState,
@@ -125,15 +125,18 @@ pub trait ExecutionEnvironment: Sized + 'static {
         inputs: &ExecInputs,
     ) -> Result<(), Self::Error>;
 
-    /// Checks a block's execution output against its header.
+    /// Checks a block's execution output against its header and the outputs
+    /// claimed for it.
     ///
     /// This must check every commitment the header makes to execution, such
-    /// as the receipts and the gas used. The state root is left to the caller,
-    /// since it only exists once the writes are merged.
+    /// as the receipts and the gas used. It must also check the claimed
+    /// outputs with [`ExecOutputs::matches_executed`]. The state root is left
+    /// to the caller, since it only exists once the writes are merged.
     fn verify_block_post_execution(
         &self,
         header: &<Self::Block as ExecBlock>::Header,
-        outputs: &ExecBlockOutput<Self>,
+        exec_output: &ExecBlockOutput<Self>,
+        claimed_outputs: &ExecOutputs,
     ) -> Result<(), Self::Error>;
 
     /// Applies a block's write batch to the partial state.

@@ -1,5 +1,6 @@
 //! Errors of the EVM execution environment.
 
+use alpen_chain_types::ExecOutputs;
 use alpen_params::AlpenSpecId;
 use alpen_reth_evm::WithdrawalIntentExtractionError;
 use reth_consensus::ConsensusError;
@@ -62,6 +63,13 @@ pub enum EvmEnvError {
     /// A deposit differs from the block's withdrawal at the same position.
     #[error("deposit {index} differs from the block's withdrawal")]
     DepositMismatch { index: usize },
+
+    /// The block's claimed outputs differ from what executing it produced.
+    #[error("block output mismatch: claimed {claimed:?}, executed {executed:?}")]
+    OutputMismatch {
+        claimed: Box<ExecOutputs>,
+        executed: Box<ExecOutputs>,
+    },
 }
 
 impl From<ConsensusError> for EvmEnvError {
