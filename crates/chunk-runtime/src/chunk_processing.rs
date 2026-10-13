@@ -46,56 +46,6 @@ pub fn process_block<E: ExecutionEnvironment>(
     Ok(header)
 }
 
-/// Chunk-level IO built up from the per-block IO of a chunk's blocks.
-struct ChunkIo {
-    inputs: ExecInputs,
-    outputs: ExecOutputs,
-}
-
-impl ChunkIo {
-    fn new_empty() -> Self {
-        Self {
-            inputs: ExecInputs::new_empty(),
-            outputs: ExecOutputs::new_empty(),
-        }
-    }
-
-    /// Appends the next block's inputs and outputs.
-    fn extend_from_block<EnvErr>(
-        &mut self,
-        inps: &ExecInputs,
-        outps: &ExecOutputs,
-    ) -> ChunkRuntimeResult<(), EnvErr> {
-        // A rotation ends the chunk. The sequencer stops assembling at one and
-        // seals right after it, but that's only host behavior — without this
-        // check a proof could carry blocks that ran after the rotation, and
-        // they'd be authorized by the predecessor predicate.
-        if self.outputs.new_predicate().is_some() {
-            return Err(ChunkRuntimeError::NonTerminalRotation);
-        }
-
-        // FIXME(STR-2172): these panic once the chunk's IO goes over the SSZ
-        // list bounds. Switch to fallible pushes when chain-types has them.
-        for d in inps.subject_deposits() {
-            self.inputs.add_subject_deposit(d.clone());
-        }
-        for t in outps.output_transfers() {
-            self.outputs.add_transfer(t.clone());
-        }
-        for m in outps.output_messages() {
-            self.outputs.add_message(m.clone());
-        }
-
-        // The guard above makes this block the last one we accept for the
-        // chunk, so its rotation is the chunk's rotation.
-        if let Some(key) = outps.new_predicate() {
-            self.outputs.set_new_predicate(Some(key.clone()));
-        }
-
-        Ok(())
-    }
-}
-
 /// Processes a chunk's blocks and updates the state, returning the header of
 /// the chunk's last block (its prev header if it has none) and the
 /// chunk-level IO built from the blocks' IO.
@@ -104,15 +54,28 @@ fn process_chunk_blocks<E: ExecutionEnvironment>(
     state: &mut E::PartialState,
     chunk: Chunk<E>,
 ) -> ChunkRuntimeResult<(HeaderOf<E>, ExecInputs, ExecOutputs), E::Error> {
-    let mut chunk_io = ChunkIo::new_empty();
+    let mut chunk_inputs = ExecInputs::new_empty();
+    let mut chunk_outputs = ExecOutputs::new_empty();
     let (mut parent_header, blocks) = chunk.into_parts();
     for cb in blocks {
         let (inputs, outputs, block) = cb.into_parts();
         parent_header = process_block(ee, state, &parent_header, &inputs, &outputs, block)?;
-        chunk_io.extend_from_block(&inputs, &outputs)?;
+
+        // A rotation ends the chunk. The sequencer stops assembling at one and
+        // seals right after it, but that's only host behavior. Without this
+        // check a proof could carry blocks that ran after the rotation, and
+        // they'd be authorized by the predecessor predicate.
+        if chunk_outputs.new_predicate().is_some() {
+            return Err(ChunkRuntimeError::NonTerminalRotation);
+        }
+
+        // FIXME(STR-2172): these panic once the chunk's IO goes over the SSZ
+        // list bounds. Switch to fallible pushes when chain-types has them.
+        chunk_inputs.extend_from(&inputs);
+        chunk_outputs.extend_from(&outputs);
     }
 
-    Ok((parent_header, chunk_io.inputs, chunk_io.outputs))
+    Ok((parent_header, chunk_inputs, chunk_outputs))
 }
 
 /// Computes the chunk transition by executing the chunk on top of the pre
