@@ -20,6 +20,10 @@ pub fn process_block<E: ExecutionEnvironment>(
     block: E::Block,
 ) -> ChunkRuntimeResult<HeaderOf<E>, E::Error> {
     // Execution takes the block, so keep the header for the checks after it.
+    // Both copies need the block ID: the executed block records it for later
+    // blocks, and the next block checks it as its parent. Reading it before
+    // the copy lets an environment that caches the ID compute it only once.
+    let _ = block.get_header().compute_block_id();
     let header = block.get_header().clone();
 
     // 1. Check the block before executing it: the header against its parent,

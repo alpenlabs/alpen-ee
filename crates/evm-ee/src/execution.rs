@@ -196,7 +196,10 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
         )?;
 
         // Step 5: Convert the state changes to a write batch.
-        let write_batch = EvmWriteBatch::from_bundle_state(&state, recovered.into_header());
+        let write_batch = EvmWriteBatch::from_bundle_state(
+            &state,
+            recovered.into_sealed_block().into_sealed_header(),
+        );
 
         // Step 6: Create ExecOutputs with withdrawal intent messages.
         let mut outputs = ExecOutputs::new_empty();
@@ -262,6 +265,7 @@ mod tests {
     use reth_consensus::ConsensusError;
     use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
+    use reth_primitives_traits::SealedHeader;
     use reth_trie::HashedPostState;
     use revm::DatabaseRef;
     use revm_primitives::{
@@ -389,7 +393,10 @@ mod tests {
                 .is_err()
         );
 
-        let write_batch = EvmWriteBatch::new(HashedPostState::default(), header.clone());
+        let write_batch = EvmWriteBatch::new(
+            HashedPostState::default(),
+            SealedHeader::new_unhashed(header.clone()),
+        );
         fixture_env()
             .merge_write_into_state(&mut pre_state, &write_batch)
             .expect("merging the write batch should succeed");
