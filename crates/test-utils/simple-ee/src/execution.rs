@@ -28,6 +28,11 @@ impl ExecutionEnvironment for SimpleExecutionEnvironment {
         Ok(())
     }
 
+    fn verify_block_pre_execution(&self, _block: &Self::Block) -> EnvResult<()> {
+        // The simple header does not commit to its body.
+        Ok(())
+    }
+
     fn execute_block_body(
         &self,
         pre_state: &Self::PartialState,

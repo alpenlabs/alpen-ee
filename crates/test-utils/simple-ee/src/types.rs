@@ -298,11 +298,6 @@ impl ExecBlock for SimpleBlock {
         Self { header, body }
     }
 
-    fn check_header_matches_body(_header: &Self::Header, _body: &Self::Body) -> bool {
-        // For the simple implementation, headers always match bodies
-        true
-    }
-
     fn get_header(&self) -> &Self::Header {
         &self.header
     }

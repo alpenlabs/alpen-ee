@@ -11,10 +11,9 @@ use thiserror::Error;
 /// Why an EVM block failed one of the environment's checks or its execution.
 #[derive(Debug, Error)]
 pub enum EvmEnvError {
-    /// The header breaks the node's consensus rules, on its own or against
-    /// its parent.
-    #[error("header breaks consensus rules: {0}")]
-    HeaderRule(#[source] Box<ConsensusError>),
+    /// The block breaks the node's consensus rules.
+    #[error("block breaks consensus rules: {0}")]
+    ConsensusRule(#[source] Box<ConsensusError>),
 
     /// The header is stamped with a spec version other than the one this
     /// environment runs.
@@ -97,7 +96,7 @@ pub enum EvmEnvError {
 
 impl From<ConsensusError> for EvmEnvError {
     fn from(err: ConsensusError) -> Self {
-        Self::HeaderRule(Box::new(err))
+        Self::ConsensusRule(Box::new(err))
     }
 }
 

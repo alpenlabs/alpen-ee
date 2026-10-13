@@ -53,10 +53,6 @@ pub enum ChunkRuntimeError<EnvErr> {
         got: Hash,
     },
 
-    /// A block's header does not commit to its body.
-    #[error("block header does not match its body")]
-    HeaderBodyMismatch,
-
     /// A block's claimed outputs differ from what executing it produced.
     #[error("block output mismatch: expected {expected:?}, got {got:?}")]
     OutputMismatch {
