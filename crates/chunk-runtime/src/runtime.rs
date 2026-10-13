@@ -3,8 +3,7 @@
 use alpen_acct_types::ExecutionEnvironment;
 
 use crate::{
-    ArchivedPrivateInput, Chunk, ChunkBlock, ChunkRuntimeError, ChunkRuntimeResult,
-    compute_chunk_transition,
+    ArchivedPrivateInput, Chunk, ChunkRuntimeError, ChunkRuntimeResult, compute_chunk_transition,
 };
 
 /// Verifies the private input's consistency using the provided execution
@@ -28,33 +27,15 @@ pub fn verify_input<E: ExecutionEnvironment>(
         .map_err(ChunkRuntimeError::DecodePreState)?;
 
     // 2. Parse the blocks into a chunk we can execute.
-    // TODO(STR-3685): rework borrowings here because this is really ugly
-    let mut block_inputs = Vec::new();
-    let mut block_outputs = Vec::new();
-    for (index, b) in input.raw_chunk().blocks().iter().enumerate() {
-        block_inputs.push(
-            b.try_decode_exec_inputs()
-                .map_err(|source| ChunkRuntimeError::DecodeBlockInputs { index, source })?,
-        );
-        block_outputs.push(
-            b.try_decode_exec_outputs()
-                .map_err(|source| ChunkRuntimeError::DecodeBlockOutputs { index, source })?,
-        );
-    }
+    let blocks = input
+        .raw_chunk()
+        .blocks()
+        .iter()
+        .enumerate()
+        .map(|(index, b)| b.try_decode_chunk_block::<E>(index))
+        .collect::<Result<Vec<_>, _>>()?;
 
-    let mut blocks = Vec::new();
-    for (index, b) in input.raw_chunk().blocks().iter().enumerate() {
-        let block = b
-            .try_decode_block::<E>()
-            .map_err(|source| ChunkRuntimeError::DecodeBlock { index, source })?;
-        blocks.push(ChunkBlock::new(
-            &block_inputs[index],
-            &block_outputs[index],
-            block,
-        ));
-    }
-
-    let chunk = Chunk::<'_, E>::new(prev_header, blocks);
+    let chunk = Chunk::<E>::new(prev_header, blocks);
 
     // 3. Execute the chunk on the pre state and check the transition it
     // produces is the one claimed.
