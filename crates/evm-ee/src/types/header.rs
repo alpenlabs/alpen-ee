@@ -5,6 +5,7 @@ use alpen_acct_types::ExecHeader;
 use alpen_chain_types::ExecHeaderSummary;
 use alpen_da_types::EvmHeaderSummary;
 use alpen_params::HeaderExtra;
+use ref_cast::RefCast;
 use reth_primitives_traits::SealedHeader;
 use strata_codec::{Codec, CodecError};
 
@@ -18,7 +19,11 @@ use crate::codec_shims::{decode_rlp_with_length, encode_rlp_with_length};
 ///
 /// The seal computes the block hash on first use and caches it, so the
 /// header is hashed once however often its ID is read.
-#[derive(Clone, Debug)]
+///
+/// It is transparent over the sealed header so an [`EvmBlock`](super::EvmBlock)
+/// can lend out its header as an `EvmHeader` without copying it.
+#[derive(Clone, Debug, RefCast)]
+#[repr(transparent)]
 pub struct EvmHeader {
     header: SealedHeader<Header>,
 }
@@ -39,6 +44,11 @@ impl EvmHeader {
     /// Gets a reference to the sealed header, as Reth's rules take it.
     pub fn sealed(&self) -> &SealedHeader<Header> {
         &self.header
+    }
+
+    /// Consumes self and returns the sealed header.
+    pub fn into_sealed(self) -> SealedHeader<Header> {
+        self.header
     }
 
     /// Returns the block number.
