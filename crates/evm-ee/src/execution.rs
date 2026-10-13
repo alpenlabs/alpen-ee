@@ -18,7 +18,7 @@ use reth_evm::{
     block::BlockExecutionResult,
     execute::{BasicBlockExecutor, BlockExecutionOutput, Executor},
 };
-use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
+use reth_primitives_traits::{RecoveredBlock, SealedBlock};
 use revm::database::WrapDatabaseRef;
 use strata_acct_types::{BRIDGE_GATEWAY_ACCT_ID, BitcoinAmount, MsgPayload};
 use strata_codec::encode_to_vec;
@@ -155,11 +155,9 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
             return Err(EvmEnvError::SpecVersionMismatch { expected, got });
         }
 
-        let header = SealedHeader::new_unhashed(header.header().clone());
-        let parent = SealedHeader::new_unhashed(parent.header().clone());
-        self.consensus.validate_header(&header)?;
+        self.consensus.validate_header(header.sealed())?;
         self.consensus
-            .validate_header_against_parent(&header, &parent)?;
+            .validate_header_against_parent(header.sealed(), parent.sealed())?;
         Ok(())
     }
 
