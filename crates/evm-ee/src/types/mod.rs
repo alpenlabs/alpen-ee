@@ -15,7 +15,7 @@ mod write_batch;
 // Re-export public types
 pub use block::EvmBlock;
 pub use block_body::EvmBlockBody;
-pub use header::{EvmHeader, EvmHeaderIntrinsics};
+pub use header::EvmHeader;
 pub use partial_state::EvmPartialState;
 // Internal types
 pub(crate) use witness_db::WitnessDB;

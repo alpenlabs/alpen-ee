@@ -65,7 +65,7 @@ class ExecOutputs(Container):
     ### rotation.
     ###
     ### TODO: this is an account-level declaration, not an EVM-execution
-    ### artifact like output_transfers/output_messages -- execute_block_body
+    ### artifact like output_transfers/output_messages -- execute_block
     ### never sets it, so ee-chunk-runtime's process_block can't verify it
     ### against real execution the way it does the other two fields. Consider
     ### carrying it as a separate declaration on the block wrapper instead of
