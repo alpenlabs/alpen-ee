@@ -304,7 +304,7 @@ mod tests {
             }]),
         );
         let forged_header1 = SimpleHeader::new(genesis_blkid, Hash::from([0x42; 32]), 1);
-        let block1 = SimpleBlock::new(forged_header1, block1.get_body().clone());
+        let block1 = SimpleBlock::new(forged_header1, block1.body().clone());
         let forged_block1_id = block1.get_header().compute_block_id();
 
         let (block2, inp2, out2, _state2) = build_block(
