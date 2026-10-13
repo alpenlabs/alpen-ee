@@ -29,7 +29,6 @@ reth-primitives-traits.workspace = true
 revm.workspace = true
 revm-primitives.workspace = true
 thiserror.workspace = true
-tracing.workspace = true
 
 [dev-dependencies]
 alpen-params = { workspace = true, features = ["test-utils"] }
