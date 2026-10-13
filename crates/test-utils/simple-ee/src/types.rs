@@ -142,15 +142,6 @@ impl SimpleHeader {
 }
 
 impl ExecHeader for SimpleHeader {
-    type Intrinsics = SimpleHeaderIntrinsics;
-
-    fn get_intrinsics(&self) -> Self::Intrinsics {
-        SimpleHeaderIntrinsics {
-            parent_blkid: self.parent_blkid,
-            index: self.index,
-        }
-    }
-
     fn get_parent_id(&self) -> Hash {
         self.parent_blkid
     }

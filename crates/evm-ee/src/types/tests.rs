@@ -161,7 +161,6 @@ fn test_evm_header_exec_header_trait() {
     // Test ExecHeader trait methods
     assert_eq!(evm_header.get_state_root().0, header.state_root.0);
     assert_eq!(evm_header.compute_block_id().0, header.hash_slow().0);
-    assert_eq!(evm_header.get_intrinsics().number(), header.number);
     assert_eq!(evm_header.block_number(), header.number);
 }
 
@@ -371,7 +370,7 @@ fn test_evm_partial_state_rejects_invalid_ancestor_parent_hash() {
 /// into hash digests, losing the resolved trie data needed for execution.
 #[test]
 fn test_evm_partial_state_codec_roundtrip_execution() {
-    use alpen_acct_types::{ExecBlock, ExecPayload, ExecutionEnvironment};
+    use alpen_acct_types::ExecutionEnvironment;
     use alpen_params::{AlpenParams, AlpenSpecId, DEV_PARAMS_JSON};
     use reth_primitives_traits::Block as _;
 
@@ -394,11 +393,9 @@ fn test_evm_partial_state_codec_roundtrip_execution() {
     let params: AlpenParams =
         serde_json::from_str(DEV_PARAMS_JSON).expect("dev params should parse");
     let ee = EvmExecutionEnvironment::new(&params, AlpenSpecId::V0);
-    let intrinsics = block.get_header().get_intrinsics();
-    let payload = ExecPayload::new(&intrinsics, block.get_body());
 
     // Original state executes fine.
-    ee.execute_block_body(&partial_state, &payload)
+    ee.execute_block(&partial_state, &block)
         .expect("execution on original state should succeed");
 
     // Roundtrip through codec.
@@ -406,7 +403,7 @@ fn test_evm_partial_state_codec_roundtrip_execution() {
     let decoded: EvmPartialState = decode_buf_exact(&encoded).expect("decode failed");
 
     // Decoded state should also execute — this fails if trie nodes are lost.
-    ee.execute_block_body(&decoded, &payload)
+    ee.execute_block(&decoded, &block)
         .expect("execution on codec-roundtripped state should succeed");
 }
 

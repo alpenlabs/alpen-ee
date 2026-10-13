@@ -6,7 +6,7 @@
 //! it (`ChunkSpec::fetch_input` in alpen-client).
 
 use alloy_consensus::Header;
-use alpen_acct_types::{ExecBlock, ExecHeader, ExecPayload, ExecutionEnvironment};
+use alpen_acct_types::{ExecBlock, ExecHeader, ExecutionEnvironment};
 use alpen_chain_types::{
     ChunkTransition, ExecInputs, ExecOutputs, OutputMessage, OutputTransfer, SubjectDepositData,
 };
@@ -65,10 +65,8 @@ pub(super) fn build_chunk(workload: &Workload) -> Chunk {
         let block = evm_block(workload_block);
         let inputs = block_inputs(workload_block);
 
-        let header_intrinsics = block.get_header().get_intrinsics();
-        let payload = ExecPayload::new(&header_intrinsics, block.get_body());
         let output = ee
-            .execute_block_body(&state, &payload)
+            .execute_block(&state, &block)
             .expect("workload block executes");
         ee.merge_write_into_state(&mut state, output.write_batch())
             .expect("merge block writes");

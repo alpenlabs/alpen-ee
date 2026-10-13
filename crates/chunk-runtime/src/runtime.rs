@@ -77,9 +77,7 @@ pub fn verify_input<E: ExecutionEnvironment>(
 mod tests {
     use std::collections::BTreeMap;
 
-    use alpen_acct_types::{
-        BlockAssembler, EnvError, ExecBlock, ExecHeader, ExecPartialState, ExecPayload, Hash,
-    };
+    use alpen_acct_types::{EnvError, ExecBlock, ExecHeader, ExecPartialState, Hash};
     use alpen_chain_types::ChunkTransition;
     use alpen_simple_ee::{
         SimpleBlock, SimpleBlockBody, SimpleExecutionEnvironment, SimpleHeader,
@@ -121,9 +119,8 @@ mod tests {
             value: 200,
         }]);
         let inputs = body.exec_inputs();
-        let payload = ExecPayload::new(&intrinsics, &body);
-        let output = ee.execute_block_body(&pre_state, &payload).unwrap();
-        let header = ee.complete_header(&payload, &output).unwrap();
+        let output = ee.execute_body(&pre_state, &body).unwrap();
+        let header = ee.complete_header(&intrinsics, &output);
         let outputs = output.outputs().clone();
         let block = SimpleBlock::new(header, body);
 

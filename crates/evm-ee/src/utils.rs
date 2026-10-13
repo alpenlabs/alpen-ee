@@ -4,31 +4,23 @@
 //! belong to any specific type.
 
 use alloy_consensus::{Block as AlloyBlock, BlockBody};
-use alpen_acct_types::ExecPayload;
+use alpen_acct_types::ExecBlock;
 use alpen_chain_types::ExecInputs;
 use alpen_reth_evm::subject_to_address;
 use alpen_reth_primitives::sats_to_gwei;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_primitives_traits::{Block, RecoveredBlock};
 
-use crate::{
-    errors::EvmEnvError,
-    types::{EvmBlock, EvmHeaderIntrinsics},
-};
+use crate::{errors::EvmEnvError, types::EvmBlock};
 
-/// Builds an Alloy block from exec payload and recovers transaction senders.
-///
-/// This constructs an AlloyBlock from the header and body in the exec payload,
-/// then recovers the sender addresses from transaction signatures.
+/// Builds an Alloy block from an EVM block and recovers transaction senders.
 pub(crate) fn build_and_recover_block(
-    exec_payload: &ExecPayload<'_, EvmBlock>,
+    block: &EvmBlock,
 ) -> Result<RecoveredBlock<AlloyBlock<TransactionSigned>>, EvmEnvError> {
-    let header: EvmHeaderIntrinsics = exec_payload.header_intrinsics().clone();
-    let body = exec_payload.body().body().clone();
-    let header = header.build_execution_header(&body);
-
-    // Build block using alloy_consensus types
-    let alloy_block = AlloyBlock { header, body };
+    let alloy_block = AlloyBlock {
+        header: block.get_header().header().clone(),
+        body: block.get_body().body().clone(),
+    };
 
     // Recover transaction senders from signatures
     alloy_block
