@@ -94,36 +94,33 @@ pub trait ExecutionEnvironment: Sized + 'static {
         header: &<Self::Block as ExecBlock>::Header,
     ) -> Result<(), Self::Error>;
 
-    /// Checks a block's body against its header, before executing it.
+    /// Checks a block's body against its header and the inputs claimed for
+    /// it, before executing it.
     ///
     /// This must check that the header commits to the body. It also checks
     /// every other rule the environment puts on a block that needs the body
     /// but not the execution result, such as a limit on the block's size.
-    fn verify_block_pre_execution(&self, block: &Self::Block) -> Result<(), Self::Error>;
+    ///
+    /// Execution reads the block, not the inputs, so the claimed inputs must
+    /// be checked against the block itself, for example against a deposit
+    /// list in the body.
+    fn verify_block_pre_execution(
+        &self,
+        block: &Self::Block,
+        claimed_inputs: &ExecInputs,
+    ) -> Result<(), Self::Error>;
 
     /// Executes a block on top of a pre-state, returning the execution output.
     ///
     /// Execution alone does not verify the block: the caller must also check
-    /// the header with [`Self::verify_header`], the body with
-    /// [`Self::verify_block_pre_execution`], the inputs with
-    /// [`Self::verify_inputs_against_block`] and the output and claimed
+    /// the header with [`Self::verify_header`], the body and claimed inputs
+    /// with [`Self::verify_block_pre_execution`] and the output and claimed
     /// outputs with [`Self::verify_block_post_execution`].
     fn execute_block(
         &self,
         pre_state: &Self::PartialState,
         block: &Self::Block,
     ) -> Result<ExecBlockOutput<Self>, Self::Error>;
-
-    /// Checks that the inputs match what the block applies.
-    ///
-    /// Execution reads the block, not the inputs, so the inputs are a claim
-    /// about the block. Each environment checks that claim against the block
-    /// itself, for example against a deposit list in the body.
-    fn verify_inputs_against_block(
-        &self,
-        block: &Self::Block,
-        inputs: &ExecInputs,
-    ) -> Result<(), Self::Error>;
 
     /// Checks a block's execution output against its header and the outputs
     /// claimed for it.
