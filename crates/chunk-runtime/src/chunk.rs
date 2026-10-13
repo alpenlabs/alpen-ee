@@ -26,6 +26,11 @@ impl<E: ExecutionEnvironment> Chunk<E> {
     pub fn blocks(&self) -> &[ChunkBlock<E>] {
         &self.blocks
     }
+
+    /// Consumes the chunk and returns its prev header and blocks.
+    pub fn into_parts(self) -> (<E::Block as ExecBlock>::Header, Vec<ChunkBlock<E>>) {
+        (self.prev_header, self.blocks)
+    }
 }
 
 /// Decoded execution env block within a chunk.
@@ -55,5 +60,10 @@ impl<E: ExecutionEnvironment> ChunkBlock<E> {
 
     pub fn exec_block(&self) -> &E::Block {
         &self.exec_block
+    }
+
+    /// Consumes the chunk block and returns its inputs, outputs and block.
+    pub fn into_parts(self) -> (ExecInputs, ExecOutputs, E::Block) {
+        (self.inputs, self.outputs, self.exec_block)
     }
 }

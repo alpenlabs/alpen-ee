@@ -364,7 +364,7 @@ fn test_evm_partial_state_codec_roundtrip_execution() {
     let ee = EvmExecutionEnvironment::new(&params, AlpenSpecId::V0);
 
     // Original state executes fine.
-    ee.execute_block(&partial_state, &block)
+    ee.execute_block(&partial_state, block.clone())
         .expect("execution on original state should succeed");
 
     // Roundtrip through codec.
@@ -372,7 +372,7 @@ fn test_evm_partial_state_codec_roundtrip_execution() {
     let decoded: EvmPartialState = decode_buf_exact(&encoded).expect("decode failed");
 
     // Decoded state should also execute — this fails if trie nodes are lost.
-    ee.execute_block(&decoded, &block)
+    ee.execute_block(&decoded, block)
         .expect("execution on codec-roundtripped state should succeed");
 }
 

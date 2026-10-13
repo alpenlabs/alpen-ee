@@ -13,10 +13,9 @@ use reth_primitives_traits::RecoveredBlock;
 use crate::{errors::EvmEnvError, types::EvmBlock};
 
 /// Recovers the transaction senders of an EVM block.
-pub(crate) fn recover_block(block: &EvmBlock) -> Result<RecoveredBlock<Block>, EvmEnvError> {
+pub(crate) fn recover_block(block: EvmBlock) -> Result<RecoveredBlock<Block>, EvmEnvError> {
     block
-        .sealed()
-        .clone()
+        .into_sealed()
         .try_recover()
         .map_err(|_| EvmEnvError::SenderRecovery)
 }

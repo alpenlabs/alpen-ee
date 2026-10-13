@@ -55,7 +55,7 @@ pub fn build_workload_chunk(
         let inputs = block_inputs(workload_block);
 
         let output = ee
-            .execute_block(&state, &block)
+            .execute_block(&state, block.clone())
             .expect("workload block executes");
         ee.merge_write_into_state(&mut state, output.write_batch())
             .expect("merge block writes");
