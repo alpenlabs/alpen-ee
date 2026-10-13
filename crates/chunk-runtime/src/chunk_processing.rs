@@ -87,7 +87,7 @@ pub fn compute_chunk_transition<E: ExecutionEnvironment>(
     chunk: Chunk<E>,
 ) -> ChunkRuntimeResult<ChunkTransition, E::Error> {
     // 1. Make sure the chunk is nonempty.
-    if chunk.blocks().is_empty() {
+    if chunk.is_empty() {
         return Err(ChunkRuntimeError::EmptyChunk);
     }
 
