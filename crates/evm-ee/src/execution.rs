@@ -217,6 +217,10 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
         // Reth's rule reads only the header from the block, so the body and
         // senders are left empty rather than copied. If it ever read the body,
         // the empty one would fail valid blocks, not pass invalid ones.
+        // TODO: the rule takes an owned block, so the header is copied here.
+        // Having the trait hand the header over by value would avoid that
+        // copy, but `process_block` keeps the header for the state root check
+        // and as the next block's parent, so it needs the header back.
         let block = RecoveredBlock::new_unhashed(
             Block {
                 header: header.header().clone(),
