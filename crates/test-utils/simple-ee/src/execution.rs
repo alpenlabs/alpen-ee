@@ -97,7 +97,7 @@ impl ExecutionEnvironment for SimpleExecutionEnvironment {
     fn execute_block(
         &self,
         pre_state: &Self::PartialState,
-        block: &Self::Block,
+        block: Self::Block,
     ) -> EnvResult<ExecBlockOutput<Self>> {
         self.execute_body(pre_state, block.body())
     }

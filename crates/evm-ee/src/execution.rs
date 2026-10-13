@@ -4,7 +4,7 @@
 //! using RSP's sparse state and Reth's EVM execution engine.
 
 use alloy_consensus::Header;
-use alpen_acct_types::{ExecBlock, ExecBlockOutput, ExecutionEnvironment};
+use alpen_acct_types::{ExecBlockOutput, ExecutionEnvironment};
 use alpen_chain_types::{ExecInputs, ExecOutputs, OutputMessage};
 use alpen_params::{AlpenParams, AlpenSpecId};
 use alpen_reth_evm::{
@@ -174,7 +174,7 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
     fn execute_block(
         &self,
         pre_state: &Self::PartialState,
-        block: &EvmBlock,
+        block: EvmBlock,
     ) -> Result<ExecBlockOutput<Self>, Self::Error> {
         // Step 1: Recover the senders. The header is checked by
         // `verify_header`, the body and inputs by `verify_block_pre_execution`
@@ -182,23 +182,21 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
         let recovered = recover_block(block)?;
 
         // Step 2: Anchor the `BLOCKHASH` ancestors to this block.
-        validate_ancestors_against_block(pre_state, block.get_header().header())?;
+        validate_ancestors_against_block(pre_state, recovered.header())?;
 
         // Step 3: Execute the block.
         let BlockExecutionOutput { result, state } =
             self.execute_recovered_block(&recovered, pre_state)?;
 
         // Step 4: Collect withdrawal intents.
-        let transactions = recovered.into_transactions();
         let withdrawal_intents = extract_withdrawal_intents(
-            &transactions,
+            &recovered.body().transactions,
             &result.receipts,
             self.evm_config.bridge_params(),
         )?;
 
         // Step 5: Convert the state changes to a write batch.
-        let write_batch =
-            EvmWriteBatch::from_bundle_state(&state, block.get_header().header().clone());
+        let write_batch = EvmWriteBatch::from_bundle_state(&state, recovered.into_header());
 
         // Step 6: Create ExecOutputs with withdrawal intent messages.
         let mut outputs = ExecOutputs::new_empty();
@@ -216,6 +214,10 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
         // Reth's rule reads only the header from the block, so the body and
         // senders are left empty rather than copied. If it ever read the body,
         // the empty one would fail valid blocks, not pass invalid ones.
+        // TODO(STR-4597): the rule takes an owned block, so the header is copied here.
+        // Having the trait hand the header over by value would avoid that
+        // copy, but `process_block` keeps the header for the state root check
+        // and as the next block's parent, so it needs the header back.
         let block = RecoveredBlock::new_unhashed(
             Block {
                 header: header.header().clone(),
@@ -426,7 +428,7 @@ mod tests {
             fabricated,
         );
 
-        let result = fixture_env().execute_block(&pre_state, &fixture.evm_block());
+        let result = fixture_env().execute_block(&pre_state, fixture.evm_block());
         assert!(
             matches!(result, Err(EvmEnvError::AncestorMismatch { .. })),
             "ancestors that do not link to the executed block must be rejected: {result:?}"
@@ -572,17 +574,18 @@ mod tests {
         let mut fixture = fixture();
         let env = fixture_env();
         let block = fixture.evm_block();
+        let header = block.get_header().clone();
 
         env.verify_block_pre_execution(&block, &fixture.inputs)
             .expect("the header commits to the body, which mints the workload's deposits");
 
         let output = env
-            .execute_block(&fixture.pre_state, &block)
+            .execute_block(&fixture.pre_state, block)
             .expect("block execution should succeed");
 
         // This covers the receipts root, logs bloom and gas figures, but not
         // the state root, which this method does not look at.
-        env.verify_block_post_execution(block.get_header(), &output, output.outputs())
+        env.verify_block_post_execution(&header, &output, output.outputs())
             .expect("execution-derived commitments should match the header");
 
         // The state root only exists once the writes are merged, so check it here.
@@ -600,8 +603,9 @@ mod tests {
         let fixture = fixture();
         let env = fixture_env();
         let block = fixture.evm_block();
+        let header = block.get_header().clone();
         let output = env
-            .execute_block(&fixture.pre_state, &block)
+            .execute_block(&fixture.pre_state, block)
             .expect("block execution should succeed");
 
         let mut claimed = output.outputs().clone();
@@ -610,7 +614,7 @@ mod tests {
             BitcoinAmount::try_from(1u64).expect("amount fits"),
         ));
 
-        let result = env.verify_block_post_execution(block.get_header(), &output, &claimed);
+        let result = env.verify_block_post_execution(&header, &output, &claimed);
         assert!(
             matches!(result, Err(EvmEnvError::OutputMismatch { .. })),
             "{result:?}"
@@ -624,7 +628,7 @@ mod tests {
         let fixture = fixture();
         let env = fixture_env();
         let output = env
-            .execute_block(&fixture.pre_state, &fixture.evm_block())
+            .execute_block(&fixture.pre_state, fixture.evm_block())
             .expect("block execution should succeed");
         let header = fixture.block.header;
 

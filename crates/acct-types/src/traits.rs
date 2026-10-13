@@ -101,10 +101,14 @@ pub trait ExecutionEnvironment: Sized + 'static {
     /// the header with [`Self::verify_header`], the body and claimed inputs
     /// with [`Self::verify_block_pre_execution`] and the output and claimed
     /// outputs with [`Self::verify_block_post_execution`].
+    ///
+    /// It takes the block so an environment can hand it to its executor
+    /// without copying it. A caller that still needs the header afterwards
+    /// clones it first.
     fn execute_block(
         &self,
         pre_state: &Self::PartialState,
-        block: &Self::Block,
+        block: Self::Block,
     ) -> Result<ExecBlockOutput<Self>, Self::Error>;
 
     /// Checks a block's execution output against its header and the outputs

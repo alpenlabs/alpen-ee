@@ -23,8 +23,14 @@ impl<E: ExecutionEnvironment> Chunk<E> {
         &self.prev_header
     }
 
-    pub fn blocks(&self) -> &[ChunkBlock<E>] {
-        &self.blocks
+    /// Returns whether the chunk has no blocks.
+    pub fn is_empty(&self) -> bool {
+        self.blocks.is_empty()
+    }
+
+    /// Consumes the chunk and returns its prev header and blocks.
+    pub fn into_parts(self) -> (<E::Block as ExecBlock>::Header, Vec<ChunkBlock<E>>) {
+        (self.prev_header, self.blocks)
     }
 }
 
@@ -45,15 +51,8 @@ impl<E: ExecutionEnvironment> ChunkBlock<E> {
         }
     }
 
-    pub fn inputs(&self) -> &ExecInputs {
-        &self.inputs
-    }
-
-    pub fn outputs(&self) -> &ExecOutputs {
-        &self.outputs
-    }
-
-    pub fn exec_block(&self) -> &E::Block {
-        &self.exec_block
+    /// Consumes the chunk block and returns its inputs, outputs and block.
+    pub fn into_parts(self) -> (ExecInputs, ExecOutputs, E::Block) {
+        (self.inputs, self.outputs, self.exec_block)
     }
 }

@@ -1,33 +1,36 @@
 use alpen_acct_types::{ExecBlock, ExecHeader, ExecPartialState, ExecutionEnvironment};
 use alpen_chain_types::{ChunkTransition, ExecInputs, ExecOutputs};
 
-use crate::{
-    ChunkRuntimeError, ChunkRuntimeResult,
-    chunk::{Chunk, ChunkBlock},
-};
+use crate::{ChunkRuntimeError, ChunkRuntimeResult, chunk::Chunk};
+
+/// Header type of an execution environment's blocks.
+type HeaderOf<E> = <<E as ExecutionEnvironment>::Block as ExecBlock>::Header;
 
 /// Processes a block from a chunk with associated inputs, merging results into
 /// the passed state.
 ///
-/// `parent_header` is the header of the block this one builds on.
+/// `parent_header` is the header of the block this one builds on. Returns
+/// the block's header, for the next block to build on.
 pub fn process_block<E: ExecutionEnvironment>(
     ee: &E,
     state: &mut E::PartialState,
-    parent_header: &<E::Block as ExecBlock>::Header,
-    block: &ChunkBlock<E>,
-) -> ChunkRuntimeResult<(), E::Error> {
-    let eb = block.exec_block();
-    let header = eb.get_header();
+    parent_header: &HeaderOf<E>,
+    inputs: &ExecInputs,
+    outputs: &ExecOutputs,
+    block: E::Block,
+) -> ChunkRuntimeResult<HeaderOf<E>, E::Error> {
+    // Execution takes the block, so keep the header for the checks after it.
+    let header = block.get_header().clone();
 
     // 1. Check the block before executing it: the header against its parent,
     // then the body against the header and the claimed inputs.
-    ee.verify_header(parent_header, header)?;
-    ee.verify_block_pre_execution(eb, block.inputs())?;
+    ee.verify_header(parent_header, &header)?;
+    ee.verify_block_pre_execution(&block, inputs)?;
 
     // 2. Execute the block and check the result against the header and the
     // claimed outputs.
-    let exec_outp = ee.execute_block(state, eb)?;
-    ee.verify_block_post_execution(header, &exec_outp, block.outputs())?;
+    let exec_outp = ee.execute_block(state, block)?;
+    ee.verify_block_post_execution(&header, &exec_outp, outputs)?;
 
     // 3. Merge the writes and check the new state root against the header.
     ee.merge_write_into_state(state, exec_outp.write_batch())?;
@@ -40,7 +43,7 @@ pub fn process_block<E: ExecutionEnvironment>(
         });
     }
 
-    Ok(())
+    Ok(header)
 }
 
 /// Chunk-level IO built up from the per-block IO of a chunk's blocks.
@@ -93,22 +96,23 @@ impl ChunkIo {
     }
 }
 
-/// Processes a chunk's blocks and updates the state, returning the chunk-level
-/// IO built from the blocks' IO.
+/// Processes a chunk's blocks and updates the state, returning the header of
+/// the chunk's last block (its prev header if it has none) and the
+/// chunk-level IO built from the blocks' IO.
 fn process_chunk_blocks<E: ExecutionEnvironment>(
     ee: &E,
     state: &mut E::PartialState,
-    chunk: &Chunk<E>,
-) -> ChunkRuntimeResult<(ExecInputs, ExecOutputs), E::Error> {
+    chunk: Chunk<E>,
+) -> ChunkRuntimeResult<(HeaderOf<E>, ExecInputs, ExecOutputs), E::Error> {
     let mut chunk_io = ChunkIo::new_empty();
-    let mut parent_header = chunk.prev_header();
-    for cb in chunk.blocks() {
-        process_block(ee, state, parent_header, cb)?;
-        chunk_io.extend_from_block(cb.inputs(), cb.outputs())?;
-        parent_header = cb.exec_block().get_header();
+    let (mut parent_header, blocks) = chunk.into_parts();
+    for cb in blocks {
+        let (inputs, outputs, block) = cb.into_parts();
+        parent_header = process_block(ee, state, &parent_header, &inputs, &outputs, block)?;
+        chunk_io.extend_from_block(&inputs, &outputs)?;
     }
 
-    Ok((chunk_io.inputs, chunk_io.outputs))
+    Ok((parent_header, chunk_io.inputs, chunk_io.outputs))
 }
 
 /// Computes the chunk transition by executing the chunk on top of the pre
@@ -116,16 +120,16 @@ fn process_chunk_blocks<E: ExecutionEnvironment>(
 pub fn compute_chunk_transition<E: ExecutionEnvironment>(
     ee: &E,
     state: &mut E::PartialState,
-    chunk: &Chunk<E>,
+    chunk: Chunk<E>,
 ) -> ChunkRuntimeResult<ChunkTransition, E::Error> {
-    let prev_header = chunk.prev_header();
-
     // 1. Make sure the chunk is nonempty.
-    let Some(tip_header) = chunk.blocks().last().map(|b| b.exec_block().get_header()) else {
+    if chunk.is_empty() {
         return Err(ChunkRuntimeError::EmptyChunk);
-    };
+    }
 
     // 2. Make sure the state matches the parent block's state root.
+    let prev_header = chunk.prev_header();
+    let prev_blkid = prev_header.compute_block_id();
     let computed_pre_sr = state.compute_state_root();
     if computed_pre_sr != prev_header.get_state_root() {
         return Err(ChunkRuntimeError::PreStateRootMismatch {
@@ -136,7 +140,7 @@ pub fn compute_chunk_transition<E: ExecutionEnvironment>(
 
     // 3. Execute the blocks in the chunk. Each block's post-state root is
     // verified before its header can be used as the parent of a later block.
-    let (inputs, outputs) = process_chunk_blocks(ee, state, chunk)?;
+    let (tip_header, inputs, outputs) = process_chunk_blocks(ee, state, chunk)?;
 
     // 4. Compute the final state root and make sure it matches the tip.
     let tip_state_root = state.compute_state_root();
@@ -148,7 +152,7 @@ pub fn compute_chunk_transition<E: ExecutionEnvironment>(
     }
 
     Ok(ChunkTransition::new(
-        prev_header.compute_block_id(),
+        prev_blkid,
         tip_header.compute_block_id(),
         tip_state_root,
         tip_header.get_exec_header_summary(),
@@ -271,7 +275,7 @@ mod tests {
 
         // Process starting from the initial state.
         let mut state = initial_state;
-        let (chunk_inputs, chunk_outputs) = process_chunk_blocks(&ee, &mut state, &chunk)
+        let (_, chunk_inputs, chunk_outputs) = process_chunk_blocks(&ee, &mut state, chunk)
             .expect("multi-block chunk should process successfully");
         assert_eq!(chunk_inputs, ExecInputs::new_empty());
         assert_eq!(chunk_outputs, ExecOutputs::new_empty());
@@ -328,7 +332,7 @@ mod tests {
         );
         let mut state = initial_state;
 
-        let err = process_chunk_blocks(&ee, &mut state, &chunk)
+        let err = process_chunk_blocks(&ee, &mut state, chunk)
             .expect_err("forged intermediate state root must be rejected");
         assert!(matches!(
             err,
@@ -364,7 +368,7 @@ mod tests {
         );
         let mut state = initial_state;
 
-        let err = process_chunk_blocks(&ee, &mut state, &chunk)
+        let err = process_chunk_blocks(&ee, &mut state, chunk)
             .expect_err("a block off the parent must be rejected");
         assert!(matches!(
             err,
@@ -401,7 +405,7 @@ mod tests {
         let chunk = Chunk::new(genesis_header, vec![ChunkBlock::new(inp, out, block)]);
         let mut state = initial_state;
 
-        let err = process_chunk_blocks(&ee, &mut state, &chunk)
+        let err = process_chunk_blocks(&ee, &mut state, chunk)
             .expect_err("a header that skips an index must be rejected");
         assert!(matches!(
             err,
@@ -462,7 +466,7 @@ mod tests {
         );
         let mut state = initial_state;
 
-        let err = process_chunk_blocks(&ee, &mut state, &chunk)
+        let err = process_chunk_blocks(&ee, &mut state, chunk)
             .expect_err("a block after a rotation must be rejected");
         assert!(matches!(err, ChunkRuntimeError::NonTerminalRotation));
     }
@@ -516,7 +520,7 @@ mod tests {
         );
         let mut state = initial_state;
 
-        let (_, chunk_outputs) = process_chunk_blocks(&ee, &mut state, &chunk)
+        let (_, _, chunk_outputs) = process_chunk_blocks(&ee, &mut state, chunk)
             .expect("a rotation on the last block should process successfully");
         assert_eq!(chunk_outputs.new_predicate(), Some(&new_key));
 
@@ -558,7 +562,7 @@ mod tests {
 
         let mut state = initial_state;
 
-        let computed = compute_chunk_transition(&ee, &mut state, &chunk)
+        let computed = compute_chunk_transition(&ee, &mut state, chunk)
             .expect("chunk should compute a transition");
         assert_eq!(computed, chunk_transition);
     }

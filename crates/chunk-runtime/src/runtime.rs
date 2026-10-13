@@ -43,7 +43,7 @@ pub fn verify_input<E: ExecutionEnvironment>(
     // the claimed one from `PrivateInput`. This comparison then goes away. It
     // stays for now because that changes the guest's input and so its
     // verifying key.
-    let computed_tsn = compute_chunk_transition(ee, &mut pre_state, &chunk)?;
+    let computed_tsn = compute_chunk_transition(ee, &mut pre_state, chunk)?;
     if computed_tsn != tsn {
         return Err(ChunkRuntimeError::TransitionMismatch {
             expected: Box::new(tsn),
