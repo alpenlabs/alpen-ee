@@ -70,8 +70,6 @@ pub(super) fn build_chunk(workload: &Workload) -> Chunk {
             .expect("workload block executes");
         ee.merge_write_into_state(&mut state, output.write_batch())
             .expect("merge block writes");
-        ee.update_partial_state_after_block(&mut state, block.get_header())
-            .expect("update state after block");
         let outputs = output.outputs().clone();
 
         extend_exec_inputs(&mut chunk_inputs, &inputs);

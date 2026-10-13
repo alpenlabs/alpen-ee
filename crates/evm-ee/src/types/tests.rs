@@ -414,7 +414,7 @@ fn test_evm_write_batch_codec_roundtrip() {
     use super::EvmWriteBatch;
 
     let hashed_post_state = HashedPostState::default();
-    let write_batch = EvmWriteBatch::new(hashed_post_state);
+    let write_batch = EvmWriteBatch::new(hashed_post_state, create_test_header());
 
     // Encode
     let encoded = encode_to_vec(&write_batch).expect("encode failed");
@@ -581,7 +581,7 @@ fn balance_only_write_batch(hashed_address: B256, balance: u64) -> EvmWriteBatch
         }),
     );
 
-    EvmWriteBatch::new(post_state)
+    EvmWriteBatch::new(post_state, Header::default())
 }
 
 /// A canonical execution witness omits the storage trie of an account whose
