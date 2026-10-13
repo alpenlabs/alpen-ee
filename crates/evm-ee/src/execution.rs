@@ -257,6 +257,7 @@ mod tests {
     use alloy_consensus::{
         BlockBody, Header, Sealable, TxLegacy, proofs::calculate_transaction_root,
     };
+    use alloy_rlp::decode_exact;
     use alpen_acct_types::{ExecBlock, ExecPartialState};
     use alpen_chain_types::{OutputTransfer, SubjectDepositData};
     use alpen_params::DEV_PARAMS_JSON;
@@ -326,9 +327,8 @@ mod tests {
         }
 
         Fixture {
-            parent: alloy_rlp::decode_exact(&workload.prev_header_rlp[..])
-                .expect("decode prev header"),
-            block: alloy_rlp::decode_exact(&first.block_rlp[..]).expect("decode block"),
+            parent: decode_exact(&workload.prev_header_rlp[..]).expect("decode prev header"),
+            block: decode_exact(&first.block_rlp[..]).expect("decode block"),
             inputs,
             pre_state: decode_buf_exact(&workload.chunk_pre_state).expect("decode pre-state"),
         }
@@ -380,7 +380,7 @@ mod tests {
         // The pre-state already holds the hashes the range's own blocks read,
         // so take the last block, whose hash no block reads.
         let last = workload.blocks.last().expect("workload has blocks");
-        let header = alloy_rlp::decode_exact::<Block>(&last.block_rlp[..])
+        let header = decode_exact::<Block>(&last.block_rlp[..])
             .expect("decode block")
             .header;
 

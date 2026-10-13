@@ -4,6 +4,7 @@
 //! (`ChunkSpec::fetch_input` in alpen-client).
 
 use alloy_consensus::Header;
+use alloy_rlp::decode_exact;
 use alpen_acct_types::{ExecBlock, ExecHeader, ExecutionEnvironment};
 use alpen_chain_types::{ChunkTransition, ExecInputs, ExecOutputs, SubjectDepositData};
 use alpen_chunk_runtime::{PrivateInput, RawBlockData, RawChunkData};
@@ -33,7 +34,7 @@ pub fn build_workload_chunk(
     spec_version: AlpenSpecId,
 ) -> WorkloadChunk {
     let prev_header: Header =
-        alloy_rlp::decode_exact(&workload.prev_header_rlp[..]).expect("decode prev header");
+        decode_exact(&workload.prev_header_rlp[..]).expect("decode prev header");
     let parent_evm_header = EvmHeader::new(prev_header);
     let parent_blkid: Hash = parent_evm_header.compute_block_id();
 
@@ -91,8 +92,7 @@ pub fn build_workload_chunk(
 }
 
 fn evm_block(workload_block: &WorkloadBlock) -> EvmBlock {
-    let block: Block =
-        alloy_rlp::decode_exact(&workload_block.block_rlp[..]).expect("decode workload block");
+    let block: Block = decode_exact(&workload_block.block_rlp[..]).expect("decode workload block");
     EvmBlock::new(block)
 }
 
