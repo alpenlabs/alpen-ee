@@ -1566,6 +1566,7 @@ dependencies = [
  "alpen-params",
  "alpen-reth-evm",
  "alpen-reth-primitives",
+ "alpen-test-utils-evm-workload",
  "bincode",
  "itertools 0.14.0",
  "reth-consensus",

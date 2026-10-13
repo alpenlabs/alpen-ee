@@ -251,25 +251,24 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, fs, path::PathBuf};
-
     use alloy_consensus::{
         BlockBody, Header, Sealable, TxLegacy, proofs::calculate_transaction_root,
     };
     use alpen_acct_types::{ExecBlock, ExecPartialState};
-    use alpen_params::{DEV_PARAMS_JSON, HeaderExtra};
+    use alpen_chain_types::SubjectDepositData;
+    use alpen_params::DEV_PARAMS_JSON;
+    use alpen_test_utils_evm_workload::{MIXED_WORKLOAD, Workload, workload_dir};
     use reth_consensus::ConsensusError;
     use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
-    use reth_primitives_traits::Block as RethBlockTrait;
     use reth_trie::HashedPostState;
-    use revm::{DatabaseRef, state::Bytecode};
+    use revm::DatabaseRef;
     use revm_primitives::{
         B256,
         alloy_primitives::{Bloom, Signature},
     };
-    use rsp_client_executor::io::EthClientExecutorInput;
-    use serde::Deserialize;
+    use strata_acct_types::SubjectId;
+    use strata_codec::decode_buf_exact;
     use strata_msg_fmt::{Msg, MsgRef};
     use strata_ol_bridge_types::OperatorSelection;
     use strata_ol_msg_types::OLMessageExt;
@@ -278,23 +277,60 @@ mod tests {
     use super::*;
     use crate::types::{EvmBlock, EvmBlockBody, EvmHeader, EvmPartialState};
 
-    /// The spec version the witness fixture was produced under.
-    const FIXTURE_SPEC_VERSION: AlpenSpecId = AlpenSpecId::V0;
+    /// The spec version the workload's blocks are stamped with.
+    const FIXTURE_SPEC_VERSION: AlpenSpecId = AlpenSpecId::V1;
 
-    /// The dev network's params, whose genesis the witness fixture was built
-    /// on.
+    /// The dev network's params, whose genesis the workload was built on.
     fn dev_params() -> AlpenParams {
         serde_json::from_str(DEV_PARAMS_JSON).expect("dev params should parse")
     }
 
-    fn rehashed_fixture_bytecodes(bytecodes: Vec<Bytecode>) -> BTreeMap<B256, Bytecode> {
-        // The RSP fixture stores bytecodes as a Vec without the original code-hash
-        // keys. Re-hashing here preserves the old fixture behavior; production
-        // range witnesses pass keyed bytecodes from AccessedStateGenerator.
-        bytecodes
-            .into_iter()
-            .map(|bytecode| (bytecode.hash_slow(), bytecode))
-            .collect()
+    fn fixture_env() -> EvmExecutionEnvironment {
+        EvmExecutionEnvironment::new(&dev_params(), FIXTURE_SPEC_VERSION)
+    }
+
+    /// The first block of the mixed workload and what it runs on.
+    struct Fixture {
+        parent: Header,
+        block: Block,
+        inputs: ExecInputs,
+        /// State at the start of the workload. It covers every block of the
+        /// range, so it is enough for the first.
+        pre_state: EvmPartialState,
+    }
+
+    impl Fixture {
+        fn evm_block(&self) -> EvmBlock {
+            EvmBlock::new(
+                EvmHeader::new(self.block.header.clone()),
+                EvmBlockBody::from_alloy_body(self.block.body.clone()),
+            )
+        }
+    }
+
+    fn load_workload() -> Workload {
+        Workload::load(&workload_dir(MIXED_WORKLOAD)).expect("load workload")
+    }
+
+    fn fixture() -> Fixture {
+        let workload = load_workload();
+        let first = workload.blocks.first().expect("workload has blocks");
+
+        let mut inputs = ExecInputs::new_empty();
+        for deposit in &first.deposits {
+            inputs.add_subject_deposit(SubjectDepositData::new(
+                SubjectId::from(deposit.dest_subject),
+                BitcoinAmount::try_from(deposit.sats).expect("deposit amount fits"),
+            ));
+        }
+
+        Fixture {
+            parent: alloy_rlp::decode_exact(&workload.prev_header_rlp[..])
+                .expect("decode prev header"),
+            block: alloy_rlp::decode_exact(&first.block_rlp[..]).expect("decode block"),
+            inputs,
+            pre_state: decode_buf_exact(&workload.chunk_pre_state).expect("decode pre-state"),
+        }
     }
 
     #[test]
@@ -337,45 +373,32 @@ mod tests {
 
     #[test]
     fn merge_write_into_state_adds_block_hash_for_subsequent_blocks() {
-        #[derive(Deserialize, Debug)]
-        struct TestData {
-            witness: EthClientExecutorInput,
-        }
-
-        let test_data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .join("test-utils/data/evm-ee/rsp_block_witness.json");
-
-        let json_content = fs::read_to_string(&test_data_path)
-            .expect("Failed to read rsp_block_witness.json from test-utils/data/evm-ee");
-
-        let test_data: TestData =
-            serde_json::from_str(&json_content).expect("Failed to parse test data");
-
-        let env = EvmExecutionEnvironment::new(&dev_params(), FIXTURE_SPEC_VERSION);
-        let header = test_data.witness.current_block.header().clone();
-        let mut state = EvmPartialState::new(
-            test_data.witness.parent_state,
-            rehashed_fixture_bytecodes(test_data.witness.bytecodes),
-            test_data.witness.ancestor_headers,
-        );
+        let workload = load_workload();
+        let mut pre_state: EvmPartialState =
+            decode_buf_exact(&workload.chunk_pre_state).expect("decode pre-state");
+        // The pre-state already holds the hashes the range's own blocks read,
+        // so take the last block, whose hash no block reads.
+        let last = workload.blocks.last().expect("workload has blocks");
+        let header = alloy_rlp::decode_exact::<Block>(&last.block_rlp[..])
+            .expect("decode block")
+            .header;
 
         // The block has not been executed yet, so its hash is not in the
         // witness. Looking it up fails rather than defaulting to zero.
         assert!(
-            state
+            pre_state
                 .create_witness_db()
                 .block_hash_ref(header.number)
                 .is_err()
         );
 
         let write_batch = EvmWriteBatch::new(HashedPostState::default(), header.clone());
-        env.merge_write_into_state(&mut state, &write_batch)
+        fixture_env()
+            .merge_write_into_state(&mut pre_state, &write_batch)
             .expect("merging the write batch should succeed");
 
         assert_eq!(
-            state
+            pre_state
                 .create_witness_db()
                 .block_hash_ref(header.number)
                 .expect("block hash lookup must succeed"),
@@ -388,29 +411,13 @@ mod tests {
     /// are what `BLOCKHASH` returns.
     #[test]
     fn execute_block_rejects_ancestors_from_another_chain() {
-        #[derive(Deserialize, Debug)]
-        struct TestData {
-            witness: EthClientExecutorInput,
-        }
-
-        let test_data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .join("test-utils/data/evm-ee/rsp_block_witness.json");
-
-        let json_content = fs::read_to_string(&test_data_path)
-            .expect("Failed to read rsp_block_witness.json from test-utils/data/evm-ee");
-
-        let test_data: TestData =
-            serde_json::from_str(&json_content).expect("Failed to parse test data");
-
-        let env = EvmExecutionEnvironment::new(&dev_params(), FIXTURE_SPEC_VERSION);
+        let fixture = fixture();
 
         // Same block numbers, different content, relinked so the chain still
         // hangs together on its own terms.
         let mut fabricated: Vec<Header> = Vec::new();
-        for (idx, ancestor) in test_data.witness.ancestor_headers.iter().enumerate() {
-            let mut header = ancestor.clone();
+        for (idx, ancestor) in fixture.pre_state.ancestor_headers().values().enumerate() {
+            let mut header = ancestor.inner().clone();
             header.timestamp += 1;
             if idx > 0 {
                 header.parent_hash = fabricated[idx - 1].clone().seal_slow().hash();
@@ -419,74 +426,36 @@ mod tests {
         }
 
         let pre_state = EvmPartialState::new(
-            test_data.witness.parent_state,
-            rehashed_fixture_bytecodes(test_data.witness.bytecodes),
+            fixture.pre_state.ethereum_state().clone(),
+            fixture.pre_state.bytecodes().clone(),
             fabricated,
         );
 
-        let evm_header = EvmHeader::new(test_data.witness.current_block.header().clone());
-        let evm_body =
-            EvmBlockBody::from_alloy_body(test_data.witness.current_block.body().clone());
-        let block = EvmBlock::new(evm_header, evm_body);
-
-        let result = env.execute_block(&pre_state, &block);
+        let result = fixture_env().execute_block(&pre_state, &fixture.evm_block());
         assert!(
             matches!(result, Err(EvmEnvError::AncestorMismatch { .. })),
             "ancestors that do not link to the executed block must be rejected: {result:?}"
         );
     }
 
-    fn fixture_witness() -> EthClientExecutorInput {
-        #[derive(Deserialize, Debug)]
-        struct TestData {
-            witness: EthClientExecutorInput,
-        }
-
-        let test_data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .join("test-utils/data/evm-ee/rsp_block_witness.json");
-        let json_content = fs::read_to_string(test_data_path).expect("read witness fixture");
-        let test_data: TestData =
-            serde_json::from_str(&json_content).expect("parse witness fixture");
-        test_data.witness
-    }
-
-    /// The fixture block and its parent, the newest witnessed ancestor.
-    ///
-    /// The fixture block carries V1's floored base fee but no stamp, which
-    /// reads as V0. Stamping it V1 makes it a valid first V1 block over its V0
-    /// parent.
-    fn fixture_parent_and_header() -> (Header, Header) {
-        let witness = fixture_witness();
-        let parent = witness
-            .ancestor_headers
-            .last()
-            .expect("witness contains the parent header")
-            .clone();
-        let mut header = witness.current_block.header().clone();
-        header.extra_data = HeaderExtra::new(AlpenSpecId::V1, 0).encode().into();
-        (parent, header)
-    }
-
     fn verify_fixture_header(parent: Header, header: Header) -> Result<(), EvmEnvError> {
-        let env = EvmExecutionEnvironment::new(&dev_params(), AlpenSpecId::V1);
-        env.verify_header(&EvmHeader::new(parent), &EvmHeader::new(header))
+        fixture_env().verify_header(&EvmHeader::new(parent), &EvmHeader::new(header))
     }
 
     #[test]
     fn verify_header_accepts_the_fixture_block() {
-        let (parent, header) = fixture_parent_and_header();
+        let Fixture { parent, block, .. } = fixture();
 
-        verify_fixture_header(parent, header).expect("the fixture block follows the header rules");
+        verify_fixture_header(parent, block.header)
+            .expect("the fixture block follows the header rules");
     }
 
     /// Each case breaks one rule the node checks against the parent. The
     /// proof must refuse the same headers.
     #[test]
     fn verify_header_rejects_what_the_node_rejects() {
-        let (parent, header) = fixture_parent_and_header();
-
+        let Fixture { parent, block, .. } = fixture();
+        let header = block.header;
         type BreakRule = fn(&Header, &mut Header);
         type IsExpected = fn(&ConsensusError) -> bool;
         let cases: [(BreakRule, IsExpected); 5] = [
@@ -527,14 +496,14 @@ mod tests {
     /// with another version must not pass under this environment's rules.
     #[test]
     fn verify_header_rejects_a_header_stamped_with_another_version() {
-        let (parent, mut header) = fixture_parent_and_header();
-        header.extra_data = HeaderExtra::new(AlpenSpecId::V0, 0).encode().into();
+        let Fixture { parent, block, .. } = fixture();
+        let env = EvmExecutionEnvironment::new(&dev_params(), AlpenSpecId::V0);
 
         assert!(matches!(
-            verify_fixture_header(parent, header),
+            env.verify_header(&EvmHeader::new(parent), &EvmHeader::new(block.header)),
             Err(EvmEnvError::SpecVersionMismatch {
-                expected: AlpenSpecId::V1,
-                got: AlpenSpecId::V0,
+                expected: AlpenSpecId::V0,
+                got: AlpenSpecId::V1,
             })
         ));
     }
@@ -543,26 +512,25 @@ mod tests {
         header: Header,
         body: BlockBody<TransactionSigned>,
     ) -> Result<(), EvmEnvError> {
-        let env = EvmExecutionEnvironment::new(&dev_params(), AlpenSpecId::V1);
         let block = EvmBlock::new(EvmHeader::new(header), EvmBlockBody::from_alloy_body(body));
-        env.verify_block_pre_execution(&block)
+        fixture_env().verify_block_pre_execution(&block)
     }
 
     #[test]
     fn verify_block_pre_execution_accepts_the_fixture_block() {
-        let (_, header) = fixture_parent_and_header();
-        let body = fixture_witness().current_block.body().clone();
+        let Fixture { block, .. } = fixture();
 
-        verify_fixture_block(header, body).expect("the fixture header commits to its body");
+        verify_fixture_block(block.header, block.body)
+            .expect("the fixture header commits to its body");
     }
 
     #[test]
     fn verify_block_pre_execution_rejects_a_body_the_header_does_not_commit_to() {
-        let (_, mut header) = fixture_parent_and_header();
-        let body = fixture_witness().current_block.body().clone();
+        let Fixture { block, .. } = fixture();
+        let mut header = block.header;
         header.transactions_root = B256::ZERO;
 
-        let result = verify_fixture_block(header, body);
+        let result = verify_fixture_block(header, block.body);
         assert!(
             matches!(
                 &result,
@@ -577,8 +545,9 @@ mod tests {
     /// larger block before executing it, and so must the proof.
     #[test]
     fn verify_block_pre_execution_rejects_an_oversized_block() {
-        let (_, mut header) = fixture_parent_and_header();
-        let mut body = fixture_witness().current_block.body().clone();
+        let Fixture { block, .. } = fixture();
+        let mut header = block.header;
+        let mut body = block.body;
         let padding = TxLegacy {
             input: vec![0; MAX_RLP_BLOCK_SIZE].into(),
             ..Default::default()
@@ -600,80 +569,33 @@ mod tests {
         );
     }
 
-    /// Test with real witness data from the reference implementation.
-    /// This is an integration test that validates the full execution flow with real block data.
+    /// Runs a real block through every step the chunk proof takes and checks
+    /// the result against the header the node built.
     #[test]
-    fn test_with_witness_params() {
-        #[derive(Deserialize, Debug)]
-        struct TestData {
-            witness: EthClientExecutorInput,
-        }
+    fn execute_block_matches_the_node_built_header() {
+        let mut fixture = fixture();
+        let env = fixture_env();
+        let block = fixture.evm_block();
 
-        // Load test data from the canonical fixture under test-utils/data/.
-        let test_data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .join("test-utils/data/evm-ee/rsp_block_witness.json");
+        env.verify_inputs_against_block(&block, &fixture.inputs)
+            .expect("the block mints the workload's deposits");
 
-        let json_content = fs::read_to_string(&test_data_path)
-            .expect("Failed to read rsp_block_witness.json from test-utils/data/evm-ee");
+        let output = env
+            .execute_block(&fixture.pre_state, &block)
+            .expect("block execution should succeed");
 
-        let test_data: TestData =
-            serde_json::from_str(&json_content).expect("Failed to parse test data");
-
-        // Create execution environment
-        let env = EvmExecutionEnvironment::new(&dev_params(), FIXTURE_SPEC_VERSION);
-
-        // Use the pre-state directly from witness data (it already has all the proofs!)
-        let mut pre_state = EvmPartialState::new(
-            test_data.witness.parent_state,
-            rehashed_fixture_bytecodes(test_data.witness.bytecodes),
-            test_data.witness.ancestor_headers,
-        );
-
-        // Create block from witness
-        let header = test_data.witness.current_block.header().clone();
-        let evm_header = EvmHeader::new(header.clone());
-
-        // Get transactions from the block
-        let block_body = test_data.witness.current_block.body().clone();
-        let evm_body = EvmBlockBody::from_alloy_body(block_body);
-
-        let block = EvmBlock::new(evm_header, evm_body);
-
-        // Create exec payload and inputs
-        let inputs = ExecInputs::new_empty();
-
-        env.verify_inputs_against_block(&block, &inputs)
-            .expect("the witness block carries no deposits");
-
-        // Execute the block
-        // Note: This will execute real block data through our implementation
-        let result = env.execute_block(&pre_state, &block);
-
-        // For now, we just verify it doesn't panic
-        // In the future, we can compare outputs with the reference implementation
-        assert!(
-            result.is_ok(),
-            "Block execution should succeed with witness data: {:?}",
-            result.err()
-        );
-
-        let output = result.expect("block execution should succeed");
-
-        // Check the execution-derived header commitments. This covers the receipts
-        // root, logs bloom and gas figures, but not the state root, which this
-        // method does not look at.
+        // This covers the receipts root, logs bloom and gas figures, but not
+        // the state root, which this method does not look at.
         env.verify_block_post_execution(block.get_header(), &output)
-            .expect("execution-derived commitments should match the witness header");
+            .expect("execution-derived commitments should match the header");
 
         // The state root only exists once the writes are merged, so check it here.
-        env.merge_write_into_state(&mut pre_state, output.write_batch())
+        env.merge_write_into_state(&mut fixture.pre_state, output.write_batch())
             .expect("merging the write batch should succeed");
         assert_eq!(
-            pre_state.compute_state_root().as_ref(),
-            header.state_root.as_slice(),
-            "merged state root should match the witness header"
+            fixture.pre_state.compute_state_root().as_ref(),
+            fixture.block.header.state_root.as_slice(),
+            "merged state root should match the header"
         );
     }
 
@@ -681,37 +603,12 @@ mod tests {
     /// proof must refuse the same headers the node does.
     #[test]
     fn verify_block_post_execution_rejects_what_the_node_rejects() {
-        #[derive(Deserialize, Debug)]
-        struct TestData {
-            witness: EthClientExecutorInput,
-        }
-
-        let test_data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .join("test-utils/data/evm-ee/rsp_block_witness.json");
-
-        let json_content = fs::read_to_string(&test_data_path)
-            .expect("Failed to read rsp_block_witness.json from test-utils/data/evm-ee");
-
-        let test_data: TestData =
-            serde_json::from_str(&json_content).expect("Failed to parse test data");
-
-        let env = EvmExecutionEnvironment::new(&dev_params(), FIXTURE_SPEC_VERSION);
-        let pre_state = EvmPartialState::new(
-            test_data.witness.parent_state,
-            rehashed_fixture_bytecodes(test_data.witness.bytecodes),
-            test_data.witness.ancestor_headers,
-        );
-
-        let header = test_data.witness.current_block.header().clone();
-        let evm_header = EvmHeader::new(header.clone());
-        let block_body = test_data.witness.current_block.body().clone();
-        let evm_body = EvmBlockBody::from_alloy_body(block_body);
-        let block = EvmBlock::new(evm_header, evm_body);
+        let fixture = fixture();
+        let env = fixture_env();
         let output = env
-            .execute_block(&pre_state, &block)
+            .execute_block(&fixture.pre_state, &fixture.evm_block())
             .expect("block execution should succeed");
+        let header = fixture.block.header;
 
         type BreakRule = fn(&mut Header);
         type IsExpected = fn(&ConsensusError) -> bool;
