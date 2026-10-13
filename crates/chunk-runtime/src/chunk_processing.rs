@@ -58,7 +58,6 @@ pub fn process_block<E: ExecutionEnvironment>(
             got: computed_state_root,
         });
     }
-    ee.update_partial_state_after_block(state, header)?;
 
     Ok(())
 }

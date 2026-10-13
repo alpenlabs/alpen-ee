@@ -199,7 +199,8 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
         )?;
 
         // Step 5: Convert the state changes to a write batch.
-        let write_batch = EvmWriteBatch::from_bundle_state(&state);
+        let write_batch =
+            EvmWriteBatch::from_bundle_state(&state, block.get_header().header().clone());
 
         // Step 6: Create ExecOutputs with withdrawal intent messages.
         let mut outputs = ExecOutputs::new_empty();
@@ -241,18 +242,9 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
         state: &mut Self::PartialState,
         wb: &Self::WriteBatch,
     ) -> Result<(), Self::Error> {
-        // Merge the HashedPostState into the EthereumState
         state.merge_write_batch(wb);
-
-        Ok(())
-    }
-
-    fn update_partial_state_after_block(
-        &self,
-        state: &mut Self::PartialState,
-        header: &<Self::Block as ExecBlock>::Header,
-    ) -> Result<(), Self::Error> {
-        state.add_executed_block(header.header().clone());
+        // Record the block so the next one in the chunk can build on it.
+        state.add_executed_block(wb.header().clone());
         Ok(())
     }
 }
@@ -270,6 +262,7 @@ mod tests {
     use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
     use reth_primitives_traits::Block as RethBlockTrait;
+    use reth_trie::HashedPostState;
     use revm::{DatabaseRef, state::Bytecode};
     use revm_primitives::{
         B256,
@@ -343,7 +336,7 @@ mod tests {
     }
 
     #[test]
-    fn update_partial_state_after_block_adds_block_hash_for_subsequent_blocks() {
+    fn merge_write_into_state_adds_block_hash_for_subsequent_blocks() {
         #[derive(Deserialize, Debug)]
         struct TestData {
             witness: EthClientExecutorInput,
@@ -362,7 +355,6 @@ mod tests {
 
         let env = EvmExecutionEnvironment::new(&dev_params(), FIXTURE_SPEC_VERSION);
         let header = test_data.witness.current_block.header().clone();
-        let evm_header = EvmHeader::new(header.clone());
         let mut state = EvmPartialState::new(
             test_data.witness.parent_state,
             rehashed_fixture_bytecodes(test_data.witness.bytecodes),
@@ -378,8 +370,9 @@ mod tests {
                 .is_err()
         );
 
-        env.update_partial_state_after_block(&mut state, &evm_header)
-            .expect("post-block state update should succeed");
+        let write_batch = EvmWriteBatch::new(HashedPostState::default(), header.clone());
+        env.merge_write_into_state(&mut state, &write_batch)
+            .expect("merging the write batch should succeed");
 
         assert_eq!(
             state
