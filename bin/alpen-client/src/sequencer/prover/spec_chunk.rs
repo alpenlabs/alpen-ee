@@ -9,9 +9,7 @@
 use std::{fmt, sync::Arc};
 
 use alpen_acct_types::{ExecBlock, ExecHeader};
-use alpen_chain_types::{
-    ChunkTransition, ExecHeaderSummary, ExecInputs, ExecOutputs, OutputMessage, OutputTransfer,
-};
+use alpen_chain_types::{ChunkTransition, ExecHeaderSummary, ExecInputs, ExecOutputs};
 use alpen_chunk_runtime::{PrivateInput, RawBlockData, RawChunkData};
 use alpen_common::{
     decode_chunk_task_key, encode_chunk_task_key, BlockWitnessStore, ChunkId, ChunkStorage,
@@ -212,8 +210,8 @@ impl ChunkSpec {
             tip_state_root = block.get_header().get_state_root();
             tip_exec_header_summary = block.get_header().get_exec_header_summary();
 
-            extend_exec_inputs(&mut aggregated_inputs, &block_inputs);
-            extend_exec_outputs(&mut aggregated_outputs, &block_outputs);
+            aggregated_inputs.extend_from(&block_inputs);
+            aggregated_outputs.extend_from(&block_outputs);
 
             block_datas.push(
                 RawBlockData::from_block::<EvmExecutionEnvironment>(
@@ -283,34 +281,5 @@ impl ChunkSpec {
         );
 
         Ok(EeChunkProofInput { private_input })
-    }
-}
-
-/// Chunk-level aggregation of per-block [`ExecOutputs`].
-///
-/// TODO(STR-3553): move to upstream `ExecOutputs::extend_from`; outputs
-/// must be bit-identical across chunk execution -> DA blob -> pub_params.
-fn extend_exec_outputs(dst: &mut ExecOutputs, src: &ExecOutputs) {
-    for t in src.output_transfers() {
-        dst.add_transfer(OutputTransfer::new(t.dest(), t.value()));
-    }
-    for m in src.output_messages() {
-        dst.add_message(OutputMessage::new(m.dest(), m.payload().clone()));
-    }
-    // Only overwrite `dst` when this block actually declares a rotation, so a
-    // non-rotating block can never clear a rotation an earlier block already
-    // recorded. Chunk sealing force-seals immediately after the rotating
-    // block, so in practice it's always last and no later block exists to
-    // trigger this — but the merge should stay correct on its own without
-    // relying on that.
-    if let Some(new_predicate) = src.new_predicate() {
-        dst.set_new_predicate(Some(new_predicate.clone()));
-    }
-}
-
-/// Chunk-level aggregation of per-block [`ExecInputs`].
-fn extend_exec_inputs(dst: &mut ExecInputs, src: &ExecInputs) {
-    for d in src.subject_deposits() {
-        dst.add_subject_deposit(d.clone());
     }
 }

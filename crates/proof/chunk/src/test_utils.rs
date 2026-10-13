@@ -5,9 +5,7 @@
 
 use alloy_consensus::Header;
 use alpen_acct_types::{ExecBlock, ExecHeader, ExecutionEnvironment};
-use alpen_chain_types::{
-    ChunkTransition, ExecInputs, ExecOutputs, OutputMessage, OutputTransfer, SubjectDepositData,
-};
+use alpen_chain_types::{ChunkTransition, ExecInputs, ExecOutputs, SubjectDepositData};
 use alpen_chunk_runtime::{PrivateInput, RawBlockData, RawChunkData};
 use alpen_evm_ee::{EvmBlock, EvmExecutionEnvironment, EvmHeader, EvmPartialState};
 use alpen_params::{AlpenParams, AlpenSpecId};
@@ -61,8 +59,8 @@ pub fn build_workload_chunk(
             .expect("merge block writes");
         let outputs = output.outputs().clone();
 
-        extend_exec_inputs(&mut chunk_inputs, &inputs);
-        extend_exec_outputs(&mut chunk_outputs, &outputs);
+        chunk_inputs.extend_from(&inputs);
+        chunk_outputs.extend_from(&outputs);
         block_datas.push(
             RawBlockData::from_block::<EvmExecutionEnvironment>(&block, inputs, outputs)
                 .expect("encode block"),
@@ -107,28 +105,4 @@ fn block_inputs(workload_block: &WorkloadBlock) -> ExecInputs {
         ));
     }
     inputs
-}
-
-// TODO(STR-3553): these mirror the chunk-level aggregation helpers in
-// alpen-client's `spec_chunk.rs`. Use the upstream `ExecOutputs::extend_from`
-// in both places once it lands.
-fn extend_exec_inputs(dst: &mut ExecInputs, src: &ExecInputs) {
-    for deposit in src.subject_deposits() {
-        dst.add_subject_deposit(deposit.clone());
-    }
-}
-
-fn extend_exec_outputs(dst: &mut ExecOutputs, src: &ExecOutputs) {
-    for transfer in src.output_transfers() {
-        dst.add_transfer(OutputTransfer::new(transfer.dest(), transfer.value()));
-    }
-    for message in src.output_messages() {
-        dst.add_message(OutputMessage::new(
-            message.dest(),
-            message.payload().clone(),
-        ));
-    }
-    if let Some(new_predicate) = src.new_predicate() {
-        dst.set_new_predicate(Some(new_predicate.clone()));
-    }
 }
