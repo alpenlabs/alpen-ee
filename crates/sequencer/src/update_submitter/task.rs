@@ -7,6 +7,7 @@ use alpen_common::{
     SequencerOLClient,
 };
 use eyre::{eyre, Result};
+use metrics::{counter, gauge};
 use strata_snark_acct_types::SnarkAccountUpdate;
 use tokio::{sync::watch, time};
 use tracing::{debug, error, info, warn};
@@ -17,6 +18,13 @@ use crate::update_submitter::update_builder::build_update_from_batch;
 const DEFAULT_UPDATE_CACHE_MAX_SIZE: usize = 64;
 /// Polling interval to process batches regardless of events.
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Counts successful OL update submission RPC calls, including resubmissions, in updates.
+const UPDATES_SUBMITTED_METRIC: &str = "alpen_ee_updates_submitted_total";
+/// Counts failed OL update submission RPC calls, in errors.
+const UPDATE_SUBMISSION_ERRORS_METRIC: &str = "alpen_ee_update_submission_errors_total";
+/// Tracks the sequence number of the last successfully submitted OL update, in sequence numbers.
+const UPDATE_LAST_SUBMITTED_SEQ_NO_METRIC: &str = "alpen_ee_update_last_submitted_seq_no";
 
 /// Cache for built updates, keyed by BatchId.
 /// Stores (batch_idx, update) to allow eviction based on sequence number.
@@ -184,7 +192,15 @@ async fn process_ready_batches(
             .iter()
             .map(|message| message.payload().value().to_sat())
             .sum();
-        let txid = ol_client.submit_update(update).await?;
+        let txid = match ol_client.submit_update(update).await {
+            Ok(txid) => txid,
+            Err(error) => {
+                counter!(UPDATE_SUBMISSION_ERRORS_METRIC).increment(1);
+                return Err(error.into());
+            }
+        };
+        counter!(UPDATES_SUBMITTED_METRIC).increment(1);
+        gauge!(UPDATE_LAST_SUBMITTED_SEQ_NO_METRIC).set(seq_no as f64);
 
         info!(
             component = "alpen_ee_update_submitter",

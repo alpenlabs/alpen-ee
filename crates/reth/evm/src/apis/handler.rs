@@ -20,6 +20,7 @@ use revm::{
     Database, Inspector,
 };
 use revm_primitives::U256;
+use tracing::debug_span;
 
 use crate::{
     apis::validation,
@@ -123,6 +124,7 @@ where
         result_gas: ResultGas,
     ) -> Result<ExecutionResult<Self::HaltReason>, Self::Error> {
         if self.da_rate != U256::ZERO {
+            let _span = debug_span!("da_fee").entered();
             let context = evm.ctx();
             let caller = context.tx().caller();
             let beneficiary = context.block().beneficiary();

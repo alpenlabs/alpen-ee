@@ -16,16 +16,23 @@ use alpen_primitives::sats_to_gwei;
 use alpen_reth_node::{AlpenBuiltPayload, AlpenEngineTypes, AlpenPayloadAttributes};
 use async_trait::async_trait;
 use eyre::{eyre, Context};
-use reth_node_builder::{ConsensusEngineHandle, PayloadKind};
+use metrics::histogram;
+use reth_node_builder::{BuiltPayload, ConsensusEngineHandle, PayloadKind};
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderError, PayloadBuilderHandle};
 use strata_acct_types::Hash;
 use tokio::time::sleep;
-use tracing::{debug, info, info_span, warn, Instrument};
+use tracing::{debug, debug_span, info, info_span, warn, Instrument};
 
 use crate::AlpenRethExecEngine;
 
 const MISSING_PARENT_RETRY_DELAY_MS: u64 = 250;
 const MISSING_PARENT_MAX_RETRIES: u16 = 120;
+
+/// Records successful payload job creation, resolution and witness persistence time, in seconds.
+const BLOCK_BUILD_DURATION_METRIC: &str = "alpen_ee_block_build_duration_seconds";
+/// Records the transaction count of each resolved payload with a persisted witness, in
+/// transactions.
+const BLOCK_TRANSACTIONS_METRIC: &str = "alpen_ee_block_transactions";
 
 fn is_retryable_missing_parent(err: &PayloadBuilderError) -> bool {
     matches!(
@@ -273,9 +280,14 @@ impl AlpenRethPayloadEngine {
             .ok_or_else(|| eyre!("payload {block_hash:?} built without inline witness"))?;
         self.block_witness_store
             .put_block_witness(block_hash, witness)
+            .instrument(debug_span!("store_block_witness", ?block_hash))
             .await
             .map_err(|e| eyre!("persist block witness {block_hash:?}: {e}"))?;
         info!(?block_hash, "persisted block witness");
+
+        histogram!(BLOCK_BUILD_DURATION_METRIC).record(build_started.elapsed().as_secs_f64());
+        histogram!(BLOCK_TRANSACTIONS_METRIC)
+            .record(payload.block().body().transactions.len() as f64);
 
         Ok(payload)
     }

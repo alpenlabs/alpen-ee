@@ -1,7 +1,7 @@
 //! The btcio DA pipeline: transaction broadcaster, chunked-envelope reveal
 //! task, and the blob provider batches read/write DA payloads through.
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use alpen_da_provider::{ChunkedEnvelopeDaProvider, DaBlobSource, StateDiffBlobProvider};
 use alpen_database::{NodeStorage, SequencerDatabases};
@@ -11,6 +11,7 @@ use bitcoind_async_client::{
     traits::{Reader, Wallet as _},
     Auth, Client as BtcClient,
 };
+use metrics::gauge;
 use reth_provider::HeaderProvider;
 use reth_tasks::TaskExecutor;
 use strata_btcio::{
@@ -22,8 +23,8 @@ use strata_config::{
     BitcoindConfig,
 };
 use strata_primitives::L1Height;
-use tokio::runtime::Handle;
-use tracing::{info, info_span, Instrument};
+use tokio::{runtime::Handle, time::interval};
+use tracing::{info, info_span, warn, Instrument};
 
 use super::header_summary::RethHeaderSummaryProvider;
 use crate::service_executor::ServiceExecutor;
@@ -33,6 +34,9 @@ use crate::service_executor::ServiceExecutor;
 // `[sequencer.bitcoind]`.
 const DEFAULT_BTCIO_RETRY_COUNT: u16 = 3;
 const DEFAULT_BTCIO_RETRY_INTERVAL_MS: u64 = 1_000;
+
+/// Tracks broadcast transactions awaiting processing or finalization, in transactions.
+const DA_BROADCAST_PENDING_METRIC: &str = "alpen_ee_da_broadcast_pending";
 
 /// Everything [`start`] needs to bring up the DA pipeline.
 pub(crate) struct DaPipelineInputs<'a, P> {
@@ -143,6 +147,20 @@ where
         .await
         .map_err(|e| eyre::eyre!("starting broadcaster service: {e}"))?,
     );
+
+    // Sample the broadcaster's existing in-memory status; never scan the DA database.
+    if let Some(monitor) = broadcast_handle.monitor().cloned() {
+        task_executor.spawn_task(async move {
+            let mut poll = interval(Duration::from_secs(10));
+            loop {
+                poll.tick().await;
+                gauge!(DA_BROADCAST_PENDING_METRIC)
+                    .set(monitor.get_current().unfinalized_count as f64);
+            }
+        });
+    } else {
+        warn!("broadcaster monitor unavailable; pending transaction metric disabled");
+    }
 
     let (envelope_handle, envelope_watcher_task) = create_chunked_envelope_task(
         btc_client.clone(),
