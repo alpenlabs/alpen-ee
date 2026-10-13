@@ -51,6 +51,10 @@ pub enum EnvError {
     #[error("blocks in a chunk did not match the chunk's attested io")]
     InconsistentChunkIo,
 
+    /// A block's claimed outputs differ from what executing it produced.
+    #[error("block outputs differ from its execution")]
+    OutputMismatch,
+
     /// Execution continued after a predicate rotation was consumed.
     ///
     /// A rotation has to be the last thing in its chunk and in its update.

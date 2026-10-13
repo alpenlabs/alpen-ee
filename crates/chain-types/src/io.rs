@@ -125,6 +125,19 @@ impl ExecOutputs {
     pub fn new_predicate(&self) -> Option<&PredicateKey> {
         self.new_predicate.predicate()
     }
+
+    /// Checks whether these claimed outputs match the outputs that executing
+    /// the block produced.
+    ///
+    /// `new_predicate` is deliberately left out: it's an account-level fact
+    /// drawn from the pending-input queue, not something execution can derive,
+    /// so executed outputs always leave it empty. Checking a declared rotation
+    /// belongs to a cross-check over the chunk's blocks, not this per-block
+    /// comparison.
+    pub fn matches_executed(&self, executed: &ExecOutputs) -> bool {
+        self.output_transfers() == executed.output_transfers()
+            && self.output_messages() == executed.output_messages()
+    }
 }
 
 impl OutputMessage {
@@ -345,6 +358,32 @@ mod tests {
             assert_eq!(outputs.output_transfers().len(), 0);
             assert_eq!(outputs.output_messages().len(), 0);
             assert_eq!(outputs.new_predicate(), None);
+        }
+
+        #[test]
+        fn matches_executed_compares_transfers_and_messages() {
+            let executed = ExecOutputs::new_empty();
+
+            let mut extra_transfer = ExecOutputs::new_empty();
+            extra_transfer.add_transfer(OutputTransfer::new(
+                AccountId::new([1; 32]),
+                BitcoinAmount::try_from(5u64).unwrap(),
+            ));
+            assert!(!extra_transfer.matches_executed(&executed));
+
+            let mut extra_message = ExecOutputs::new_empty();
+            extra_message.add_message(OutputMessage::new(
+                AccountId::new([2; 32]),
+                MsgPayload::from_bytes(BitcoinAmount::try_from(5u64).unwrap(), vec![]).unwrap(),
+            ));
+            assert!(!extra_message.matches_executed(&executed));
+        }
+
+        #[test]
+        fn matches_executed_ignores_new_predicate() {
+            let mut claimed = ExecOutputs::new_empty();
+            claimed.set_new_predicate(Some(PredicateKey::always_accept()));
+            assert!(claimed.matches_executed(&ExecOutputs::new_empty()));
         }
     }
 }

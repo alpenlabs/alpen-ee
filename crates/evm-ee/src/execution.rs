@@ -220,7 +220,8 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
     fn verify_block_post_execution(
         &self,
         header: &EvmHeader,
-        outputs: &ExecBlockOutput<Self>,
+        exec_output: &ExecBlockOutput<Self>,
+        claimed_outputs: &ExecOutputs,
     ) -> Result<(), Self::Error> {
         // Reth's rule reads only the header from the block, so the body and
         // senders are left empty rather than copied. If it ever read the body,
@@ -233,7 +234,14 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
             Vec::new(),
         );
         self.consensus
-            .validate_block_post_execution(&block, outputs.block_output(), None)?;
+            .validate_block_post_execution(&block, exec_output.block_output(), None)?;
+
+        if !claimed_outputs.matches_executed(exec_output.outputs()) {
+            return Err(EvmEnvError::OutputMismatch {
+                claimed: Box::new(claimed_outputs.clone()),
+                executed: Box::new(exec_output.outputs().clone()),
+            });
+        }
         Ok(())
     }
 
@@ -256,7 +264,7 @@ mod tests {
     };
     use alloy_rlp::decode_exact;
     use alpen_acct_types::{ExecBlock, ExecPartialState};
-    use alpen_chain_types::SubjectDepositData;
+    use alpen_chain_types::{OutputTransfer, SubjectDepositData};
     use alpen_params::DEV_PARAMS_JSON;
     use alpen_test_utils_evm_workload::{MIXED_WORKLOAD, Workload, workload_dir};
     use reth_consensus::ConsensusError;
@@ -268,7 +276,7 @@ mod tests {
         B256,
         alloy_primitives::{Bloom, Signature},
     };
-    use strata_acct_types::SubjectId;
+    use strata_acct_types::{AccountId, SubjectId};
     use strata_codec::decode_buf_exact;
     use strata_msg_fmt::{Msg, MsgRef};
     use strata_ol_bridge_types::OperatorSelection;
@@ -586,7 +594,7 @@ mod tests {
 
         // This covers the receipts root, logs bloom and gas figures, but not
         // the state root, which this method does not look at.
-        env.verify_block_post_execution(block.get_header(), &output)
+        env.verify_block_post_execution(block.get_header(), &output, output.outputs())
             .expect("execution-derived commitments should match the header");
 
         // The state root only exists once the writes are merged, so check it here.
@@ -596,6 +604,28 @@ mod tests {
             fixture.pre_state.compute_state_root().as_ref(),
             fixture.block.header.state_root.as_slice(),
             "merged state root should match the header"
+        );
+    }
+
+    #[test]
+    fn verify_block_post_execution_rejects_mismatched_outputs() {
+        let fixture = fixture();
+        let env = fixture_env();
+        let block = fixture.evm_block();
+        let output = env
+            .execute_block(&fixture.pre_state, &block)
+            .expect("block execution should succeed");
+
+        let mut claimed = output.outputs().clone();
+        claimed.add_transfer(OutputTransfer::new(
+            AccountId::new([0x44; 32]),
+            BitcoinAmount::try_from(1u64).expect("amount fits"),
+        ));
+
+        let result = env.verify_block_post_execution(block.get_header(), &output, &claimed);
+        assert!(
+            matches!(result, Err(EvmEnvError::OutputMismatch { .. })),
+            "{result:?}"
         );
     }
 
@@ -634,7 +664,11 @@ mod tests {
         for (break_rule, is_expected) in cases {
             let mut bad_header = header.clone();
             break_rule(&mut bad_header);
-            let result = env.verify_block_post_execution(&EvmHeader::new(bad_header), &output);
+            let result = env.verify_block_post_execution(
+                &EvmHeader::new(bad_header),
+                &output,
+                output.outputs(),
+            );
             assert!(
                 matches!(&result, Err(EvmEnvError::ConsensusRule(err)) if is_expected(err)),
                 "{result:?}"
