@@ -58,16 +58,17 @@ fn process_chunk_blocks<E: ExecutionEnvironment>(
     let mut chunk_outputs = ExecOutputs::new_empty();
     let (mut parent_header, blocks) = chunk.into_parts();
     for cb in blocks {
-        let (inputs, outputs, block) = cb.into_parts();
-        parent_header = process_block(ee, state, &parent_header, &inputs, &outputs, block)?;
-
         // A rotation ends the chunk. The sequencer stops assembling at one and
         // seals right after it, but that's only host behavior. Without this
         // check a proof could carry blocks that ran after the rotation, and
-        // they'd be authorized by the predecessor predicate.
+        // they'd be authorized by the predecessor predicate. It runs before
+        // the block does, so a chunk that breaks it costs no execution.
         if chunk_outputs.new_predicate().is_some() {
             return Err(ChunkRuntimeError::NonTerminalRotation);
         }
+
+        let (inputs, outputs, block) = cb.into_parts();
+        parent_header = process_block(ee, state, &parent_header, &inputs, &outputs, block)?;
 
         // FIXME(STR-2172): these panic once the chunk's IO goes over the SSZ
         // list bounds. Switch to fallible pushes when chain-types has them.
