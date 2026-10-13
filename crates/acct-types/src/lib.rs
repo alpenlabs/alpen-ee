@@ -7,7 +7,6 @@
 mod commit;
 mod errors;
 mod extra_data;
-mod inputs;
 mod messages;
 mod outputs;
 mod reexports;
@@ -29,7 +28,6 @@ mod ssz_generated {
 pub use commit::*;
 pub use errors::*;
 pub use extra_data::*;
-pub use inputs::*;
 pub use messages::*;
 pub use outputs::*;
 pub use reexports::*;

@@ -110,7 +110,7 @@ impl EeChunkProgram {
 mod tests {
     use std::{fs, path::PathBuf};
 
-    use alpen_acct_types::{ExecBlock, ExecHeader, ExecPayload, ExecutionEnvironment};
+    use alpen_acct_types::{ExecBlock, ExecHeader, ExecutionEnvironment};
     use alpen_chain_types::{ChunkTransition, ExecInputs};
     use alpen_chunk_runtime::{PrivateInput, RawBlockData, RawChunkData};
     use alpen_evm_ee::{
@@ -194,11 +194,9 @@ mod tests {
         // Execute the block to get outputs, against the same params `params`
         // will hand to `process_ee_chunk` below.
         let ee = EvmExecutionEnvironment::new(&params, FIXTURE_SPEC_VERSION);
-        let header_intrinsics = block.get_header().get_intrinsics();
-        let exec_payload = ExecPayload::new(&header_intrinsics, block.get_body());
         let inputs = ExecInputs::new_empty();
         let output = ee
-            .execute_block_body(&pre_state, &exec_payload)
+            .execute_block(&pre_state, &block)
             .expect("block execution should succeed");
         let outputs = output.outputs().clone();
 

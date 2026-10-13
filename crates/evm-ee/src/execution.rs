@@ -3,7 +3,8 @@
 //! This module provides the core ExecutionEnvironment implementation for EVM blocks,
 //! using RSP's sparse state and Reth's EVM execution engine.
 
-use alpen_acct_types::{ExecBlock, ExecBlockOutput, ExecPayload, ExecutionEnvironment};
+use alloy_consensus::Header;
+use alpen_acct_types::{ExecBlock, ExecBlockOutput, ExecutionEnvironment};
 use alpen_chain_types::{ExecInputs, ExecOutputs, OutputMessage};
 use alpen_params::{AlpenParams, AlpenSpecId};
 use alpen_reth_evm::{
@@ -26,7 +27,7 @@ use strata_ol_msg_types::{DEFAULT_OPERATOR_FEE, WITHDRAWAL_MSG_TYPE_ID, Withdraw
 
 use crate::{
     errors::EvmEnvError,
-    types::{EvmBlock, EvmHeader, EvmHeaderIntrinsics, EvmPartialState, EvmWriteBatch},
+    types::{EvmBlock, EvmHeader, EvmPartialState, EvmWriteBatch},
     utils::{build_and_recover_block, validate_deposits_against_block},
 };
 
@@ -83,12 +84,9 @@ fn convert_withdrawal_intents_to_messages(
 /// carries the binding down the rest of it.
 fn validate_ancestors_against_block(
     pre_state: &EvmPartialState,
-    header_intrinsics: &EvmHeaderIntrinsics,
+    header: &Header,
 ) -> Result<(), EvmEnvError> {
-    let parent_number = header_intrinsics
-        .number()
-        .checked_sub(1)
-        .ok_or(EvmEnvError::NoParent)?;
+    let parent_number = header.number.checked_sub(1).ok_or(EvmEnvError::NoParent)?;
 
     // The witness always carries the parent, since a block's ancestor range
     // ends there even when it never uses `BLOCKHASH`.
@@ -97,9 +95,9 @@ fn validate_ancestors_against_block(
         .get(&parent_number)
         .ok_or(EvmEnvError::MissingAncestor(parent_number))?;
 
-    if *parent_hash != header_intrinsics.parent_hash() {
+    if *parent_hash != header.parent_hash {
         return Err(EvmEnvError::AncestorMismatch {
-            expected: header_intrinsics.parent_hash(),
+            expected: header.parent_hash,
             witnessed: *parent_hash,
         });
     }
@@ -174,26 +172,26 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
         Ok(())
     }
 
-    fn execute_block_body(
+    fn execute_block(
         &self,
         pre_state: &Self::PartialState,
-        exec_payload: &ExecPayload<'_, Self::Block>,
+        block: &EvmBlock,
     ) -> Result<ExecBlockOutput<Self>, Self::Error> {
-        // Step 1: Build block from exec_payload and recover senders. The header
-        // is checked by `verify_header`, its body by `verify_block_pre_execution`,
-        // the inputs by `verify_inputs_against_block` and the execution results
-        // by `verify_block_post_execution`.
-        let block = build_and_recover_block(exec_payload)?;
+        // Step 1: Recover the senders. The header is checked by
+        // `verify_header`, the body by `verify_block_pre_execution`, the inputs
+        // by `verify_inputs_against_block` and the execution results by
+        // `verify_block_post_execution`.
+        let recovered = build_and_recover_block(block)?;
 
         // Step 2: Anchor the `BLOCKHASH` ancestors to this block.
-        validate_ancestors_against_block(pre_state, exec_payload.header_intrinsics())?;
+        validate_ancestors_against_block(pre_state, block.get_header().header())?;
 
         // Step 3: Execute the block.
         let BlockExecutionOutput { result, state } =
-            self.execute_recovered_block(&block, pre_state)?;
+            self.execute_recovered_block(&recovered, pre_state)?;
 
         // Step 4: Collect withdrawal intents.
-        let transactions = block.into_transactions();
+        let transactions = recovered.into_transactions();
         let withdrawal_intents = extract_withdrawal_intents(
             &transactions,
             &result.receipts,
@@ -266,7 +264,7 @@ mod tests {
     use alloy_consensus::{
         BlockBody, Header, Sealable, TxLegacy, proofs::calculate_transaction_root,
     };
-    use alpen_acct_types::{ExecBlock, ExecHeader, ExecPartialState};
+    use alpen_acct_types::{ExecBlock, ExecPartialState};
     use alpen_params::{DEV_PARAMS_JSON, HeaderExtra};
     use reth_consensus::ConsensusError;
     use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
@@ -396,7 +394,7 @@ mod tests {
     /// check alone accepts it. It must still be rejected, because these hashes
     /// are what `BLOCKHASH` returns.
     #[test]
-    fn execute_block_body_rejects_ancestors_from_another_chain() {
+    fn execute_block_rejects_ancestors_from_another_chain() {
         #[derive(Deserialize, Debug)]
         struct TestData {
             witness: EthClientExecutorInput,
@@ -438,10 +436,7 @@ mod tests {
             EvmBlockBody::from_alloy_body(test_data.witness.current_block.body().clone());
         let block = EvmBlock::new(evm_header, evm_body);
 
-        let intrinsics = block.get_header().get_intrinsics();
-        let exec_payload = ExecPayload::new(&intrinsics, block.get_body());
-
-        let result = env.execute_block_body(&pre_state, &exec_payload);
+        let result = env.execute_block(&pre_state, &block);
         assert!(
             matches!(result, Err(EvmEnvError::AncestorMismatch { .. })),
             "ancestors that do not link to the executed block must be rejected: {result:?}"
@@ -654,8 +649,6 @@ mod tests {
         let block = EvmBlock::new(evm_header, evm_body);
 
         // Create exec payload and inputs
-        let intrinsics = block.get_header().get_intrinsics();
-        let exec_payload = ExecPayload::new(&intrinsics, block.get_body());
         let inputs = ExecInputs::new_empty();
 
         env.verify_inputs_against_block(&block, &inputs)
@@ -663,7 +656,7 @@ mod tests {
 
         // Execute the block
         // Note: This will execute real block data through our implementation
-        let result = env.execute_block_body(&pre_state, &exec_payload);
+        let result = env.execute_block(&pre_state, &block);
 
         // For now, we just verify it doesn't panic
         // In the future, we can compare outputs with the reference implementation
@@ -723,10 +716,8 @@ mod tests {
         let block_body = test_data.witness.current_block.body().clone();
         let evm_body = EvmBlockBody::from_alloy_body(block_body);
         let block = EvmBlock::new(evm_header, evm_body);
-        let intrinsics = block.get_header().get_intrinsics();
-        let exec_payload = ExecPayload::new(&intrinsics, block.get_body());
         let output = env
-            .execute_block_body(&pre_state, &exec_payload)
+            .execute_block(&pre_state, &block)
             .expect("block execution should succeed");
 
         type BreakRule = fn(&mut Header);
