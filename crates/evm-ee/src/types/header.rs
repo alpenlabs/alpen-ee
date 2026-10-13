@@ -68,8 +68,8 @@ impl ExecHeader for EvmHeader {
 
     fn get_exec_header_summary(&self) -> ExecHeaderSummary {
         // Hosts only summarize headers they have already validated, so the
-        // stamp decodes. The guest summarizes the chunk tip before it runs
-        // the blocks, but there a panic rejects the chunk just like an error.
+        // stamp decodes. The guest summarizes only the chunk tip, and only
+        // after `verify_header` has decoded and checked its stamp.
         let header_extra = HeaderExtra::of_header(self.header())
             .expect("Alpen EVM headers carry a valid extra_data stamp");
         let payload = EvmHeaderSummary {
