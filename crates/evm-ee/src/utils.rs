@@ -10,8 +10,6 @@ use alpen_reth_evm::subject_to_address;
 use alpen_reth_primitives::sats_to_gwei;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_primitives_traits::{Block, RecoveredBlock};
-use reth_trie::{HashedPostState, KeccakKeyHasher};
-use revm::database::BundleState;
 
 use crate::{
     errors::EvmEnvError,
@@ -36,11 +34,6 @@ pub(crate) fn build_and_recover_block(
     alloy_block
         .try_into_recovered()
         .map_err(|_| EvmEnvError::SenderRecovery)
-}
-
-/// Converts execution output to HashedPostState for state updates.
-pub(crate) fn compute_hashed_post_state(state: &BundleState) -> HashedPostState {
-    HashedPostState::from_bundle_state::<KeccakKeyHasher>(&state.state)
 }
 
 /// Validates that deposits from ExecInputs match the withdrawals field in the block.

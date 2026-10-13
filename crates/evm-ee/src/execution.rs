@@ -27,7 +27,7 @@ use strata_ol_msg_types::{DEFAULT_OPERATOR_FEE, WITHDRAWAL_MSG_TYPE_ID, Withdraw
 use crate::{
     errors::EvmEnvError,
     types::{EvmBlock, EvmHeader, EvmHeaderIntrinsics, EvmPartialState, EvmWriteBatch},
-    utils::{build_and_recover_block, compute_hashed_post_state, validate_deposits_against_block},
+    utils::{build_and_recover_block, validate_deposits_against_block},
 };
 
 /// EVM Execution Environment for Alpen.
@@ -201,7 +201,7 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
         )?;
 
         // Step 5: Convert the state changes to a write batch.
-        let write_batch = EvmWriteBatch::new(compute_hashed_post_state(&state));
+        let write_batch = EvmWriteBatch::from_bundle_state(&state);
 
         // Step 6: Create ExecOutputs with withdrawal intent messages.
         let mut outputs = ExecOutputs::new_empty();

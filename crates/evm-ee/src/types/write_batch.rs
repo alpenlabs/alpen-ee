@@ -1,6 +1,7 @@
 //! EVM write batch implementation.
 
-use reth_trie::HashedPostState;
+use reth_trie::{HashedPostState, KeccakKeyHasher};
+use revm::database::BundleState;
 use strata_codec::{Codec, CodecError};
 
 use crate::codec_shims::{decode_hashed_post_state, encode_hashed_post_state};
@@ -19,6 +20,14 @@ impl EvmWriteBatch {
     /// Creates a new EvmWriteBatch from execution state changes.
     pub fn new(hashed_post_state: HashedPostState) -> Self {
         Self { hashed_post_state }
+    }
+
+    /// Creates the write batch of a block's execution from the state changes
+    /// it made.
+    pub fn from_bundle_state(state: &BundleState) -> Self {
+        Self::new(HashedPostState::from_bundle_state::<KeccakKeyHasher>(
+            &state.state,
+        ))
     }
 
     /// Gets a reference to the underlying HashedPostState.
