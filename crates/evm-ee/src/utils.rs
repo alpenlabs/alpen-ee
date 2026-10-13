@@ -19,7 +19,7 @@ pub(crate) fn build_and_recover_block(
 ) -> Result<RecoveredBlock<AlloyBlock<TransactionSigned>>, EvmEnvError> {
     let alloy_block = AlloyBlock {
         header: block.get_header().header().clone(),
-        body: block.get_body().body().clone(),
+        body: block.body().body().clone(),
     };
 
     // Recover transaction senders from signatures

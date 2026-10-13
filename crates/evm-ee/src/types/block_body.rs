@@ -1,7 +1,6 @@
 //! EVM block body implementation.
 
 use alloy_consensus::BlockBody;
-use alpen_acct_types::ExecBlockBody;
 use reth_ethereum_primitives::TransactionSigned;
 use strata_codec::{Codec, CodecError};
 
@@ -49,8 +48,6 @@ impl EvmBlockBody {
         self.body.transactions.len()
     }
 }
-
-impl ExecBlockBody for EvmBlockBody {}
 
 impl Codec for EvmBlockBody {
     fn encode(&self, enc: &mut impl strata_codec::Encoder) -> Result<(), CodecError> {
