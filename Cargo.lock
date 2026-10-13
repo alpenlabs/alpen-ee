@@ -1817,6 +1817,7 @@ dependencies = [
  "strata-ol-bridge-types",
  "strata-primitives",
  "thiserror 2.0.20",
+ "tracing",
 ]
 
 [[package]]
@@ -1992,6 +1993,7 @@ dependencies = [
  "bitcoin",
  "eyre",
  "futures",
+ "metrics",
  "mockall",
  "serde",
  "strata-acct-types",
