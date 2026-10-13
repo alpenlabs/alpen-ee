@@ -108,9 +108,14 @@ impl ExecutionEnvironment for SimpleExecutionEnvironment {
     fn verify_block_post_execution(
         &self,
         _header: &<Self::Block as ExecBlock>::Header,
-        _outputs: &ExecBlockOutput<Self>,
+        exec_output: &ExecBlockOutput<Self>,
+        claimed_outputs: &ExecOutputs,
     ) -> EnvResult<()> {
-        // For the simple EE, we don't need additional verification
+        // The simple header commits to nothing from execution, so only the
+        // claimed outputs need checking.
+        if !claimed_outputs.matches_executed(exec_output.outputs()) {
+            return Err(EnvError::OutputMismatch);
+        }
         Ok(())
     }
 

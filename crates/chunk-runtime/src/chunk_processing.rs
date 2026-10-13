@@ -19,36 +19,18 @@ pub fn process_block<E: ExecutionEnvironment>(
     let eb = block.exec_block();
     let header = eb.get_header();
 
-    // This also checks the block builds on its parent.
+    // 1. Check the block before executing it: the header against its parent,
+    // the body against the header and the claimed inputs against the block.
     ee.verify_header(parent_header, header)?;
-
     ee.verify_block_pre_execution(eb)?;
-
-    // Check the inputs against the block, then execute it and check the
-    // outputs against the header.
     ee.verify_inputs_against_block(eb, block.inputs())?;
+
+    // 2. Execute the block and check the result against the header and the
+    // claimed outputs.
     let exec_outp = ee.execute_block(state, eb)?;
-    ee.verify_block_post_execution(header, &exec_outp)?;
+    ee.verify_block_post_execution(header, &exec_outp, block.outputs())?;
 
-    // Check that the EVM-derivable outputs match the chunk block.
-    //
-    // `new_predicate` is deliberately left out of this comparison: it's an
-    // account-level fact drawn from the pending-input queue, not something
-    // `execute_block` can derive from EVM execution alone (see `evm-ee`'s
-    // `execute_block`, which only ever sets output messages/transfers and
-    // always leaves `new_predicate` empty). Chunk-level verification of a
-    // declared rotation against real block execution belongs to a
-    // cross-check over the chunk's blocks, not this per-block comparison.
-    if exec_outp.outputs().output_transfers() != block.outputs().output_transfers()
-        || exec_outp.outputs().output_messages() != block.outputs().output_messages()
-    {
-        return Err(ChunkRuntimeError::OutputMismatch {
-            expected: Box::new(block.outputs().clone()),
-            got: Box::new(exec_outp.outputs().clone()),
-        });
-    }
-
-    // Merge the changes and return the outputs.
+    // 3. Merge the writes and check the new state root against the header.
     ee.merge_write_into_state(state, exec_outp.write_batch())?;
     let computed_state_root = state.compute_state_root();
     let header_state_root = header.get_state_root();
