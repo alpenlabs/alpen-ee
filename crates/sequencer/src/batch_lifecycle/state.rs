@@ -1,6 +1,10 @@
 //! Batch lifecycle state management.
 
 use alpen_common::{require_genesis_batch, BatchId, BatchStatus, BatchStorage, StorageError};
+use metrics::gauge;
+
+/// Tracks the latest canonical batch to reach each lifecycle status, in batch indices.
+pub(super) const BATCH_LATEST_IDX_METRIC: &str = "alpen_ee_batch_latest_idx";
 
 /// A frontier tracks the latest batch that has reached a particular status.
 ///
@@ -108,21 +112,25 @@ impl BatchLifecycleState {
     /// Advance DA pending frontier to a new batch.
     pub(crate) fn advance_da_pending(&mut self, idx: u64, id: BatchId) {
         self.da_pending = Frontier::new(idx, id);
+        gauge!(BATCH_LATEST_IDX_METRIC, "status" => "da_pending").set(idx as f64);
     }
 
     /// Advance DA complete frontier to a new batch.
     pub(crate) fn advance_da_complete(&mut self, idx: u64, id: BatchId) {
         self.da_complete = Frontier::new(idx, id);
+        gauge!(BATCH_LATEST_IDX_METRIC, "status" => "da_complete").set(idx as f64);
     }
 
     /// Advance proof pending frontier to a new batch.
     pub(crate) fn advance_proof_pending(&mut self, idx: u64, id: BatchId) {
         self.proof_pending = Frontier::new(idx, id);
+        gauge!(BATCH_LATEST_IDX_METRIC, "status" => "proof_pending").set(idx as f64);
     }
 
     /// Advance proof ready frontier to a new batch.
     pub(crate) fn advance_proof_ready(&mut self, idx: u64, id: BatchId) {
         self.proof_ready = Frontier::new(idx, id);
+        gauge!(BATCH_LATEST_IDX_METRIC, "status" => "proof_ready").set(idx as f64);
     }
 
     /// Reset all frontiers to genesis state.

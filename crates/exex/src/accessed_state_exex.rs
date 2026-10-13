@@ -40,7 +40,7 @@ use reth_provider::{BlockReader, Chain, StateProviderFactory};
 use reth_revm::{db::CacheDB, state::Bytecode};
 use strata_acct_types::Hash;
 use tokio::task;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, instrument, warn, Span};
 
 #[expect(
     missing_debug_implementations,
@@ -96,6 +96,7 @@ where
     ///
     /// Returns the latest `(number, hash)` successfully processed so the
     /// caller can emit `FinishedHeight`.
+    #[instrument(name = "accessed_state", skip_all)]
     async fn commit(&self, chain: &Chain) -> eyre::Result<Option<BlockNumHash>> {
         let mut finished = None;
         let blocks = chain.blocks();
@@ -111,10 +112,12 @@ where
 
             // Heavy lifting (re-execution + state-provider traversal) runs
             // off the async runtime.
-            let record_result =
-                task::spawn_blocking(move || build_accessed_state(provider, evm_config, block_num))
-                    .await
-                    .map_err(|e| eyre::eyre!("accessed-state join: {e}"))?;
+            let span = Span::current();
+            let record_result = task::spawn_blocking(move || {
+                span.in_scope(|| build_accessed_state(provider, evm_config, block_num))
+            })
+            .await
+            .map_err(|e| eyre::eyre!("accessed-state join: {e}"))?;
 
             let (record, bytecodes) = match record_result {
                 Ok(v) => v,
@@ -213,6 +216,7 @@ pub type BytecodeEntry = (Hash, Vec<u8>);
 ///
 /// Public so tools that build blocks off-node, such as the EVM workload
 /// generator, record exactly what the exex would have stored.
+#[instrument(name = "capture_accessed_state", skip_all, fields(block_num))]
 pub fn build_accessed_state<P, E>(
     provider: P,
     evm_config: E,

@@ -1544,6 +1544,7 @@ dependencies = [
  "alpen-reth-node",
  "async-trait",
  "eyre",
+ "metrics",
  "mockall",
  "reth-node-builder",
  "reth-payload-builder",
@@ -1831,6 +1832,7 @@ dependencies = [
  "strata-ol-bridge-types",
  "strata-primitives",
  "thiserror 2.0.20",
+ "tracing",
 ]
 
 [[package]]
@@ -2002,6 +2004,7 @@ dependencies = [
  "bitcoin",
  "eyre",
  "futures",
+ "metrics",
  "mockall",
  "serde",
  "strata-acct-types",
