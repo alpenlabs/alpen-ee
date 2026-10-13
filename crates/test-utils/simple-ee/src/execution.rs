@@ -88,7 +88,7 @@ impl ExecutionEnvironment for SimpleExecutionEnvironment {
     ) -> EnvResult<()> {
         // The simple header does not commit to its body, so only the claimed
         // inputs need checking.
-        if block.get_body().deposits() != claimed_inputs.subject_deposits() {
+        if block.body().deposits() != claimed_inputs.subject_deposits() {
             return Err(EnvError::InvalidBlock);
         }
         Ok(())
@@ -99,7 +99,7 @@ impl ExecutionEnvironment for SimpleExecutionEnvironment {
         pre_state: &Self::PartialState,
         block: &Self::Block,
     ) -> EnvResult<ExecBlockOutput<Self>> {
-        self.execute_body(pre_state, block.get_body())
+        self.execute_body(pre_state, block.body())
     }
 
     fn verify_block_post_execution(

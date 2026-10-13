@@ -32,29 +32,14 @@ pub trait ExecHeader: Codec + Clone + Sized {
     fn compute_block_id(&self) -> Hash;
 }
 
-/// Represents the body of an execution block, without the header.
-///
-/// This is the executable content of a block (transactions, operations, etc.)
-/// that can be processed to produce state changes.
-pub trait ExecBlockBody: Codec + Sized {}
-
 /// Represents a full execution block, with whatever information needed to
 /// execute it on top of a pre-state.
 pub trait ExecBlock: Codec + Sized {
     /// The block's header type.
     type Header: ExecHeader;
 
-    /// The block's body type.
-    type Body: ExecBlockBody;
-
-    /// Constructs a block from a header and body.
-    fn from_parts(header: Self::Header, body: Self::Body) -> Self;
-
     /// Gets a reference to the block's header.
     fn get_header(&self) -> &Self::Header;
-
-    /// Gets a reference to the block's body.
-    fn get_body(&self) -> &Self::Body;
 }
 
 /// Execution environment.

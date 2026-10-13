@@ -168,10 +168,10 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
     ) -> Result<(), Self::Error> {
         let sealed = SealedBlock::new_unhashed(Block {
             header: block.get_header().header().clone(),
-            body: block.get_body().body().clone(),
+            body: block.body().body().clone(),
         });
         self.consensus.validate_block_pre_execution(&sealed)?;
-        validate_deposits_against_block(block.get_body().body(), claimed_inputs)
+        validate_deposits_against_block(block.body().body(), claimed_inputs)
     }
 
     fn execute_block(
