@@ -685,7 +685,6 @@ dependencies = [
  "strata-crypto",
  "strata-primitives",
  "thiserror 2.0.18",
- "tracing",
 ]
 
 [[package]]
