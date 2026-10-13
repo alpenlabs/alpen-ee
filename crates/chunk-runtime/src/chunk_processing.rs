@@ -20,10 +20,9 @@ pub fn process_block<E: ExecutionEnvironment>(
     let header = eb.get_header();
 
     // 1. Check the block before executing it: the header against its parent,
-    // the body against the header and the claimed inputs against the block.
+    // then the body against the header and the claimed inputs.
     ee.verify_header(parent_header, header)?;
-    ee.verify_block_pre_execution(eb)?;
-    ee.verify_inputs_against_block(eb, block.inputs())?;
+    ee.verify_block_pre_execution(eb, block.inputs())?;
 
     // 2. Execute the block and check the result against the header and the
     // claimed outputs.

@@ -163,13 +163,17 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
         Ok(())
     }
 
-    fn verify_block_pre_execution(&self, block: &EvmBlock) -> Result<(), Self::Error> {
-        let block = SealedBlock::new_unhashed(Block {
+    fn verify_block_pre_execution(
+        &self,
+        block: &EvmBlock,
+        claimed_inputs: &ExecInputs,
+    ) -> Result<(), Self::Error> {
+        let sealed = SealedBlock::new_unhashed(Block {
             header: block.get_header().header().clone(),
             body: block.get_body().body().clone(),
         });
-        self.consensus.validate_block_pre_execution(&block)?;
-        Ok(())
+        self.consensus.validate_block_pre_execution(&sealed)?;
+        validate_deposits_against_block(block.get_body().body(), claimed_inputs)
     }
 
     fn execute_block(
@@ -178,9 +182,8 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
         block: &EvmBlock,
     ) -> Result<ExecBlockOutput<Self>, Self::Error> {
         // Step 1: Recover the senders. The header is checked by
-        // `verify_header`, the body by `verify_block_pre_execution`, the inputs
-        // by `verify_inputs_against_block` and the execution results by
-        // `verify_block_post_execution`.
+        // `verify_header`, the body and inputs by `verify_block_pre_execution`
+        // and the execution results by `verify_block_post_execution`.
         let recovered = build_and_recover_block(block)?;
 
         // Step 2: Anchor the `BLOCKHASH` ancestors to this block.
@@ -207,14 +210,6 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
         convert_withdrawal_intents_to_messages(withdrawal_intents, &mut outputs);
 
         Ok(ExecBlockOutput::new(write_batch, result, outputs))
-    }
-
-    fn verify_inputs_against_block(
-        &self,
-        block: &Self::Block,
-        inputs: &ExecInputs,
-    ) -> Result<(), Self::Error> {
-        validate_deposits_against_block(block.get_body().body(), inputs)
     }
 
     fn verify_block_post_execution(
@@ -519,26 +514,27 @@ mod tests {
     fn verify_fixture_block(
         header: Header,
         body: BlockBody<TransactionSigned>,
+        inputs: &ExecInputs,
     ) -> Result<(), EvmEnvError> {
         let block = EvmBlock::new(EvmHeader::new(header), EvmBlockBody::from_alloy_body(body));
-        fixture_env().verify_block_pre_execution(&block)
+        fixture_env().verify_block_pre_execution(&block, inputs)
     }
 
     #[test]
     fn verify_block_pre_execution_accepts_the_fixture_block() {
-        let Fixture { block, .. } = fixture();
+        let Fixture { block, inputs, .. } = fixture();
 
-        verify_fixture_block(block.header, block.body)
+        verify_fixture_block(block.header, block.body, &inputs)
             .expect("the fixture header commits to its body");
     }
 
     #[test]
     fn verify_block_pre_execution_rejects_a_body_the_header_does_not_commit_to() {
-        let Fixture { block, .. } = fixture();
+        let Fixture { block, inputs, .. } = fixture();
         let mut header = block.header;
         header.transactions_root = B256::ZERO;
 
-        let result = verify_fixture_block(header, block.body);
+        let result = verify_fixture_block(header, block.body, &inputs);
         assert!(
             matches!(
                 &result,
@@ -553,7 +549,7 @@ mod tests {
     /// larger block before executing it, and so must the proof.
     #[test]
     fn verify_block_pre_execution_rejects_an_oversized_block() {
-        let Fixture { block, .. } = fixture();
+        let Fixture { block, inputs, .. } = fixture();
         let mut header = block.header;
         let mut body = block.body;
         let padding = TxLegacy {
@@ -566,7 +562,7 @@ mod tests {
         ));
         header.transactions_root = calculate_transaction_root(&body.transactions);
 
-        let result = verify_fixture_block(header, body);
+        let result = verify_fixture_block(header, body, &inputs);
         assert!(
             matches!(
                 &result,
@@ -585,8 +581,8 @@ mod tests {
         let env = fixture_env();
         let block = fixture.evm_block();
 
-        env.verify_inputs_against_block(&block, &fixture.inputs)
-            .expect("the block mints the workload's deposits");
+        env.verify_block_pre_execution(&block, &fixture.inputs)
+            .expect("the header commits to the body, which mints the workload's deposits");
 
         let output = env
             .execute_block(&fixture.pre_state, &block)
