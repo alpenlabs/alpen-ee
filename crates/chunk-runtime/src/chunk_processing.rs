@@ -14,7 +14,7 @@ pub fn process_block<E: ExecutionEnvironment>(
     ee: &E,
     state: &mut E::PartialState,
     parent_header: &<E::Block as ExecBlock>::Header,
-    block: &ChunkBlock<'_, E>,
+    block: &ChunkBlock<E>,
 ) -> ChunkRuntimeResult<(), E::Error> {
     let eb = block.exec_block();
     let header = eb.get_header();
@@ -117,7 +117,7 @@ impl ChunkIo {
 fn process_chunk_blocks<E: ExecutionEnvironment>(
     ee: &E,
     state: &mut E::PartialState,
-    chunk: &Chunk<'_, E>,
+    chunk: &Chunk<E>,
 ) -> ChunkRuntimeResult<(ExecInputs, ExecOutputs), E::Error> {
     // 1. Check that the chunk is nonempty.
     if chunk.blocks().is_empty() {
@@ -141,7 +141,7 @@ fn process_chunk_blocks<E: ExecutionEnvironment>(
 pub fn compute_chunk_transition<E: ExecutionEnvironment>(
     ee: &E,
     state: &mut E::PartialState,
-    chunk: &Chunk<'_, E>,
+    chunk: &Chunk<E>,
 ) -> ChunkRuntimeResult<ChunkTransition, E::Error> {
     let prev_header = chunk.prev_header();
 
@@ -288,9 +288,9 @@ mod tests {
 
         // Build the chunk.
         let chunk_blocks = vec![
-            ChunkBlock::new(&inp1, &out1, block1),
-            ChunkBlock::new(&inp2, &out2, block2),
-            ChunkBlock::new(&inp3, &out3, block3),
+            ChunkBlock::new(inp1, out1, block1),
+            ChunkBlock::new(inp2, out2, block2),
+            ChunkBlock::new(inp3, out3, block3),
         ];
         let chunk = Chunk::new(genesis_header, chunk_blocks);
 
@@ -347,8 +347,8 @@ mod tests {
         let chunk = Chunk::new(
             genesis_header,
             vec![
-                ChunkBlock::new(&inp1, &out1, block1),
-                ChunkBlock::new(&inp2, &out2, block2),
+                ChunkBlock::new(inp1, out1, block1),
+                ChunkBlock::new(inp2, out2, block2),
             ],
         );
         let mut state = initial_state;
@@ -385,7 +385,7 @@ mod tests {
 
         let chunk = Chunk::new(
             SimpleHeader::genesis(),
-            vec![ChunkBlock::new(&inp, &out, block)],
+            vec![ChunkBlock::new(inp, out, block)],
         );
         let mut state = initial_state;
 
@@ -423,7 +423,7 @@ mod tests {
             }]),
         );
 
-        let chunk = Chunk::new(genesis_header, vec![ChunkBlock::new(&inp, &out, block)]);
+        let chunk = Chunk::new(genesis_header, vec![ChunkBlock::new(inp, out, block)]);
         let mut state = initial_state;
 
         let err = process_chunk_blocks(&ee, &mut state, &chunk)
@@ -481,8 +481,8 @@ mod tests {
         let chunk = Chunk::new(
             genesis_header,
             vec![
-                ChunkBlock::new(&inp1, &out1, block1),
-                ChunkBlock::new(&inp2, &out2, block2),
+                ChunkBlock::new(inp1, out1, block1),
+                ChunkBlock::new(inp2, out2, block2),
             ],
         );
         let mut state = initial_state;
@@ -535,8 +535,8 @@ mod tests {
         let chunk = Chunk::new(
             genesis_header,
             vec![
-                ChunkBlock::new(&inp1, &out1, block1),
-                ChunkBlock::new(&inp2, &out2, block2),
+                ChunkBlock::new(inp1, out1, block1),
+                ChunkBlock::new(inp2, out2, block2),
             ],
         );
         let mut state = initial_state;
@@ -579,7 +579,7 @@ mod tests {
             inputs.clone(),
             outputs.clone(),
         );
-        let chunk = Chunk::new(prev_header, vec![ChunkBlock::new(&inputs, &outputs, block)]);
+        let chunk = Chunk::new(prev_header, vec![ChunkBlock::new(inputs, outputs, block)]);
 
         let mut state = initial_state;
 
