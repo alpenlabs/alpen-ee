@@ -119,12 +119,6 @@ fn process_chunk_blocks<E: ExecutionEnvironment>(
     state: &mut E::PartialState,
     chunk: &Chunk<E>,
 ) -> ChunkRuntimeResult<(ExecInputs, ExecOutputs), E::Error> {
-    // 1. Check that the chunk is nonempty.
-    if chunk.blocks().is_empty() {
-        return Err(ChunkRuntimeError::EmptyChunk);
-    }
-
-    // 2. Process each block on top of the one before it, collecting the IO.
     let mut chunk_io = ChunkIo::new_empty();
     let mut parent_header = chunk.prev_header();
     for cb in chunk.blocks() {
