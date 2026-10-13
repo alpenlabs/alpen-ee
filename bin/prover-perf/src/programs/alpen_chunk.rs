@@ -5,6 +5,8 @@
 //! deposits. The input comes from [`build_workload_chunk`], the builder the
 //! chunk proof crate's own native test runs.
 
+use std::sync::LazyLock;
+
 use alpen_params::{AlpenParams, AlpenSpecId, DEV_PARAMS_JSON};
 use alpen_proof_chunk::{
     test_utils::{build_workload_chunk, WorkloadChunk},
@@ -24,26 +26,36 @@ pub(super) fn perf_alpen_params() -> AlpenParams {
     serde_json::from_str(DEV_PARAMS_JSON).expect("dev params should parse")
 }
 
-pub(super) fn load_workload() -> Workload {
+/// The checked-in workload, loaded once per run.
+static WORKLOAD: LazyLock<Workload> = LazyLock::new(|| {
     let dir = workload_dir(MIXED_WORKLOAD);
     Workload::load(&dir).unwrap_or_else(|e| panic!("load workload from {}: {e}", dir.display()))
+});
+
+/// The chunk over all of the workload's blocks, built once per run.
+///
+/// Building it replays every block natively, and both guests' inputs need
+/// it.
+static CHUNK: LazyLock<WorkloadChunk> =
+    LazyLock::new(|| build_workload_chunk(&WORKLOAD, &perf_alpen_params(), PERF_SPEC_VERSION));
+
+pub(super) fn workload() -> &'static Workload {
+    &WORKLOAD
 }
 
-/// Builds the chunk over all of `workload`'s blocks.
-pub(super) fn build_chunk(workload: &Workload) -> WorkloadChunk {
-    build_workload_chunk(workload, &perf_alpen_params(), PERF_SPEC_VERSION)
+pub(super) fn workload_chunk() -> &'static WorkloadChunk {
+    &CHUNK
 }
 
 pub(crate) fn gen_perf_report(host: &impl ZkVmHost) -> (String, ExecutionSummary) {
     info!("Generating execution summary for Alpen Chunk");
-    let chunk = build_chunk(&load_workload());
-    let summary = <EeChunkProgram as ZkVmProgram>::execute(&chunk.input, host)
+    let summary = <EeChunkProgram as ZkVmProgram>::execute(&workload_chunk().input, host)
         .expect("alpen-chunk execution");
     (EeChunkProgram::name(), summary)
 }
 
 pub(crate) fn gen_proof(host: &impl ZkVmHost) -> ProofReceiptWithMetadata {
     info!("Generating proof for Alpen Chunk");
-    let chunk = build_chunk(&load_workload());
-    <EeChunkProgram as ZkVmProgram>::prove(&chunk.input, host).expect("alpen-chunk proof")
+    <EeChunkProgram as ZkVmProgram>::prove(&workload_chunk().input, host)
+        .expect("alpen-chunk proof")
 }

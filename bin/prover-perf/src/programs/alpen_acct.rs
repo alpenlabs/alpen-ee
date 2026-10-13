@@ -25,7 +25,7 @@ use tracing::info;
 use zkaleido::{ExecutionSummary, ProofReceiptWithMetadata, ZkVmHost, ZkVmProgram};
 
 use super::{
-    alpen_chunk::{build_chunk, load_workload},
+    alpen_chunk::{workload, workload_chunk},
     da::build_batch_da,
 };
 
@@ -35,15 +35,12 @@ const UPDATE_SEQ_NO: u64 = 1;
 /// OL epoch the deposit messages were included in.
 const DEPOSIT_EPOCH: u32 = 1;
 
-/// Builds the update over `workload`'s chunk, carrying `chunk_proof`.
+/// Builds the update over the workload's chunk, carrying `chunk_proof`.
 ///
 /// Panics if `chunk_proof` proves a different chunk than the workload's, which
 /// means one of the two was regenerated without the other.
-pub(super) fn prepare_input(
-    workload: &Workload,
-    chunk_proof: &ProofReceiptWithMetadata,
-) -> EeAcctProofInput {
-    let chunk = build_chunk(workload);
+pub(super) fn prepare_input(chunk_proof: &ProofReceiptWithMetadata) -> EeAcctProofInput {
+    let chunk = workload_chunk();
     let proven = ChunkTransition::from_ssz_bytes(chunk_proof.receipt().public_values().as_bytes())
         .expect("chunk proof public values are a chunk transition");
     assert_eq!(
@@ -52,7 +49,7 @@ pub(super) fn prepare_input(
          `just prover-proof`"
     );
     build_input(
-        workload,
+        workload(),
         &chunk.transition,
         chunk_proof.receipt().proof().as_bytes().to_vec(),
     )
@@ -159,7 +156,7 @@ pub(crate) fn gen_perf_report(
     chunk_proof: &ProofReceiptWithMetadata,
 ) -> (String, ExecutionSummary) {
     info!("Generating execution summary for Alpen Acct");
-    let input = prepare_input(&load_workload(), chunk_proof);
+    let input = prepare_input(chunk_proof);
     let summary =
         <EeAcctProgram as ZkVmProgram>::execute(&input, host).expect("alpen-acct execution");
     (EeAcctProgram::name(), summary)
@@ -170,7 +167,7 @@ pub(crate) fn gen_proof(
     chunk_proof: &ProofReceiptWithMetadata,
 ) -> ProofReceiptWithMetadata {
     info!("Generating proof for Alpen Acct");
-    let input = prepare_input(&load_workload(), chunk_proof);
+    let input = prepare_input(chunk_proof);
     <EeAcctProgram as ZkVmProgram>::prove(&input, host).expect("alpen-acct proof")
 }
 
@@ -183,17 +180,15 @@ mod tests {
 
     #[test]
     fn test_alpen_acct_native_execution() {
-        let workload = load_workload();
-
         // Natively the chunk proof is a Schnorr signature over the transition,
         // checked against the chunk program's test key.
         let chunk_program = EeChunkProgram::new(perf_alpen_params(), PERF_SPEC_VERSION);
-        let chunk = build_chunk(&workload);
+        let chunk = workload_chunk();
         let chunk_proof =
             <EeChunkProgram as ZkVmProgram>::prove(&chunk.input, &chunk_program.native_host())
                 .expect("native chunk proof");
 
-        let input = prepare_input(&workload, &chunk_proof);
+        let input = prepare_input(&chunk_proof);
         let program = EeAcctProgram::new(
             EeChunkProgram::test_predicate_key(),
             perf_alpen_params(),
