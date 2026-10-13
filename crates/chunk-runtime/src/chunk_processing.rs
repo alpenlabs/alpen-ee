@@ -34,7 +34,7 @@ pub fn process_block<E: ExecutionEnvironment>(
     // outputs against the header.
     ee.verify_inputs_against_block(eb, block.inputs())?;
     let exec_outp = ee.execute_block_body(state, &epl)?;
-    ee.verify_outputs_against_header(header, &exec_outp)?;
+    ee.verify_block_post_execution(header, &exec_outp)?;
 
     // Check that the EVM-derivable outputs match the chunk block.
     //
