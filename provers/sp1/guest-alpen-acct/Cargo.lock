@@ -596,7 +596,6 @@ dependencies = [
  "bincode",
  "itertools 0.14.0",
  "reth-consensus",
- "reth-consensus-common",
  "reth-errors",
  "reth-ethereum-primitives",
  "reth-evm",

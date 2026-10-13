@@ -24,9 +24,7 @@ pub fn process_block<E: ExecutionEnvironment>(
     // This also checks the block builds on its parent.
     ee.verify_header(parent_header, header)?;
 
-    if !E::Block::check_header_matches_body(header, eb.get_body()) {
-        return Err(ChunkRuntimeError::HeaderBodyMismatch);
-    }
+    ee.verify_block_pre_execution(eb)?;
 
     // Repackage the block into the payload we can execute.
     let header_intrinsics = header.get_intrinsics();

@@ -12,10 +12,10 @@ use alpen_reth_evm::{
     consensus::{FlooredConsensus, validate_header_extra_against_parent},
     extract_withdrawal_intents,
 };
-use reth_consensus::HeaderValidator;
-use reth_ethereum_primitives::{Receipt as EthereumReceipt, TransactionSigned};
+use reth_consensus::{Consensus, HeaderValidator};
+use reth_ethereum_primitives::{Block, Receipt as EthereumReceipt, TransactionSigned};
 use reth_evm::execute::{BasicBlockExecutor, BlockExecutionOutput, Executor};
-use reth_primitives_traits::{RecoveredBlock, SealedHeader};
+use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
 use revm::database::WrapDatabaseRef;
 use strata_acct_types::{BRIDGE_GATEWAY_ACCT_ID, BitcoinAmount, MsgPayload};
 use strata_codec::encode_to_vec;
@@ -39,7 +39,7 @@ pub struct EvmExecutionEnvironment {
     /// EVM configuration of the one spec version this environment executes.
     evm_config: AlpenEvmConfig,
 
-    /// Header rules of that spec version, the same ones the node applies.
+    /// Consensus rules of that spec version, the same ones the node applies.
     consensus: FlooredConsensus,
 }
 
@@ -165,13 +165,22 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
         Ok(())
     }
 
+    fn verify_block_pre_execution(&self, block: &EvmBlock) -> Result<(), Self::Error> {
+        let block = SealedBlock::new_unhashed(Block {
+            header: block.get_header().header().clone(),
+            body: block.get_body().body().clone(),
+        });
+        self.consensus.validate_block_pre_execution(&block)?;
+        Ok(())
+    }
+
     fn execute_block_body(
         &self,
         pre_state: &Self::PartialState,
         exec_payload: &ExecPayload<'_, Self::Block>,
     ) -> Result<ExecBlockOutput<Self>, Self::Error> {
         // Step 1: Build block from exec_payload and recover senders. The header
-        // is checked by `verify_header`, its body by `check_header_matches_body`,
+        // is checked by `verify_header`, its body by `verify_block_pre_execution`,
         // the inputs by `verify_inputs_against_block` and the execution results
         // by `verify_outputs_against_header`.
         let block = build_and_recover_block(exec_payload)?;
@@ -287,13 +296,20 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
 mod tests {
     use std::{collections::BTreeMap, fs, path::PathBuf};
 
-    use alloy_consensus::{Header, Sealable};
+    use alloy_consensus::{
+        BlockBody, Header, Sealable, TxLegacy, proofs::calculate_transaction_root,
+    };
     use alpen_acct_types::{ExecBlock, ExecHeader, ExecPartialState};
     use alpen_params::{DEV_PARAMS_JSON, HeaderExtra};
     use reth_consensus::ConsensusError;
+    use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
+    use reth_ethereum_primitives::Transaction;
     use reth_primitives_traits::Block as RethBlockTrait;
     use revm::{DatabaseRef, state::Bytecode};
-    use revm_primitives::{B256, alloy_primitives::Bloom};
+    use revm_primitives::{
+        B256,
+        alloy_primitives::{Bloom, Signature},
+    };
     use rsp_client_executor::io::EthClientExecutorInput;
     use serde::Deserialize;
     use strata_msg_fmt::{Msg, MsgRef};
@@ -465,12 +481,7 @@ mod tests {
         );
     }
 
-    /// The fixture block and its parent, the newest witnessed ancestor.
-    ///
-    /// The fixture block carries V1's floored base fee but no stamp, which
-    /// reads as V0. Stamping it V1 makes it a valid first V1 block over its V0
-    /// parent.
-    fn fixture_parent_and_header() -> (Header, Header) {
+    fn fixture_witness() -> EthClientExecutorInput {
         #[derive(Deserialize, Debug)]
         struct TestData {
             witness: EthClientExecutorInput,
@@ -483,14 +494,22 @@ mod tests {
         let json_content = fs::read_to_string(test_data_path).expect("read witness fixture");
         let test_data: TestData =
             serde_json::from_str(&json_content).expect("parse witness fixture");
+        test_data.witness
+    }
 
-        let parent = test_data
-            .witness
+    /// The fixture block and its parent, the newest witnessed ancestor.
+    ///
+    /// The fixture block carries V1's floored base fee but no stamp, which
+    /// reads as V0. Stamping it V1 makes it a valid first V1 block over its V0
+    /// parent.
+    fn fixture_parent_and_header() -> (Header, Header) {
+        let witness = fixture_witness();
+        let parent = witness
             .ancestor_headers
             .last()
             .expect("witness contains the parent header")
             .clone();
-        let mut header = test_data.witness.current_block.header().clone();
+        let mut header = witness.current_block.header().clone();
         header.extra_data = HeaderExtra::new(AlpenSpecId::V1, 0).encode().into();
         (parent, header)
     }
@@ -543,7 +562,7 @@ mod tests {
             break_rule(&parent, &mut bad_header);
             let result = verify_fixture_header(parent.clone(), bad_header);
             assert!(
-                matches!(&result, Err(EvmEnvError::HeaderRule(err)) if is_expected(err)),
+                matches!(&result, Err(EvmEnvError::ConsensusRule(err)) if is_expected(err)),
                 "{result:?}"
             );
         }
@@ -563,6 +582,67 @@ mod tests {
                 got: AlpenSpecId::V0,
             })
         ));
+    }
+
+    fn verify_fixture_block(
+        header: Header,
+        body: BlockBody<TransactionSigned>,
+    ) -> Result<(), EvmEnvError> {
+        let env = EvmExecutionEnvironment::new(&dev_params(), AlpenSpecId::V1);
+        let block = EvmBlock::new(EvmHeader::new(header), EvmBlockBody::from_alloy_body(body));
+        env.verify_block_pre_execution(&block)
+    }
+
+    #[test]
+    fn verify_block_pre_execution_accepts_the_fixture_block() {
+        let (_, header) = fixture_parent_and_header();
+        let body = fixture_witness().current_block.body().clone();
+
+        verify_fixture_block(header, body).expect("the fixture header commits to its body");
+    }
+
+    #[test]
+    fn verify_block_pre_execution_rejects_a_body_the_header_does_not_commit_to() {
+        let (_, mut header) = fixture_parent_and_header();
+        let body = fixture_witness().current_block.body().clone();
+        header.transactions_root = B256::ZERO;
+
+        let result = verify_fixture_block(header, body);
+        assert!(
+            matches!(
+                &result,
+                Err(EvmEnvError::ConsensusRule(err))
+                    if matches!(**err, ConsensusError::BodyTransactionRootDiff(_))
+            ),
+            "{result:?}"
+        );
+    }
+
+    /// V1 runs Osaka, so EIP-7934 caps a block's RLP size. The node refuses a
+    /// larger block before executing it, and so must the proof.
+    #[test]
+    fn verify_block_pre_execution_rejects_an_oversized_block() {
+        let (_, mut header) = fixture_parent_and_header();
+        let mut body = fixture_witness().current_block.body().clone();
+        let padding = TxLegacy {
+            input: vec![0; MAX_RLP_BLOCK_SIZE].into(),
+            ..Default::default()
+        };
+        body.transactions.push(TransactionSigned::new_unhashed(
+            Transaction::Legacy(padding),
+            Signature::test_signature(),
+        ));
+        header.transactions_root = calculate_transaction_root(&body.transactions);
+
+        let result = verify_fixture_block(header, body);
+        assert!(
+            matches!(
+                &result,
+                Err(EvmEnvError::ConsensusRule(err))
+                    if matches!(**err, ConsensusError::BlockTooLarge { .. })
+            ),
+            "{result:?}"
+        );
     }
 
     /// Test with real witness data from the reference implementation.

@@ -62,9 +62,6 @@ pub trait ExecBlock: Codec + Sized {
     /// Constructs a block from a header and body.
     fn from_parts(header: Self::Header, body: Self::Body) -> Self;
 
-    /// Checks if a header matches a body.
-    fn check_header_matches_body(header: &Self::Header, body: &Self::Body) -> bool;
-
     /// Gets a reference to the block's header.
     fn get_header(&self) -> &Self::Header;
 
@@ -109,12 +106,20 @@ pub trait ExecutionEnvironment: Sized + 'static {
         header: &<Self::Block as ExecBlock>::Header,
     ) -> Result<(), Self::Error>;
 
+    /// Checks a block's body against its header, before executing it.
+    ///
+    /// This must check that the header commits to the body. It also checks
+    /// every other rule the environment puts on a block that needs the body
+    /// but not the execution result, such as a limit on the block's size.
+    fn verify_block_pre_execution(&self, block: &Self::Block) -> Result<(), Self::Error>;
+
     /// Executes a block payload on top of a pre-state, returning the execution
     /// output.
     ///
     /// When assembling a block, the output is used to complete its header. When
     /// verifying a block, execution alone is not enough: the caller must also
-    /// check the header with [`Self::verify_header`], the inputs with
+    /// check the header with [`Self::verify_header`], the body with
+    /// [`Self::verify_block_pre_execution`], the inputs with
     /// [`Self::verify_inputs_against_block`] and the output with
     /// [`Self::verify_outputs_against_header`].
     fn execute_block_body(
