@@ -45,6 +45,7 @@ bincode.workspace = true
 
 # Utilities
 itertools.workspace = true
+ref-cast.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

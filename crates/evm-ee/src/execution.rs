@@ -18,7 +18,7 @@ use reth_evm::{
     block::BlockExecutionResult,
     execute::{BasicBlockExecutor, BlockExecutionOutput, Executor},
 };
-use reth_primitives_traits::{RecoveredBlock, SealedBlock};
+use reth_primitives_traits::RecoveredBlock;
 use revm::database::WrapDatabaseRef;
 use strata_acct_types::{BRIDGE_GATEWAY_ACCT_ID, BitcoinAmount, MsgPayload};
 use strata_codec::encode_to_vec;
@@ -28,7 +28,7 @@ use strata_ol_msg_types::{DEFAULT_OPERATOR_FEE, WITHDRAWAL_MSG_TYPE_ID, Withdraw
 use crate::{
     errors::EvmEnvError,
     types::{EvmBlock, EvmHeader, EvmPartialState, EvmWriteBatch},
-    utils::{build_and_recover_block, validate_deposits_against_block},
+    utils::{recover_block, validate_deposits_against_block},
 };
 
 /// EVM Execution Environment for Alpen.
@@ -166,12 +166,9 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
         block: &EvmBlock,
         claimed_inputs: &ExecInputs,
     ) -> Result<(), Self::Error> {
-        let sealed = SealedBlock::new_unhashed(Block {
-            header: block.get_header().header().clone(),
-            body: block.body().body().clone(),
-        });
-        self.consensus.validate_block_pre_execution(&sealed)?;
-        validate_deposits_against_block(block.body().body(), claimed_inputs)
+        self.consensus
+            .validate_block_pre_execution(block.sealed())?;
+        validate_deposits_against_block(block.body(), claimed_inputs)
     }
 
     fn execute_block(
@@ -182,7 +179,7 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
         // Step 1: Recover the senders. The header is checked by
         // `verify_header`, the body and inputs by `verify_block_pre_execution`
         // and the execution results by `verify_block_post_execution`.
-        let recovered = build_and_recover_block(block)?;
+        let recovered = recover_block(block)?;
 
         // Step 2: Anchor the `BLOCKHASH` ancestors to this block.
         validate_ancestors_against_block(pre_state, block.get_header().header())?;
@@ -276,7 +273,7 @@ mod tests {
     use strata_primitives::bitcoin_bosd::Descriptor;
 
     use super::*;
-    use crate::types::{EvmBlock, EvmBlockBody, EvmHeader, EvmPartialState};
+    use crate::types::{EvmBlock, EvmHeader, EvmPartialState};
 
     /// The spec version the workload's blocks are stamped with.
     const FIXTURE_SPEC_VERSION: AlpenSpecId = AlpenSpecId::V1;
@@ -302,10 +299,7 @@ mod tests {
 
     impl Fixture {
         fn evm_block(&self) -> EvmBlock {
-            EvmBlock::new(
-                EvmHeader::new(self.block.header.clone()),
-                EvmBlockBody::from_alloy_body(self.block.body.clone()),
-            )
+            EvmBlock::new(self.block.clone())
         }
     }
 
@@ -514,7 +508,7 @@ mod tests {
         body: BlockBody<TransactionSigned>,
         inputs: &ExecInputs,
     ) -> Result<(), EvmEnvError> {
-        let block = EvmBlock::new(EvmHeader::new(header), EvmBlockBody::from_alloy_body(body));
+        let block = EvmBlock::new(Block { header, body });
         fixture_env().verify_block_pre_execution(&block, inputs)
     }
 

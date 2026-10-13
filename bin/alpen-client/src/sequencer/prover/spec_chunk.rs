@@ -18,12 +18,11 @@ use alpen_common::{
     ExecBlockStorage, ProverTaskKeyDecodeError,
 };
 use alpen_database::NodeStorage;
-use alpen_evm_ee::{EvmBlock, EvmBlockBody, EvmExecutionEnvironment, EvmHeader, EvmPartialState};
+use alpen_evm_ee::{EvmBlock, EvmExecutionEnvironment, EvmHeader, EvmPartialState};
 use alpen_proof_chunk::{EeChunkProgram, EeChunkProofInput};
 use alpen_reth_node::BlockWitnessRecord;
 use async_trait::async_trait;
 use reth_ethereum_primitives::Block;
-use reth_primitives_traits::Block as _;
 use strata_acct_types::Hash;
 use strata_codec::encode_to_vec;
 use strata_paas::{InputResolution, ProofSpec, ProverError as PaasError, ProverResult};
@@ -175,8 +174,8 @@ impl ChunkSpec {
                 alloy_rlp::decode_exact(&record.raw_block_rlp[..]).map_err(|e| {
                     PaasError::permanent(format!("decode block RLP for {block_hash:?}: {e}"))
                 })?;
-            let evm_header = EvmHeader::new(alloy_block.header.clone());
-            let computed: Hash = evm_header.compute_block_id();
+            let block = EvmBlock::new(alloy_block);
+            let computed: Hash = block.get_header().compute_block_id();
             if computed != *block_hash {
                 return Err(PaasError::permanent(format!(
                     "block witness hash mismatch for chunk {chunk_id:?} at index {idx}: \
@@ -209,9 +208,7 @@ impl ChunkSpec {
             let block_inputs = exec_record.package().inputs().clone();
             let block_outputs = exec_record.package().outputs().clone();
 
-            let body = EvmBlockBody::from_alloy_body(alloy_block.body().clone());
-            let block = EvmBlock::new(evm_header, body);
-            tip_blkid = block.get_header().compute_block_id();
+            tip_blkid = computed;
             tip_state_root = block.get_header().get_state_root();
             tip_exec_header_summary = block.get_header().get_exec_header_summary();
 

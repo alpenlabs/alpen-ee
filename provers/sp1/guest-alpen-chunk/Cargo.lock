@@ -571,6 +571,7 @@ dependencies = [
  "alpen-reth-primitives",
  "bincode",
  "itertools 0.14.0",
+ "ref-cast",
  "reth-consensus",
  "reth-errors",
  "reth-ethereum-primitives",
