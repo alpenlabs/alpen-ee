@@ -14,4 +14,14 @@ ignore = [
   # to move to a release that takes hickory 0.26.
   "RUSTSEC-2026-0118", # NSEC3 unbounded loop; no patched release yet
   "RUSTSEC-2026-0119", # O(n^2) name compression; patched in 0.26.1
+
+  # RUSTSEC-2026-0344 (ruzstd 0.8.3)
+  # Reached through object 0.37, which sp1-core-executor 6.8.1 pins with default
+  # features (and so the `compression` feature). Only object 0.40 takes the
+  # patched ruzstd 0.9, and sp1-core-executor 6.9.0 still pins 0.37. ruzstd only
+  # runs when object decompresses an ELF section. Here that is the SP1 executor
+  # reading our own guest ELFs and backtrace reading the node's own binary, so no
+  # untrusted input reaches it.
+  # Revisit when sp1 moves to object 0.40+.
+  "RUSTSEC-2026-0344",
 ]
