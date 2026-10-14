@@ -1,5 +1,6 @@
 # Builds one selected Docker image on manual dispatch and pushes it to the
-# shared ECR account (private) and the public ECR gallery.
+# shared ECR account (private) and, for images that have one, the public ECR
+# gallery.
 #
 # The image does not ship the SP1 guest ELFs. Each network's guests bake in
 # its params, so release.yml publishes them per network instead.
@@ -111,22 +112,29 @@ jobs:
         run: |
           case "${IMAGE_NAME}" in
             alpen-client) PUBLIC_REPO=alpen ;;
-            alpen-da-verifier) PUBLIC_REPO=alpen-da-verifier ;;
+            # Private only: there is no public repository for the DA
+            # verifier, and the role cannot push one (alpen-infra ecr,
+            # STR-4580).
+            alpen-da-verifier) PUBLIC_REPO="" ;;
             *) echo "Unsupported image: ${IMAGE_NAME}" >&2; exit 1 ;;
           esac
 
           DOCKERFILE_PATH="docker/${IMAGE_NAME}/Dockerfile"
           FULL_IMAGE="${ECR_REGISTRY}/${ECR_REPOSITORY_PREFIX}/${IMAGE_NAME}:${SHORT_TAG}"
 
-          # Single build, multiple tags: buildx pushes to both the private and
-          # public registries from one image (same digest in both).
+          TAGS=(-t "${FULL_IMAGE}")
+          if [ -n "${PUBLIC_REPO}" ]; then
+            TAGS+=(-t "${PUBLIC_ECR_BASE}/${PUBLIC_REPO}:${SHORT_TAG}")
+          fi
+
+          # Single build, multiple tags: buildx pushes to the private and (when
+          # set) public registries from one image (same digest in both).
           docker buildx build \
             --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
             --label "org.opencontainers.image.revision=${COMMIT_SHA}" \
             --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --push \
-            -t "${FULL_IMAGE}" \
-            -t "${PUBLIC_ECR_BASE}/${PUBLIC_REPO}:${SHORT_TAG}" \
+            "${TAGS[@]}" \
             -f "${DOCKERFILE_PATH}" .
 
           echo "Successfully pushed ${IMAGE_NAME}:${SHORT_TAG}"
