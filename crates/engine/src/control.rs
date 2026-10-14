@@ -1,4 +1,4 @@
-use std::future::Future;
+use std::{fmt::Debug, future::Future};
 
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::ForkchoiceState;
@@ -6,7 +6,7 @@ use alpen_common::{BlockNumHash, ConsensusHeads, ExecutionEngine};
 use reth_node_builder::NodeTypesWithDB;
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
-    BlockHashReader, BlockNumReader, CanonStateSubscriptions, ProviderResult,
+    BlockHashReader, BlockNumReader, CanonStateSubscriptions, ProviderError,
 };
 use tokio::{
     select,
@@ -14,24 +14,27 @@ use tokio::{
 };
 use tracing::{debug, error, warn};
 
-/// Read access to the parts of reth's chain state the engine control task uses.
-///
-/// Lets the tests stand in for [`BlockchainProvider`].
+/// Read access to the parts of the execution engine's chain state the engine control task uses.
 trait CanonicalChain {
-    /// Returns the hash of reth's canonical head.
+    /// Error returned when the chain state cannot be read.
+    type Error: Debug;
+
+    /// Returns the hash of the canonical head.
     fn head_hash(&self) -> B256;
 
-    /// Returns the hash of the safe block reth has applied, if any.
+    /// Returns the hash of the safe block the engine has applied, if any.
     fn safe_hash(&self) -> Option<B256>;
 
-    /// Returns the hash of the finalized block reth has applied, if any.
+    /// Returns the hash of the finalized block the engine has applied, if any.
     fn finalized_hash(&self) -> Option<B256>;
 
-    /// Returns whether `blockhash` is on reth's canonical chain.
-    fn contains(&self, blockhash: B256) -> ProviderResult<bool>;
+    /// Returns whether `blockhash` is on the canonical chain.
+    fn contains(&self, blockhash: B256) -> Result<bool, Self::Error>;
 }
 
 impl<N: NodeTypesWithDB + ProviderNodeTypes> CanonicalChain for BlockchainProvider<N> {
+    type Error = ProviderError;
+
     fn head_hash(&self) -> B256 {
         self.canonical_in_memory_state().get_canonical_head().hash()
     }
@@ -48,7 +51,7 @@ impl<N: NodeTypesWithDB + ProviderNodeTypes> CanonicalChain for BlockchainProvid
             .map(|num_hash| num_hash.hash)
     }
 
-    fn contains(&self, blockhash: B256) -> ProviderResult<bool> {
+    fn contains(&self, blockhash: B256) -> Result<bool, ProviderError> {
         let Some(block_number) = self.block_number(blockhash)? else {
             return Ok(false);
         };
@@ -59,11 +62,11 @@ impl<N: NodeTypesWithDB + ProviderNodeTypes> CanonicalChain for BlockchainProvid
     }
 }
 
-fn forkchoice_state_from_consensus(
+fn forkchoice_state_from_consensus<C: CanonicalChain>(
     consensus_state: &ConsensusHeads,
     head_block_hash: B256,
-    chain: &impl CanonicalChain,
-) -> ProviderResult<ForkchoiceState> {
+    chain: &C,
+) -> Result<ForkchoiceState, C::Error> {
     let safe_block_hash = B256::from_slice(consensus_state.confirmed().as_slice());
     let finalized_block_hash = B256::from_slice(consensus_state.finalized().as_slice());
 
@@ -89,11 +92,11 @@ fn forkchoice_state_from_consensus(
 ///
 /// Reuses `last_sent_head` so reth's sync target does not move, and returns `None` until reth has
 /// reached that head. Also returns `None` when there is nothing reth can apply.
-fn safe_and_finalized_update(
+fn safe_and_finalized_update<C: CanonicalChain>(
     consensus_state: &ConsensusHeads,
     last_sent_head: B256,
-    chain: &impl CanonicalChain,
-) -> ProviderResult<Option<ForkchoiceState>> {
+    chain: &C,
+) -> Result<Option<ForkchoiceState>, C::Error> {
     if chain.head_hash() != last_sent_head {
         return Ok(None);
     }
@@ -124,11 +127,11 @@ fn safe_and_finalized_update(
 ///
 /// Otherwise returns [`B256::ZERO`], which tells reth to keep its current value. Reth rejects an
 /// update whose safe or finalized block is not canonical.
-fn pending_hash(
+fn pending_hash<C: CanonicalChain>(
     target: B256,
     applied: Option<B256>,
-    chain: &impl CanonicalChain,
-) -> ProviderResult<B256> {
+    chain: &C,
+) -> Result<B256, C::Error> {
     if applied == Some(target) || !chain.contains(target)? {
         return Ok(B256::ZERO);
     }
@@ -183,7 +186,7 @@ async fn engine_control_task_inner<C, E, T>(
                             head_block_hash = update.head_block_hash;
                         }
                     }
-                    Err(err) => error!(?err, "failed to access blockchain provider"),
+                    Err(err) => error!(?err, "failed to read the canonical chain"),
                 }
             }
             res = preconf_rx.changed() => {
@@ -224,7 +227,7 @@ async fn engine_control_task_inner<C, E, T>(
                 send_forkchoice_update(&engine, update).await;
             }
             Ok(None) => {}
-            Err(err) => error!(?err, "failed to access blockchain provider"),
+            Err(err) => error!(?err, "failed to read the canonical chain"),
         }
     }
 }
@@ -250,6 +253,7 @@ pub fn create_engine_control_task<N: NodeTypesWithDB + ProviderNodeTypes, E: Exe
 mod tests {
     use std::{
         collections::HashSet,
+        convert::Infallible,
         sync::{Arc, Mutex},
         time::Duration,
     };
@@ -287,6 +291,8 @@ mod tests {
     }
 
     impl CanonicalChain for FakeChain {
+        type Error = Infallible;
+
         fn head_hash(&self) -> B256 {
             self.0.lock().unwrap().head
         }
@@ -299,7 +305,7 @@ mod tests {
             self.0.lock().unwrap().finalized
         }
 
-        fn contains(&self, blockhash: B256) -> ProviderResult<bool> {
+        fn contains(&self, blockhash: B256) -> Result<bool, Infallible> {
             Ok(self.0.lock().unwrap().canonical.contains(&blockhash))
         }
     }
