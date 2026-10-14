@@ -1,4 +1,4 @@
-use std::{fmt::Debug, future::Future};
+use std::{fmt::Debug, future::Future, time::Duration};
 
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::ForkchoiceState;
@@ -11,8 +11,14 @@ use reth_provider::{
 use tokio::{
     select,
     sync::{broadcast, watch},
+    time,
 };
 use tracing::{debug, error, warn};
+
+/// How often the engine control task checks for safe and finalized blocks reth is missing.
+///
+/// Reth's canonical state notifications miss some chain moves, so this is the fallback.
+const RECHECK_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Read access to the parts of the execution engine's chain state the engine control task uses.
 trait CanonicalChain {
@@ -151,13 +157,14 @@ async fn send_forkchoice_update<E: ExecutionEngine>(engine: &E, update: Forkchoi
 ///
 /// Reth applies safe and finalized only from an update whose head it already has, so it drops
 /// them from OL updates that arrive while it syncs. After every event, including reth's canonical
-/// state notifications, the task resends the ones reth is missing.
+/// state notifications and a periodic recheck, the task resends the ones reth is missing.
 async fn engine_control_task_inner<C, E, T>(
     mut preconf_rx: watch::Receiver<BlockNumHash>,
     mut consensus_rx: watch::Receiver<ConsensusHeads>,
     mut canon_state_rx: broadcast::Receiver<T>,
     chain: C,
     engine: E,
+    recheck_interval: Duration,
 ) where
     C: CanonicalChain,
     E: ExecutionEngine,
@@ -169,6 +176,8 @@ async fn engine_control_task_inner<C, E, T>(
     // The watch channel counts its current value as seen. Without this, a node that restarts
     // after the OL tracker caught up would not resend the OL heads until the next OL update.
     consensus_rx.mark_changed();
+
+    let mut recheck = time::interval(recheck_interval);
 
     loop {
         select! {
@@ -215,6 +224,9 @@ async fn engine_control_task_inner<C, E, T>(
                     return;
                 }
             }
+            // Reth sends no canonical state notification when a backfill run finishes, so the
+            // tick catches a backfill that ends on the last sent head.
+            _ = recheck.tick() => {}
         }
 
         let consensus_state = consensus_rx.borrow().clone();
@@ -246,6 +258,7 @@ pub fn create_engine_control_task<N: NodeTypesWithDB + ProviderNodeTypes, E: Exe
         canon_state_rx,
         provider,
         engine_control,
+        RECHECK_INTERVAL,
     )
 }
 
@@ -454,6 +467,7 @@ mod tests {
                 canon_state_rx,
                 chain.clone(),
                 engine.clone(),
+                Duration::from_millis(10),
             ));
             Self {
                 preconf_tx,
@@ -547,6 +561,29 @@ mod tests {
         let updates = harness.wait_for_updates(4).await;
         assert_eq!(updates[3], fcu(block(5), block(3), block(2)));
         assert_eq!(harness.chain.finalized_hash(), Some(block(2)));
+    }
+
+    #[tokio::test]
+    async fn test_finalized_applied_after_backfill_without_notification() {
+        let chain = FakeChain::default();
+        chain.sync_to(&[block(1)]);
+        let harness = Harness::start(chain, heads(block(1), block(1)));
+        harness.wait_for_updates(1).await;
+
+        harness
+            .consensus_tx
+            .send(heads(block(3), block(3)))
+            .unwrap();
+        let updates = harness.wait_for_updates(2).await;
+        assert_eq!(updates[1], fcu(block(3), block(3), block(3)));
+
+        // Reth backfills to the OL's head. Its backfill path sends no canonical state
+        // notification, so only the recheck tick can pick this up.
+        harness.chain.sync_to(&[block(2), block(3)]);
+
+        let updates = harness.wait_for_updates(3).await;
+        assert_eq!(updates[2], fcu(block(3), block(3), block(3)));
+        assert_eq!(harness.chain.finalized_hash(), Some(block(3)));
     }
 
     #[tokio::test]
