@@ -11,29 +11,42 @@ use reth_provider::{
 use tokio::{select, sync::watch};
 use tracing::{error, warn};
 
-/// Check if `blockhash` is in canonical chain provided by [`BlockchainProvider`].
-fn is_in_canonical_chain<N: NodeTypesWithDB + ProviderNodeTypes>(
-    blockhash: B256,
-    provider: &BlockchainProvider<N>,
-) -> ProviderResult<bool> {
-    let Some(block_number) = provider.block_number(blockhash)? else {
-        return Ok(false);
-    };
-    let Some(canonical_blockhash) = provider.block_hash(block_number)? else {
-        return Ok(false);
-    };
-    Ok(blockhash == canonical_blockhash)
+/// Read access to the parts of reth's chain state the engine control task uses.
+///
+/// Lets the tests stand in for [`BlockchainProvider`].
+trait CanonicalChain {
+    /// Returns the hash of reth's canonical head.
+    fn head_hash(&self) -> B256;
+
+    /// Returns whether `blockhash` is on reth's canonical chain.
+    fn contains(&self, blockhash: B256) -> ProviderResult<bool>;
 }
 
-fn forkchoice_state_from_consensus<N: NodeTypesWithDB + ProviderNodeTypes>(
+impl<N: NodeTypesWithDB + ProviderNodeTypes> CanonicalChain for BlockchainProvider<N> {
+    fn head_hash(&self) -> B256 {
+        self.canonical_in_memory_state().get_canonical_head().hash()
+    }
+
+    fn contains(&self, blockhash: B256) -> ProviderResult<bool> {
+        let Some(block_number) = self.block_number(blockhash)? else {
+            return Ok(false);
+        };
+        let Some(canonical_blockhash) = self.block_hash(block_number)? else {
+            return Ok(false);
+        };
+        Ok(blockhash == canonical_blockhash)
+    }
+}
+
+fn forkchoice_state_from_consensus(
     consensus_state: &ConsensusHeads,
     head_block_hash: B256,
-    provider: &BlockchainProvider<N>,
+    chain: &impl CanonicalChain,
 ) -> ProviderResult<ForkchoiceState> {
     let safe_block_hash = B256::from_slice(consensus_state.confirmed().as_slice());
     let finalized_block_hash = B256::from_slice(consensus_state.finalized().as_slice());
 
-    let head_block_hash = if is_in_canonical_chain(safe_block_hash, provider)? {
+    let head_block_hash = if chain.contains(safe_block_hash)? {
         head_block_hash
     } else {
         // Safe block is not in canonical chain on reth.
@@ -52,16 +65,13 @@ fn forkchoice_state_from_consensus<N: NodeTypesWithDB + ProviderNodeTypes>(
 }
 
 /// Takes chain updates from OL and sequencer/p2p and updates the chain in engine (reth).
-async fn engine_control_task_inner<N: NodeTypesWithDB + ProviderNodeTypes, E: ExecutionEngine>(
+async fn engine_control_task_inner<C: CanonicalChain, E: ExecutionEngine>(
     mut preconf_rx: watch::Receiver<BlockNumHash>,
     mut consensus_rx: watch::Receiver<ConsensusHeads>,
-    provider: BlockchainProvider<N>,
+    chain: C,
     engine: E,
 ) {
-    let mut head_block_hash = provider
-        .canonical_in_memory_state()
-        .get_canonical_head()
-        .hash();
+    let mut head_block_hash = chain.head_hash();
 
     loop {
         select! {
@@ -73,7 +83,7 @@ async fn engine_control_task_inner<N: NodeTypesWithDB + ProviderNodeTypes, E: Ex
                 }
                 // got a consensus update from ol
                 let consensus_state = consensus_rx.borrow_and_update().clone();
-                let update = match forkchoice_state_from_consensus(&consensus_state, head_block_hash, &provider) {
+                let update = match forkchoice_state_from_consensus(&consensus_state, head_block_hash, &chain) {
                     Ok(update) => update,
                     Err(err) => {
                         error!(?err, "failed to access blockchain provider");
