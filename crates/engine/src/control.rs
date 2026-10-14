@@ -245,3 +245,312 @@ pub fn create_engine_control_task<N: NodeTypesWithDB + ProviderNodeTypes, E: Exe
         engine_control,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        collections::HashSet,
+        sync::{Arc, Mutex},
+        time::Duration,
+    };
+
+    use alpen_common::ExecutionEngineError;
+    use alpen_reth_node::AlpenBuiltPayload;
+    use async_trait::async_trait;
+    use strata_acct_types::Hash;
+    use tokio::{
+        task::{yield_now, JoinHandle},
+        time::{sleep, timeout},
+    };
+
+    use super::*;
+
+    /// Stands in for reth's chain state. Tests move it forward to simulate reth syncing.
+    #[derive(Debug, Default)]
+    struct FakeChainState {
+        head: B256,
+        safe: Option<B256>,
+        finalized: Option<B256>,
+        canonical: HashSet<B256>,
+    }
+
+    #[derive(Debug, Default, Clone)]
+    struct FakeChain(Arc<Mutex<FakeChainState>>);
+
+    impl FakeChain {
+        /// Makes `blocks` canonical, with the last one as the head.
+        fn sync_to(&self, blocks: &[B256]) {
+            let mut state = self.0.lock().unwrap();
+            state.canonical.extend(blocks);
+            state.head = *blocks.last().unwrap();
+        }
+    }
+
+    impl CanonicalChain for FakeChain {
+        fn head_hash(&self) -> B256 {
+            self.0.lock().unwrap().head
+        }
+
+        fn safe_hash(&self) -> Option<B256> {
+            self.0.lock().unwrap().safe
+        }
+
+        fn finalized_hash(&self) -> Option<B256> {
+            self.0.lock().unwrap().finalized
+        }
+
+        fn contains(&self, blockhash: B256) -> ProviderResult<bool> {
+            Ok(self.0.lock().unwrap().canonical.contains(&blockhash))
+        }
+    }
+
+    /// Records the forkchoice updates it receives and applies them to the chain like reth does.
+    #[derive(Debug, Clone)]
+    struct RecordingEngine {
+        updates: Arc<Mutex<Vec<ForkchoiceState>>>,
+        chain: FakeChain,
+    }
+
+    impl RecordingEngine {
+        fn new(chain: FakeChain) -> Self {
+            Self {
+                updates: Arc::default(),
+                chain,
+            }
+        }
+
+        fn updates(&self) -> Vec<ForkchoiceState> {
+            self.updates.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl ExecutionEngine for RecordingEngine {
+        type TEnginePayload = AlpenBuiltPayload;
+
+        async fn submit_payload(
+            &self,
+            _payload: AlpenBuiltPayload,
+        ) -> Result<(), ExecutionEngineError> {
+            unreachable!("the engine control task never submits payloads")
+        }
+
+        async fn update_consensus_state(
+            &self,
+            state: ForkchoiceState,
+        ) -> Result<(), ExecutionEngineError> {
+            self.updates.lock().unwrap().push(state);
+
+            let mut chain = self.chain.0.lock().unwrap();
+            if chain.head == state.head_block_hash {
+                if !state.safe_block_hash.is_zero() {
+                    chain.safe = Some(state.safe_block_hash);
+                }
+                if !state.finalized_block_hash.is_zero() {
+                    chain.finalized = Some(state.finalized_block_hash);
+                }
+            }
+            Ok(())
+        }
+    }
+
+    fn block(n: u8) -> B256 {
+        B256::with_last_byte(n)
+    }
+
+    fn heads(confirmed: B256, finalized: B256) -> ConsensusHeads {
+        ConsensusHeads {
+            confirmed: Hash::from(confirmed.0),
+            confirmed_epoch: 2,
+            finalized: Hash::from(finalized.0),
+            finalized_epoch: 1,
+        }
+    }
+
+    fn fcu(head: B256, safe: B256, finalized: B256) -> ForkchoiceState {
+        ForkchoiceState {
+            head_block_hash: head,
+            safe_block_hash: safe,
+            finalized_block_hash: finalized,
+        }
+    }
+
+    #[test]
+    fn test_safe_and_finalized_update_waits_while_reth_syncs() {
+        let chain = FakeChain::default();
+        chain.sync_to(&[block(1), block(2), block(3)]);
+
+        // The last update sent a head reth does not have yet.
+        let update =
+            safe_and_finalized_update(&heads(block(3), block(2)), block(9), &chain).unwrap();
+
+        assert_eq!(update, None);
+    }
+
+    #[test]
+    fn test_safe_and_finalized_update_sends_unapplied_heads() {
+        let chain = FakeChain::default();
+        chain.sync_to(&[block(1), block(2), block(3)]);
+
+        let update =
+            safe_and_finalized_update(&heads(block(3), block(2)), block(3), &chain).unwrap();
+
+        assert_eq!(update, Some(fcu(block(3), block(3), block(2))));
+    }
+
+    #[test]
+    fn test_safe_and_finalized_update_skips_applied_heads() {
+        let chain = FakeChain::default();
+        chain.sync_to(&[block(1), block(2), block(3)]);
+        {
+            let mut state = chain.0.lock().unwrap();
+            state.safe = Some(block(3));
+            state.finalized = Some(block(2));
+        }
+
+        let update =
+            safe_and_finalized_update(&heads(block(3), block(2)), block(3), &chain).unwrap();
+
+        assert_eq!(update, None);
+    }
+
+    #[test]
+    fn test_safe_and_finalized_update_skips_non_canonical_heads() {
+        let chain = FakeChain::default();
+        chain.sync_to(&[block(1), block(2)]);
+
+        // The safe block is on a fork reth does not follow; finalized is canonical.
+        let update =
+            safe_and_finalized_update(&heads(block(7), block(2)), block(2), &chain).unwrap();
+
+        assert_eq!(update, Some(fcu(block(2), B256::ZERO, block(2))));
+    }
+
+    struct Harness {
+        preconf_tx: watch::Sender<BlockNumHash>,
+        consensus_tx: watch::Sender<ConsensusHeads>,
+        canon_state_tx: broadcast::Sender<()>,
+        chain: FakeChain,
+        engine: RecordingEngine,
+        task: JoinHandle<()>,
+    }
+
+    impl Harness {
+        fn start(chain: FakeChain, initial_heads: ConsensusHeads) -> Self {
+            let (preconf_tx, preconf_rx) =
+                watch::channel(BlockNumHash::new(Hash::from(chain.head_hash().0), 0));
+            let (consensus_tx, consensus_rx) = watch::channel(initial_heads);
+            let (canon_state_tx, canon_state_rx) = broadcast::channel(16);
+            let engine = RecordingEngine::new(chain.clone());
+            let task = tokio::spawn(engine_control_task_inner(
+                preconf_rx,
+                consensus_rx,
+                canon_state_rx,
+                chain.clone(),
+                engine.clone(),
+            ));
+            Self {
+                preconf_tx,
+                consensus_tx,
+                canon_state_tx,
+                chain,
+                engine,
+                task,
+            }
+        }
+
+        /// Waits until the engine has received `count` updates and returns them.
+        async fn wait_for_updates(&self, count: usize) -> Vec<ForkchoiceState> {
+            timeout(Duration::from_secs(5), async {
+                loop {
+                    let updates = self.engine.updates();
+                    if updates.len() >= count {
+                        return updates;
+                    }
+                    yield_now().await;
+                }
+            })
+            .await
+            .expect("engine did not receive the expected updates")
+        }
+    }
+
+    impl Drop for Harness {
+        fn drop(&mut self) {
+            self.task.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn test_finalized_applied_once_reth_catches_up_without_gossip() {
+        let chain = FakeChain::default();
+        chain.sync_to(&[block(1)]);
+        let harness = Harness::start(chain, heads(block(1), block(1)));
+        // Startup resends the OL heads, which reth applies.
+        harness.wait_for_updates(1).await;
+
+        // The OL moves ahead of reth. Reth answers SYNCING and keeps neither safe nor finalized.
+        harness
+            .consensus_tx
+            .send(heads(block(3), block(2)))
+            .unwrap();
+        let updates = harness.wait_for_updates(2).await;
+        assert_eq!(updates[1], fcu(block(3), block(3), block(2)));
+
+        // Reth reaches the OL's safe block on its own and announces the new canonical chain.
+        harness.chain.sync_to(&[block(2), block(3)]);
+        harness.canon_state_tx.send(()).unwrap();
+
+        let updates = harness.wait_for_updates(3).await;
+        assert_eq!(updates[2], fcu(block(3), block(3), block(2)));
+        assert_eq!(harness.chain.finalized_hash(), Some(block(2)));
+    }
+
+    #[tokio::test]
+    async fn test_finalized_applied_once_reth_reaches_gossip_head() {
+        let chain = FakeChain::default();
+        chain.sync_to(&[block(1), block(2), block(3)]);
+        let harness = Harness::start(chain, heads(block(1), block(1)));
+        // Startup resends the OL heads, which reth applies.
+        harness.wait_for_updates(1).await;
+
+        // Gossip points reth at a block it does not have, so reth starts syncing towards it.
+        harness
+            .preconf_tx
+            .send(BlockNumHash::new(Hash::from(block(5).0), 5))
+            .unwrap();
+        harness.wait_for_updates(2).await;
+
+        // The OL update arrives while reth syncs. Reth answers SYNCING and drops it.
+        harness
+            .consensus_tx
+            .send(heads(block(3), block(2)))
+            .unwrap();
+        let updates = harness.wait_for_updates(3).await;
+        assert_eq!(updates[2], fcu(block(5), block(3), block(2)));
+
+        // Reth commits block 4 on the way. Resending now would only be dropped again.
+        harness.chain.sync_to(&[block(4)]);
+        harness.canon_state_tx.send(()).unwrap();
+        sleep(Duration::from_millis(50)).await;
+        assert_eq!(harness.engine.updates().len(), 3);
+
+        // Reth reaches the gossip head, so the dropped OL heads go out again.
+        harness.chain.sync_to(&[block(5)]);
+        harness.canon_state_tx.send(()).unwrap();
+        let updates = harness.wait_for_updates(4).await;
+        assert_eq!(updates[3], fcu(block(5), block(3), block(2)));
+        assert_eq!(harness.chain.finalized_hash(), Some(block(2)));
+    }
+
+    #[tokio::test]
+    async fn test_startup_resends_ol_heads() {
+        let chain = FakeChain::default();
+        chain.sync_to(&[block(1), block(2), block(3)]);
+
+        let harness = Harness::start(chain, heads(block(3), block(2)));
+
+        let updates = harness.wait_for_updates(1).await;
+        assert_eq!(updates[0], fcu(block(3), block(3), block(2)));
+    }
+}
