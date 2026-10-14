@@ -163,6 +163,10 @@ async fn engine_control_task_inner<C, E, T>(
     // The head of the last update sent to reth.
     let mut head_block_hash = chain.head_hash();
 
+    // The watch channel counts its current value as seen. Without this, a node that restarts
+    // after the OL tracker caught up would not resend the OL heads until the next OL update.
+    consensus_rx.mark_changed();
+
     loop {
         select! {
             res = consensus_rx.changed() => {
