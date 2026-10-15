@@ -50,6 +50,7 @@ thiserror.workspace = true
 [dev-dependencies]
 alloy-eips.workspace = true
 alpen-params = { workspace = true, features = ["test-utils"] }
+alpen-test-utils-evm-workload.workspace = true
 reth-consensus-common.workspace = true
 rsp-client-executor.workspace = true
 serde.workspace = true

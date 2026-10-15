@@ -1,6 +1,4 @@
-use alpen_acct_types::{
-    ExecBlock, ExecHeader, ExecPartialState, ExecPayload, ExecutionEnvironment,
-};
+use alpen_acct_types::{ExecBlock, ExecHeader, ExecPartialState, ExecutionEnvironment};
 use alpen_chain_types::{ChunkTransition, ExecInputs, ExecOutputs};
 
 use crate::{
@@ -26,22 +24,18 @@ pub fn process_block<E: ExecutionEnvironment>(
 
     ee.verify_block_pre_execution(eb)?;
 
-    // Repackage the block into the payload we can execute.
-    let header_intrinsics = header.get_intrinsics();
-    let epl = ExecPayload::new(&header_intrinsics, eb.get_body());
-
     // Check the inputs against the block, then execute it and check the
     // outputs against the header.
     ee.verify_inputs_against_block(eb, block.inputs())?;
-    let exec_outp = ee.execute_block_body(state, &epl)?;
+    let exec_outp = ee.execute_block(state, eb)?;
     ee.verify_block_post_execution(header, &exec_outp)?;
 
     // Check that the EVM-derivable outputs match the chunk block.
     //
     // `new_predicate` is deliberately left out of this comparison: it's an
     // account-level fact drawn from the pending-input queue, not something
-    // `execute_block_body` can derive from EVM execution alone (see `evm-ee`'s
-    // `execute_block_body`, which only ever sets output messages/transfers and
+    // `execute_block` can derive from EVM execution alone (see `evm-ee`'s
+    // `execute_block`, which only ever sets output messages/transfers and
     // always leaves `new_predicate` empty). Chunk-level verification of a
     // declared rotation against real block execution belongs to a
     // cross-check over the chunk's blocks, not this per-block comparison.
@@ -64,7 +58,6 @@ pub fn process_block<E: ExecutionEnvironment>(
             got: computed_state_root,
         });
     }
-    ee.update_partial_state_after_block(state, header)?;
 
     Ok(())
 }
@@ -187,9 +180,7 @@ pub fn compute_chunk_transition<E: ExecutionEnvironment>(
 mod tests {
     use std::collections::BTreeMap;
 
-    use alpen_acct_types::{
-        BlockAssembler, EnvError, ExecBlock, ExecBlockOutput, ExecHeader, ExecPayload, Hash,
-    };
+    use alpen_acct_types::{EnvError, ExecBlock, ExecBlockOutput, ExecHeader, Hash};
     use alpen_chain_types::{ExecInputs, ExecOutputs};
     use alpen_simple_ee::{
         SimpleBlock, SimpleBlockBody, SimpleExecutionEnvironment, SimpleHeader,
@@ -222,11 +213,10 @@ mod tests {
             index,
         };
         let inputs = body.exec_inputs();
-        let payload = ExecPayload::new(&intrinsics, &body);
         let output: ExecBlockOutput<SimpleExecutionEnvironment> =
-            ee.execute_block_body(state, &payload).unwrap();
+            ee.execute_body(state, &body).unwrap();
 
-        let header = ee.complete_header(&payload, &output).unwrap();
+        let header = ee.complete_header(&intrinsics, &output);
         let block = SimpleBlock::new(header, body);
 
         let mut post_state = state.clone();
