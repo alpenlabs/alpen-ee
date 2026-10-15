@@ -1,7 +1,7 @@
 //! Error types for the chunk runtime.
 
 use alpen_acct_types::Hash;
-use alpen_chain_types::{ChunkTransition, ExecOutputs};
+use alpen_chain_types::ChunkTransition;
 use ssz::DecodeError;
 use strata_codec::CodecError;
 use thiserror::Error;
@@ -51,15 +51,6 @@ pub enum ChunkRuntimeError<EnvErr> {
         expected: Hash,
         /// State root computed from the pre state.
         got: Hash,
-    },
-
-    /// A block's claimed outputs differ from what executing it produced.
-    #[error("block output mismatch: expected {expected:?}, got {got:?}")]
-    OutputMismatch {
-        /// Outputs claimed for the block.
-        expected: Box<ExecOutputs>,
-        /// Outputs produced by executing the block.
-        got: Box<ExecOutputs>,
     },
 
     /// The state after a block does not match the block's state root.

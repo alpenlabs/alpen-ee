@@ -7,6 +7,8 @@ use rkyv_impl::archive_impl;
 use ssz::{Decode, DecodeError, Encode};
 use strata_codec::CodecError;
 
+use crate::{ChunkBlock, ChunkRuntimeError, ChunkRuntimeResult};
+
 /// Private inputs we expose to the runtime.
 #[derive(Debug, Archive, Deserialize, Serialize)]
 #[rkyv(derive(Debug))]
@@ -162,5 +164,24 @@ impl RawBlockData {
     /// Tries to decode the [`ExecOutputs`] as its type.
     pub fn try_decode_exec_outputs(&self) -> Result<ExecOutputs, DecodeError> {
         ExecOutputs::from_ssz_bytes(self.exec_outputs_ssz())
+    }
+
+    /// Tries to decode the block and its IO into a [`ChunkBlock`].
+    ///
+    /// `index` is the block's position in the chunk, used to tag errors.
+    pub fn try_decode_chunk_block<E: ExecutionEnvironment>(
+        &self,
+        index: usize,
+    ) -> ChunkRuntimeResult<ChunkBlock<E>, E::Error> {
+        let inputs = self
+            .try_decode_exec_inputs()
+            .map_err(|source| ChunkRuntimeError::DecodeBlockInputs { index, source })?;
+        let outputs = self
+            .try_decode_exec_outputs()
+            .map_err(|source| ChunkRuntimeError::DecodeBlockOutputs { index, source })?;
+        let block = self
+            .try_decode_block::<E>()
+            .map_err(|source| ChunkRuntimeError::DecodeBlock { index, source })?;
+        Ok(ChunkBlock::new(inputs, outputs, block))
     }
 }

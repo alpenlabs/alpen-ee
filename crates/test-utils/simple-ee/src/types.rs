@@ -2,9 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use alpen_acct_types::{
-    EnvError, EnvResult, ExecBlock, ExecBlockBody, ExecHeader, ExecPartialState,
-};
+use alpen_acct_types::{EnvError, EnvResult, ExecBlock, ExecHeader, ExecPartialState};
 use alpen_chain_types::{
     ExecHeaderSummary, ExecInputs, ExecOutputs, OutputMessage, SubjectDepositData,
 };
@@ -220,8 +218,6 @@ impl SimpleBlockBody {
     }
 }
 
-impl ExecBlockBody for SimpleBlockBody {}
-
 impl Codec for SimpleBlockBody {
     fn encode(&self, enc: &mut impl strata_codec::Encoder) -> Result<(), CodecError> {
         (self.deposits.len() as u32).encode(enc)?;
@@ -276,6 +272,10 @@ impl SimpleBlock {
         Self { header, body }
     }
 
+    pub fn body(&self) -> &SimpleBlockBody {
+        &self.body
+    }
+
     pub fn transactions(&self) -> &[SimpleTransaction] {
         self.body.transactions()
     }
@@ -283,18 +283,9 @@ impl SimpleBlock {
 
 impl ExecBlock for SimpleBlock {
     type Header = SimpleHeader;
-    type Body = SimpleBlockBody;
-
-    fn from_parts(header: Self::Header, body: Self::Body) -> Self {
-        Self { header, body }
-    }
 
     fn get_header(&self) -> &Self::Header {
         &self.header
-    }
-
-    fn get_body(&self) -> &Self::Body {
-        &self.body
     }
 }
 

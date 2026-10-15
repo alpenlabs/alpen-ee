@@ -4,7 +4,7 @@
 //! using RSP's sparse state and Reth's EVM execution engine.
 
 use alloy_consensus::Header;
-use alpen_acct_types::{ExecBlock, ExecBlockOutput, ExecutionEnvironment};
+use alpen_acct_types::{ExecBlockOutput, ExecutionEnvironment};
 use alpen_chain_types::{ExecInputs, ExecOutputs, OutputMessage};
 use alpen_params::{AlpenParams, AlpenSpecId};
 use alpen_reth_evm::{
@@ -18,7 +18,7 @@ use reth_evm::{
     block::BlockExecutionResult,
     execute::{BasicBlockExecutor, BlockExecutionOutput, Executor},
 };
-use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
+use reth_primitives_traits::RecoveredBlock;
 use revm::database::WrapDatabaseRef;
 use strata_acct_types::{BRIDGE_GATEWAY_ACCT_ID, BitcoinAmount, MsgPayload};
 use strata_codec::encode_to_vec;
@@ -28,7 +28,7 @@ use strata_ol_msg_types::{DEFAULT_OPERATOR_FEE, WITHDRAWAL_MSG_TYPE_ID, Withdraw
 use crate::{
     errors::EvmEnvError,
     types::{EvmBlock, EvmHeader, EvmPartialState, EvmWriteBatch},
-    utils::{build_and_recover_block, validate_deposits_against_block},
+    utils::{recover_block, validate_deposits_against_block},
 };
 
 /// EVM Execution Environment for Alpen.
@@ -155,52 +155,51 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
             return Err(EvmEnvError::SpecVersionMismatch { expected, got });
         }
 
-        let header = SealedHeader::new_unhashed(header.header().clone());
-        let parent = SealedHeader::new_unhashed(parent.header().clone());
-        self.consensus.validate_header(&header)?;
+        self.consensus.validate_header(header.sealed())?;
         self.consensus
-            .validate_header_against_parent(&header, &parent)?;
+            .validate_header_against_parent(header.sealed(), parent.sealed())?;
         Ok(())
     }
 
-    fn verify_block_pre_execution(&self, block: &EvmBlock) -> Result<(), Self::Error> {
-        let block = SealedBlock::new_unhashed(Block {
-            header: block.get_header().header().clone(),
-            body: block.get_body().body().clone(),
-        });
-        self.consensus.validate_block_pre_execution(&block)?;
-        Ok(())
+    fn verify_block_pre_execution(
+        &self,
+        block: &EvmBlock,
+        claimed_inputs: &ExecInputs,
+    ) -> Result<(), Self::Error> {
+        self.consensus
+            .validate_block_pre_execution(block.sealed())?;
+        validate_deposits_against_block(block.body(), claimed_inputs)
     }
 
     fn execute_block(
         &self,
         pre_state: &Self::PartialState,
-        block: &EvmBlock,
+        block: EvmBlock,
     ) -> Result<ExecBlockOutput<Self>, Self::Error> {
         // Step 1: Recover the senders. The header is checked by
-        // `verify_header`, the body by `verify_block_pre_execution`, the inputs
-        // by `verify_inputs_against_block` and the execution results by
-        // `verify_block_post_execution`.
-        let recovered = build_and_recover_block(block)?;
+        // `verify_header`, the body and inputs by `verify_block_pre_execution`
+        // and the execution results by `verify_block_post_execution`.
+        let recovered = recover_block(block)?;
 
         // Step 2: Anchor the `BLOCKHASH` ancestors to this block.
-        validate_ancestors_against_block(pre_state, block.get_header().header())?;
+        validate_ancestors_against_block(pre_state, recovered.header())?;
 
         // Step 3: Execute the block.
         let BlockExecutionOutput { result, state } =
             self.execute_recovered_block(&recovered, pre_state)?;
 
         // Step 4: Collect withdrawal intents.
-        let transactions = recovered.into_transactions();
         let withdrawal_intents = extract_withdrawal_intents(
-            &transactions,
+            &recovered.body().transactions,
             &result.receipts,
             self.evm_config.bridge_params(),
         )?;
 
         // Step 5: Convert the state changes to a write batch.
-        let write_batch =
-            EvmWriteBatch::from_bundle_state(&state, block.get_header().header().clone());
+        let write_batch = EvmWriteBatch::from_bundle_state(
+            &state,
+            recovered.into_sealed_block().into_sealed_header(),
+        );
 
         // Step 6: Create ExecOutputs with withdrawal intent messages.
         let mut outputs = ExecOutputs::new_empty();
@@ -209,22 +208,19 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
         Ok(ExecBlockOutput::new(write_batch, result, outputs))
     }
 
-    fn verify_inputs_against_block(
-        &self,
-        block: &Self::Block,
-        inputs: &ExecInputs,
-    ) -> Result<(), Self::Error> {
-        validate_deposits_against_block(block.get_body().body(), inputs)
-    }
-
     fn verify_block_post_execution(
         &self,
         header: &EvmHeader,
-        outputs: &ExecBlockOutput<Self>,
+        exec_output: &ExecBlockOutput<Self>,
+        claimed_outputs: &ExecOutputs,
     ) -> Result<(), Self::Error> {
         // Reth's rule reads only the header from the block, so the body and
         // senders are left empty rather than copied. If it ever read the body,
         // the empty one would fail valid blocks, not pass invalid ones.
+        // TODO(STR-4597): the rule takes an owned block, so the header is copied here.
+        // Having the trait hand the header over by value would avoid that
+        // copy, but `process_block` keeps the header for the state root check
+        // and as the next block's parent, so it needs the header back.
         let block = RecoveredBlock::new_unhashed(
             Block {
                 header: header.header().clone(),
@@ -233,7 +229,14 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
             Vec::new(),
         );
         self.consensus
-            .validate_block_post_execution(&block, outputs.block_output(), None)?;
+            .validate_block_post_execution(&block, exec_output.block_output(), None)?;
+
+        if !claimed_outputs.matches_executed(exec_output.outputs()) {
+            return Err(EvmEnvError::OutputMismatch {
+                claimed: Box::new(claimed_outputs.clone()),
+                executed: Box::new(exec_output.outputs().clone()),
+            });
+        }
         Ok(())
     }
 
@@ -256,19 +259,20 @@ mod tests {
     };
     use alloy_rlp::decode_exact;
     use alpen_acct_types::{ExecBlock, ExecPartialState};
-    use alpen_chain_types::SubjectDepositData;
+    use alpen_chain_types::{OutputTransfer, SubjectDepositData};
     use alpen_params::DEV_PARAMS_JSON;
     use alpen_test_utils_evm_workload::{MIXED_WORKLOAD, Workload, workload_dir};
     use reth_consensus::ConsensusError;
     use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
+    use reth_primitives_traits::SealedHeader;
     use reth_trie::HashedPostState;
     use revm::DatabaseRef;
     use revm_primitives::{
         B256,
         alloy_primitives::{Bloom, Signature},
     };
-    use strata_acct_types::SubjectId;
+    use strata_acct_types::{AccountId, SubjectId};
     use strata_codec::decode_buf_exact;
     use strata_msg_fmt::{Msg, MsgRef};
     use strata_ol_bridge_types::OperatorSelection;
@@ -276,7 +280,7 @@ mod tests {
     use strata_primitives::bitcoin_bosd::Descriptor;
 
     use super::*;
-    use crate::types::{EvmBlock, EvmBlockBody, EvmHeader, EvmPartialState};
+    use crate::types::{EvmBlock, EvmHeader, EvmPartialState};
 
     /// The spec version the workload's blocks are stamped with.
     const FIXTURE_SPEC_VERSION: AlpenSpecId = AlpenSpecId::V1;
@@ -302,10 +306,7 @@ mod tests {
 
     impl Fixture {
         fn evm_block(&self) -> EvmBlock {
-            EvmBlock::new(
-                EvmHeader::new(self.block.header.clone()),
-                EvmBlockBody::from_alloy_body(self.block.body.clone()),
-            )
+            EvmBlock::new(self.block.clone())
         }
     }
 
@@ -392,7 +393,10 @@ mod tests {
                 .is_err()
         );
 
-        let write_batch = EvmWriteBatch::new(HashedPostState::default(), header.clone());
+        let write_batch = EvmWriteBatch::new(
+            HashedPostState::default(),
+            SealedHeader::new_unhashed(header.clone()),
+        );
         fixture_env()
             .merge_write_into_state(&mut pre_state, &write_batch)
             .expect("merging the write batch should succeed");
@@ -431,7 +435,7 @@ mod tests {
             fabricated,
         );
 
-        let result = fixture_env().execute_block(&pre_state, &fixture.evm_block());
+        let result = fixture_env().execute_block(&pre_state, fixture.evm_block());
         assert!(
             matches!(result, Err(EvmEnvError::AncestorMismatch { .. })),
             "ancestors that do not link to the executed block must be rejected: {result:?}"
@@ -511,26 +515,27 @@ mod tests {
     fn verify_fixture_block(
         header: Header,
         body: BlockBody<TransactionSigned>,
+        inputs: &ExecInputs,
     ) -> Result<(), EvmEnvError> {
-        let block = EvmBlock::new(EvmHeader::new(header), EvmBlockBody::from_alloy_body(body));
-        fixture_env().verify_block_pre_execution(&block)
+        let block = EvmBlock::new(Block { header, body });
+        fixture_env().verify_block_pre_execution(&block, inputs)
     }
 
     #[test]
     fn verify_block_pre_execution_accepts_the_fixture_block() {
-        let Fixture { block, .. } = fixture();
+        let Fixture { block, inputs, .. } = fixture();
 
-        verify_fixture_block(block.header, block.body)
+        verify_fixture_block(block.header, block.body, &inputs)
             .expect("the fixture header commits to its body");
     }
 
     #[test]
     fn verify_block_pre_execution_rejects_a_body_the_header_does_not_commit_to() {
-        let Fixture { block, .. } = fixture();
+        let Fixture { block, inputs, .. } = fixture();
         let mut header = block.header;
         header.transactions_root = B256::ZERO;
 
-        let result = verify_fixture_block(header, block.body);
+        let result = verify_fixture_block(header, block.body, &inputs);
         assert!(
             matches!(
                 &result,
@@ -545,7 +550,7 @@ mod tests {
     /// larger block before executing it, and so must the proof.
     #[test]
     fn verify_block_pre_execution_rejects_an_oversized_block() {
-        let Fixture { block, .. } = fixture();
+        let Fixture { block, inputs, .. } = fixture();
         let mut header = block.header;
         let mut body = block.body;
         let padding = TxLegacy {
@@ -558,7 +563,7 @@ mod tests {
         ));
         header.transactions_root = calculate_transaction_root(&body.transactions);
 
-        let result = verify_fixture_block(header, body);
+        let result = verify_fixture_block(header, body, &inputs);
         assert!(
             matches!(
                 &result,
@@ -576,17 +581,18 @@ mod tests {
         let mut fixture = fixture();
         let env = fixture_env();
         let block = fixture.evm_block();
+        let header = block.get_header().clone();
 
-        env.verify_inputs_against_block(&block, &fixture.inputs)
-            .expect("the block mints the workload's deposits");
+        env.verify_block_pre_execution(&block, &fixture.inputs)
+            .expect("the header commits to the body, which mints the workload's deposits");
 
         let output = env
-            .execute_block(&fixture.pre_state, &block)
+            .execute_block(&fixture.pre_state, block)
             .expect("block execution should succeed");
 
         // This covers the receipts root, logs bloom and gas figures, but not
         // the state root, which this method does not look at.
-        env.verify_block_post_execution(block.get_header(), &output)
+        env.verify_block_post_execution(&header, &output, output.outputs())
             .expect("execution-derived commitments should match the header");
 
         // The state root only exists once the writes are merged, so check it here.
@@ -599,6 +605,29 @@ mod tests {
         );
     }
 
+    #[test]
+    fn verify_block_post_execution_rejects_mismatched_outputs() {
+        let fixture = fixture();
+        let env = fixture_env();
+        let block = fixture.evm_block();
+        let header = block.get_header().clone();
+        let output = env
+            .execute_block(&fixture.pre_state, block)
+            .expect("block execution should succeed");
+
+        let mut claimed = output.outputs().clone();
+        claimed.add_transfer(OutputTransfer::new(
+            AccountId::new([0x44; 32]),
+            BitcoinAmount::try_from(1u64).expect("amount fits"),
+        ));
+
+        let result = env.verify_block_post_execution(&header, &output, &claimed);
+        assert!(
+            matches!(result, Err(EvmEnvError::OutputMismatch { .. })),
+            "{result:?}"
+        );
+    }
+
     /// Each case breaks one commitment the header makes to execution. The
     /// proof must refuse the same headers the node does.
     #[test]
@@ -606,7 +635,7 @@ mod tests {
         let fixture = fixture();
         let env = fixture_env();
         let output = env
-            .execute_block(&fixture.pre_state, &fixture.evm_block())
+            .execute_block(&fixture.pre_state, fixture.evm_block())
             .expect("block execution should succeed");
         let header = fixture.block.header;
 
@@ -634,7 +663,11 @@ mod tests {
         for (break_rule, is_expected) in cases {
             let mut bad_header = header.clone();
             break_rule(&mut bad_header);
-            let result = env.verify_block_post_execution(&EvmHeader::new(bad_header), &output);
+            let result = env.verify_block_post_execution(
+                &EvmHeader::new(bad_header),
+                &output,
+                output.outputs(),
+            );
             assert!(
                 matches!(&result, Err(EvmEnvError::ConsensusRule(err)) if is_expected(err)),
                 "{result:?}"

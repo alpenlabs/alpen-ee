@@ -6,6 +6,7 @@ use alloy_consensus::{BlockHeader, Header, Sealable, Sealed};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alpen_acct_types::ExecPartialState;
 use itertools::Itertools;
+use reth_primitives_traits::SealedHeader;
 use revm::state::Bytecode;
 use revm_primitives::{B256, Bytes, keccak256, map::HashMap};
 use rsp_mpt::EthereumState;
@@ -151,16 +152,17 @@ impl EvmPartialState {
     /// Adds a newly executed block's header to the witness state.
     ///
     /// This is called after executing a block in a batch to make its hash
-    /// available for `BLOCKHASH` opcode in subsequent blocks.
+    /// available for `BLOCKHASH` opcode in subsequent blocks. It reuses the
+    /// header's hash when the seal already holds it.
     // NOTE: not sure we we should be adding this in proof generation flow. Looks like we can
     // prepare all of this for whole batch while generating witness.
-    pub fn add_executed_block(&mut self, header: Header) {
-        let sealed = header.seal_slow(); // Hash once
-        let block_num = sealed.number();
-        let block_hash = sealed.hash();
+    pub fn add_executed_block(&mut self, header: SealedHeader<Header>) {
+        let (header, block_hash) = header.split();
+        let block_num = header.number;
 
         // Add to both maps for subsequent block execution
-        self.ancestor_headers.insert(block_num, sealed);
+        self.ancestor_headers
+            .insert(block_num, Sealed::new_unchecked(header, block_hash));
         self.block_hashes.insert(block_num, block_hash);
     }
 
