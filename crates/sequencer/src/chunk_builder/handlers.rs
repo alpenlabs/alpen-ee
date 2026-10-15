@@ -7,6 +7,7 @@
 
 use alpen_common::{BatchId, BatchStorage, BlockNumHash, Chunk, ChunkStorage, ExecBlockStorage};
 use eyre::{eyre, Result};
+use metrics::{counter, histogram};
 use strata_acct_types::Hash;
 use tracing::{debug, warn};
 
@@ -21,6 +22,11 @@ const SEAL_REASON_BATCH_BOUNDARY: SealReason = "batch_boundary";
 
 /// Maximum number of entries to process in a single tick cycle.
 const MAX_ENTRIES_PER_TICK: usize = 10;
+
+/// Counts durably sealed chunks by policy reason, in chunks.
+const CHUNK_SEALED_METRIC: &str = "alpen_ee_chunk_sealed_total";
+/// Records the number of execution blocks in each durably sealed chunk, in blocks.
+const CHUNK_BLOCKS_METRIC: &str = "alpen_ee_chunk_blocks";
 
 /// Process pending entries from the queue.
 ///
@@ -296,6 +302,9 @@ async fn seal_chunk<P: AccumulationPolicy>(
         .save_next_chunk(chunk)
         .await
         .map_err(|e| eyre!("save_next_chunk: {e}"))?;
+
+    counter!(CHUNK_SEALED_METRIC, "reason" => reason).increment(1);
+    histogram!(CHUNK_BLOCKS_METRIC).record(state.accumulator().block_count() as f64);
 
     // The chunk is durable, so the blocks it covers can go. `advance_chunk`
     // doesn't touch the accumulator, unlike its batch-level counterpart.

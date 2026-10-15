@@ -1992,6 +1992,7 @@ dependencies = [
  "bitcoin",
  "eyre",
  "futures",
+ "metrics",
  "mockall",
  "serde",
  "strata-acct-types",
