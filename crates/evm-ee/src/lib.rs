@@ -5,12 +5,13 @@
 //! to be executed and proven within the Alpen rollup system.
 
 mod codec_shims;
+mod errors;
 mod execution;
 mod types;
 mod utils;
 
+pub use errors::EvmEnvError;
 pub use execution::EvmExecutionEnvironment;
 pub use types::{
-    EvmBlock, EvmBlockBody, EvmBlockOutput, EvmHeader, EvmHeaderIntrinsics, EvmPartialState,
-    EvmWriteBatch,
+    EvmBlock, EvmBlockBody, EvmHeader, EvmHeaderIntrinsics, EvmPartialState, EvmWriteBatch,
 };

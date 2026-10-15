@@ -1,8 +1,8 @@
 //! Simple execution environment implementation.
 
 use alpen_acct_types::{
-    BlockAssembler, EnvError, EnvResult, ExecBlock, ExecBlockOutput, ExecPartialState, ExecPayload,
-    ExecutionEnvironment,
+    BlockAssembler, EnvError, EnvResult, ExecBlock, ExecBlockOutput, ExecHeader, ExecPartialState,
+    ExecPayload, ExecutionEnvironment,
 };
 use alpen_chain_types::{ExecInputs, ExecOutputs};
 
@@ -17,6 +17,21 @@ impl ExecutionEnvironment for SimpleExecutionEnvironment {
     type Block = SimpleBlock;
     type WriteBatch = SimpleWriteBatch;
     type BlockOutput = ();
+    type Error = EnvError;
+
+    fn verify_header(&self, parent: &SimpleHeader, header: &SimpleHeader) -> EnvResult<()> {
+        if header.get_parent_id() != parent.compute_block_id()
+            || parent.index().checked_add(1) != Some(header.index())
+        {
+            return Err(EnvError::InvalidHeader);
+        }
+        Ok(())
+    }
+
+    fn verify_block_pre_execution(&self, _block: &Self::Block) -> EnvResult<()> {
+        // The simple header does not commit to its body.
+        Ok(())
+    }
 
     fn execute_block_body(
         &self,
@@ -59,7 +74,7 @@ impl ExecutionEnvironment for SimpleExecutionEnvironment {
         Ok(())
     }
 
-    fn verify_outputs_against_header(
+    fn verify_block_post_execution(
         &self,
         _header: &<Self::Block as ExecBlock>::Header,
         _outputs: &ExecBlockOutput<Self>,
@@ -88,7 +103,7 @@ impl BlockAssembler for SimpleExecutionEnvironment {
 
         // Compute state root by applying the write batch
         let post_state = SimplePartialState::new(output.write_batch().accounts().clone());
-        let state_root = post_state.compute_state_root()?;
+        let state_root = post_state.compute_state_root();
 
         Ok(SimpleHeader::new(
             intrinsics.parent_blkid,
@@ -150,7 +165,7 @@ mod tests {
     ) -> SimpleHeader {
         // Compute state root by applying the write batch
         let post_state = SimplePartialState::new(output.write_batch().accounts().clone());
-        let state_root = post_state.compute_state_root().unwrap();
+        let state_root = post_state.compute_state_root();
 
         SimpleHeader::new(intrinsics.parent_blkid, state_root, intrinsics.index)
     }

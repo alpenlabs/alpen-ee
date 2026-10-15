@@ -36,6 +36,10 @@ pub enum EnvError {
     #[error("provided partial state insufficient for block being executed")]
     InsufficientPartialState,
 
+    /// A block header breaks the environment's header rules.
+    #[error("invalid block header")]
+    InvalidHeader,
+
     /// There was an invalid block within a segment, for some reason.
     #[error("invalid block")]
     InvalidBlock,
@@ -43,10 +47,6 @@ pub enum EnvError {
     /// There was a tx that was invalid in a block, for some reason.
     #[error("invalid tx in a block")]
     InvalidBlockTx,
-
-    /// A deposit has an invalid destination address.
-    #[error("invalid deposit address: {0}")]
-    InvalidDepositAddress(strata_acct_types::SubjectId),
 
     #[error("blocks in a chunk did not match the chunk's attested io")]
     InconsistentChunkIo,

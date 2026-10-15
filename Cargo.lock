@@ -1568,6 +1568,7 @@ dependencies = [
  "alpen-reth-primitives",
  "bincode",
  "itertools 0.14.0",
+ "reth-consensus",
  "reth-consensus-common",
  "reth-errors",
  "reth-ethereum-primitives",
@@ -1586,6 +1587,7 @@ dependencies = [
  "strata-ol-bridge-types",
  "strata-ol-msg-types",
  "strata-primitives",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -1804,6 +1806,9 @@ dependencies = [
  "alpen-reth-primitives",
  "proptest",
  "reth-chainspec",
+ "reth-consensus",
+ "reth-consensus-common",
+ "reth-ethereum-consensus",
  "reth-ethereum-primitives",
  "reth-evm",
  "reth-evm-ethereum",
@@ -1840,7 +1845,6 @@ dependencies = [
  "reth-basic-payload-builder",
  "reth-chainspec",
  "reth-consensus",
- "reth-consensus-common",
  "reth-errors",
  "reth-eth-wire",
  "reth-ethereum-engine-primitives",

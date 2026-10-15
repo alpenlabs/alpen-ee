@@ -2,17 +2,19 @@
 // crate?  so that chunk-runtime doesn't have to depend on this crate?  maybe
 // do this after repo restructure
 
+use std::error::Error;
+
 use alpen_chain_types::{ExecHeaderSummary, ExecInputs};
 use strata_codec::Codec;
 use strata_identifiers::Hash;
 
-use crate::{errors::EnvResult, inputs::ExecPayload, outputs::ExecBlockOutput};
+use crate::{inputs::ExecPayload, outputs::ExecBlockOutput};
 
 /// Represents a partially-loaded state, including any information we would need
 /// to manipulate it and compute state roots.
 pub trait ExecPartialState: Codec + Clone + Sized {
     /// Computes the state root of a partial state.
-    fn compute_state_root(&self) -> EnvResult<Hash>;
+    fn compute_state_root(&self) -> Hash;
 }
 
 /// Represents an execution block header.
@@ -60,9 +62,6 @@ pub trait ExecBlock: Codec + Sized {
     /// Constructs a block from a header and body.
     fn from_parts(header: Self::Header, body: Self::Body) -> Self;
 
-    /// Checks if a header matches a body.
-    fn check_header_matches_body(header: &Self::Header, body: &Self::Body) -> bool;
-
     /// Gets a reference to the block's header.
     fn get_header(&self) -> &Self::Header;
 
@@ -89,18 +88,45 @@ pub trait ExecutionEnvironment: Sized + 'static {
     /// or complete a block header.
     type BlockOutput: Sized;
 
+    /// Why one of this environment's checks or its execution failed.
+    ///
+    /// Each environment names its own failures, so a rejected block says
+    /// which rule it broke.
+    type Error: Error + Send + Sync + 'static;
+
+    /// Checks a block header on its own and against its parent's header.
+    ///
+    /// This must check that `header` builds on `parent`, meaning its parent
+    /// ID is `parent`'s block ID. Callers rely on that to treat a run of
+    /// blocks as one chain. It also checks every other rule the environment
+    /// puts on a header, such as its number, timestamp and fee fields.
+    fn verify_header(
+        &self,
+        parent: &<Self::Block as ExecBlock>::Header,
+        header: &<Self::Block as ExecBlock>::Header,
+    ) -> Result<(), Self::Error>;
+
+    /// Checks a block's body against its header, before executing it.
+    ///
+    /// This must check that the header commits to the body. It also checks
+    /// every other rule the environment puts on a block that needs the body
+    /// but not the execution result, such as a limit on the block's size.
+    fn verify_block_pre_execution(&self, block: &Self::Block) -> Result<(), Self::Error>;
+
     /// Executes a block payload on top of a pre-state, returning the execution
     /// output.
     ///
     /// When assembling a block, the output is used to complete its header. When
     /// verifying a block, execution alone is not enough: the caller must also
-    /// check the inputs with [`Self::verify_inputs_against_block`] and the
-    /// output with [`Self::verify_outputs_against_header`].
+    /// check the header with [`Self::verify_header`], the body with
+    /// [`Self::verify_block_pre_execution`], the inputs with
+    /// [`Self::verify_inputs_against_block`] and the output with
+    /// [`Self::verify_block_post_execution`].
     fn execute_block_body(
         &self,
         pre_state: &Self::PartialState,
         exec_payload: &ExecPayload<'_, Self::Block>,
-    ) -> EnvResult<ExecBlockOutput<Self>>;
+    ) -> Result<ExecBlockOutput<Self>, Self::Error>;
 
     /// Checks that the inputs match what the block applies.
     ///
@@ -111,22 +137,25 @@ pub trait ExecutionEnvironment: Sized + 'static {
         &self,
         block: &Self::Block,
         inputs: &ExecInputs,
-    ) -> EnvResult<()>;
+    ) -> Result<(), Self::Error>;
 
-    /// Performs any additional checks needed from the block outputs against the
-    /// header.
-    fn verify_outputs_against_header(
+    /// Checks a block's execution output against its header.
+    ///
+    /// This must check every commitment the header makes to execution, such
+    /// as the receipts and the gas used. The state root is left to the caller,
+    /// since it only exists once the writes are merged.
+    fn verify_block_post_execution(
         &self,
         header: &<Self::Block as ExecBlock>::Header,
         outputs: &ExecBlockOutput<Self>,
-    ) -> EnvResult<()>;
+    ) -> Result<(), Self::Error>;
 
     /// Applies a pending write batch into the partial state.
     fn merge_write_into_state(
         &self,
         state: &mut Self::PartialState,
         wb: &Self::WriteBatch,
-    ) -> EnvResult<()>;
+    ) -> Result<(), Self::Error>;
 
     /// Updates partial state with data derived from a successfully executed block.
     ///
@@ -138,7 +167,7 @@ pub trait ExecutionEnvironment: Sized + 'static {
         &self,
         _state: &mut Self::PartialState,
         _header: &<Self::Block as ExecBlock>::Header,
-    ) -> EnvResult<()> {
+    ) -> Result<(), Self::Error> {
         Ok(())
     }
 }
@@ -158,5 +187,5 @@ pub trait BlockAssembler: ExecutionEnvironment {
         &self,
         exec_payload: &ExecPayload<'_, Self::Block>,
         output: &ExecBlockOutput<Self>,
-    ) -> EnvResult<<Self::Block as ExecBlock>::Header>;
+    ) -> Result<<Self::Block as ExecBlock>::Header, Self::Error>;
 }
