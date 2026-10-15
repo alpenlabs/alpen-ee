@@ -194,7 +194,7 @@ mod tests {
         let exec_payload = ExecPayload::new(&header_intrinsics, block.get_body());
         let inputs = ExecInputs::new_empty();
         let output = ee
-            .execute_block_body(&pre_state, &exec_payload, &inputs)
+            .execute_block_body(&pre_state, &exec_payload)
             .expect("block execution should succeed");
         let outputs = output.outputs().clone();
 
@@ -214,7 +214,7 @@ mod tests {
         let raw_block_data =
             RawBlockData::from_block::<EvmExecutionEnvironment>(&block, inputs, outputs)
                 .expect("encode block");
-        let raw_chunk = RawChunkData::new(vec![raw_block_data], parent_blkid);
+        let raw_chunk = RawChunkData::new(vec![raw_block_data]);
         let raw_prev_header = encode_to_vec(&parent_evm_header).expect("encode prev header");
 
         let private_input = PrivateInput::new(

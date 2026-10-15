@@ -122,10 +122,9 @@ impl EvmExecutionEnvironment {
         Self { evm_config }
     }
 
-    fn validate_execution_inputs(
+    fn validate_block(
         &self,
         block: &RecoveredBlock<AlloyBlock<TransactionSigned>>,
-        inputs: &ExecInputs,
     ) -> EnvResult<()> {
         EthPrimitives::validate_header(
             block.sealed_block().sealed_header(),
@@ -133,8 +132,7 @@ impl EvmExecutionEnvironment {
         )
         .map_err(|_| EnvError::InvalidBlock)?;
         validate_body_against_header(block.body(), block.header())
-            .map_err(|_| EnvError::InvalidBlock)?;
-        validate_deposits_against_block(block, inputs)
+            .map_err(|_| EnvError::InvalidBlock)
     }
 
     fn execute_recovered_block(
@@ -166,14 +164,14 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
         &self,
         pre_state: &Self::PartialState,
         exec_payload: &ExecPayload<'_, Self::Block>,
-        inputs: &ExecInputs,
     ) -> EnvResult<ExecBlockOutput<Self>> {
         // Step 1: Build block from exec_payload and recover senders
         let block = build_and_recover_block(exec_payload)?;
 
-        // Step 2: Validate execution inputs against the synthesized execution header.
-        // The full block header is checked separately by `verify_outputs_against_header`.
-        self.validate_execution_inputs(&block, inputs)?;
+        // Step 2: Validate the block against the synthesized execution header.
+        // The full block header is checked separately by `verify_outputs_against_header`,
+        // and the inputs by `verify_inputs_against_block`.
+        self.validate_block(&block)?;
 
         // Step 2b: Anchor the `BLOCKHASH` ancestors to this block.
         validate_ancestors_against_block(pre_state, exec_payload.header_intrinsics())?;
@@ -207,6 +205,14 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
         convert_withdrawal_intents_to_messages(withdrawal_intents, &mut outputs);
 
         Ok(ExecBlockOutput::new(write_batch, block_output, outputs))
+    }
+
+    fn verify_inputs_against_block(
+        &self,
+        block: &Self::Block,
+        inputs: &ExecInputs,
+    ) -> EnvResult<()> {
+        validate_deposits_against_block(block.get_body().body(), inputs)
     }
 
     fn verify_outputs_against_header(
@@ -425,7 +431,7 @@ mod tests {
         let intrinsics = block.get_header().get_intrinsics();
         let exec_payload = ExecPayload::new(&intrinsics, block.get_body());
 
-        let result = env.execute_block_body(&pre_state, &exec_payload, &ExecInputs::new_empty());
+        let result = env.execute_block_body(&pre_state, &exec_payload);
         assert!(
             result.is_err(),
             "ancestors that do not link to the executed block must be rejected"
@@ -519,9 +525,12 @@ mod tests {
         let exec_payload = ExecPayload::new(&intrinsics, block.get_body());
         let inputs = ExecInputs::new_empty();
 
+        env.verify_inputs_against_block(&block, &inputs)
+            .expect("the witness block carries no deposits");
+
         // Execute the block
         // Note: This will execute real block data through our implementation
-        let result = env.execute_block_body(&pre_state, &exec_payload, &inputs);
+        let result = env.execute_block_body(&pre_state, &exec_payload);
 
         // For now, we just verify it doesn't panic
         // In the future, we can compare outputs with the reference implementation
@@ -584,9 +593,8 @@ mod tests {
         let block = EvmBlock::new(evm_header, evm_body);
         let intrinsics = block.get_header().get_intrinsics();
         let exec_payload = ExecPayload::new(&intrinsics, block.get_body());
-        let inputs = ExecInputs::new_empty();
         let output = env
-            .execute_block_body(&pre_state, &exec_payload, &inputs)
+            .execute_block_body(&pre_state, &exec_payload)
             .expect("block execution should succeed");
 
         let mut bad_receipts_root = header.clone();

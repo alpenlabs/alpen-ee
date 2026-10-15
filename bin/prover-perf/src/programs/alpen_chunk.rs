@@ -68,7 +68,7 @@ pub(super) fn build_chunk(workload: &Workload) -> Chunk {
         let header_intrinsics = block.get_header().get_intrinsics();
         let payload = ExecPayload::new(&header_intrinsics, block.get_body());
         let output = ee
-            .execute_block_body(&state, &payload, &inputs)
+            .execute_block_body(&state, &payload)
             .expect("workload block executes");
         ee.merge_write_into_state(&mut state, output.write_batch())
             .expect("merge block writes");
@@ -96,7 +96,7 @@ pub(super) fn build_chunk(workload: &Workload) -> Chunk {
     );
     let private_input = PrivateInput::new(
         transition.clone(),
-        RawChunkData::new(block_datas, parent_blkid),
+        RawChunkData::new(block_datas),
         encode_to_vec(&parent_evm_header).expect("encode prev header"),
         workload.chunk_pre_state.clone(),
     );

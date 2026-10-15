@@ -608,9 +608,8 @@ dependencies = [
  "rkyv",
  "rkyv_impl 0.2.2",
  "ssz",
- "strata-acct-types",
  "strata-codec",
- "strata-predicate",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

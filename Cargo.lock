@@ -1246,6 +1246,7 @@ dependencies = [
  "strata-acct-types",
  "strata-codec",
  "strata-predicate",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

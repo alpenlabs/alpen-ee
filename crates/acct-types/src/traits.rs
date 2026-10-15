@@ -92,14 +92,26 @@ pub trait ExecutionEnvironment: Sized + 'static {
     /// Executes a block payload on top of a pre-state, returning the execution
     /// output.
     ///
-    /// This should still be checked against a header when verifying a block, or
-    /// can be used to construct the final block header when assembling a block.
+    /// When assembling a block, the output is used to complete its header. When
+    /// verifying a block, execution alone is not enough: the caller must also
+    /// check the inputs with [`Self::verify_inputs_against_block`] and the
+    /// output with [`Self::verify_outputs_against_header`].
     fn execute_block_body(
         &self,
         pre_state: &Self::PartialState,
         exec_payload: &ExecPayload<'_, Self::Block>,
-        inputs: &ExecInputs,
     ) -> EnvResult<ExecBlockOutput<Self>>;
+
+    /// Checks that the inputs match what the block applies.
+    ///
+    /// Execution reads the block, not the inputs, so the inputs are a claim
+    /// about the block. Each environment checks that claim against the block
+    /// itself, for example against a deposit list in the body.
+    fn verify_inputs_against_block(
+        &self,
+        block: &Self::Block,
+        inputs: &ExecInputs,
+    ) -> EnvResult<()>;
 
     /// Performs any additional checks needed from the block outputs against the
     /// header.

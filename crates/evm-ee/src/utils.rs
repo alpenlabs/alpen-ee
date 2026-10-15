@@ -3,7 +3,7 @@
 //! This module contains utility functions used during block execution that don't
 //! belong to any specific type.
 
-use alloy_consensus::Block as AlloyBlock;
+use alloy_consensus::{Block as AlloyBlock, BlockBody};
 use alpen_acct_types::{EnvError, EnvResult, ExecPayload};
 use alpen_chain_types::ExecInputs;
 use alpen_reth_evm::subject_to_address;
@@ -63,14 +63,11 @@ pub(crate) fn compute_hashed_post_state(
 /// - `Ok(())` if deposits match
 /// - `Err(EnvError::InvalidBlock)` if there's a mismatch in count, address, or amount
 pub(crate) fn validate_deposits_against_block(
-    block: &RecoveredBlock<AlloyBlock<TransactionSigned>>,
+    body: &BlockBody<TransactionSigned>,
     inputs: &ExecInputs,
 ) -> EnvResult<()> {
     // Get withdrawals from the block body (this is where deposits are stored)
-    // Access the sealed block's body withdrawals through the nested structure
-    let block_withdrawals = block
-        .sealed_block()
-        .body()
+    let block_withdrawals = body
         .withdrawals
         .as_ref()
         .map(|w| w.as_slice())
@@ -107,10 +104,8 @@ pub(crate) fn validate_deposits_against_block(
 
 #[cfg(test)]
 mod tests {
-    use alloy_consensus::{BlockBody, Header};
     use alloy_eips::eip4895::Withdrawal;
     use alpen_chain_types::{ExecInputs, SubjectDepositData};
-    use reth_primitives_traits::RecoveredBlock;
     use revm_primitives::Address;
     use strata_acct_types::{BitcoinAmount, SubjectId};
 
@@ -124,8 +119,7 @@ mod tests {
         let subject_id = SubjectId::new(subject_bytes);
         let expected_address = subject_to_address(&subject_id).expect("valid subject ID");
 
-        // Create a block with matching withdrawal
-        let header = Header::default();
+        // Create a block body with matching withdrawal
         let body = BlockBody {
             transactions: vec![],
             ommers: vec![],
@@ -139,9 +133,6 @@ mod tests {
                 .into(),
             ),
         };
-        let block = AlloyBlock { header, body };
-        let recovered_block: RecoveredBlock<AlloyBlock<TransactionSigned>> =
-            block.try_into_recovered().unwrap();
 
         // Create matching deposit input
         let mut inputs = ExecInputs::new_empty();
@@ -149,7 +140,7 @@ mod tests {
         inputs.add_subject_deposit(deposit);
 
         // Should succeed - perfect match
-        let result = validate_deposits_against_block(&recovered_block, &inputs);
+        let result = validate_deposits_against_block(&body, &inputs);
         assert!(result.is_ok());
     }
 
@@ -160,8 +151,7 @@ mod tests {
         subject_bytes[31] = 0xff; // Different address
         let subject_id = SubjectId::new(subject_bytes);
 
-        // Create a block with different address
-        let header = Header::default();
+        // Create a block body with different address
         let body = BlockBody {
             transactions: vec![],
             ommers: vec![],
@@ -175,9 +165,6 @@ mod tests {
                 .into(),
             ),
         };
-        let block = AlloyBlock { header, body };
-        let recovered_block: RecoveredBlock<AlloyBlock<TransactionSigned>> =
-            block.try_into_recovered().unwrap();
 
         // Create deposit with different address
         let mut inputs = ExecInputs::new_empty();
@@ -185,7 +172,7 @@ mod tests {
         inputs.add_subject_deposit(deposit);
 
         // Should fail - address mismatch
-        let result = validate_deposits_against_block(&recovered_block, &inputs);
+        let result = validate_deposits_against_block(&body, &inputs);
         assert!(result.is_err());
     }
 
@@ -194,8 +181,7 @@ mod tests {
         // Invalid subject ID with non-zero padding in first 12 bytes
         let subject_id = SubjectId::new([0xff; 32]);
 
-        // Create a block
-        let header = Header::default();
+        // Create a block body
         let body = BlockBody {
             transactions: vec![],
             ommers: vec![],
@@ -209,9 +195,6 @@ mod tests {
                 .into(),
             ),
         };
-        let block = AlloyBlock { header, body };
-        let recovered_block: RecoveredBlock<AlloyBlock<TransactionSigned>> =
-            block.try_into_recovered().unwrap();
 
         // Create deposit with invalid subject ID
         let mut inputs = ExecInputs::new_empty();
@@ -219,7 +202,7 @@ mod tests {
         inputs.add_subject_deposit(deposit);
 
         // Should fail - invalid subject ID
-        let result = validate_deposits_against_block(&recovered_block, &inputs);
+        let result = validate_deposits_against_block(&body, &inputs);
         assert!(result.is_err());
     }
 
@@ -230,8 +213,7 @@ mod tests {
         let subject_id = SubjectId::new(subject_bytes);
         let expected_address = subject_to_address(&subject_id).expect("valid subject ID");
 
-        // Create a block with wrong amount
-        let header = Header::default();
+        // Create a block body with wrong amount
         let body = BlockBody {
             transactions: vec![],
             ommers: vec![],
@@ -245,9 +227,6 @@ mod tests {
                 .into(),
             ),
         };
-        let block = AlloyBlock { header, body };
-        let recovered_block: RecoveredBlock<AlloyBlock<TransactionSigned>> =
-            block.try_into_recovered().unwrap();
 
         // Create deposit with different amount
         let mut inputs = ExecInputs::new_empty();
@@ -255,7 +234,7 @@ mod tests {
         inputs.add_subject_deposit(deposit);
 
         // Should fail - amount mismatch
-        let result = validate_deposits_against_block(&recovered_block, &inputs);
+        let result = validate_deposits_against_block(&body, &inputs);
         assert!(result.is_err());
     }
 }
