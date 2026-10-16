@@ -159,10 +159,12 @@ jobs:
         id: runtests
         env:
           EEST_PYTEST_ARGS: ${{ github.event.inputs.eest_pytest_args || '' }}
+        # The fork must match the spec version the alpen_eest chain launches
+        # on. That is V1, which runs Osaka.
         run: |
           args=(
             --rpc-endpoint http://localhost:30303
-            --fork Prague
+            --fork Osaka
             --tx-wait-timeout 120
           )
           if [[ -n "${EEST_PYTEST_ARGS}" ]]; then
