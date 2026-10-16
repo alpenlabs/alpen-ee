@@ -1,13 +1,13 @@
 //! Generic L1 byte-blob inclusion layer of the DA witness: walking the batch's
 //! referenced L1 blocks, building Bitcoin wtxid inclusion proofs, and DA-blob
-//! reassembly from the witnessed transactions.
+//! decoding from the witnessed transactions.
 //!
 //! This layer is execution-environment agnostic — it deals only with published
 //! byte blobs in L1 transactions, not with what those blobs decode into.
 
 use alpen_common::L1DaBlockRef;
 use alpen_da_types::{
-    compute_bitcoin_inclusion_proof, extract_da_chunks, reassemble_da_blob, wtxid_leaves,
+    compute_bitcoin_inclusion_proof, decode_da_blob_from_chunks, extract_da_chunks, wtxid_leaves,
     wtxids_root_from_txs, BitcoinMerkleProof, DaBlob, DaBlockWitness, DaTxWitness,
     L1DaBlockInclusion,
 };
@@ -21,10 +21,10 @@ use super::DaWitnessBuildError;
 
 /// Walks the batch's referenced L1 blocks and builds the generic byte-blob
 /// inclusion witness (raw txs + wtxid Merkle proofs), returning the per-block
-/// witnesses and the flat list of included transactions for blob reassembly.
+/// witnesses and the flat list of included transactions for blob decoding.
 ///
 /// This is execution-environment agnostic: it knows about L1 blocks and txs, not
-/// about what the reassembled blob decodes into.
+/// about what the decoded blob contains.
 pub(crate) async fn collect_l1_inclusion_blocks(
     da_refs: &[L1DaBlockRef],
     btc: &(impl Reader + Sync),
@@ -106,13 +106,13 @@ pub(crate) fn build_wtxid_inclusion_proof(txs: &[Transaction], idx: usize) -> Bi
     BitcoinMerkleProof::new(siblings, idx as u32)
 }
 
-/// Reassembles this batch's DA blob from its included commit/reveal transactions.
-pub(crate) fn reassemble_da_blob_from_txs(
+/// Decodes this batch's DA blob from its included commit/reveal transactions.
+pub(crate) fn decode_da_blob_from_txs(
     txs: &[Transaction],
     spec_version: AlpenSpecId,
 ) -> Result<DaBlob, DaWitnessBuildError> {
     let chunks = extract_da_chunks(txs.iter())?;
-    reassemble_da_blob(&chunks, spec_version).map_err(DaWitnessBuildError::Reassembly)
+    decode_da_blob_from_chunks(&chunks, spec_version).map_err(DaWitnessBuildError::Decode)
 }
 
 #[cfg(test)]
