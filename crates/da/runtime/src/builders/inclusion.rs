@@ -7,17 +7,16 @@
 
 use alpen_common::L1DaBlockRef;
 use alpen_da_types::{
-    compute_bitcoin_inclusion_proof, extract_da_chunks, reassemble_da_blob, wtxid_leaves,
-    wtxids_root_from_txs, BitcoinMerkleProof, DaBlob, DaBlockWitness, DaTxWitness,
-    L1DaBlockInclusion,
+    compute_bitcoin_inclusion_proof, wtxid_leaves, wtxids_root_from_txs, BitcoinMerkleProof,
+    DaBlockWitness, DaTxWitness, L1DaBlockInclusion,
 };
-use alpen_params::AlpenSpecId;
 use bitcoin::{consensus::serialize as btc_serialize, hashes::Hash as _, Transaction};
 use bitcoind_async_client::traits::Reader;
 use strata_identifiers::{Buf32, WtxidsRoot};
 use strata_primitives::l1::L1BlockIdBitcoinExt;
 
 use super::DaWitnessBuildError;
+use crate::payload::L1DaTransactions;
 
 /// Walks the batch's referenced L1 blocks and builds the generic byte-blob
 /// inclusion witness (raw txs + wtxid Merkle proofs), returning the per-block
@@ -28,7 +27,7 @@ use super::DaWitnessBuildError;
 pub(crate) async fn collect_l1_inclusion_blocks(
     da_refs: &[L1DaBlockRef],
     btc: &(impl Reader + Sync),
-) -> Result<(Vec<DaBlockWitness>, Vec<Transaction>), DaWitnessBuildError> {
+) -> Result<(Vec<DaBlockWitness>, Vec<L1DaTransactions>), DaWitnessBuildError> {
     if da_refs.is_empty() {
         return Err(DaWitnessBuildError::EmptyDaRefs);
     }
@@ -37,7 +36,7 @@ pub(crate) async fn collect_l1_inclusion_blocks(
     sorted.sort_by_key(|r| r.block.height());
 
     let mut blocks = Vec::with_capacity(sorted.len());
-    let mut included_txs = Vec::new();
+    let mut included_blocks = Vec::with_capacity(sorted.len());
     for da_ref in sorted {
         let block_hash = da_ref.block.blkid().to_block_hash();
         let block =
@@ -63,6 +62,7 @@ pub(crate) async fn collect_l1_inclusion_blocks(
         }
 
         let mut txs = Vec::with_capacity(da_ref.txns.len());
+        let mut included_txs = Vec::with_capacity(da_ref.txns.len());
         for (txid, wtxid) in &da_ref.txns {
             let pos = block
                 .txdata
@@ -90,9 +90,10 @@ pub(crate) async fn collect_l1_inclusion_blocks(
             ),
             txs,
         ));
+        included_blocks.push(L1DaTransactions::new(da_ref.block.height(), included_txs));
     }
 
-    Ok((blocks, included_txs))
+    Ok((blocks, included_blocks))
 }
 
 /// Builds a wtxid-to-witness-root inclusion proof for the transaction at
@@ -104,15 +105,6 @@ pub(crate) fn build_wtxid_inclusion_proof(txs: &[Transaction], idx: usize) -> Bi
     let leaves = wtxid_leaves(txs);
     let siblings = compute_bitcoin_inclusion_proof(&leaves, idx as u32);
     BitcoinMerkleProof::new(siblings, idx as u32)
-}
-
-/// Reassembles this batch's DA blob from its included commit/reveal transactions.
-pub(crate) fn reassemble_da_blob_from_txs(
-    txs: &[Transaction],
-    spec_version: AlpenSpecId,
-) -> Result<DaBlob, DaWitnessBuildError> {
-    let chunks = extract_da_chunks(txs.iter())?;
-    reassemble_da_blob(&chunks, spec_version).map_err(DaWitnessBuildError::Reassembly)
 }
 
 #[cfg(test)]

@@ -166,92 +166,14 @@ impl EvmHeaderSummary {
     }
 }
 
-/// Reassembles a [`DaBlob`] from raw chunk payloads.
-///
-/// `chunks` must be in commit-output order. The blob is decoded directly across
-/// the chunk slices (no intermediate contiguous copy), and any trailing bytes
-/// after a complete `DaBlob` are rejected — matching `decode_buf_exact`.
-/// `spec_version` names the layout the blob was encoded under.
-pub fn reassemble_da_blob(
-    chunks: &[Vec<u8>],
-    spec_version: AlpenSpecId,
-) -> Result<DaBlob, CodecError> {
-    if chunks.is_empty() {
-        return Err(CodecError::MalformedField("no DA chunks provided"));
-    }
-
-    let mut dec = MultiSliceDecoder::new(chunks);
-    let blob = DaBlob::decode(spec_version, &mut dec)?;
-    if dec.remaining() > 0 {
+/// Decodes a [`DaBlob`] from its encoded payload bytes.
+pub fn decode_da_blob(bytes: &[u8], spec_version: AlpenSpecId) -> Result<DaBlob, CodecError> {
+    let mut decoder = BufDecoder::new(bytes);
+    let blob = DaBlob::decode(spec_version, &mut decoder)?;
+    if decoder.remaining() > 0 {
         return Err(CodecError::ExtraInput);
     }
     Ok(blob)
-}
-
-/// A [`Decoder`] that reads across a sequence of byte chunks without first
-/// concatenating them into one contiguous buffer.
-///
-/// Lets [`reassemble_da_blob`] decode a [`DaBlob`] straight from its
-/// commit/reveal chunk payloads, avoiding an O(blob) allocation + copy on the
-/// proof-verification path.
-struct MultiSliceDecoder<'a> {
-    chunks: &'a [Vec<u8>],
-    /// Index of the chunk currently being read.
-    chunk: usize,
-    /// Read offset within `chunks[chunk]`.
-    offset: usize,
-}
-
-impl<'a> MultiSliceDecoder<'a> {
-    fn new(chunks: &'a [Vec<u8>]) -> Self {
-        Self {
-            chunks,
-            chunk: 0,
-            offset: 0,
-        }
-    }
-
-    /// Total number of unread bytes across the current and later chunks.
-    fn remaining(&self) -> usize {
-        if self.chunk >= self.chunks.len() {
-            return 0;
-        }
-        let current = self.chunks[self.chunk].len().saturating_sub(self.offset);
-        let later: usize = self.chunks[self.chunk + 1..].iter().map(Vec::len).sum();
-        current + later
-    }
-}
-
-impl Decoder for MultiSliceDecoder<'_> {
-    fn read_buf(&mut self, into: &mut [u8]) -> Result<(), CodecError> {
-        if into.len() > self.remaining() {
-            return Err(CodecError::OverrunInput);
-        }
-
-        let mut filled = 0;
-        while filled < into.len() {
-            let chunk = &self.chunks[self.chunk];
-            if self.offset >= chunk.len() {
-                // Current chunk exhausted; `remaining()` guarantees a later one holds the rest.
-                self.chunk += 1;
-                self.offset = 0;
-                continue;
-            }
-            let available = &chunk[self.offset..];
-            let take = available.len().min(into.len() - filled);
-            into[filled..filled + take].copy_from_slice(&available[..take]);
-            self.offset += take;
-            filled += take;
-        }
-
-        Ok(())
-    }
-
-    fn read_arr<const N: usize>(&mut self) -> Result<[u8; N], CodecError> {
-        let mut buf = [0u8; N];
-        self.read_buf(&mut buf)?;
-        Ok(buf)
-    }
 }
 
 #[cfg(test)]
@@ -357,27 +279,18 @@ mod tests {
     }
 
     #[test]
-    fn reassembles_across_arbitrary_chunk_boundaries() {
+    fn decodes_payload_bytes() {
         for spec_version in VERSIONS {
             let encoded = sample_blob(spec_version).encode_to_vec().unwrap();
+            let decoded = decode_da_blob(&encoded, spec_version).expect("payload decodes");
 
-            // Splitting the same bytes at every boundary must decode identically to
-            // the single-buffer path (compared via re-encoding, as DaBlob is not Eq).
-            for chunk_size in 1..=encoded.len() {
-                let chunks: Vec<Vec<u8>> = encoded.chunks(chunk_size).map(|c| c.to_vec()).collect();
-                let got = reassemble_da_blob(&chunks, spec_version).expect("decode across chunks");
-                assert_eq!(
-                    got.encode_to_vec().unwrap(),
-                    encoded,
-                    "{spec_version:?} chunk_size={chunk_size}"
-                );
-            }
+            assert_eq!(decoded.encode_to_vec().unwrap(), encoded);
         }
     }
 
     #[test]
-    fn empty_chunks_is_error() {
-        assert!(reassemble_da_blob(&[], AlpenSpecId::V1).is_err());
+    fn empty_payload_is_error() {
+        assert!(decode_da_blob(&[], AlpenSpecId::V1).is_err());
     }
 
     #[test]
@@ -386,7 +299,7 @@ mod tests {
             let mut encoded = sample_blob(spec_version).encode_to_vec().unwrap();
             encoded.push(0xFF);
             assert!(matches!(
-                reassemble_da_blob(&[encoded], spec_version),
+                decode_da_blob(&encoded, spec_version),
                 Err(CodecError::ExtraInput)
             ));
         }
