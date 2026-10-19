@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use alloy_consensus::{BlockHeader, Header, Sealable, Sealed};
 use alloy_rpc_types_debug::ExecutionWitness;
-use alpen_acct_types::{EnvResult, ExecPartialState};
+use alpen_acct_types::ExecPartialState;
 use itertools::Itertools;
 use revm::state::Bytecode;
 use revm_primitives::{B256, Bytes, keccak256, map::HashMap};
@@ -186,9 +186,8 @@ impl EvmPartialState {
 }
 
 impl ExecPartialState for EvmPartialState {
-    fn compute_state_root(&self) -> EnvResult<Hash> {
-        let state_root = self.ethereum_state.state_root();
-        Ok(state_root.0.into())
+    fn compute_state_root(&self) -> Hash {
+        self.ethereum_state.state_root().0.into()
     }
 }
 

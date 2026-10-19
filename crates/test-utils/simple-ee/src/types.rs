@@ -65,7 +65,7 @@ impl SimplePartialState {
 }
 
 impl ExecPartialState for SimplePartialState {
-    fn compute_state_root(&self) -> EnvResult<Hash> {
+    fn compute_state_root(&self) -> Hash {
         // Hash the account state by encoding it as a sorted list
         let mut hasher = Sha256::new();
 
@@ -74,7 +74,7 @@ impl ExecPartialState for SimplePartialState {
             hasher.update(balance.to_le_bytes());
         }
 
-        Ok(<[u8; 32]>::from(hasher.finalize()).into())
+        <[u8; 32]>::from(hasher.finalize()).into()
     }
 }
 
@@ -131,9 +131,7 @@ impl SimpleHeader {
     pub fn genesis() -> Self {
         Self {
             parent_blkid: Hash::new([0; 32]),
-            state_root: SimplePartialState::new_empty()
-                .compute_state_root()
-                .expect("genesis state root"),
+            state_root: SimplePartialState::new_empty().compute_state_root(),
             index: 0,
         }
     }
@@ -298,11 +296,6 @@ impl ExecBlock for SimpleBlock {
 
     fn from_parts(header: Self::Header, body: Self::Body) -> Self {
         Self { header, body }
-    }
-
-    fn check_header_matches_body(_header: &Self::Header, _body: &Self::Body) -> bool {
-        // For the simple implementation, headers always match bodies
-        true
     }
 
     fn get_header(&self) -> &Self::Header {

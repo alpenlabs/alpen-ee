@@ -12,7 +12,7 @@ use crate::{
 pub fn verify_input<E: ExecutionEnvironment>(
     ee: &E,
     input: &ArchivedPrivateInput,
-) -> ChunkRuntimeResult<()> {
+) -> ChunkRuntimeResult<(), E::Error> {
     // 1. Parse the various basic inputs.
     let tsn = input
         .try_decode_chunk_transition()
@@ -78,7 +78,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use alpen_acct_types::{
-        BlockAssembler, ExecBlock, ExecHeader, ExecPartialState, ExecPayload, Hash,
+        BlockAssembler, EnvError, ExecBlock, ExecHeader, ExecPartialState, ExecPayload, Hash,
     };
     use alpen_chain_types::ChunkTransition;
     use alpen_simple_ee::{
@@ -108,8 +108,7 @@ mod tests {
         accounts.insert(alice, 1000);
         let pre_state = SimplePartialState::new(accounts);
 
-        let prev_header =
-            SimpleHeader::new(Hash::zero(), pre_state.compute_state_root().unwrap(), 0);
+        let prev_header = SimpleHeader::new(Hash::zero(), pre_state.compute_state_root(), 0);
         let prev_blkid = prev_header.compute_block_id();
 
         let intrinsics = SimpleHeaderIntrinsics {
@@ -149,7 +148,7 @@ mod tests {
         pre_state: &SimplePartialState,
         raw_chunk: RawChunkData,
         tsn: ChunkTransition,
-    ) -> ChunkRuntimeResult<()> {
+    ) -> ChunkRuntimeResult<(), EnvError> {
         let private_input = PrivateInput::new(
             tsn,
             raw_chunk,

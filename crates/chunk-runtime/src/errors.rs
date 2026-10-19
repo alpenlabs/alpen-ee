@@ -1,16 +1,20 @@
 //! Error types for the chunk runtime.
 
-use alpen_acct_types::{EnvError, Hash};
+use alpen_acct_types::Hash;
 use alpen_chain_types::{ChunkTransition, ExecOutputs};
 use ssz::DecodeError;
 use strata_codec::CodecError;
 use thiserror::Error;
 
+/// Why a chunk failed verification.
+///
+/// `EnvErr` is the execution environment's own error, which says which of its
+/// checks the block broke.
 #[derive(Debug, Error)]
-pub enum ChunkRuntimeError {
-    /// Execution environment error.
+pub enum ChunkRuntimeError<EnvErr> {
+    /// A check or the execution in the execution environment failed.
     #[error("execution environment: {0}")]
-    Env(#[from] EnvError),
+    Env(#[from] EnvErr),
 
     /// The claimed chunk transition could not be decoded.
     #[error("decode chunk transition: {0:?}")]
@@ -49,19 +53,6 @@ pub enum ChunkRuntimeError {
         got: Hash,
     },
 
-    /// A block does not build on the block before it.
-    #[error("parent mismatch: expected {expected:?}, got {got:?}")]
-    ParentMismatch {
-        /// ID of the previous block.
-        expected: Hash,
-        /// Parent ID in the block's header.
-        got: Hash,
-    },
-
-    /// A block's header does not commit to its body.
-    #[error("block header does not match its body")]
-    HeaderBodyMismatch,
-
     /// A block's claimed outputs differ from what executing it produced.
     #[error("block output mismatch: expected {expected:?}, got {got:?}")]
     OutputMismatch {
@@ -94,4 +85,4 @@ pub enum ChunkRuntimeError {
     },
 }
 
-pub type ChunkRuntimeResult<T> = Result<T, ChunkRuntimeError>;
+pub type ChunkRuntimeResult<T, EnvErr> = Result<T, ChunkRuntimeError<EnvErr>>;

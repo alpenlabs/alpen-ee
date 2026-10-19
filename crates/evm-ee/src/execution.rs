@@ -3,28 +3,30 @@
 //! This module provides the core ExecutionEnvironment implementation for EVM blocks,
 //! using RSP's sparse state and Reth's EVM execution engine.
 
-use alloy_consensus::Block as AlloyBlock;
-use alpen_acct_types::{
-    EnvError, EnvResult, ExecBlock, ExecBlockOutput, ExecPayload, ExecutionEnvironment,
-};
+use alpen_acct_types::{ExecBlock, ExecBlockOutput, ExecPayload, ExecutionEnvironment};
 use alpen_chain_types::{ExecInputs, ExecOutputs, OutputMessage};
-use alpen_params::{AlpenParams, AlpenSpecId, HeaderExtra};
+use alpen_params::{AlpenParams, AlpenSpecId};
 use alpen_reth_evm::{
-    config::AlpenEvmConfig, da_fee::validate_da_rate_against_parent, extract_withdrawal_intents,
+    config::AlpenEvmConfig,
+    consensus::{FlooredConsensus, validate_header_extra_against_parent},
+    extract_withdrawal_intents,
 };
-use reth_consensus_common::validation::validate_body_against_header;
-use reth_ethereum_primitives::{EthPrimitives, Receipt as EthereumReceipt, TransactionSigned};
-use reth_evm::execute::{BasicBlockExecutor, BlockExecutionOutput, Executor};
-use reth_primitives_traits::RecoveredBlock;
+use reth_consensus::{Consensus, FullConsensus, HeaderValidator};
+use reth_ethereum_primitives::{Block, BlockBody, Receipt as EthereumReceipt};
+use reth_evm::{
+    block::BlockExecutionResult,
+    execute::{BasicBlockExecutor, BlockExecutionOutput, Executor},
+};
+use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
 use revm::database::WrapDatabaseRef;
-use rsp_client_executor::BlockValidator;
 use strata_acct_types::{BRIDGE_GATEWAY_ACCT_ID, BitcoinAmount, MsgPayload};
 use strata_codec::encode_to_vec;
 use strata_msg_fmt::{Msg as MsgTrait, OwnedMsg};
 use strata_ol_msg_types::{DEFAULT_OPERATOR_FEE, WITHDRAWAL_MSG_TYPE_ID, WithdrawalMsgData};
 
 use crate::{
-    types::{EvmBlock, EvmBlockOutput, EvmHeaderIntrinsics, EvmPartialState, EvmWriteBatch},
+    errors::EvmEnvError,
+    types::{EvmBlock, EvmHeader, EvmHeaderIntrinsics, EvmPartialState, EvmWriteBatch},
     utils::{build_and_recover_block, compute_hashed_post_state, validate_deposits_against_block},
 };
 
@@ -36,6 +38,9 @@ use crate::{
 pub struct EvmExecutionEnvironment {
     /// EVM configuration of the one spec version this environment executes.
     evm_config: AlpenEvmConfig,
+
+    /// Consensus rules of that spec version, the same ones the node applies.
+    consensus: FlooredConsensus,
 }
 
 /// Converts withdrawal intents to messages sent to the bridge gateway account.
@@ -69,7 +74,7 @@ fn convert_withdrawal_intents_to_messages(
     }
 }
 
-/// Checks that the witnessed parent belongs to the block's chain and permits its DA rate.
+/// Checks that the witnessed ancestors belong to the block's chain.
 ///
 /// [`EvmPartialState`] checks that its ancestors are contiguous and link to
 /// each other, but that only makes the set self-consistent: a fabricated chain
@@ -79,36 +84,24 @@ fn convert_withdrawal_intents_to_messages(
 fn validate_ancestors_against_block(
     pre_state: &EvmPartialState,
     header_intrinsics: &EvmHeaderIntrinsics,
-) -> EnvResult<()> {
+) -> Result<(), EvmEnvError> {
     let parent_number = header_intrinsics
         .number()
         .checked_sub(1)
-        .ok_or(EnvError::InvalidBlock)?;
+        .ok_or(EvmEnvError::NoParent)?;
 
     // The witness always carries the parent, since a block's ancestor range
     // ends there even when it never uses `BLOCKHASH`.
     let parent_hash = pre_state
         .block_hashes()
         .get(&parent_number)
-        .ok_or(EnvError::InvalidBlock)?;
+        .ok_or(EvmEnvError::MissingAncestor(parent_number))?;
 
     if *parent_hash != header_intrinsics.parent_hash() {
-        return Err(EnvError::InvalidBlock);
-    }
-
-    let parent_header = pre_state
-        .ancestor_headers()
-        .get(&parent_number)
-        .ok_or(EnvError::InvalidBlock)?;
-    if let Some(next_rate) = HeaderExtra::decode(header_intrinsics.extra_data())
-        .map_err(|_| EnvError::InvalidBlock)?
-        .da_rate()
-    {
-        let parent_rate = HeaderExtra::of_header(parent_header.inner())
-            .map_err(|_| EnvError::InvalidBlock)?
-            .da_rate();
-        validate_da_rate_against_parent(parent_rate, next_rate)
-            .map_err(|_| EnvError::InvalidBlock)?;
+        return Err(EvmEnvError::AncestorMismatch {
+            expected: header_intrinsics.parent_hash(),
+            witnessed: *parent_hash,
+        });
     }
 
     Ok(())
@@ -119,27 +112,21 @@ impl EvmExecutionEnvironment {
     /// the rules `params` gives that version.
     pub fn new(params: &AlpenParams, spec_version: AlpenSpecId) -> Self {
         let evm_config = AlpenEvmConfig::new(params, spec_version);
-        Self { evm_config }
-    }
-
-    fn validate_block(
-        &self,
-        block: &RecoveredBlock<AlloyBlock<TransactionSigned>>,
-    ) -> EnvResult<()> {
-        EthPrimitives::validate_header(
-            block.sealed_block().sealed_header(),
-            self.evm_config.chain_spec().clone(),
-        )
-        .map_err(|_| EnvError::InvalidBlock)?;
-        validate_body_against_header(block.body(), block.header())
-            .map_err(|_| EnvError::InvalidBlock)
+        let consensus = FlooredConsensus::new(
+            params.chain_spec(spec_version).clone(),
+            params.fee_spec().base_fee_floor(spec_version),
+        );
+        Self {
+            evm_config,
+            consensus,
+        }
     }
 
     fn execute_recovered_block(
         &self,
-        block: &RecoveredBlock<AlloyBlock<TransactionSigned>>,
+        block: &RecoveredBlock<Block>,
         pre_state: &EvmPartialState,
-    ) -> EnvResult<BlockExecutionOutput<EthereumReceipt>> {
+    ) -> Result<BlockExecutionOutput<EthereumReceipt>, EvmEnvError> {
         let db = {
             let wit_db = pre_state.create_witness_db();
             WrapDatabaseRef(wit_db)
@@ -148,91 +135,106 @@ impl EvmExecutionEnvironment {
         // `AlpenEvmConfig`'s execution context, which `BasicBlockExecutor` builds per block,
         // so the DA fee charge sees the block's committed rate with no plumbing here.
         let block_executor = BasicBlockExecutor::new(&self.evm_config, db);
-        block_executor
-            .execute(block)
-            .map_err(|_| EnvError::InvalidBlock)
+        Ok(block_executor.execute(block)?)
     }
 }
 
 impl ExecutionEnvironment for EvmExecutionEnvironment {
     type PartialState = EvmPartialState;
     type WriteBatch = EvmWriteBatch;
-    type BlockOutput = EvmBlockOutput;
+    type BlockOutput = BlockExecutionResult<EthereumReceipt>;
     type Block = EvmBlock;
+    type Error = EvmEnvError;
+
+    fn verify_header(&self, parent: &EvmHeader, header: &EvmHeader) -> Result<(), Self::Error> {
+        let header_extra = validate_header_extra_against_parent(header.header(), parent.header())?;
+
+        // The node picks the rules from the header's stamp. This environment
+        // holds one version's rules, so it only takes headers stamped with it.
+        let expected = self.evm_config.spec_version();
+        let got = header_extra.spec_version();
+        if got != expected {
+            return Err(EvmEnvError::SpecVersionMismatch { expected, got });
+        }
+
+        let header = SealedHeader::new_unhashed(header.header().clone());
+        let parent = SealedHeader::new_unhashed(parent.header().clone());
+        self.consensus.validate_header(&header)?;
+        self.consensus
+            .validate_header_against_parent(&header, &parent)?;
+        Ok(())
+    }
+
+    fn verify_block_pre_execution(&self, block: &EvmBlock) -> Result<(), Self::Error> {
+        let block = SealedBlock::new_unhashed(Block {
+            header: block.get_header().header().clone(),
+            body: block.get_body().body().clone(),
+        });
+        self.consensus.validate_block_pre_execution(&block)?;
+        Ok(())
+    }
 
     fn execute_block_body(
         &self,
         pre_state: &Self::PartialState,
         exec_payload: &ExecPayload<'_, Self::Block>,
-    ) -> EnvResult<ExecBlockOutput<Self>> {
-        // Step 1: Build block from exec_payload and recover senders
+    ) -> Result<ExecBlockOutput<Self>, Self::Error> {
+        // Step 1: Build block from exec_payload and recover senders. The header
+        // is checked by `verify_header`, its body by `verify_block_pre_execution`,
+        // the inputs by `verify_inputs_against_block` and the execution results
+        // by `verify_block_post_execution`.
         let block = build_and_recover_block(exec_payload)?;
 
-        // Step 2: Validate the block against the synthesized execution header.
-        // The full block header is checked separately by `verify_outputs_against_header`,
-        // and the inputs by `verify_inputs_against_block`.
-        self.validate_block(&block)?;
-
-        // Step 2b: Anchor the `BLOCKHASH` ancestors to this block.
+        // Step 2: Anchor the `BLOCKHASH` ancestors to this block.
         validate_ancestors_against_block(pre_state, exec_payload.header_intrinsics())?;
 
         // Step 3: Execute the block.
-        let execution_output = self.execute_recovered_block(&block, pre_state)?;
+        let BlockExecutionOutput { result, state } =
+            self.execute_recovered_block(&block, pre_state)?;
 
-        // Step 4: Accumulate execution commitments.
-        let header_intrinsics = exec_payload.header_intrinsics();
-        let block_output =
-            EvmBlockOutput::from_header_and_output(header_intrinsics, &execution_output);
-
-        // Step 5: Collect withdrawal intents.
+        // Step 4: Collect withdrawal intents.
         let transactions = block.into_transactions();
         let withdrawal_intents = extract_withdrawal_intents(
             &transactions,
-            &execution_output.receipts,
+            &result.receipts,
             self.evm_config.bridge_params(),
-        )
-        .map_err(|_| EnvError::InvalidBlock)?;
+        )?;
 
-        // Step 6: Convert execution outcome to HashedPostState.
-        let block_number = header_intrinsics.number();
-        let hashed_post_state = compute_hashed_post_state(execution_output, block_number);
+        // Step 5: Convert the state changes to a write batch.
+        let write_batch = EvmWriteBatch::new(compute_hashed_post_state(&state));
 
-        // Step 7: Split state writes from execution-derived header commitments.
-        let write_batch = EvmWriteBatch::new(hashed_post_state);
-
-        // Step 8: Create ExecOutputs with withdrawal intent messages.
+        // Step 6: Create ExecOutputs with withdrawal intent messages.
         let mut outputs = ExecOutputs::new_empty();
         convert_withdrawal_intents_to_messages(withdrawal_intents, &mut outputs);
 
-        Ok(ExecBlockOutput::new(write_batch, block_output, outputs))
+        Ok(ExecBlockOutput::new(write_batch, result, outputs))
     }
 
     fn verify_inputs_against_block(
         &self,
         block: &Self::Block,
         inputs: &ExecInputs,
-    ) -> EnvResult<()> {
+    ) -> Result<(), Self::Error> {
         validate_deposits_against_block(block.get_body().body(), inputs)
     }
 
-    fn verify_outputs_against_header(
+    fn verify_block_post_execution(
         &self,
-        header: &<Self::Block as alpen_acct_types::ExecBlock>::Header,
+        header: &EvmHeader,
         outputs: &ExecBlockOutput<Self>,
-    ) -> EnvResult<()> {
-        let header = header.header();
-        let block_output = outputs.block_output();
-
-        if header.gas_used > header.gas_limit
-            || block_output.receipts_root() != header.receipts_root
-            || block_output.logs_bloom() != header.logs_bloom
-            || block_output.gas_used() != header.gas_used
-            || block_output.blob_gas_used() != header.blob_gas_used
-            || block_output.requests_hash() != header.requests_hash
-        {
-            return Err(EnvError::InvalidBlock);
-        }
-
+    ) -> Result<(), Self::Error> {
+        // Reth's rule reads only the header from the block, so the body and
+        // senders are left empty rather than copied. If it ever read the body,
+        // the empty one would fail valid blocks, not pass invalid ones.
+        let block = RecoveredBlock::new_unhashed(
+            Block {
+                header: header.header().clone(),
+                body: BlockBody::default(),
+            },
+            Vec::new(),
+        );
+        self.consensus
+            .validate_block_post_execution(&block, outputs.block_output(), None)?;
         Ok(())
     }
 
@@ -240,7 +242,7 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
         &self,
         state: &mut Self::PartialState,
         wb: &Self::WriteBatch,
-    ) -> EnvResult<()> {
+    ) -> Result<(), Self::Error> {
         // Merge the HashedPostState into the EthereumState
         state.merge_write_batch(wb);
 
@@ -251,7 +253,7 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
         &self,
         state: &mut Self::PartialState,
         header: &<Self::Block as ExecBlock>::Header,
-    ) -> EnvResult<()> {
+    ) -> Result<(), Self::Error> {
         state.add_executed_block(header.header().clone());
         Ok(())
     }
@@ -261,12 +263,20 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
 mod tests {
     use std::{collections::BTreeMap, fs, path::PathBuf};
 
-    use alloy_consensus::{Header, Sealable};
+    use alloy_consensus::{
+        BlockBody, Header, Sealable, TxLegacy, proofs::calculate_transaction_root,
+    };
     use alpen_acct_types::{ExecBlock, ExecHeader, ExecPartialState};
-    use alpen_params::DEV_PARAMS_JSON;
+    use alpen_params::{DEV_PARAMS_JSON, HeaderExtra};
+    use reth_consensus::ConsensusError;
+    use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
+    use reth_ethereum_primitives::{Transaction, TransactionSigned};
     use reth_primitives_traits::Block as RethBlockTrait;
     use revm::{DatabaseRef, state::Bytecode};
-    use revm_primitives::{B256, alloy_primitives::Bloom};
+    use revm_primitives::{
+        B256,
+        alloy_primitives::{Bloom, Signature},
+    };
     use rsp_client_executor::io::EthClientExecutorInput;
     use serde::Deserialize;
     use strata_msg_fmt::{Msg, MsgRef};
@@ -433,13 +443,12 @@ mod tests {
 
         let result = env.execute_block_body(&pre_state, &exec_payload);
         assert!(
-            result.is_err(),
-            "ancestors that do not link to the executed block must be rejected"
+            matches!(result, Err(EvmEnvError::AncestorMismatch { .. })),
+            "ancestors that do not link to the executed block must be rejected: {result:?}"
         );
     }
 
-    #[test]
-    fn guest_rejects_da_rate_increase_above_quote_margin() {
+    fn fixture_witness() -> EthClientExecutorInput {
         #[derive(Deserialize, Debug)]
         struct TestData {
             witness: EthClientExecutorInput,
@@ -450,33 +459,157 @@ mod tests {
             .unwrap()
             .join("test-utils/data/evm-ee/rsp_block_witness.json");
         let json_content = fs::read_to_string(test_data_path).expect("read witness fixture");
-        let mut test_data: TestData =
+        let test_data: TestData =
             serde_json::from_str(&json_content).expect("parse witness fixture");
+        test_data.witness
+    }
 
-        let parent = test_data
-            .witness
+    /// The fixture block and its parent, the newest witnessed ancestor.
+    ///
+    /// The fixture block carries V1's floored base fee but no stamp, which
+    /// reads as V0. Stamping it V1 makes it a valid first V1 block over its V0
+    /// parent.
+    fn fixture_parent_and_header() -> (Header, Header) {
+        let witness = fixture_witness();
+        let parent = witness
             .ancestor_headers
-            .last_mut()
-            .expect("witness contains the parent header");
-        parent.extra_data = HeaderExtra::new(AlpenSpecId::V1, 1_000).encode().into();
-        let parent_number = parent.number;
-        let parent_hash = parent.clone().seal_slow().hash();
-        let pre_state = EvmPartialState::new(
-            test_data.witness.parent_state,
-            rehashed_fixture_bytecodes(test_data.witness.bytecodes),
-            test_data.witness.ancestor_headers,
-        );
-        let intrinsics = |rate| {
-            EvmHeaderIntrinsics::from_header(&Header {
-                parent_hash,
-                number: parent_number + 1,
-                extra_data: HeaderExtra::new(AlpenSpecId::V1, rate).encode().into(),
-                ..Default::default()
-            })
-        };
+            .last()
+            .expect("witness contains the parent header")
+            .clone();
+        let mut header = witness.current_block.header().clone();
+        header.extra_data = HeaderExtra::new(AlpenSpecId::V1, 0).encode().into();
+        (parent, header)
+    }
 
-        assert!(validate_ancestors_against_block(&pre_state, &intrinsics(1_100)).is_ok());
-        assert!(validate_ancestors_against_block(&pre_state, &intrinsics(1_101)).is_err());
+    fn verify_fixture_header(parent: Header, header: Header) -> Result<(), EvmEnvError> {
+        let env = EvmExecutionEnvironment::new(&dev_params(), AlpenSpecId::V1);
+        env.verify_header(&EvmHeader::new(parent), &EvmHeader::new(header))
+    }
+
+    #[test]
+    fn verify_header_accepts_the_fixture_block() {
+        let (parent, header) = fixture_parent_and_header();
+
+        verify_fixture_header(parent, header).expect("the fixture block follows the header rules");
+    }
+
+    /// Each case breaks one rule the node checks against the parent. The
+    /// proof must refuse the same headers.
+    #[test]
+    fn verify_header_rejects_what_the_node_rejects() {
+        let (parent, header) = fixture_parent_and_header();
+
+        type BreakRule = fn(&Header, &mut Header);
+        type IsExpected = fn(&ConsensusError) -> bool;
+        let cases: [(BreakRule, IsExpected); 5] = [
+            (
+                |_, header| header.parent_hash = B256::ZERO,
+                |err| matches!(err, ConsensusError::ParentHashMismatch(_)),
+            ),
+            (
+                |parent, header| header.number = parent.number + 2,
+                |err| matches!(err, ConsensusError::ParentBlockNumberMismatch { .. }),
+            ),
+            (
+                |parent, header| header.timestamp = parent.timestamp,
+                |err| matches!(err, ConsensusError::TimestampIsInPast { .. }),
+            ),
+            (
+                |parent, header| header.gas_limit = parent.gas_limit * 2,
+                |err| matches!(err, ConsensusError::GasLimitInvalidIncrease { .. }),
+            ),
+            (
+                |_, header| header.base_fee_per_gas = header.base_fee_per_gas.map(|fee| fee + 1),
+                |err| matches!(err, ConsensusError::BaseFeeDiff(_)),
+            ),
+        ];
+
+        for (break_rule, is_expected) in cases {
+            let mut bad_header = header.clone();
+            break_rule(&parent, &mut bad_header);
+            let result = verify_fixture_header(parent.clone(), bad_header);
+            assert!(
+                matches!(&result, Err(EvmEnvError::ConsensusRule(err)) if is_expected(err)),
+                "{result:?}"
+            );
+        }
+    }
+
+    /// The node picks a header's rules from its stamp, so a header stamped
+    /// with another version must not pass under this environment's rules.
+    #[test]
+    fn verify_header_rejects_a_header_stamped_with_another_version() {
+        let (parent, mut header) = fixture_parent_and_header();
+        header.extra_data = HeaderExtra::new(AlpenSpecId::V0, 0).encode().into();
+
+        assert!(matches!(
+            verify_fixture_header(parent, header),
+            Err(EvmEnvError::SpecVersionMismatch {
+                expected: AlpenSpecId::V1,
+                got: AlpenSpecId::V0,
+            })
+        ));
+    }
+
+    fn verify_fixture_block(
+        header: Header,
+        body: BlockBody<TransactionSigned>,
+    ) -> Result<(), EvmEnvError> {
+        let env = EvmExecutionEnvironment::new(&dev_params(), AlpenSpecId::V1);
+        let block = EvmBlock::new(EvmHeader::new(header), EvmBlockBody::from_alloy_body(body));
+        env.verify_block_pre_execution(&block)
+    }
+
+    #[test]
+    fn verify_block_pre_execution_accepts_the_fixture_block() {
+        let (_, header) = fixture_parent_and_header();
+        let body = fixture_witness().current_block.body().clone();
+
+        verify_fixture_block(header, body).expect("the fixture header commits to its body");
+    }
+
+    #[test]
+    fn verify_block_pre_execution_rejects_a_body_the_header_does_not_commit_to() {
+        let (_, mut header) = fixture_parent_and_header();
+        let body = fixture_witness().current_block.body().clone();
+        header.transactions_root = B256::ZERO;
+
+        let result = verify_fixture_block(header, body);
+        assert!(
+            matches!(
+                &result,
+                Err(EvmEnvError::ConsensusRule(err))
+                    if matches!(**err, ConsensusError::BodyTransactionRootDiff(_))
+            ),
+            "{result:?}"
+        );
+    }
+
+    /// V1 runs Osaka, so EIP-7934 caps a block's RLP size. The node refuses a
+    /// larger block before executing it, and so must the proof.
+    #[test]
+    fn verify_block_pre_execution_rejects_an_oversized_block() {
+        let (_, mut header) = fixture_parent_and_header();
+        let mut body = fixture_witness().current_block.body().clone();
+        let padding = TxLegacy {
+            input: vec![0; MAX_RLP_BLOCK_SIZE].into(),
+            ..Default::default()
+        };
+        body.transactions.push(TransactionSigned::new_unhashed(
+            Transaction::Legacy(padding),
+            Signature::test_signature(),
+        ));
+        header.transactions_root = calculate_transaction_root(&body.transactions);
+
+        let result = verify_fixture_block(header, body);
+        assert!(
+            matches!(
+                &result,
+                Err(EvmEnvError::ConsensusRule(err))
+                    if matches!(**err, ConsensusError::BlockTooLarge { .. })
+            ),
+            "{result:?}"
+        );
     }
 
     /// Test with real witness data from the reference implementation.
@@ -545,24 +678,23 @@ mod tests {
         // Check the execution-derived header commitments. This covers the receipts
         // root, logs bloom and gas figures, but not the state root, which this
         // method does not look at.
-        env.verify_outputs_against_header(block.get_header(), &output)
+        env.verify_block_post_execution(block.get_header(), &output)
             .expect("execution-derived commitments should match the witness header");
 
         // The state root only exists once the writes are merged, so check it here.
         env.merge_write_into_state(&mut pre_state, output.write_batch())
             .expect("merging the write batch should succeed");
         assert_eq!(
-            pre_state
-                .compute_state_root()
-                .expect("state root should be computable")
-                .as_ref(),
+            pre_state.compute_state_root().as_ref(),
             header.state_root.as_slice(),
             "merged state root should match the witness header"
         );
     }
 
+    /// Each case breaks one commitment the header makes to execution. The
+    /// proof must refuse the same headers the node does.
     #[test]
-    fn verify_outputs_rejects_mismatched_non_state_commitments() {
+    fn verify_block_post_execution_rejects_what_the_node_rejects() {
         #[derive(Deserialize, Debug)]
         struct TestData {
             witness: EthClientExecutorInput,
@@ -597,25 +729,35 @@ mod tests {
             .execute_block_body(&pre_state, &exec_payload)
             .expect("block execution should succeed");
 
-        let mut bad_receipts_root = header.clone();
-        bad_receipts_root.receipts_root = B256::from([0x11; 32]);
-        assert!(
-            env.verify_outputs_against_header(&EvmHeader::new(bad_receipts_root), &output)
-                .is_err()
-        );
+        type BreakRule = fn(&mut Header);
+        type IsExpected = fn(&ConsensusError) -> bool;
+        let cases: [(BreakRule, IsExpected); 4] = [
+            (
+                |header| header.receipts_root = B256::from([0x11; 32]),
+                |err| matches!(err, ConsensusError::BodyReceiptRootDiff(_)),
+            ),
+            (
+                |header| header.logs_bloom = Bloom::from([0x22; 256]),
+                |err| matches!(err, ConsensusError::BodyBloomLogDiff(_)),
+            ),
+            (
+                |header| header.gas_used += 1,
+                |err| matches!(err, ConsensusError::BlockGasUsed { .. }),
+            ),
+            (
+                |header| header.requests_hash = Some(B256::from([0x33; 32])),
+                |err| matches!(err, ConsensusError::BodyRequestsHashDiff(_)),
+            ),
+        ];
 
-        let mut bad_logs_bloom = header.clone();
-        bad_logs_bloom.logs_bloom = Bloom::from([0x22; 256]);
-        assert!(
-            env.verify_outputs_against_header(&EvmHeader::new(bad_logs_bloom), &output)
-                .is_err()
-        );
-
-        let mut bad_gas_used = header;
-        bad_gas_used.gas_used = bad_gas_used.gas_used.saturating_add(1);
-        assert!(
-            env.verify_outputs_against_header(&EvmHeader::new(bad_gas_used), &output)
-                .is_err()
-        );
+        for (break_rule, is_expected) in cases {
+            let mut bad_header = header.clone();
+            break_rule(&mut bad_header);
+            let result = env.verify_block_post_execution(&EvmHeader::new(bad_header), &output);
+            assert!(
+                matches!(&result, Err(EvmEnvError::ConsensusRule(err)) if is_expected(err)),
+                "{result:?}"
+            );
+        }
     }
 }

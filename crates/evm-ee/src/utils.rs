@@ -4,16 +4,19 @@
 //! belong to any specific type.
 
 use alloy_consensus::{Block as AlloyBlock, BlockBody};
-use alpen_acct_types::{EnvError, EnvResult, ExecPayload};
+use alpen_acct_types::ExecPayload;
 use alpen_chain_types::ExecInputs;
 use alpen_reth_evm::subject_to_address;
 use alpen_reth_primitives::sats_to_gwei;
-use reth_ethereum_primitives::{Receipt as EthereumReceipt, TransactionSigned};
-use reth_evm::execute::BlockExecutionOutput;
+use reth_ethereum_primitives::TransactionSigned;
 use reth_primitives_traits::{Block, RecoveredBlock};
 use reth_trie::{HashedPostState, KeccakKeyHasher};
+use revm::database::BundleState;
 
-use crate::types::{EvmBlock, EvmHeaderIntrinsics};
+use crate::{
+    errors::EvmEnvError,
+    types::{EvmBlock, EvmHeaderIntrinsics},
+};
 
 /// Builds an Alloy block from exec payload and recovers transaction senders.
 ///
@@ -21,7 +24,7 @@ use crate::types::{EvmBlock, EvmHeaderIntrinsics};
 /// then recovers the sender addresses from transaction signatures.
 pub(crate) fn build_and_recover_block(
     exec_payload: &ExecPayload<'_, EvmBlock>,
-) -> EnvResult<RecoveredBlock<AlloyBlock<TransactionSigned>>> {
+) -> Result<RecoveredBlock<AlloyBlock<TransactionSigned>>, EvmEnvError> {
     let header: EvmHeaderIntrinsics = exec_payload.header_intrinsics().clone();
     let body = exec_payload.body().body().clone();
     let header = header.build_execution_header(&body);
@@ -32,15 +35,12 @@ pub(crate) fn build_and_recover_block(
     // Recover transaction senders from signatures
     alloy_block
         .try_into_recovered()
-        .map_err(|_| EnvError::InvalidBlock)
+        .map_err(|_| EvmEnvError::SenderRecovery)
 }
 
 /// Converts execution output to HashedPostState for state updates.
-pub(crate) fn compute_hashed_post_state(
-    execution_output: BlockExecutionOutput<EthereumReceipt>,
-    _block_number: u64,
-) -> HashedPostState {
-    HashedPostState::from_bundle_state::<KeccakKeyHasher>(&execution_output.state.state)
+pub(crate) fn compute_hashed_post_state(state: &BundleState) -> HashedPostState {
+    HashedPostState::from_bundle_state::<KeccakKeyHasher>(&state.state)
 }
 
 /// Validates that deposits from ExecInputs match the withdrawals field in the block.
@@ -58,14 +58,10 @@ pub(crate) fn compute_hashed_post_state(
 /// - `Withdrawal.address` ← last 20 bytes of `SubjectDepositData.dest` (SubjectId)
 /// - `Withdrawal.amount` ← `SubjectDepositData.value` in Gwei
 /// - `Withdrawal.index` and `Withdrawal.validator_index` are ignored (not meaningful for deposits)
-///
-/// # Returns
-/// - `Ok(())` if deposits match
-/// - `Err(EnvError::InvalidBlock)` if there's a mismatch in count, address, or amount
 pub(crate) fn validate_deposits_against_block(
     body: &BlockBody<TransactionSigned>,
     inputs: &ExecInputs,
-) -> EnvResult<()> {
+) -> Result<(), EvmEnvError> {
     // Get withdrawals from the block body (this is where deposits are stored)
     let block_withdrawals = body
         .withdrawals
@@ -77,22 +73,29 @@ pub(crate) fn validate_deposits_against_block(
 
     // Check counts match
     if block_withdrawals.len() != subject_deposits.len() {
-        return Err(EnvError::InvalidBlock);
+        return Err(EvmEnvError::DepositCountMismatch {
+            deposits: subject_deposits.len(),
+            withdrawals: block_withdrawals.len(),
+        });
     }
 
     // Validate each deposit matches the corresponding withdrawal
-    for (withdrawal, deposit) in block_withdrawals.iter().zip(subject_deposits.iter()) {
+    for (index, (withdrawal, deposit)) in block_withdrawals
+        .iter()
+        .zip(subject_deposits.iter())
+        .enumerate()
+    {
         // Convert SubjectId to Address - returns None if first 12 bytes aren't zero
         let expected_address = subject_to_address(&deposit.dest())
-            .ok_or_else(|| EnvError::InvalidDepositAddress(deposit.dest()))?;
+            .ok_or_else(|| EvmEnvError::InvalidDepositAddress(deposit.dest()))?;
 
         // Convert satoshis to gwei (1 sat = 10 gwei, per 1 BTC = 10^8 sats = 10^9 gwei)
-        let expected_amount =
-            sats_to_gwei(deposit.value().to_sat()).ok_or(EnvError::InvalidBlock)?;
+        let expected_amount = sats_to_gwei(deposit.value().to_sat())
+            .ok_or(EvmEnvError::DepositAmountOverflow { index })?;
 
         // Validate address and amount match
         if withdrawal.address != expected_address || withdrawal.amount != expected_amount {
-            return Err(EnvError::InvalidBlock);
+            return Err(EvmEnvError::DepositMismatch { index });
         }
 
         // Note: withdrawal.index and withdrawal.validator_index are not validated
@@ -173,7 +176,10 @@ mod tests {
 
         // Should fail - address mismatch
         let result = validate_deposits_against_block(&body, &inputs);
-        assert!(result.is_err());
+        assert!(matches!(
+            result,
+            Err(EvmEnvError::DepositMismatch { index: 0 })
+        ));
     }
 
     #[test]
@@ -203,7 +209,7 @@ mod tests {
 
         // Should fail - invalid subject ID
         let result = validate_deposits_against_block(&body, &inputs);
-        assert!(result.is_err());
+        assert!(matches!(result, Err(EvmEnvError::InvalidDepositAddress(_))));
     }
 
     #[test]
@@ -235,6 +241,9 @@ mod tests {
 
         // Should fail - amount mismatch
         let result = validate_deposits_against_block(&body, &inputs);
-        assert!(result.is_err());
+        assert!(matches!(
+            result,
+            Err(EvmEnvError::DepositMismatch { index: 0 })
+        ));
     }
 }
