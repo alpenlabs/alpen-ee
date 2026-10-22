@@ -10,8 +10,7 @@ The block is block 5 of a dev chain. It has no transactions, and its header carr
 
 Read by:
 
-- `alpen-evm-ee` unit tests (`src/execution.rs`, `src/types/tests.rs`)
-- `alpen-proof-chunk` native execution test
+- `alpen-evm-ee` codec and partial state tests (`src/types/tests.rs`)
 
 ## `workloads/<name>/`
 
@@ -48,4 +47,6 @@ Then regenerate the chunk proof prover-perf reads (see `bin/prover-perf/README.m
 
 Read by:
 
+- `alpen-evm-ee` execution tests (`src/execution.rs`), on the first block of `mixed`
+- `alpen-proof-chunk`, whose `test-utils` feature builds a chunk proof input from a workload
 - `alpen-prover-perf`, for both guests' inputs and native tests

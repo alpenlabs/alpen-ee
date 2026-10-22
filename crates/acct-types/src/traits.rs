@@ -8,7 +8,7 @@ use alpen_chain_types::{ExecHeaderSummary, ExecInputs};
 use strata_codec::Codec;
 use strata_identifiers::Hash;
 
-use crate::{inputs::ExecPayload, outputs::ExecBlockOutput};
+use crate::outputs::ExecBlockOutput;
 
 /// Represents a partially-loaded state, including any information we would need
 /// to manipulate it and compute state roots.
@@ -19,18 +19,6 @@ pub trait ExecPartialState: Codec + Clone + Sized {
 
 /// Represents an execution block header.
 pub trait ExecHeader: Codec + Clone + Sized {
-    /// Data intrinsic to a block header, like the timestamp and parent block.
-    ///
-    /// This doesn't include data that's a commitment to external data, like
-    /// the body or anything that's computed as a result of execution.
-    ///
-    /// In practice, this MAY be the same structure as a header, but with some
-    /// fields stubbed out with dummy/zero values.
-    type Intrinsics: Clone;
-
-    /// Gets the header's intrinsics we can execute the block with.
-    fn get_intrinsics(&self) -> Self::Intrinsics;
-
     /// Gets the parent exec blkid field.
     fn get_parent_id(&self) -> Hash;
 
@@ -85,7 +73,7 @@ pub trait ExecutionEnvironment: Sized + 'static {
     /// Execution-derived block output that is neither a state write nor OL-facing output.
     ///
     /// This carries execution-environment-specific commitments needed to verify
-    /// or complete a block header.
+    /// a block header.
     type BlockOutput: Sized;
 
     /// Why one of this environment's checks or its execution failed.
@@ -113,19 +101,17 @@ pub trait ExecutionEnvironment: Sized + 'static {
     /// but not the execution result, such as a limit on the block's size.
     fn verify_block_pre_execution(&self, block: &Self::Block) -> Result<(), Self::Error>;
 
-    /// Executes a block payload on top of a pre-state, returning the execution
-    /// output.
+    /// Executes a block on top of a pre-state, returning the execution output.
     ///
-    /// When assembling a block, the output is used to complete its header. When
-    /// verifying a block, execution alone is not enough: the caller must also
-    /// check the header with [`Self::verify_header`], the body with
+    /// Execution alone does not verify the block: the caller must also check
+    /// the header with [`Self::verify_header`], the body with
     /// [`Self::verify_block_pre_execution`], the inputs with
     /// [`Self::verify_inputs_against_block`] and the output with
     /// [`Self::verify_block_post_execution`].
-    fn execute_block_body(
+    fn execute_block(
         &self,
         pre_state: &Self::PartialState,
-        exec_payload: &ExecPayload<'_, Self::Block>,
+        block: &Self::Block,
     ) -> Result<ExecBlockOutput<Self>, Self::Error>;
 
     /// Checks that the inputs match what the block applies.
@@ -150,42 +136,13 @@ pub trait ExecutionEnvironment: Sized + 'static {
         outputs: &ExecBlockOutput<Self>,
     ) -> Result<(), Self::Error>;
 
-    /// Applies a pending write batch into the partial state.
+    /// Applies a block's write batch to the partial state.
+    ///
+    /// Besides the state changes, this must record whatever later blocks in
+    /// the chunk need from this one, such as its hash.
     fn merge_write_into_state(
         &self,
         state: &mut Self::PartialState,
         wb: &Self::WriteBatch,
     ) -> Result<(), Self::Error>;
-
-    /// Updates partial state with data derived from a successfully executed block.
-    ///
-    /// Execution environments that expose per-block lookups to later blocks in
-    /// the same chunk must override this method. The default no-op is only safe
-    /// when no post-block metadata, such as block hashes, is needed by subsequent
-    /// executions.
-    fn update_partial_state_after_block(
-        &self,
-        _state: &mut Self::PartialState,
-        _header: &<Self::Block as ExecBlock>::Header,
-    ) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
-
-/// Block assembly trait for constructing complete headers from execution outputs.
-///
-/// This trait is separate from ExecutionEnvironment because header completion
-/// is only needed when building new blocks, not when verifying existing blocks.
-/// The ExecutionEnvironment trait focuses on proof-related operations.
-pub trait BlockAssembler: ExecutionEnvironment {
-    /// Constructs a complete header from header intrinsics and execution outputs.
-    ///
-    /// This combines the header intrinsics (parent hash, timestamp, etc.) with
-    /// the computed commitments from execution (state root, logs bloom, etc.)
-    /// to produce a complete block header.
-    fn complete_header(
-        &self,
-        exec_payload: &ExecPayload<'_, Self::Block>,
-        output: &ExecBlockOutput<Self>,
-    ) -> Result<<Self::Block as ExecBlock>::Header, Self::Error>;
 }

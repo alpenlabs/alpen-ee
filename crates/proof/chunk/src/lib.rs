@@ -6,8 +6,12 @@ use alpen_params::{AlpenParams, AlpenSpecId};
 use rkyv::rancor::Error as RkyvError;
 use zkaleido::ZkVmEnvSerde;
 
+#[cfg(not(target_os = "zkvm"))]
 mod program;
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils;
 
+#[cfg(not(target_os = "zkvm"))]
 pub use program::{EeChunkProgram, EeChunkProofInput};
 
 /// Guest entry point for EE chunk proof generation.
