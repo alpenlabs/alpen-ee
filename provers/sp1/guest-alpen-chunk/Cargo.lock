@@ -552,8 +552,6 @@ dependencies = [
  "rkyv_impl 0.2.2",
  "strata-codec",
  "strata-crypto",
- "strata-l1-envelope-fmt",
- "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -4967,18 +4965,6 @@ dependencies = [
  "strata-codec",
  "tree_hash",
  "zeroize",
-]
-
-[[package]]
-name = "strata-l1-envelope-fmt"
-version = "0.1.0"
-source = "git+https://github.com/alpenlabs/strata-common?tag=v0.4.0#fc71f121d8990af0e56c2da436754b0b1fd304e0"
-dependencies = [
- "bitcoin",
- "strata-identifiers",
- "strata-l1-txfmt",
- "thiserror 2.0.18",
- "tracing",
 ]
 
 [[package]]

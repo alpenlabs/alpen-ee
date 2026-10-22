@@ -131,6 +131,7 @@ strata-btc-types = { git = "https://github.com/alpenlabs/strata-common", tag = "
 strata-codec = { git = "https://github.com/alpenlabs/strata-common", features = [
   "derive",
 ], tag = "v0.4.0" }
+strata-codec-utils = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.4.0" }
 strata-crypto = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.4.0" }
 strata-db-macros = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.4.0" }
 strata-identifiers = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.4.0" }

@@ -561,6 +561,9 @@ dependencies = [
  "ssz",
  "strata-acct-types",
  "strata-codec",
+ "strata-codec-utils",
+ "strata-identifiers",
+ "strata-l1-envelope-fmt",
  "strata-snark-acct-types",
  "thiserror 2.0.18",
 ]
@@ -576,8 +579,6 @@ dependencies = [
  "rkyv_impl 0.2.2",
  "strata-codec",
  "strata-crypto",
- "strata-l1-envelope-fmt",
- "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -4943,6 +4944,16 @@ source = "git+https://github.com/alpenlabs/strata-common?tag=v0.4.0#fc71f121d899
 dependencies = [
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "strata-codec-utils"
+version = "0.1.0"
+source = "git+https://github.com/alpenlabs/strata-common?tag=v0.4.0#fc71f121d8990af0e56c2da436754b0b1fd304e0"
+dependencies = [
+ "ssz",
+ "ssz_derive",
+ "strata-codec",
 ]
 
 [[package]]
