@@ -4,7 +4,7 @@
 
 use std::error::Error;
 
-use alpen_chain_types::{ExecHeaderSummary, ExecInputs};
+use alpen_chain_types::{ExecHeaderSummary, ExecInputs, ExecOutputs};
 use strata_codec::Codec;
 use strata_identifiers::Hash;
 
@@ -32,29 +32,14 @@ pub trait ExecHeader: Codec + Clone + Sized {
     fn compute_block_id(&self) -> Hash;
 }
 
-/// Represents the body of an execution block, without the header.
-///
-/// This is the executable content of a block (transactions, operations, etc.)
-/// that can be processed to produce state changes.
-pub trait ExecBlockBody: Codec + Sized {}
-
 /// Represents a full execution block, with whatever information needed to
 /// execute it on top of a pre-state.
 pub trait ExecBlock: Codec + Sized {
     /// The block's header type.
     type Header: ExecHeader;
 
-    /// The block's body type.
-    type Body: ExecBlockBody;
-
-    /// Constructs a block from a header and body.
-    fn from_parts(header: Self::Header, body: Self::Body) -> Self;
-
     /// Gets a reference to the block's header.
     fn get_header(&self) -> &Self::Header;
-
-    /// Gets a reference to the block's body.
-    fn get_body(&self) -> &Self::Body;
 }
 
 /// Execution environment.
@@ -94,46 +79,50 @@ pub trait ExecutionEnvironment: Sized + 'static {
         header: &<Self::Block as ExecBlock>::Header,
     ) -> Result<(), Self::Error>;
 
-    /// Checks a block's body against its header, before executing it.
+    /// Checks a block's body against its header and the inputs claimed for
+    /// it, before executing it.
     ///
     /// This must check that the header commits to the body. It also checks
     /// every other rule the environment puts on a block that needs the body
     /// but not the execution result, such as a limit on the block's size.
-    fn verify_block_pre_execution(&self, block: &Self::Block) -> Result<(), Self::Error>;
+    ///
+    /// Execution reads the block, not the inputs, so the claimed inputs must
+    /// be checked against the block itself, for example against a deposit
+    /// list in the body.
+    fn verify_block_pre_execution(
+        &self,
+        block: &Self::Block,
+        claimed_inputs: &ExecInputs,
+    ) -> Result<(), Self::Error>;
 
     /// Executes a block on top of a pre-state, returning the execution output.
     ///
     /// Execution alone does not verify the block: the caller must also check
-    /// the header with [`Self::verify_header`], the body with
-    /// [`Self::verify_block_pre_execution`], the inputs with
-    /// [`Self::verify_inputs_against_block`] and the output with
-    /// [`Self::verify_block_post_execution`].
+    /// the header with [`Self::verify_header`], the body and claimed inputs
+    /// with [`Self::verify_block_pre_execution`] and the output and claimed
+    /// outputs with [`Self::verify_block_post_execution`].
+    ///
+    /// It takes the block so an environment can hand it to its executor
+    /// without copying it. A caller that still needs the header afterwards
+    /// clones it first.
     fn execute_block(
         &self,
         pre_state: &Self::PartialState,
-        block: &Self::Block,
+        block: Self::Block,
     ) -> Result<ExecBlockOutput<Self>, Self::Error>;
 
-    /// Checks that the inputs match what the block applies.
-    ///
-    /// Execution reads the block, not the inputs, so the inputs are a claim
-    /// about the block. Each environment checks that claim against the block
-    /// itself, for example against a deposit list in the body.
-    fn verify_inputs_against_block(
-        &self,
-        block: &Self::Block,
-        inputs: &ExecInputs,
-    ) -> Result<(), Self::Error>;
-
-    /// Checks a block's execution output against its header.
+    /// Checks a block's execution output against its header and the outputs
+    /// claimed for it.
     ///
     /// This must check every commitment the header makes to execution, such
-    /// as the receipts and the gas used. The state root is left to the caller,
-    /// since it only exists once the writes are merged.
+    /// as the receipts and the gas used. It must also check the claimed
+    /// outputs with [`ExecOutputs::matches_executed`]. The state root is left
+    /// to the caller, since it only exists once the writes are merged.
     fn verify_block_post_execution(
         &self,
         header: &<Self::Block as ExecBlock>::Header,
-        outputs: &ExecBlockOutput<Self>,
+        exec_output: &ExecBlockOutput<Self>,
+        claimed_outputs: &ExecOutputs,
     ) -> Result<(), Self::Error>;
 
     /// Applies a block's write batch to the partial state.

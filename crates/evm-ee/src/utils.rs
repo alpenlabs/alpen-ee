@@ -3,28 +3,20 @@
 //! This module contains utility functions used during block execution that don't
 //! belong to any specific type.
 
-use alloy_consensus::{Block as AlloyBlock, BlockBody};
-use alpen_acct_types::ExecBlock;
+use alloy_consensus::BlockBody;
 use alpen_chain_types::ExecInputs;
 use alpen_reth_evm::subject_to_address;
 use alpen_reth_primitives::sats_to_gwei;
-use reth_ethereum_primitives::TransactionSigned;
-use reth_primitives_traits::{Block, RecoveredBlock};
+use reth_ethereum_primitives::{Block, TransactionSigned};
+use reth_primitives_traits::RecoveredBlock;
 
 use crate::{errors::EvmEnvError, types::EvmBlock};
 
-/// Builds an Alloy block from an EVM block and recovers transaction senders.
-pub(crate) fn build_and_recover_block(
-    block: &EvmBlock,
-) -> Result<RecoveredBlock<AlloyBlock<TransactionSigned>>, EvmEnvError> {
-    let alloy_block = AlloyBlock {
-        header: block.get_header().header().clone(),
-        body: block.get_body().body().clone(),
-    };
-
-    // Recover transaction senders from signatures
-    alloy_block
-        .try_into_recovered()
+/// Recovers the transaction senders of an EVM block.
+pub(crate) fn recover_block(block: EvmBlock) -> Result<RecoveredBlock<Block>, EvmEnvError> {
+    block
+        .into_sealed()
+        .try_recover()
         .map_err(|_| EvmEnvError::SenderRecovery)
 }
 

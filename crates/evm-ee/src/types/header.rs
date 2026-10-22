@@ -5,6 +5,8 @@ use alpen_acct_types::ExecHeader;
 use alpen_chain_types::ExecHeaderSummary;
 use alpen_da_types::EvmHeaderSummary;
 use alpen_params::HeaderExtra;
+use ref_cast::RefCast;
+use reth_primitives_traits::SealedHeader;
 use strata_codec::{Codec, CodecError};
 
 use super::Hash;
@@ -12,22 +14,41 @@ use crate::codec_shims::{decode_rlp_with_length, encode_rlp_with_length};
 
 /// Block header for EVM execution.
 ///
-/// Wraps Alloy's consensus Header type and implements the ExecHeader trait
+/// Wraps a sealed Alloy consensus header and implements the ExecHeader trait
 /// to provide block metadata for the execution environment.
-#[derive(Clone, Debug)]
+///
+/// The seal computes the block hash on first use and caches it, so the
+/// header is hashed once however often its ID is read.
+///
+/// It is transparent over the sealed header so an [`EvmBlock`](super::EvmBlock)
+/// can lend out its header as an `EvmHeader` without copying it.
+#[derive(Clone, Debug, RefCast)]
+#[repr(transparent)]
 pub struct EvmHeader {
-    header: Header,
+    header: SealedHeader<Header>,
 }
 
 impl EvmHeader {
     /// Creates a new EvmHeader from an Alloy Header.
     pub fn new(header: Header) -> Self {
-        Self { header }
+        Self {
+            header: SealedHeader::new_unhashed(header),
+        }
     }
 
     /// Gets a reference to the underlying Header.
     pub fn header(&self) -> &Header {
+        self.header.header()
+    }
+
+    /// Gets a reference to the sealed header, as Reth's rules take it.
+    pub fn sealed(&self) -> &SealedHeader<Header> {
         &self.header
+    }
+
+    /// Consumes self and returns the sealed header.
+    pub fn into_sealed(self) -> SealedHeader<Header> {
+        self.header
     }
 
     /// Returns the block number.
@@ -49,7 +70,7 @@ impl ExecHeader for EvmHeader {
         // Hosts only summarize headers they have already validated, so the
         // stamp decodes. The guest summarizes only the chunk tip, and only
         // after `verify_header` has decoded and checked its stamp.
-        let header_extra = HeaderExtra::of_header(&self.header)
+        let header_extra = HeaderExtra::of_header(self.header())
             .expect("Alpen EVM headers carry a valid extra_data stamp");
         let payload = EvmHeaderSummary {
             block_num: self.header.number,
@@ -69,19 +90,19 @@ impl ExecHeader for EvmHeader {
     }
 
     fn compute_block_id(&self) -> Hash {
-        self.header.hash_slow().0.into()
+        self.header.hash().0.into()
     }
 }
 
 impl Codec for EvmHeader {
     fn encode(&self, enc: &mut impl strata_codec::Encoder) -> Result<(), CodecError> {
         // Use Alloy's RLP encoding (standard Ethereum format) with length prefix
-        encode_rlp_with_length(&self.header, enc)
+        encode_rlp_with_length(self.header(), enc)
     }
 
     fn decode(dec: &mut impl strata_codec::Decoder) -> Result<Self, CodecError> {
         // Decode using Alloy's RLP decoder with length prefix
         let header = decode_rlp_with_length(dec)?;
-        Ok(Self { header })
+        Ok(Self::new(header))
     }
 }

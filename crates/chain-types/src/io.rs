@@ -53,6 +53,16 @@ impl ExecInputs {
             .expect("subject_deposits list at capacity");
     }
 
+    /// Appends `other`'s deposits after these ones.
+    ///
+    /// A chunk's inputs are its blocks' inputs joined this way, in block
+    /// order.
+    pub fn extend_from(&mut self, other: &ExecInputs) {
+        for d in other.subject_deposits() {
+            self.add_subject_deposit(d.clone());
+        }
+    }
+
     /// Returns the total number of inputs across all types.
     pub fn total_inputs(&self) -> usize {
         self.subject_deposits.len()
@@ -124,6 +134,42 @@ impl ExecOutputs {
     /// Returns the predicate rotation declared by this block, if any.
     pub fn new_predicate(&self) -> Option<&PredicateKey> {
         self.new_predicate.predicate()
+    }
+
+    /// Appends `other`'s transfers and messages after these ones, and takes
+    /// its predicate rotation if it declares one.
+    ///
+    /// A chunk's outputs are its blocks' outputs joined this way, in block
+    /// order. The guest and the hosts must join them the same way, or the
+    /// chunk transition the host claims won't match the one the guest
+    /// computes.
+    ///
+    /// If `other` declares no rotation, a rotation already recorded here stays.
+    /// This doesn't stop a block from following a rotation. The chunk runtime
+    /// rejects that case itself.
+    pub fn extend_from(&mut self, other: &ExecOutputs) {
+        for t in other.output_transfers() {
+            self.add_transfer(t.clone());
+        }
+        for m in other.output_messages() {
+            self.add_message(m.clone());
+        }
+        if let Some(key) = other.new_predicate() {
+            self.set_new_predicate(Some(key.clone()));
+        }
+    }
+
+    /// Checks whether these claimed outputs match the outputs that executing
+    /// the block produced.
+    ///
+    /// `new_predicate` is deliberately left out: it's an account-level fact
+    /// drawn from the pending-input queue, not something execution can derive,
+    /// so executed outputs always leave it empty. Checking a declared rotation
+    /// belongs to a cross-check over the chunk's blocks, not this per-block
+    /// comparison.
+    pub fn matches_executed(&self, executed: &ExecOutputs) -> bool {
+        self.output_transfers() == executed.output_transfers()
+            && self.output_messages() == executed.output_messages()
     }
 }
 
@@ -345,6 +391,55 @@ mod tests {
             assert_eq!(outputs.output_transfers().len(), 0);
             assert_eq!(outputs.output_messages().len(), 0);
             assert_eq!(outputs.new_predicate(), None);
+        }
+
+        #[test]
+        fn matches_executed_compares_transfers_and_messages() {
+            let executed = ExecOutputs::new_empty();
+
+            let mut extra_transfer = ExecOutputs::new_empty();
+            extra_transfer.add_transfer(OutputTransfer::new(
+                AccountId::new([1; 32]),
+                BitcoinAmount::try_from(5u64).unwrap(),
+            ));
+            assert!(!extra_transfer.matches_executed(&executed));
+
+            let mut extra_message = ExecOutputs::new_empty();
+            extra_message.add_message(OutputMessage::new(
+                AccountId::new([2; 32]),
+                MsgPayload::from_bytes(BitcoinAmount::try_from(5u64).unwrap(), vec![]).unwrap(),
+            ));
+            assert!(!extra_message.matches_executed(&executed));
+        }
+
+        #[test]
+        fn extend_from_appends_in_order_and_keeps_a_rotation() {
+            let transfer = |n: u8| {
+                OutputTransfer::new(
+                    AccountId::new([n; 32]),
+                    BitcoinAmount::try_from(u64::from(n)).unwrap(),
+                )
+            };
+
+            let mut first = ExecOutputs::new_empty();
+            first.add_transfer(transfer(1));
+            first.set_new_predicate(Some(PredicateKey::always_accept()));
+            let mut second = ExecOutputs::new_empty();
+            second.add_transfer(transfer(2));
+
+            let mut joined = ExecOutputs::new_empty();
+            joined.extend_from(&first);
+            joined.extend_from(&second);
+
+            assert_eq!(joined.output_transfers(), &[transfer(1), transfer(2)]);
+            assert_eq!(joined.new_predicate(), Some(&PredicateKey::always_accept()));
+        }
+
+        #[test]
+        fn matches_executed_ignores_new_predicate() {
+            let mut claimed = ExecOutputs::new_empty();
+            claimed.set_new_predicate(Some(PredicateKey::always_accept()));
+            assert!(claimed.matches_executed(&ExecOutputs::new_empty()));
         }
     }
 }

@@ -81,36 +81,38 @@ impl ExecutionEnvironment for SimpleExecutionEnvironment {
         Ok(())
     }
 
-    fn verify_block_pre_execution(&self, _block: &Self::Block) -> EnvResult<()> {
-        // The simple header does not commit to its body.
+    fn verify_block_pre_execution(
+        &self,
+        block: &Self::Block,
+        claimed_inputs: &ExecInputs,
+    ) -> EnvResult<()> {
+        // The simple header does not commit to its body, so only the claimed
+        // inputs need checking.
+        if block.body().deposits() != claimed_inputs.subject_deposits() {
+            return Err(EnvError::InvalidBlock);
+        }
         Ok(())
     }
 
     fn execute_block(
         &self,
         pre_state: &Self::PartialState,
-        block: &Self::Block,
+        block: Self::Block,
     ) -> EnvResult<ExecBlockOutput<Self>> {
-        self.execute_body(pre_state, block.get_body())
-    }
-
-    fn verify_inputs_against_block(
-        &self,
-        block: &Self::Block,
-        inputs: &ExecInputs,
-    ) -> EnvResult<()> {
-        if block.get_body().deposits() != inputs.subject_deposits() {
-            return Err(EnvError::InvalidBlock);
-        }
-        Ok(())
+        self.execute_body(pre_state, block.body())
     }
 
     fn verify_block_post_execution(
         &self,
         _header: &<Self::Block as ExecBlock>::Header,
-        _outputs: &ExecBlockOutput<Self>,
+        exec_output: &ExecBlockOutput<Self>,
+        claimed_outputs: &ExecOutputs,
     ) -> EnvResult<()> {
-        // For the simple EE, we don't need additional verification
+        // The simple header commits to nothing from execution, so only the
+        // claimed outputs need checking.
+        if !claimed_outputs.matches_executed(exec_output.outputs()) {
+            return Err(EnvError::OutputMismatch);
+        }
         Ok(())
     }
 
@@ -972,13 +974,13 @@ mod tests {
     }
 
     #[test]
-    fn verify_inputs_against_block_checks_body_deposits() {
+    fn verify_block_pre_execution_checks_body_deposits() {
         let ee = SimpleExecutionEnvironment;
         let deposit = SubjectDepositData::new(alice(), BitcoinAmount::try_from(1000u64).unwrap());
         let body = SimpleBlockBody::with_deposits(vec![deposit], vec![]);
         let block = SimpleBlock::new(SimpleHeader::genesis(), body.clone());
 
-        ee.verify_inputs_against_block(&block, &body.exec_inputs())
+        ee.verify_block_pre_execution(&block, &body.exec_inputs())
             .expect("inputs matching the body's deposits should pass");
 
         let wrong = SimpleBlockBody::with_deposits(
@@ -989,7 +991,7 @@ mod tests {
             vec![],
         );
         let err = ee
-            .verify_inputs_against_block(&block, &wrong.exec_inputs())
+            .verify_block_pre_execution(&block, &wrong.exec_inputs())
             .expect_err("inputs that differ from the body's deposits must be rejected");
         assert!(matches!(err, EnvError::InvalidBlock));
     }

@@ -12,4 +12,4 @@ mod utils;
 
 pub use errors::EvmEnvError;
 pub use execution::EvmExecutionEnvironment;
-pub use types::{EvmBlock, EvmBlockBody, EvmHeader, EvmPartialState, EvmWriteBatch};
+pub use types::{EvmBlock, EvmHeader, EvmPartialState, EvmWriteBatch};
