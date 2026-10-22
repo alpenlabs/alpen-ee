@@ -8,7 +8,7 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_exex::{ExExContext, ExExEvent};
 use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_provider::{BlockReaderIdExt, Chain};
-use tracing::{debug, error};
+use tracing::{debug, debug_span, error};
 
 #[expect(
     missing_debug_implementations,
@@ -42,6 +42,7 @@ impl<
         });
 
         for (block_hash, outcome) in bundles {
+            let _span = debug_span!("state_diff", ?block_hash).entered();
             #[cfg(debug_assertions)]
             assert!(outcome.len() == 1, "should only contain single block");
             let state_diff = BlockStateChanges::from(&outcome.bundle);
