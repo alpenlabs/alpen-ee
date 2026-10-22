@@ -200,6 +200,7 @@ reth-db = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
 reth-db-common = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
 reth-errors = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
 reth-eth-wire = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-ethereum-consensus = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
 reth-ethereum-engine-primitives = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
 reth-ethereum-payload-builder = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
 reth-ethereum-primitives = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }

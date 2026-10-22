@@ -1,7 +1,6 @@
 //! EVM block implementation.
 
 use alpen_acct_types::ExecBlock;
-use reth_consensus_common::validation::validate_body_against_header;
 use strata_codec::impl_type_flat_struct;
 
 use super::{EvmBlockBody, EvmHeader};
@@ -24,10 +23,6 @@ impl ExecBlock for EvmBlock {
 
     fn from_parts(header: Self::Header, body: Self::Body) -> Self {
         Self { header, body }
-    }
-
-    fn check_header_matches_body(header: &Self::Header, body: &Self::Body) -> bool {
-        validate_body_against_header(body.body(), header.header()).is_ok()
     }
 
     fn get_header(&self) -> &Self::Header {

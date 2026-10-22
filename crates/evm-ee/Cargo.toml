@@ -18,14 +18,13 @@ strata-codec.workspace = true
 strata-msg-fmt.workspace = true
 strata-ol-msg-types.workspace = true
 
-# RSP for sparse MPT and execution
-rsp-client-executor.workspace = true
+# RSP for the sparse MPT
 rsp-mpt.workspace = true
 
 # Reth for EVM execution
 alpen-reth-evm.workspace = true
 alpen-reth-primitives.workspace = true
-reth-consensus-common.workspace = true
+reth-consensus.workspace = true
 reth-errors.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-evm.workspace = true
@@ -46,10 +45,13 @@ bincode.workspace = true
 
 # Utilities
 itertools.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 alloy-eips.workspace = true
 alpen-params = { workspace = true, features = ["test-utils"] }
+reth-consensus-common.workspace = true
+rsp-client-executor.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 strata-ol-bridge-types.workspace = true

@@ -116,7 +116,7 @@ mod tests {
     use alpen_evm_ee::{
         EvmBlock, EvmBlockBody, EvmExecutionEnvironment, EvmHeader, EvmPartialState,
     };
-    use alpen_params::{AlpenSpecId, DEV_PARAMS_JSON};
+    use alpen_params::{AlpenSpecId, DEV_PARAMS_JSON, HeaderExtra};
     use reth_primitives_traits::Block as _;
     use rsp_client_executor::io::EthClientExecutorInput;
     use serde::Deserialize;
@@ -145,10 +145,10 @@ mod tests {
         serde_json::from_str(DEV_PARAMS_JSON).expect("dev params should parse")
     }
 
-    /// The spec version the RSP witness fixture was produced under. Shared by
-    /// the execution that builds the expected outputs and by the program that
+    /// The spec version the fixture block is proven under. Shared by the
+    /// execution that builds the expected outputs and by the program that
     /// replays them, so the two cannot drift apart.
-    const FIXTURE_SPEC_VERSION: AlpenSpecId = AlpenSpecId::V0;
+    const FIXTURE_SPEC_VERSION: AlpenSpecId = AlpenSpecId::V1;
 
     #[test]
     fn test_native_chunk_execution() {
@@ -178,9 +178,13 @@ mod tests {
             witness.ancestor_headers,
         );
 
-        // Build the EVM block from the witness.
-        let header = witness.current_block.header().clone();
-        let evm_header = EvmHeader::new(header.clone());
+        // Build the EVM block from the witness. The fixture block carries V1's
+        // floored base fee but no stamp, which reads as V0. Stamping it V1
+        // makes it a valid first V1 block over its V0 parent. It's empty, so
+        // the stamp doesn't change its execution.
+        let mut header = witness.current_block.header().clone();
+        header.extra_data = HeaderExtra::new(FIXTURE_SPEC_VERSION, 0).encode().into();
+        let evm_header = EvmHeader::new(header);
         let body = EvmBlockBody::from_alloy_body(witness.current_block.body().clone());
         let block = EvmBlock::new(evm_header, body);
         let tip_blkid: Hash = block.get_header().compute_block_id();
