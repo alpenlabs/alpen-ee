@@ -2,7 +2,7 @@
 set -euo pipefail
 
 RPC_ENDPOINT=""
-FORK="Prague"
+FORK="Osaka"
 RPC_CHAIN_ID="2892"
 RPC_SEED_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 TX_WAIT_TIMEOUT="120"
@@ -46,12 +46,45 @@ uv python install 3.11
 uv python pin 3.11
 uv sync --all-extras
 
-if [[ "${FORK}" == "Prague" ]]; then
-    REQUIRED_SKIP="tests/frontier/opcodes/test_call.py::test_call_memory_expands_on_early_revert[fork_${FORK}-state_test]"
-    [[ -f skip_tests.yaml ]] || printf 'skip_tests:\n' > skip_tests.yaml
-    grep -Fq "${REQUIRED_SKIP}" skip_tests.yaml \
-        || printf '\n  # Alpen/reth treats memory expansion differently on early revert in this edge case\n  - %s\n' "${REQUIRED_SKIP}" >> skip_tests.yaml
+# skip_tests.yaml in the EEST checkout names tests by their Prague node IDs,
+# which carry the hardfork. Rename them to the hardfork under test so the skips
+# still match.
+# TODO: key skip_tests.yaml in alpenlabs/execution-spec-tests on Osaka, move
+# ALPEN_SKIPS into it and drop this rewrite, so all skips live in one place.
+SKIP_LIST="alpen_skip_tests.yaml"
+if [[ -f skip_tests.yaml ]]; then
+    sed "s/fork_Prague-/fork_${FORK}-/g" skip_tests.yaml > "${SKIP_LIST}"
+else
+    printf 'skip_tests:\n' > "${SKIP_LIST}"
 fi
+
+# Skips on top of skip_tests.yaml. An entry matches a node ID exactly or as an
+# fnmatch glob. A glob can't contain brackets: fnmatch reads them as a
+# character class.
+EIP7825="tests/osaka/eip7825_transaction_gas_limit_cap/test_tx_gas_limit.py"
+ALPEN_SKIPS=(
+    # Alpen/reth treats memory expansion differently on early revert in this edge case.
+    "tests/frontier/opcodes/test_call.py::test_call_memory_expands_on_early_revert[fork_${FORK}-state_test]"
+    # Execute mode can't send blob (type-3) transactions.
+    "tests/osaka/eip7594_peerdas/*.py::*"
+    "${EIP7825}::test_transaction_gas_limit_cap[fork_${FORK}-tx_gas_limit_cap_exceeds_maximum1-state_test]"
+    "${EIP7825}::test_transaction_gas_limit_cap[fork_${FORK}-tx_gas_limit_cap_over1-state_test]"
+    # Execute mode deploys contracts through an initcode prefix capped at 255 bytes,
+    # and this test's prefix is longer.
+    "${EIP7825}::test_maximum_gas_refund*"
+    # These fill a transaction at the 2^24 gas cap with calldata or access
+    # lists. The result is over reth's 128 KiB txpool limit on transaction
+    # size, which alpen-client can't raise yet (STR-3681).
+    "${EIP7825}::test_tx_gas_limit_cap_full_calldata[fork_${FORK}-state_test-zero_byte_True-exceed_tx_gas_limit_False-correct_intrinsic_cost_in_transaction_gas_limit_True]"
+    "${EIP7825}::test_tx_gas_limit_cap_full_calldata[fork_${FORK}-state_test-zero_byte_False-exceed_tx_gas_limit_False-correct_intrinsic_cost_in_transaction_gas_limit_True]"
+    "${EIP7825}::test_tx_gas_limit_cap_access_list_with_diff_keys[fork_${FORK}-state_test-exceed_tx_gas_limit_False-correct_intrinsic_cost_in_transaction_gas_limit_True]"
+    "${EIP7825}::test_tx_gas_limit_cap_access_list_with_diff_addr[fork_${FORK}-state_test-exceed_tx_gas_limit_False-correct_intrinsic_cost_in_transaction_gas_limit_True]"
+)
+# skip_tests.yaml has no trailing newline, so start on a fresh line.
+{
+    echo
+    printf '  - %s\n' "${ALPEN_SKIPS[@]}"
+} >> "${SKIP_LIST}"
 
 PYTEST_ARGS=()
 if [[ -n "${PYTEST_ARGS_STRING}" ]]; then
@@ -66,5 +99,6 @@ uv run --with solc-select execute remote \
     "--rpc-seed-key=${RPC_SEED_KEY}" \
     "--rpc-chain-id=${RPC_CHAIN_ID}" \
     "--tx-wait-timeout=${TX_WAIT_TIMEOUT}" \
+    "--skip-list-file=${SKIP_LIST}" \
     -v \
     "${PYTEST_ARGS[@]}"
