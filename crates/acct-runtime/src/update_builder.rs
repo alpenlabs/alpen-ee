@@ -4,9 +4,7 @@
 //! inputs, allowing the consumer to query available inputs and accept
 //! validated [`ChunkTransition`]s.
 
-use alpen_acct_types::{
-    EeAccountState, EnvError, ExecutionEnvironment, PendingInputEntry, UpdateExtraData,
-};
+use alpen_acct_types::{EeAccountState, EnvError, PendingInputEntry, UpdateExtraData};
 use alpen_chain_types::ChunkTransition;
 use strata_acct_types::{Hash, MessageEntry};
 use strata_snark_acct_runtime::{PrivateInput, UpdateBuilder as GenericUpdateBuilder};
@@ -27,9 +25,12 @@ use crate::{
 /// validates [`ChunkTransition`]s against this state, and accumulates
 /// outputs. The consumer can query [`Self::remaining_pending_inputs`] and
 /// [`Self::cur_tip_blkid`] to construct valid transitions.
-#[expect(missing_debug_implementations, reason = "E may not implement Debug")]
-pub struct UpdateBuilder<'i, E: ExecutionEnvironment> {
-    inner: GenericUpdateBuilder<'i, EeSnarkAccountProgram<E>>,
+#[expect(
+    missing_debug_implementations,
+    reason = "the generic builder does not implement Debug"
+)]
+pub struct UpdateBuilder<'i> {
+    inner: GenericUpdateBuilder<'i, EeSnarkAccountProgram>,
 
     /// Current chain tip, advanced as chunks are accepted.
     cur_tip_blkid: Hash,
@@ -48,7 +49,7 @@ pub struct UpdateBuilder<'i, E: ExecutionEnvironment> {
     fincls_processed: usize,
 }
 
-impl<'i, E: ExecutionEnvironment> UpdateBuilder<'i, E> {
+impl<'i> UpdateBuilder<'i> {
     /// Creates a new EE update builder.
     ///
     /// Initializes with an empty message set. Messages are added incrementally
@@ -56,7 +57,7 @@ impl<'i, E: ExecutionEnvironment> UpdateBuilder<'i, E> {
     pub fn new(
         snark_state: SnarkAccountState,
         initial_state: EeAccountState,
-        vinput: EeVerificationInput<'i, E>,
+        vinput: EeVerificationInput<'i>,
     ) -> BuilderResult<Self> {
         let pending_inputs = initial_state.pending_inputs().to_vec();
         let cur_tip_blkid = initial_state.last_exec_blkid();

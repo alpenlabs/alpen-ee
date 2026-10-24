@@ -10,7 +10,6 @@ alpen-acct-runtime.workspace = true
 alpen-acct-types.workspace = true
 alpen-da-runtime.workspace = true
 alpen-da-types.workspace = true
-alpen-evm-ee.workspace = true
 alpen-params.workspace = true
 strata-predicate.workspace = true
 strata-snark-acct-runtime.workspace = true

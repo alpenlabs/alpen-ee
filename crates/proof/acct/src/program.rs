@@ -1,6 +1,6 @@
 use alpen_acct_runtime::EePrivateInput;
 use alpen_da_types::DaWitness;
-use alpen_params::{AlpenParams, AlpenSpecId};
+use alpen_params::AlpenSpecId;
 use k256::schnorr::SigningKey;
 use rkyv::rancor::Error as RkyvError;
 use ssz::Decode;
@@ -16,18 +16,15 @@ use crate::process_ee_acct_update;
 
 /// Host-side input for the EE account update proof.
 ///
-/// Note: neither `AlpenParams` (genesis, bridge params) nor the chunk
-/// predicate key (VK of the chunk SP1 program) is part of this input. The
-/// acct guest receives both at compile time, baked into the ELF by
-/// `provers/sp1/build.rs`. This is intentional — a host-supplied genesis,
-/// bridge params, or predicate key would let a malicious prover bypass
-/// consensus-critical checks or chunk proof verification. See
-/// `provers/sp1/guest-alpen-acct/src/main.rs` for the guest-side
-/// construction path.
+/// Note: the chunk predicate key (VK of the chunk SP1 program) is not part of
+/// this input. The acct guest receives it at compile time, baked into the ELF
+/// by `provers/sp1/build.rs`. This is intentional — a host-supplied predicate
+/// key would let a malicious prover bypass chunk proof verification. See
+/// `provers/sp1/guest-alpen-acct/src/main.rs` for the guest-side construction
+/// path.
 ///
-/// For native testing, `params` and the predicate key live on
-/// [`EeAcctProgram::new`] and are passed into the `NativeHost` closure
-/// directly.
+/// For native testing, the predicate key lives on [`EeAcctProgram::new`] and
+/// is passed into the `NativeHost` closure directly.
 #[derive(Debug)]
 pub struct EeAcctProofInput {
     pub ee_private_input: EePrivateInput,
@@ -41,19 +38,13 @@ pub struct EeAcctProofInput {
 #[derive(Debug)]
 pub struct EeAcctProgram {
     chunk_predicate_key: PredicateKey,
-    params: AlpenParams,
     spec_version: AlpenSpecId,
 }
 
 impl EeAcctProgram {
-    pub fn new(
-        chunk_predicate_key: PredicateKey,
-        params: AlpenParams,
-        spec_version: AlpenSpecId,
-    ) -> Self {
+    pub fn new(chunk_predicate_key: PredicateKey, spec_version: AlpenSpecId) -> Self {
         Self {
             chunk_predicate_key,
-            params,
             spec_version,
         }
     }
@@ -111,10 +102,9 @@ impl EeAcctProgram {
     /// Native host that can be used for testing.
     pub fn native_host(&self) -> NativeHost {
         let key = self.chunk_predicate_key.clone();
-        let params = self.params.clone();
         let spec_version = self.spec_version;
         NativeHost::new(Self::test_signing_key(), move |zkvm| {
-            process_ee_acct_update(zkvm, &params, spec_version, &key)
+            process_ee_acct_update(zkvm, spec_version, &key)
         })
     }
 
@@ -184,10 +174,6 @@ mod tests {
             UpdatePrivateInput::new(pub_params, initial_state.as_ssz_bytes(), vec![]);
         let ee_private_input = EePrivateInput::new(vec![], vec![]);
 
-        // Not exercised with zero chunks, so the default (empty EVM genesis)
-        // params are fine here.
-        let params = AlpenParams::default();
-
         let proof_input = EeAcctProofInput {
             ee_private_input,
             snark_acct_private_input,
@@ -201,7 +187,6 @@ mod tests {
         let program = EeAcctProgram::new(
             PredicateKey::try_new(PredicateTypeId::Bip340Schnorr, vec![0u8; 32])
                 .expect("condition fits within the length limit"),
-            params,
             AlpenSpecId::V0,
         );
         let result = program

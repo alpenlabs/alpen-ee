@@ -8,7 +8,6 @@ version = "0.1.0"
 [dependencies]
 alpen-params = { path = "../../../crates/params" }
 alpen-proof-acct = { path = "../../../crates/proof/acct" }
-serde_json = "1.0.94"
 strata-predicate = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.4.0", features = [
   "sp1-groth16",
 ] }

@@ -12,7 +12,6 @@ use std::iter;
 use alpen_acct_runtime::{BuilderError, EeVerificationInput, UpdateBuilder};
 use alpen_acct_types::{PendingInputEntry, UpdateExtraData};
 use alpen_chain_types::{ExecInputs, ExecOutputs, SequenceTracker, SubjectDepositData};
-use alpen_simple_ee::SimpleExecutionEnvironment;
 use common::{
     build_update_operation, create_chunk_transition, create_deposit_message, create_initial_state,
     create_vstate, empty_exec_header_summary, simple_chunk, verify_update,
@@ -30,7 +29,6 @@ use strata_snark_acct_types::{
 #[test]
 fn test_mismatched_coinput_count() {
     let (initial_state, snark_state) = create_initial_state();
-    let ee = SimpleExecutionEnvironment;
 
     let dest = SubjectId::from([1u8; 32]);
     let value = BitcoinAmount::try_from(1000u64).unwrap();
@@ -38,11 +36,11 @@ fn test_mismatched_coinput_count() {
     let message = create_deposit_message(dest, value, source, 1);
 
     let (operation, _coinputs, _snark_priv) =
-        build_update_operation(vec![message], &[], &initial_state, &snark_state, &ee);
+        build_update_operation(vec![message], &[], &initial_state, &snark_state);
 
     // Too many coinputs
     let wrong_coinputs = [vec![], vec![]];
-    let result = verify_update(&initial_state, &operation, &wrong_coinputs, &ee);
+    let result = verify_update(&initial_state, &operation, &wrong_coinputs);
     assert!(matches!(
         result,
         Err(ProgramError::MismatchedCoinputCount {
@@ -53,7 +51,7 @@ fn test_mismatched_coinput_count() {
 
     // Too few coinputs
     let wrong_coinputs2: Vec<Vec<u8>> = vec![];
-    let result2 = verify_update(&initial_state, &operation, &wrong_coinputs2, &ee);
+    let result2 = verify_update(&initial_state, &operation, &wrong_coinputs2);
     assert!(matches!(
         result2,
         Err(ProgramError::MismatchedCoinputCount {
@@ -66,7 +64,6 @@ fn test_mismatched_coinput_count() {
 #[test]
 fn test_nonempty_coinput_rejected() {
     let (initial_state, snark_state) = create_initial_state();
-    let ee = SimpleExecutionEnvironment;
 
     let dest = SubjectId::from([1u8; 32]);
     let value = BitcoinAmount::try_from(1000u64).unwrap();
@@ -74,11 +71,11 @@ fn test_nonempty_coinput_rejected() {
     let message = create_deposit_message(dest, value, source, 1);
 
     let (operation, _coinputs, _snark_priv) =
-        build_update_operation(vec![message], &[], &initial_state, &snark_state, &ee);
+        build_update_operation(vec![message], &[], &initial_state, &snark_state);
 
     // Non-empty coinput should be rejected (EE requires empty coinputs)
     let nonempty_coinputs = vec![vec![1, 2, 3]];
-    let result = verify_update(&initial_state, &operation, &nonempty_coinputs, &ee);
+    let result = verify_update(&initial_state, &operation, &nonempty_coinputs);
     assert!(
         matches!(
             result,
@@ -94,7 +91,6 @@ fn test_nonempty_coinput_rejected() {
 #[test]
 fn test_output_mismatch_fails() {
     let (initial_state, _snark_state) = create_initial_state();
-    let ee = SimpleExecutionEnvironment;
 
     // Manually construct operation data with outputs that don't match
     // accumulated chunks (there are none, so expected should be empty).
@@ -124,7 +120,7 @@ fn test_output_mismatch_fails() {
     );
 
     let coinputs: Vec<Vec<u8>> = vec![];
-    let result = verify_update(&initial_state, &operation, &coinputs, &ee);
+    let result = verify_update(&initial_state, &operation, &coinputs);
 
     assert!(
         matches!(result, Err(ProgramError::UnsatisfiedObligations)),
@@ -135,7 +131,6 @@ fn test_output_mismatch_fails() {
 #[test]
 fn test_extra_data_tip_mismatch() {
     let (initial_state, _snark_state) = create_initial_state();
-    let ee = SimpleExecutionEnvironment;
 
     // Manually construct operation data with a wrong tip.
     let wrong_tip = Hash::new([0xAA; 32]);
@@ -152,7 +147,7 @@ fn test_extra_data_tip_mismatch() {
     );
 
     let coinputs: Vec<Vec<u8>> = vec![];
-    let result = verify_update(&initial_state, &operation, &coinputs, &ee);
+    let result = verify_update(&initial_state, &operation, &coinputs);
 
     assert!(
         matches!(result, Err(ProgramError::InvalidExtraData)),
@@ -165,10 +160,9 @@ fn test_extra_data_tip_mismatch() {
 #[test]
 fn test_builder_rejects_wrong_parent() {
     let (initial_state, snark_state) = create_initial_state();
-    let ee = SimpleExecutionEnvironment;
 
     let predicate_key = PredicateKey::always_accept();
-    let vinput = EeVerificationInput::new(&ee, &predicate_key, &[], &[]);
+    let vinput = EeVerificationInput::new(&predicate_key, &[]);
     let mut builder =
         UpdateBuilder::new(snark_state, initial_state, vinput).expect("create builder");
 
@@ -194,7 +188,6 @@ fn test_builder_rejects_wrong_parent() {
 #[test]
 fn test_builder_rejects_wrong_deposit() {
     let (initial_state, snark_state) = create_initial_state();
-    let ee = SimpleExecutionEnvironment;
 
     let dest = SubjectId::from([1u8; 32]);
     let value = BitcoinAmount::try_from(1000u64).unwrap();
@@ -202,7 +195,7 @@ fn test_builder_rejects_wrong_deposit() {
     let message = create_deposit_message(dest, value, source, 1);
 
     let predicate_key = PredicateKey::always_accept();
-    let vinput = EeVerificationInput::new(&ee, &predicate_key, &[], &[]);
+    let vinput = EeVerificationInput::new(&predicate_key, &[]);
     let mut builder =
         UpdateBuilder::new(snark_state, initial_state, vinput).expect("create builder");
 
@@ -232,7 +225,6 @@ fn test_builder_rejects_wrong_deposit() {
 #[test]
 fn test_builder_advances_tip() {
     let (initial_state, snark_state) = create_initial_state();
-    let ee = SimpleExecutionEnvironment;
 
     let dest1 = SubjectId::from([1u8; 32]);
     let dest2 = SubjectId::from([2u8; 32]);
@@ -243,7 +235,7 @@ fn test_builder_advances_tip() {
     let msg2 = create_deposit_message(dest2, value, source, 1);
 
     let predicate_key = PredicateKey::always_accept();
-    let vinput = EeVerificationInput::new(&ee, &predicate_key, &[], &[]);
+    let vinput = EeVerificationInput::new(&predicate_key, &[]);
     let mut builder =
         UpdateBuilder::new(snark_state, initial_state, vinput).expect("create builder");
 
@@ -298,7 +290,6 @@ fn test_builder_advances_tip() {
 #[test]
 fn test_process_decoded_transition_happy_path() {
     let (initial_state, _snark_state) = create_initial_state();
-    let ee = SimpleExecutionEnvironment;
 
     let parent = initial_state.last_exec_blkid();
     let tip = Hash::new([0xBB; 32]);
@@ -313,12 +304,7 @@ fn test_process_decoded_transition_happy_path() {
     );
 
     let predicate_key = PredicateKey::always_accept();
-    let mut vstate = create_vstate(
-        &ee,
-        &predicate_key,
-        &initial_state,
-        UpdateOutputs::new_empty(),
-    );
+    let mut vstate = create_vstate(&predicate_key, &initial_state, UpdateOutputs::new_empty());
 
     let pending: Vec<PendingInputEntry> = vec![];
     let mut tracker = SequenceTracker::new(&pending);
@@ -331,7 +317,6 @@ fn test_process_decoded_transition_happy_path() {
 #[test]
 fn test_chain_linkage_mismatch() {
     let (initial_state, _snark_state) = create_initial_state();
-    let ee = SimpleExecutionEnvironment;
 
     let wrong_parent = Hash::new([0xCC; 32]);
     let tip = Hash::new([0xDD; 32]);
@@ -346,12 +331,7 @@ fn test_chain_linkage_mismatch() {
     );
 
     let predicate_key = PredicateKey::always_accept();
-    let mut vstate = create_vstate(
-        &ee,
-        &predicate_key,
-        &initial_state,
-        UpdateOutputs::new_empty(),
-    );
+    let mut vstate = create_vstate(&predicate_key, &initial_state, UpdateOutputs::new_empty());
 
     let pending: Vec<PendingInputEntry> = vec![];
     let mut tracker = SequenceTracker::new(&pending);
@@ -368,8 +348,6 @@ fn test_chain_linkage_mismatch() {
 
 #[test]
 fn test_deposit_mismatch_in_chunk() {
-    let ee = SimpleExecutionEnvironment;
-
     let dest = SubjectId::from([1u8; 32]);
     let value = BitcoinAmount::try_from(1000u64).unwrap();
     let deposit = SubjectDepositData::new(dest, value);
@@ -399,12 +377,7 @@ fn test_deposit_mismatch_in_chunk() {
     );
 
     let predicate_key = PredicateKey::always_accept();
-    let mut vstate = create_vstate(
-        &ee,
-        &predicate_key,
-        &initial_state,
-        UpdateOutputs::new_empty(),
-    );
+    let mut vstate = create_vstate(&predicate_key, &initial_state, UpdateOutputs::new_empty());
 
     let pending = initial_state.pending_inputs().to_vec();
     let mut tracker = SequenceTracker::new(&pending);
@@ -418,8 +391,6 @@ fn test_deposit_mismatch_in_chunk() {
 
 #[test]
 fn test_input_count_mismatch() {
-    let ee = SimpleExecutionEnvironment;
-
     let initial_state = alpen_acct_types::EeAccountState::new(
         Hash::new([0u8; 32]),
         Hash::zero(),
@@ -446,12 +417,7 @@ fn test_input_count_mismatch() {
     );
 
     let predicate_key = PredicateKey::always_accept();
-    let mut vstate = create_vstate(
-        &ee,
-        &predicate_key,
-        &initial_state,
-        UpdateOutputs::new_empty(),
-    );
+    let mut vstate = create_vstate(&predicate_key, &initial_state, UpdateOutputs::new_empty());
 
     let pending: Vec<PendingInputEntry> = vec![];
     let mut tracker = SequenceTracker::new(&pending);

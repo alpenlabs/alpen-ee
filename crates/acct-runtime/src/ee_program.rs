@@ -4,11 +4,8 @@
 //! the [`SnarkAccountProgram`] and [`SnarkAccountProgramVerification`] traits
 //! for the EE account type.
 
-use std::marker::PhantomData;
-
 use alpen_acct_types::{
-    DecodedEeMessageData, EeAccountState, EnvError, ExecutionEnvironment, PendingInputEntry,
-    UpdateExtraData,
+    DecodedEeMessageData, EeAccountState, EnvError, PendingInputEntry, UpdateExtraData,
 };
 use alpen_chain_types::SubjectDepositData;
 use strata_acct_types::ADMIN_MSG_ACCT_ID;
@@ -18,30 +15,19 @@ use crate::verification_state::{EeVerificationInput, EeVerificationState};
 
 /// Snark account program for execution environments.
 ///
-/// The type parameter `E` is the execution environment type used for block
-/// execution during verification.
-#[derive(Debug)]
-pub struct EeSnarkAccountProgram<E: ExecutionEnvironment> {
-    _pd: PhantomData<E>,
-}
+/// It never executes blocks. Chunk proofs attest to execution, and this
+/// program checks those proofs and links their transitions to the account.
+#[derive(Debug, Default)]
+pub struct EeSnarkAccountProgram;
 
-impl<E: ExecutionEnvironment> EeSnarkAccountProgram<E> {
+impl EeSnarkAccountProgram {
     /// Creates a new instance.
     pub fn new() -> Self {
-        Self::default()
+        Self
     }
 }
 
-/// Manual impl for [`Default`] because the derive macro wouldn't work here.
-impl<E: ExecutionEnvironment> Default for EeSnarkAccountProgram<E> {
-    fn default() -> Self {
-        Self {
-            _pd: Default::default(),
-        }
-    }
-}
-
-impl<E: ExecutionEnvironment> SnarkAccountProgram for EeSnarkAccountProgram<E> {
+impl SnarkAccountProgram for EeSnarkAccountProgram {
     type State = EeAccountState;
     type Msg = DecodedEeMessageData;
     type ExtraData = UpdateExtraData;
@@ -84,9 +70,9 @@ impl<E: ExecutionEnvironment> SnarkAccountProgram for EeSnarkAccountProgram<E> {
     }
 }
 
-impl<E: ExecutionEnvironment> SnarkAccountProgramVerification for EeSnarkAccountProgram<E> {
-    type VState<'a> = EeVerificationState<'a, E>;
-    type VInput<'a> = EeVerificationInput<'a, E>;
+impl SnarkAccountProgramVerification for EeSnarkAccountProgram {
+    type VState<'a> = EeVerificationState<'a>;
+    type VInput<'a> = EeVerificationInput<'a>;
 
     fn start_verification<'i, 'u>(
         &self,
@@ -95,12 +81,10 @@ impl<E: ExecutionEnvironment> SnarkAccountProgramVerification for EeSnarkAccount
         ulinfo: UpdateLedgerInfo<'u>,
     ) -> ProgramResult<Self::VState<'i>, Self::Error> {
         Ok(EeVerificationState::new_from_state(
-            vinput.ee(),
             vinput.chunk_predicate_key(),
             state,
             ulinfo.outputs().clone(), // TODO(STR-3685): ugh, avoid this clone
             vinput.input_chunks(),
-            vinput.raw_partial_pre_state(),
         ))
     }
 

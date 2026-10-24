@@ -10,7 +10,6 @@ mod common;
 use alpen_acct_runtime::{EeVerificationInput, UpdateBuilder};
 use alpen_acct_types::{EnvError, PendingInputEntry};
 use alpen_chain_types::{ExecOutputs, SequenceTracker};
-use alpen_simple_ee::SimpleExecutionEnvironment;
 use common::{
     apply_unconditionally, assert_verified_chunks_succeed, create_deposit_message,
     create_initial_state, create_predicate_update_message, create_vstate,
@@ -23,7 +22,6 @@ use strata_snark_acct_types::UpdateOutputs;
 #[test]
 fn test_deposit_then_rotation_single_chunk() {
     let (initial_state, snark_state) = create_initial_state();
-    let ee = SimpleExecutionEnvironment;
 
     let dest = SubjectId::from([1u8; 32]);
     let value = BitcoinAmount::try_from(1000u64).unwrap();
@@ -34,7 +32,7 @@ fn test_deposit_then_rotation_single_chunk() {
     let rotation_msg = create_predicate_update_message(&new_key, 1);
 
     let predicate_key = PredicateKey::always_accept();
-    let vinput = EeVerificationInput::new(&ee, &predicate_key, &[], &[]);
+    let vinput = EeVerificationInput::new(&predicate_key, &[]);
     let mut builder =
         UpdateBuilder::new(snark_state, initial_state.clone(), vinput).expect("create builder");
 
@@ -76,16 +74,15 @@ fn test_deposit_then_rotation_single_chunk() {
     let (operation, coinputs) = builder.build().expect("build should succeed");
 
     apply_unconditionally(&initial_state, &operation).expect("unconditional path should succeed");
-    assert_verified_chunks_succeed(&initial_state, &operation, &coinputs, &[chunk], &ee);
+    assert_verified_chunks_succeed(&initial_state, &operation, &coinputs, &[chunk]);
 }
 
 #[test]
 fn test_declared_rotation_without_queued_entry_fails() {
     let (initial_state, snark_state) = create_initial_state();
-    let ee = SimpleExecutionEnvironment;
 
     let predicate_key = PredicateKey::always_accept();
-    let vinput = EeVerificationInput::new(&ee, &predicate_key, &[], &[]);
+    let vinput = EeVerificationInput::new(&predicate_key, &[]);
     let mut builder =
         UpdateBuilder::new(snark_state, initial_state, vinput).expect("create builder");
 
@@ -123,16 +120,10 @@ fn rotation_key(tag: u8) -> PredicateKey {
 #[test]
 fn test_transition_after_a_rotation_is_rejected() {
     let (initial_state, _snark_state) = create_initial_state();
-    let ee = SimpleExecutionEnvironment;
 
     let new_key = rotation_key(0x01);
     let predicate_key = PredicateKey::always_accept();
-    let mut vstate = create_vstate(
-        &ee,
-        &predicate_key,
-        &initial_state,
-        UpdateOutputs::new_empty(),
-    );
+    let mut vstate = create_vstate(&predicate_key, &initial_state, UpdateOutputs::new_empty());
 
     let pending = vec![PendingInputEntry::PredicateRotation(new_key.clone())];
     let mut tracker = SequenceTracker::new(&pending);
@@ -177,17 +168,11 @@ fn test_transition_after_a_rotation_is_rejected() {
 #[test]
 fn test_second_rotation_in_one_update_is_rejected() {
     let (initial_state, _snark_state) = create_initial_state();
-    let ee = SimpleExecutionEnvironment;
 
     let first_key = rotation_key(0x01);
     let second_key = rotation_key(0x02);
     let predicate_key = PredicateKey::always_accept();
-    let mut vstate = create_vstate(
-        &ee,
-        &predicate_key,
-        &initial_state,
-        UpdateOutputs::new_empty(),
-    );
+    let mut vstate = create_vstate(&predicate_key, &initial_state, UpdateOutputs::new_empty());
 
     let pending = vec![
         PendingInputEntry::PredicateRotation(first_key.clone()),
@@ -233,13 +218,12 @@ fn test_second_rotation_in_one_update_is_rejected() {
 #[test]
 fn test_builder_rejects_a_chunk_after_a_rotation() {
     let (initial_state, snark_state) = create_initial_state();
-    let ee = SimpleExecutionEnvironment;
 
     let new_key = rotation_key(0x01);
     let rotation_msg = create_predicate_update_message(&new_key, 1);
 
     let predicate_key = PredicateKey::always_accept();
-    let vinput = EeVerificationInput::new(&ee, &predicate_key, &[], &[]);
+    let vinput = EeVerificationInput::new(&predicate_key, &[]);
     let mut builder =
         UpdateBuilder::new(snark_state, initial_state, vinput).expect("create builder");
 
