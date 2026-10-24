@@ -11,10 +11,7 @@ use ssz::{Decode, DecodeError, Encode};
 #[derive(Clone, Debug, Archive, Deserialize, Serialize)]
 #[rkyv(derive(Debug))]
 pub struct PrivateInput {
-    /// Previous header that we already have in our state.
-    raw_prev_header: Vec<u8>,
-
-    /// Partial pre-state corresponding to the previous header.
+    /// Partial pre-state corresponding to the account's last execution block.
     raw_partial_pre_state: Vec<u8>,
 
     /// Raw chunks we're going to process in the order we're processing them.
@@ -22,13 +19,8 @@ pub struct PrivateInput {
 }
 
 impl PrivateInput {
-    pub fn new(
-        raw_prev_header: Vec<u8>,
-        raw_partial_pre_state: Vec<u8>,
-        chunks: Vec<ChunkInput>,
-    ) -> Self {
+    pub fn new(raw_partial_pre_state: Vec<u8>, chunks: Vec<ChunkInput>) -> Self {
         Self {
-            raw_prev_header,
             raw_partial_pre_state,
             chunks,
         }
@@ -41,10 +33,6 @@ impl PrivateInput {
 
 #[archive_impl]
 impl PrivateInput {
-    pub fn raw_prev_header(&self) -> &[u8] {
-        &self.raw_prev_header
-    }
-
     pub fn raw_partial_pre_state(&self) -> &[u8] {
         &self.raw_partial_pre_state
     }

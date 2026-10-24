@@ -182,7 +182,7 @@ mod tests {
         // Construct private inputs.
         let snark_acct_private_input =
             UpdatePrivateInput::new(pub_params, initial_state.as_ssz_bytes(), vec![]);
-        let ee_private_input = EePrivateInput::new(vec![], vec![], vec![]);
+        let ee_private_input = EePrivateInput::new(vec![], vec![]);
 
         // Not exercised with zero chunks, so the default (empty EVM genesis)
         // params are fine here.

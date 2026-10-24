@@ -130,7 +130,6 @@ fn build_input(
 
     EeAcctProofInput {
         ee_private_input: EePrivateInput::new(
-            Vec::new(),
             workload.range_pre_state.clone(),
             vec![ChunkInput::new(transition.clone(), chunk_proof)],
         ),

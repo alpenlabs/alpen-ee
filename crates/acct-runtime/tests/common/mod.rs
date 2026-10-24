@@ -143,7 +143,7 @@ pub fn verify_update(
     let snark_priv =
         SnarkPrivateInput::new(pub_params, initial_state.as_ssz_bytes(), coinputs_typed);
 
-    let ee_priv = EePrivateInput::new(vec![], vec![], vec![]);
+    let ee_priv = EePrivateInput::new(vec![], vec![]);
 
     with_archived_inputs(&ee_priv, &snark_priv, |archived_ee, archived_snark| {
         let predicate_key = PredicateKey::always_accept();
@@ -344,7 +344,7 @@ pub(crate) fn verify_with_chunks(
         SnarkPrivateInput::new(pub_params, initial_state.as_ssz_bytes(), coinputs_typed);
 
     let chunk_inputs = make_chunk_inputs(chunks);
-    let ee_priv = EePrivateInput::new(vec![], vec![], chunk_inputs);
+    let ee_priv = EePrivateInput::new(vec![], chunk_inputs);
 
     with_archived_inputs(&ee_priv, &snark_priv, |archived_ee, archived_snark| {
         let predicate_key = PredicateKey::always_accept();
@@ -365,7 +365,7 @@ pub(crate) fn verify_with_private_input(
     ee: &SimpleExecutionEnvironment,
 ) -> ProgramResult<(), EnvError> {
     let chunk_inputs = make_chunk_inputs(chunks);
-    let ee_priv = EePrivateInput::new(vec![], vec![], chunk_inputs);
+    let ee_priv = EePrivateInput::new(vec![], chunk_inputs);
 
     with_archived_inputs(&ee_priv, snark_priv, |archived_ee, archived_snark| {
         let predicate_key = PredicateKey::always_accept();
