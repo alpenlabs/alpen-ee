@@ -1,4 +1,3 @@
-use alpen_acct_types::CommitChainSegment;
 use alpen_chain_types::ChunkTransition;
 use rkyv::{Archive, Deserialize, Serialize};
 use rkyv_impl::archive_impl;
