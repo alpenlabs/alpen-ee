@@ -31,10 +31,13 @@ ignore = [
   # patched, and that needs elliptic-curve 0.14, so no bump clears it.
   # k256 scalars are crypto-bigint values, so k256 signing is exposed. The
   # sequencer key signs through libsecp256k1 and is not. The SP1 network key
-  # signs through k256, but only proof requests, and a leak cannot break
-  # soundness. The native prover's Schnorr key also signs through k256, and it
-  # is the account update VK, so the native backend must not secure a real
-  # network until this is cleared. Deployed networks use Sp1Groth16.
+  # signs through k256, and it pays for proving, so a leak would let someone
+  # spend on our account. We accept that until a patch is reachable: it only
+  # signs inside our pods and CI runners, and nobody outside can trigger or
+  # time those signatures. The native prover's Schnorr key also signs through
+  # k256, and it is the account update VK, so the native backend must not
+  # secure a real network until this is cleared. Deployed networks use
+  # Sp1Groth16.
   # Revisit when reth, alloy and sp1 move to elliptic-curve 0.14.
   "RUSTSEC-2026-0387",
 ]
