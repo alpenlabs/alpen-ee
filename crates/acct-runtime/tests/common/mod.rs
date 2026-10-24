@@ -5,7 +5,7 @@
 
 use alpen_acct_runtime::{
     AcctProgramResult, ArchivedEePrivateInput, ChunkInput, EePrivateInput, EeSnarkAccountProgram,
-    EeVerificationInput, EeVerificationState, UpdateBuilder,
+    EeVerificationInput, UpdateBuilder,
 };
 use alpen_acct_types::{DecodedEeMessageData, EeAccountState, UpdateExtraData};
 use alpen_chain_types::{
@@ -381,13 +381,4 @@ pub(crate) fn assert_verified_chunks_succeed(
 ) {
     verify_with_chunks(initial_state, operation, coinputs, chunks)
         .expect("verified path with chunks should succeed");
-}
-
-/// Creates an [`EeVerificationState`] for testing.
-pub(crate) fn create_vstate<'a>(
-    chunk_predicate_key: &'a PredicateKey,
-    initial_state: &EeAccountState,
-    expected_outputs: UpdateOutputs,
-) -> EeVerificationState<'a> {
-    EeVerificationState::new_from_state(chunk_predicate_key, initial_state, expected_outputs, &[])
 }
