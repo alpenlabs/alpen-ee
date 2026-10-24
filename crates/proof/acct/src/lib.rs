@@ -10,8 +10,10 @@ use strata_predicate::PredicateKey;
 use strata_snark_acct_runtime::ArchivedPrivateInput as ArchivedUpdatePrivateInput;
 use zkaleido::ZkVmEnvSerde;
 
+#[cfg(not(target_os = "zkvm"))]
 mod program;
 
+#[cfg(not(target_os = "zkvm"))]
 pub use program::{EeAcctProgram, EeAcctProofInput};
 
 /// Guest entry point for EE account update proof generation.

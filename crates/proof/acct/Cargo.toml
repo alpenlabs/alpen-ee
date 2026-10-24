@@ -13,12 +13,16 @@ alpen-da-types.workspace = true
 alpen-params.workspace = true
 strata-predicate.workspace = true
 strata-snark-acct-runtime.workspace = true
-strata-snark-acct-types.workspace = true
 
-k256.workspace = true
 rkyv.workspace = true
-ssz.workspace = true
 zkaleido.workspace = true
+
+# `program.rs` is gated on this same cfg. Keeping these here avoids tripping
+# `unused_crate_dependencies` in the zkVM guest build.
+[target.'cfg(not(target_os = "zkvm"))'.dependencies]
+k256.workspace = true
+ssz.workspace = true
+strata-snark-acct-types.workspace = true
 zkaleido-native-adapter.workspace = true
 
 [dev-dependencies]
