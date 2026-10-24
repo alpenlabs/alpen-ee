@@ -1,4 +1,5 @@
-//! The batch's DA as the alpen-acct guest checks it.
+//! Builds a batch's DA from the generated EVM workloads, as the alpen-acct
+//! guest checks it.
 //!
 //! The DA blob is built the way the blob provider builds it, split into the
 //! SPS-51 commit/reveal envelopes the sequencer posts, and placed in a
@@ -11,10 +12,11 @@ use alloy_primitives::{keccak256, B256};
 use alpen_chain_types::ChunkTransition;
 use alpen_da_types::{
     compute_bitcoin_inclusion_proof, compute_bitcoin_merkle_root_from_leaves, da_blob_version,
-    BitcoinMerkleProof, BytecodePreimage, DaBlob, DaBlockWitness, DaTxWitness, DaWitness,
-    DedupWitness, EvmHeaderSummary, L1DaBlockInclusion, EE_DA_MAGIC_BYTES,
+    BitcoinMerkleProof, DaBlob, DaBlockWitness, DaTxWitness, DaWitness, DedupWitness,
+    EvmHeaderSummary, L1DaBlockInclusion, EE_DA_MAGIC_BYTES,
 };
-use alpen_reth_statediff::{AccountChange, BatchStateDiff};
+use alpen_params::AlpenSpecId;
+use alpen_reth_statediff::BatchStateDiff;
 use alpen_test_utils_evm_workload::Workload;
 use bitcoin::{
     absolute::LockTime,
@@ -33,7 +35,7 @@ use strata_codec::decode_buf_exact;
 use strata_l1_envelope_fmt::{EnvelopeScriptBuilder, MAX_ENVELOPE_PAYLOAD_SIZE};
 use strata_snark_acct_types::{AccumulatorClaim, LedgerRefs};
 
-use super::alpen_chunk::PERF_SPEC_VERSION;
+use crate::builders::bytecode_preimages_from_batch_diff;
 
 /// Height of the L1 block carrying the batch's DA.
 const L1_BLOCK_HEIGHT: u32 = 900_000;
@@ -53,17 +55,18 @@ const DUST_SATS: u64 = 546;
 
 /// The batch's DA witness and the ledger refs binding it to its L1 block.
 #[derive(Debug)]
-pub(super) struct BatchDa {
-    pub(super) witness: DaWitness,
-    pub(super) ledger_refs: LedgerRefs,
+pub struct BatchDa {
+    pub witness: DaWitness,
+    pub ledger_refs: LedgerRefs,
 }
 
 /// Builds the DA of a batch that is `workload`'s range, ending in
-/// `last_chunk`, posted as update `seq_no`.
-pub(super) fn build_batch_da(
+/// `last_chunk`, posted as update `seq_no` under `spec_version`.
+pub fn build_batch_da(
     workload: &Workload,
     last_chunk: &ChunkTransition,
     seq_no: u64,
+    spec_version: AlpenSpecId,
 ) -> BatchDa {
     let full_diff: BatchStateDiff =
         decode_buf_exact(&workload.state_diff).expect("decode batch state diff");
@@ -79,19 +82,24 @@ pub(super) fn build_batch_da(
         .deployed_bytecodes
         .retain(|hash, _| !published.contains(hash));
     let blob = DaBlob {
-        spec_version: PERF_SPEC_VERSION,
+        spec_version,
         update_seq_no: seq_no,
         evm_header: EvmHeaderSummary::decode_exact(
-            PERF_SPEC_VERSION,
+            spec_version,
             last_chunk.tip_exec_header_summary().opaque_bytes(),
         )
         .expect("decode tip header summary"),
         state_diff,
     };
-    let dedup = DedupWitness::new(deduped_bytecode_preimages(&blob, &full_diff));
+    let (preimages, unresolved) = bytecode_preimages_from_batch_diff(&blob, &full_diff);
+    assert!(
+        unresolved.is_empty(),
+        "every deduped bytecode is deployed in the batch"
+    );
+    let dedup = DedupWitness::new(preimages);
 
     let encoded_blob = blob.encode_to_vec().expect("encode DA blob");
-    let (commit, reveals) = envelope_txs(&encoded_blob);
+    let (commit, reveals) = envelope_txs(&encoded_blob, spec_version);
 
     // Coinbase leaf (zero per BIP-141), the block's other transactions, then
     // the DA ones.
@@ -132,45 +140,11 @@ pub(super) fn build_batch_da(
     }
 }
 
-/// Preimages of the bytecodes the blob's account diffs point at but the blob
-/// leaves out, because an earlier batch published them.
-///
-/// Mirrors `bytecode_preimages_from_batch_diff` in alpen-da-runtime's
-/// builders, which resolves them from the batch's full diff the same way.
-fn deduped_bytecode_preimages(blob: &DaBlob, full_diff: &BatchStateDiff) -> Vec<BytecodePreimage> {
-    let empty_code_hash = keccak256([]);
-    let deduped: BTreeSet<B256> = blob
-        .state_diff
-        .accounts
-        .values()
-        .filter_map(|change| match change {
-            AccountChange::Created(diff) | AccountChange::Updated(diff) => {
-                diff.code_hash.new_value().map(|hash| hash.0)
-            }
-            AccountChange::Deleted => None,
-        })
-        .filter(|hash| {
-            *hash != empty_code_hash && !blob.state_diff.deployed_bytecodes.contains_key(hash)
-        })
-        .collect();
-
-    deduped
-        .into_iter()
-        .map(|hash| {
-            let bytecode = full_diff
-                .deployed_bytecodes
-                .get(&hash)
-                .expect("deduped bytecode is deployed in the batch");
-            BytecodePreimage::new(bytecode.to_vec())
-        })
-        .collect()
-}
-
 /// The commit transaction and one reveal per chunk of `blob`, as SPS-51 lays
 /// them out: the commit's vout 0 is the `magic || version` marker, vouts
 /// `1..=n` are the reveals' taproot outputs, and a non-taproot change output
 /// follows.
-fn envelope_txs(blob: &[u8]) -> (Transaction, Vec<Transaction>) {
+fn envelope_txs(blob: &[u8], spec_version: AlpenSpecId) -> (Transaction, Vec<Transaction>) {
     let secret = SecretKey::from_slice(&[0x42; 32]).expect("valid secret key");
     let keypair = Keypair::from_secret_key(SECP256K1, &secret);
     let (internal_key, _) = keypair.x_only_public_key();
@@ -198,7 +172,7 @@ fn envelope_txs(blob: &[u8]) -> (Transaction, Vec<Transaction>) {
         .collect();
 
     let mut marker = EE_DA_MAGIC_BYTES.to_vec();
-    marker.extend_from_slice(&da_blob_version(PERF_SPEC_VERSION).to_be_bytes());
+    marker.extend_from_slice(&da_blob_version(spec_version).to_be_bytes());
     let marker: [u8; 8] = marker.try_into().expect("marker is 8 bytes");
     let mut outputs = vec![TxOut {
         value: Amount::ZERO,

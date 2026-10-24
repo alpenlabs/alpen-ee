@@ -17,6 +17,15 @@ strata-snark-acct-runtime.workspace = true
 rkyv.workspace = true
 zkaleido.workspace = true
 
+# test-utils
+alloy-consensus = { workspace = true, optional = true }
+alloy-rlp = { workspace = true, optional = true }
+alpen-chain-types = { workspace = true, optional = true }
+alpen-test-utils-evm-workload = { workspace = true, optional = true }
+strata-acct-types = { workspace = true, optional = true }
+strata-codec = { workspace = true, optional = true }
+strata-msg-fmt = { workspace = true, optional = true }
+
 # `program.rs` is gated on this same cfg. Keeping these here avoids tripping
 # `unused_crate_dependencies` in the zkVM guest build.
 [target.'cfg(not(target_os = "zkvm"))'.dependencies]
@@ -25,9 +34,32 @@ ssz.workspace = true
 strata-snark-acct-types.workspace = true
 zkaleido-native-adapter.workspace = true
 
+[features]
+# Builds account proof inputs from the generated EVM workloads.
+test-utils = [
+  "alpen-da-runtime/test-utils",
+  "dep:alloy-consensus",
+  "dep:alloy-rlp",
+  "dep:alpen-chain-types",
+  "dep:alpen-test-utils-evm-workload",
+  "dep:strata-acct-types",
+  "dep:strata-codec",
+  "dep:strata-msg-fmt",
+]
+
 [dev-dependencies]
+alloy-consensus.workspace = true
+alloy-rlp.workspace = true
+alpen-chain-types.workspace = true
+alpen-da-runtime = { workspace = true, features = ["test-utils"] }
+alpen-params = { workspace = true, features = ["test-utils"] }
+alpen-proof-chunk = { workspace = true, features = ["test-utils"] }
+alpen-test-utils-evm-workload.workspace = true
+serde_json.workspace = true
+strata-acct-types.workspace = true
 strata-codec.workspace = true
 strata-identifiers.workspace = true
+strata-msg-fmt.workspace = true
 
 [lints]
 workspace = true

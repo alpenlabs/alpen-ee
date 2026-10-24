@@ -18,6 +18,8 @@ use alpen_common::L1DaBlockRef;
 use alpen_da_types::DaWitness;
 use alpen_params::AlpenSpecId;
 use bitcoind_async_client::traits::Reader;
+#[cfg(feature = "test-utils")]
+pub(crate) use dedup::bytecode_preimages_from_batch_diff;
 pub use dedup::{DaDedupResolver, DedupWitnessResolver};
 pub use error::DaWitnessBuildError;
 use strata_acct_types::Hash;

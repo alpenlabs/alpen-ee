@@ -18,7 +18,6 @@ use zkaleido_sp1_host::{SP1Host, SP1HostConfig};
 
 mod alpen_acct;
 mod alpen_chunk;
-mod da;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[non_exhaustive]
