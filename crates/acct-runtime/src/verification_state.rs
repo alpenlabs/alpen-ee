@@ -3,12 +3,10 @@
 //! This module contains the verification state types used during update
 //! processing in SNARK proofs.
 
-use alpen_acct_types::{
-    EeAccountState, EnvError, EnvProgramResult, EnvResult, PendingInputEntry, UpdateExtraData,
-};
+use alpen_acct_types::{EeAccountState, EnvError, EnvResult, PendingInputEntry, UpdateExtraData};
 use alpen_chain_types::{ChunkTransition, ExecOutputs, SequenceTracker};
 use strata_acct_types::Hash;
-use strata_predicate::{PredicateKey, PredicateKeyBuf};
+use strata_predicate::PredicateKey;
 use strata_snark_acct_types::{OutputMessage, OutputTransfer, UpdateOutputs};
 
 use crate::private_input::ArchivedChunkInput;

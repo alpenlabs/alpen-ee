@@ -1,7 +1,6 @@
 //! Basic EE account runtime framework.
 
 #![cfg_attr(test, expect(unused_crate_dependencies, reason = "test weirdness"))]
-#![expect(unused, reason = "lots of stuff being refactored")]
 
 mod block_assembly;
 mod ee_program;
