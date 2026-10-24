@@ -41,7 +41,7 @@ fn test_mismatched_coinput_count() {
     let source = AccountId::from([2u8; 32]);
     let message = create_deposit_message(dest, value, source, 1);
 
-    let (operation, _coinputs, _snark_priv) =
+    let (operation, _coinputs) =
         build_update_operation(vec![message], &[], &initial_state, &snark_state);
 
     // Too many coinputs
@@ -76,7 +76,7 @@ fn test_nonempty_coinput_rejected() {
     let source = AccountId::from([2u8; 32]);
     let message = create_deposit_message(dest, value, source, 1);
 
-    let (operation, _coinputs, _snark_priv) =
+    let (operation, _coinputs) =
         build_update_operation(vec![message], &[], &initial_state, &snark_state);
 
     // Non-empty coinput should be rejected (EE requires empty coinputs)
