@@ -158,7 +158,7 @@ pub(crate) fn apply_decoded_message(
         DecodedEeMessageData::Deposit(data) => {
             // Create deposit data with the actual value from the message.
             let deposit_data = SubjectDepositData::new(*data.dest_subject(), value);
-            state.add_pending_input(PendingInputEntry::Deposit(deposit_data));
+            queue_pending_input(state, PendingInputEntry::Deposit(deposit_data))?;
         }
 
         DecodedEeMessageData::SubjTransfer(_data) => {
@@ -185,9 +185,10 @@ pub(crate) fn apply_decoded_message(
                 // batch/chunk that consumed it — see `apply_decoded_message`'s
                 // callers in block-assembly and
                 // `EeVerificationState::merge_new_outputs`.
-                state.add_pending_input(PendingInputEntry::PredicateRotation(
-                    data.new_key().clone(),
-                ));
+                queue_pending_input(
+                    state,
+                    PendingInputEntry::PredicateRotation(data.new_key().clone()),
+                )?;
             }
         }
     }
@@ -195,10 +196,22 @@ pub(crate) fn apply_decoded_message(
     Ok(())
 }
 
+/// Queues a pending input, failing if the queue is full.
+fn queue_pending_input(
+    state: &mut EeAccountState,
+    input: PendingInputEntry,
+) -> AcctProgramResult<()> {
+    if !state.add_pending_input(input) {
+        return Err(AcctRuntimeError::PendingInputsFull.into());
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use alpen_acct_types::PredicateUpdateMsgData;
-    use strata_acct_types::{AccountId, BitcoinAmount, Hash};
+    use alpen_acct_types::{DepositMsgData, PredicateUpdateMsgData};
+    use strata_acct_types::{AccountId, BitcoinAmount, Hash, SubjectId};
     use strata_predicate::PredicateKey;
 
     use super::*;
@@ -239,5 +252,33 @@ mod tests {
             .expect("apply succeeds");
 
         assert!(state.pending_inputs().is_empty());
+    }
+
+    #[test]
+    fn deposit_into_full_queue_fails() {
+        let mut state = empty_state();
+        let filler = PendingInputEntry::Deposit(SubjectDepositData::new(
+            SubjectId::from([1u8; 32]),
+            BitcoinAmount::default(),
+        ));
+        while state.add_pending_input(filler.clone()) {}
+        let queued = state.pending_inputs().len();
+
+        let msg = DecodedEeMessageData::Deposit(DepositMsgData::new(SubjectId::from([2u8; 32])));
+        let result = apply_decoded_message(
+            &mut state,
+            &msg,
+            BitcoinAmount::default(),
+            AccountId::new([0xBB; 32]),
+        );
+
+        assert!(
+            matches!(
+                result,
+                Err(ProgramError::Internal(AcctRuntimeError::PendingInputsFull))
+            ),
+            "expected PendingInputsFull, got: {result:?}"
+        );
+        assert_eq!(state.pending_inputs().len(), queued);
     }
 }
