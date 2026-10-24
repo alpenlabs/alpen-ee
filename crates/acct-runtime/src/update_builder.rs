@@ -4,7 +4,7 @@
 //! inputs, allowing the consumer to query available inputs and accept
 //! validated [`ChunkTransition`]s.
 
-use alpen_acct_types::{EeAccountState, EnvError, PendingInputEntry, UpdateExtraData};
+use alpen_acct_types::{EeAccountState, PendingInputEntry, UpdateExtraData};
 use alpen_chain_types::ChunkTransition;
 use strata_acct_types::{Hash, MessageEntry};
 use strata_snark_acct_runtime::{PrivateInput, UpdateBuilder as GenericUpdateBuilder};
@@ -14,8 +14,7 @@ use strata_snark_acct_types::{
 };
 
 use crate::{
-    builder_errors::{BuilderError, BuilderResult},
-    ee_program::EeSnarkAccountProgram,
+    builder_errors::BuilderResult, ee_program::EeSnarkAccountProgram, errors::AcctRuntimeError,
     verification_state::EeVerificationInput,
 };
 
@@ -179,15 +178,16 @@ impl<'i> UpdateBuilder<'i> {
         // means an honest sequencer finds out while building instead of
         // producing an update that can never be proven.
         if self.inner.outputs().new_predicate().is_some() {
-            return Err(BuilderError::Env(EnvError::NonTerminalRotation));
+            return Err(AcctRuntimeError::NonTerminalRotation.into());
         }
 
         // 1. Validate chain linkage.
         if transition.parent_exec_blkid() != self.cur_tip_blkid {
-            return Err(BuilderError::ChainLinkage {
-                expected: self.cur_tip_blkid,
+            return Err(AcctRuntimeError::ChainLinkage {
+                tip: self.cur_tip_blkid,
                 parent: transition.parent_exec_blkid(),
-            });
+            }
+            .into());
         }
 
         // 2. Validate input matching against pending inputs.
@@ -195,18 +195,20 @@ impl<'i> UpdateBuilder<'i> {
         let remaining = self.remaining_pending_inputs();
 
         if deposits.len() > remaining.len() {
-            return Err(BuilderError::InputMismatch {
-                position: remaining.len(),
-            });
+            return Err(AcctRuntimeError::DepositMismatch {
+                position: self.inputs_consumed + remaining.len(),
+            }
+            .into());
         }
 
         for (i, deposit) in deposits.iter().enumerate() {
             match &remaining[i] {
                 PendingInputEntry::Deposit(expected) if deposit == expected => {}
                 _ => {
-                    return Err(BuilderError::InputMismatch {
+                    return Err(AcctRuntimeError::DepositMismatch {
                         position: self.inputs_consumed + i,
-                    });
+                    }
+                    .into());
                 }
             }
         }
@@ -220,9 +222,10 @@ impl<'i> UpdateBuilder<'i> {
                     inputs_consumed_by_transition += 1;
                 }
                 _ => {
-                    return Err(BuilderError::InputMismatch {
+                    return Err(AcctRuntimeError::RotationMismatch {
                         position: self.inputs_consumed + deposits.len(),
-                    });
+                    }
+                    .into());
                 }
             }
         }
@@ -238,7 +241,7 @@ impl<'i> UpdateBuilder<'i> {
                     .iter()
                     .map(|t| OutputTransfer::new(t.dest(), t.value())),
             )
-            .map_err(|_| BuilderError::OutputOverflow)?;
+            .map_err(|_| AcctRuntimeError::OutputOverflow)?;
 
         self.inner
             .outputs_mut()
@@ -248,7 +251,7 @@ impl<'i> UpdateBuilder<'i> {
                     .iter()
                     .map(|m| OutputMessage::new(m.dest(), m.payload().clone())),
             )
-            .map_err(|_| BuilderError::OutputOverflow)?;
+            .map_err(|_| AcctRuntimeError::OutputOverflow)?;
 
         // The guard at the top means this is the update's only rotation, so
         // this never overwrites a previously accumulated key.

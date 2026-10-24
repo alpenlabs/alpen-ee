@@ -7,8 +7,8 @@
 
 mod common;
 
-use alpen_acct_runtime::{EeVerificationInput, UpdateBuilder};
-use alpen_acct_types::{EnvError, PendingInputEntry};
+use alpen_acct_runtime::{AcctRuntimeError, EeVerificationInput, UpdateBuilder};
+use alpen_acct_types::PendingInputEntry;
 use alpen_chain_types::{ExecOutputs, SequenceTracker};
 use common::{
     apply_unconditionally, assert_verified_chunks_succeed, create_deposit_message,
@@ -156,7 +156,7 @@ fn test_transition_after_a_rotation_is_rejected() {
 
     let result = vstate.process_decoded_transition(&following, &mut tracker);
     assert!(
-        matches!(result, Err(EnvError::NonTerminalRotation)),
+        matches!(result, Err(AcctRuntimeError::NonTerminalRotation)),
         "expected NonTerminalRotation, got: {result:?}"
     );
 }
@@ -208,7 +208,7 @@ fn test_second_rotation_in_one_update_is_rejected() {
 
     let result = vstate.process_decoded_transition(&second, &mut tracker);
     assert!(
-        matches!(result, Err(EnvError::NonTerminalRotation)),
+        matches!(result, Err(AcctRuntimeError::NonTerminalRotation)),
         "expected NonTerminalRotation, got: {result:?}"
     );
 }

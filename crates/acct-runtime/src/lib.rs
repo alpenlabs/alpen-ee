@@ -11,6 +11,7 @@ mod verification_state;
 
 pub use block_assembly::apply_input_messages;
 pub use ee_program::EeSnarkAccountProgram;
+pub use errors::{AcctProgramResult, AcctRuntimeError, AcctRuntimeResult};
 pub use private_input::{
     ArchivedChunkInput, ArchivedPrivateInput as ArchivedEePrivateInput, ChunkInput,
     PrivateInput as EePrivateInput,
