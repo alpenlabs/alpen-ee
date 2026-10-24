@@ -9,7 +9,7 @@ mod common;
 
 use std::iter;
 
-use alpen_acct_runtime::{BuilderError, EeVerificationInput, UpdateBuilder};
+use alpen_acct_runtime::{AcctRuntimeError, BuilderError, EeVerificationInput, UpdateBuilder};
 use alpen_acct_types::{PendingInputEntry, UpdateExtraData};
 use alpen_chain_types::{ExecInputs, ExecOutputs, SequenceTracker, SubjectDepositData};
 use common::{
@@ -123,8 +123,13 @@ fn test_output_mismatch_fails() {
     let result = verify_update(&initial_state, &operation, &coinputs);
 
     assert!(
-        matches!(result, Err(ProgramError::UnsatisfiedObligations)),
-        "expected UnsatisfiedObligations, got: {result:?}"
+        matches!(
+            result,
+            Err(ProgramError::Internal(
+                AcctRuntimeError::OutputsMismatch { .. }
+            ))
+        ),
+        "expected OutputsMismatch, got: {result:?}"
     );
 }
 
@@ -150,8 +155,13 @@ fn test_extra_data_tip_mismatch() {
     let result = verify_update(&initial_state, &operation, &coinputs);
 
     assert!(
-        matches!(result, Err(ProgramError::InvalidExtraData)),
-        "expected InvalidExtraData, got: {result:?}"
+        matches!(
+            result,
+            Err(ProgramError::Internal(
+                AcctRuntimeError::ExtraDataMismatch { .. }
+            ))
+        ),
+        "expected ExtraDataMismatch, got: {result:?}"
     );
 }
 
@@ -183,8 +193,13 @@ fn test_extra_data_claimed_fincls_rejected() {
 
     let result = verify_update(&initial_state, &operation, &[]);
     assert!(
-        matches!(result, Err(ProgramError::InvalidExtraData)),
-        "expected InvalidExtraData, got: {result:?}"
+        matches!(
+            result,
+            Err(ProgramError::Internal(
+                AcctRuntimeError::ExtraDataMismatch { .. }
+            ))
+        ),
+        "expected ExtraDataMismatch, got: {result:?}"
     );
 }
 
@@ -203,8 +218,13 @@ fn test_extra_data_processed_inputs_mismatch() {
 
     let result = verify_update(&initial_state, &operation, &[]);
     assert!(
-        matches!(result, Err(ProgramError::InvalidExtraData)),
-        "expected InvalidExtraData, got: {result:?}"
+        matches!(
+            result,
+            Err(ProgramError::Internal(
+                AcctRuntimeError::ExtraDataMismatch { .. }
+            ))
+        ),
+        "expected ExtraDataMismatch, got: {result:?}"
     );
 }
 
@@ -233,7 +253,10 @@ fn test_builder_rejects_wrong_parent() {
 
     let result = builder.accept_chunk_transition(&chunk);
     assert!(
-        matches!(result, Err(BuilderError::ChainLinkage { .. })),
+        matches!(
+            result,
+            Err(BuilderError::Runtime(AcctRuntimeError::ChainLinkage { .. }))
+        ),
         "expected ChainLinkage, got: {result:?}"
     );
 }
@@ -270,8 +293,13 @@ fn test_builder_rejects_wrong_deposit() {
 
     let result = builder.accept_chunk_transition(&chunk);
     assert!(
-        matches!(result, Err(BuilderError::InputMismatch { .. })),
-        "expected InputMismatch, got: {result:?}"
+        matches!(
+            result,
+            Err(BuilderError::Runtime(AcctRuntimeError::DepositMismatch {
+                position: 0
+            }))
+        ),
+        "expected DepositMismatch, got: {result:?}"
     );
 }
 
@@ -393,9 +421,10 @@ fn test_chain_linkage_mismatch() {
     assert!(
         matches!(
             result,
-            Err(alpen_acct_types::EnvError::MismatchedChainSegment)
+            Err(AcctRuntimeError::ChainLinkage { tip, parent })
+                if tip == initial_state.last_exec_blkid() && parent == wrong_parent
         ),
-        "expected MismatchedChainSegment, got: {result:?}"
+        "expected ChainLinkage, got: {result:?}"
     );
 }
 
@@ -437,8 +466,11 @@ fn test_deposit_mismatch_in_chunk() {
 
     let result = vstate.process_decoded_transition(&transition, &mut tracker);
     assert!(
-        matches!(result, Err(alpen_acct_types::EnvError::InconsistentChunkIo)),
-        "expected InconsistentChunkIo, got: {result:?}"
+        matches!(
+            result,
+            Err(AcctRuntimeError::DepositMismatch { position: 0 })
+        ),
+        "expected DepositMismatch, got: {result:?}"
     );
 }
 
@@ -477,7 +509,10 @@ fn test_input_count_mismatch() {
 
     let result = vstate.process_decoded_transition(&transition, &mut tracker);
     assert!(
-        matches!(result, Err(alpen_acct_types::EnvError::InconsistentChunkIo)),
-        "expected InconsistentChunkIo, got: {result:?}"
+        matches!(
+            result,
+            Err(AcctRuntimeError::DepositMismatch { position: 0 })
+        ),
+        "expected DepositMismatch, got: {result:?}"
     );
 }

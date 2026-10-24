@@ -4,10 +4,10 @@
 #![allow(dead_code, reason = "utilities used by different test files")]
 
 use alpen_acct_runtime::{
-    ArchivedEePrivateInput, ChunkInput, EePrivateInput, EeSnarkAccountProgram, EeVerificationInput,
-    EeVerificationState, UpdateBuilder,
+    AcctProgramResult, ArchivedEePrivateInput, ChunkInput, EePrivateInput, EeSnarkAccountProgram,
+    EeVerificationInput, EeVerificationState, UpdateBuilder,
 };
-use alpen_acct_types::{DecodedEeMessageData, EeAccountState, EnvError, UpdateExtraData};
+use alpen_acct_types::{DecodedEeMessageData, EeAccountState, UpdateExtraData};
 use alpen_chain_types::{
     ChunkTransition, ExecHeaderSummary, ExecInputs, ExecOutputs, SubjectDepositData,
 };
@@ -19,7 +19,7 @@ use strata_msg_fmt::Msg as MsgTrait;
 use strata_predicate::PredicateKey;
 use strata_snark_acct_runtime::{
     ArchivedPrivateInput as ArchivedSnarkPrivateInput, Coinput, IInnerState, InputMessage,
-    PrivateInput as SnarkPrivateInput, ProgramResult, SnarkAccountProgram,
+    PrivateInput as SnarkPrivateInput, SnarkAccountProgram,
 };
 use strata_snark_acct_types::*;
 
@@ -94,7 +94,7 @@ fn compute_post_state(
 pub fn apply_unconditionally(
     initial_state: &EeAccountState,
     operation: &UpdateOperationData,
-) -> ProgramResult<(), EnvError> {
+) -> AcctProgramResult<()> {
     let mut state = initial_state.clone();
 
     let post_state = compute_post_state(initial_state, operation);
@@ -116,7 +116,7 @@ pub fn verify_update(
     initial_state: &EeAccountState,
     operation: &UpdateOperationData,
     coinputs: &[Vec<u8>],
-) -> ProgramResult<(), EnvError> {
+) -> AcctProgramResult<()> {
     let pre_root = initial_state.compute_state_root();
     let post_state = compute_post_state(initial_state, operation);
     let post_root = post_state.compute_state_root();
@@ -313,7 +313,7 @@ pub(crate) fn verify_with_chunks(
     operation: &UpdateOperationData,
     coinputs: &[Vec<u8>],
     chunks: &[ChunkTransition],
-) -> ProgramResult<(), EnvError> {
+) -> AcctProgramResult<()> {
     let pre_root = initial_state.compute_state_root();
     let post_state = compute_post_state(initial_state, operation);
     let post_root = post_state.compute_state_root();
@@ -352,7 +352,7 @@ pub(crate) fn verify_with_chunks(
 pub(crate) fn verify_with_private_input(
     snark_priv: &SnarkPrivateInput,
     chunks: &[ChunkTransition],
-) -> ProgramResult<(), EnvError> {
+) -> AcctProgramResult<()> {
     let chunk_inputs = make_chunk_inputs(chunks);
     let ee_priv = EePrivateInput::new(vec![], vec![], chunk_inputs);
 

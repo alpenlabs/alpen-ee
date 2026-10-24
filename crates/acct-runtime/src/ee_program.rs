@@ -4,14 +4,15 @@
 //! the [`SnarkAccountProgram`] and [`SnarkAccountProgramVerification`] traits
 //! for the EE account type.
 
-use alpen_acct_types::{
-    DecodedEeMessageData, EeAccountState, EnvError, PendingInputEntry, UpdateExtraData,
-};
+use alpen_acct_types::{DecodedEeMessageData, EeAccountState, PendingInputEntry, UpdateExtraData};
 use alpen_chain_types::SubjectDepositData;
 use strata_acct_types::ADMIN_MSG_ACCT_ID;
 use strata_snark_acct_runtime::*;
 
-use crate::verification_state::{EeVerificationInput, EeVerificationState};
+use crate::{
+    errors::{AcctProgramResult, AcctRuntimeError},
+    verification_state::{EeVerificationInput, EeVerificationState},
+};
 
 /// Snark account program for execution environments.
 ///
@@ -31,7 +32,7 @@ impl SnarkAccountProgram for EeSnarkAccountProgram {
     type State = EeAccountState;
     type Msg = DecodedEeMessageData;
     type ExtraData = UpdateExtraData;
-    type Error = EnvError;
+    type Error = AcctRuntimeError;
 
     fn process_message(
         &self,
@@ -116,13 +117,15 @@ impl SnarkAccountProgramVerification for EeSnarkAccountProgram {
         // checked nowhere would be trusted.
         let computed_extra_data = vstate.process_chunks_on_acct(state)?;
         if computed_extra_data != *extra_data {
-            return Err(ProgramError::InvalidExtraData);
+            return Err(AcctRuntimeError::ExtraDataMismatch {
+                claimed: Box::new(*extra_data),
+                computed: Box::new(computed_extra_data),
+            }
+            .into());
         }
 
         // Check the other internal obligations.
-        vstate
-            .check_obligations()
-            .map_err(|_| ProgramError::UnsatisfiedObligations)?;
+        vstate.check_obligations()?;
 
         Ok(())
     }
@@ -135,7 +138,7 @@ impl SnarkAccountProgramVerification for EeSnarkAccountProgram {
 pub(crate) fn process_input_message(
     state: &mut EeAccountState,
     msg: &InputMessage<DecodedEeMessageData>,
-) -> ProgramResult<(), EnvError> {
+) -> AcctProgramResult<()> {
     // If we recognize it, then we have to do something with it.
     if let Some(decoded_msg) = msg.message() {
         apply_decoded_message(state, decoded_msg, msg.meta().value(), msg.meta().source())?;
@@ -150,7 +153,7 @@ pub(crate) fn apply_decoded_message(
     msg: &DecodedEeMessageData,
     value: strata_acct_types::BitcoinAmount,
     source: strata_acct_types::AccountId,
-) -> ProgramResult<(), EnvError> {
+) -> AcctProgramResult<()> {
     match msg {
         DecodedEeMessageData::Deposit(data) => {
             // Create deposit data with the actual value from the message.
