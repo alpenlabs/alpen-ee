@@ -104,15 +104,18 @@ impl<'a> EeVerificationState<'a> {
         state: &EeAccountState,
     ) -> AcctRuntimeResult<UpdateExtraData> {
         for (index, chunk) in self.input_chunks.iter().enumerate() {
-            self.chunk_predicate_key()
-                .verify_claim_witness(chunk.chunk_transition_ssz(), chunk.proof())
-                .map_err(|_| AcctRuntimeError::InvalidChunkProof { index })?;
-
             let transition = chunk
                 .try_decode_chunk_transition()
                 .map_err(|source| AcctRuntimeError::DecodeChunkTransition { index, source })?;
 
+            // The chain checks are cheap and the proof check is not, so a chunk
+            // that breaks the chain is rejected before its proof is checked.
+            // Any error aborts the update, so applying first is safe.
             self.chain.apply(&transition, state.pending_inputs())?;
+
+            self.chunk_predicate_key()
+                .verify_claim_witness(chunk.chunk_transition_ssz(), chunk.proof())
+                .map_err(|_| AcctRuntimeError::InvalidChunkProof { index })?;
         }
 
         Ok(self.chain.extra_data())
