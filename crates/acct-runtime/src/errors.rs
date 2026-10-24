@@ -49,6 +49,13 @@ pub enum AcctRuntimeError {
     #[error("chunk follows a consumed predicate rotation")]
     NonTerminalRotation,
 
+    /// The pending input queue is full, so a message's input can't be queued.
+    ///
+    /// Dropping the input instead would lose a deposit the OL already
+    /// delivered.
+    #[error("pending input queue is full")]
+    PendingInputsFull,
+
     /// Accumulated output transfers or messages exceed the update's capacity.
     #[error("outputs exceed the update's capacity")]
     OutputOverflow,

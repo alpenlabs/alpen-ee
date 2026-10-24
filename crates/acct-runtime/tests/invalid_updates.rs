@@ -15,13 +15,18 @@ use alpen_chain_types::{ExecInputs, ExecOutputs, SequenceTracker, SubjectDeposit
 use common::{
     build_update_operation, create_chunk_transition, create_deposit_message, create_initial_state,
     create_vstate, empty_exec_header_summary, simple_chunk, verify_update,
+    verify_with_private_input,
 };
+use ssz::Encode;
 use strata_acct_types::{AccountId, BitcoinAmount, Hash, SubjectId};
 use strata_codec::encode_to_vec;
 use strata_predicate::PredicateKey;
-use strata_snark_acct_runtime::ProgramError;
+use strata_snark_acct_runtime::{
+    Coinput, IInnerState, PrivateInput as SnarkPrivateInput, ProgramError,
+};
 use strata_snark_acct_types::{
-    LedgerRefs, OutputTransfer, ProofState, UpdateOperationData, UpdateOutputs,
+    LedgerRefs, OutputTransfer, ProofState, Seqno, UpdateOperationData, UpdateOutputs,
+    UpdateProofPubParams,
 };
 
 // ---- Coinput validation ----
@@ -225,6 +230,58 @@ fn test_extra_data_processed_inputs_mismatch() {
             ))
         ),
         "expected ExtraDataMismatch, got: {result:?}"
+    );
+}
+
+/// A deposit that arrives with the pending input queue full can't be queued.
+/// The verifier has to reject the update, so no proof can drop the deposit.
+#[test]
+fn test_deposit_into_full_queue_rejects_update() {
+    let (mut initial_state, _snark_state) = create_initial_state();
+    let filler = PendingInputEntry::Deposit(SubjectDepositData::new(
+        SubjectId::from([9u8; 32]),
+        BitcoinAmount::try_from(1u64).unwrap(),
+    ));
+    while initial_state.add_pending_input(filler.clone()) {}
+
+    let message = create_deposit_message(
+        SubjectId::from([1u8; 32]),
+        BitcoinAmount::try_from(1000u64).unwrap(),
+        AccountId::from([2u8; 32]),
+        1,
+    );
+
+    // No post state exists, so the claimed one is arbitrary. Message
+    // processing fails before it is checked.
+    let extra_data = UpdateExtraData::new(
+        initial_state.last_exec_blkid(),
+        initial_state.last_exec_state_root(),
+        0,
+        0,
+    );
+    let pub_params = UpdateProofPubParams::new(
+        Seqno::new(0),
+        ProofState::new(initial_state.compute_state_root(), 0),
+        ProofState::new(Hash::zero(), 1),
+        vec![message],
+        LedgerRefs::new_empty(),
+        UpdateOutputs::new_empty(),
+        encode_to_vec(&extra_data).unwrap(),
+    );
+    let snark_priv = SnarkPrivateInput::new(
+        pub_params,
+        initial_state.as_ssz_bytes(),
+        vec![Coinput::new(Vec::new())],
+    );
+
+    let result = verify_with_private_input(&snark_priv, &[]);
+    assert!(
+        matches!(
+            result,
+            Err(ProgramError::AtMessage { idx: 0, ref inner })
+                if matches!(**inner, ProgramError::Internal(AcctRuntimeError::PendingInputsFull))
+        ),
+        "expected PendingInputsFull at message 0, got: {result:?}"
     );
 }
 
