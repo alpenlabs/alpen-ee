@@ -132,6 +132,9 @@ mod tests {
     use alpen_acct_runtime::EePrivateInput;
     use alpen_acct_types::{EeAccountState, UpdateExtraData};
     use alpen_da_types::DaWitness;
+    use alpen_params::{AlpenParams, DEV_PARAMS_JSON};
+    use alpen_proof_chunk::{EeChunkProgram, test_utils::build_workload_chunk};
+    use alpen_test_utils_evm_workload::{MIXED_WORKLOAD, Workload, workload_dir};
     use ssz::Encode;
     use strata_codec::encode_to_vec;
     use strata_identifiers::Hash;
@@ -142,6 +145,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::test_utils::build_workload_update;
 
     /// Smoke test: constructs a minimal self-consistent input with zero chunks
     /// and zero messages, and runs through the full native execution pipeline.
@@ -196,5 +200,38 @@ mod tests {
         // Verify output pub params state roots match.
         assert_eq!(result.cur_state().inner_state(), state_root);
         assert_eq!(result.new_state().inner_state(), state_root);
+    }
+
+    /// Proves the mixed workload's chunk natively, then the account update
+    /// that carries it, so the update runs real deposits, outputs and DA.
+    #[test]
+    fn test_native_acct_execution_on_workload() {
+        let workload = Workload::load(&workload_dir(MIXED_WORKLOAD)).expect("load workload");
+        let params: AlpenParams =
+            serde_json::from_str(DEV_PARAMS_JSON).expect("dev params should parse");
+        let chunk = build_workload_chunk(&workload, &params, AlpenSpecId::V1);
+
+        // Natively the chunk proof is a Schnorr signature over the transition,
+        // checked against the chunk program's test key.
+        let chunk_program = EeChunkProgram::new(params, AlpenSpecId::V1);
+        let chunk_proof =
+            <EeChunkProgram as ZkVmProgram>::prove(&chunk.input, &chunk_program.native_host())
+                .expect("native chunk proof");
+        let input = build_workload_update(
+            &workload,
+            &chunk.transition,
+            chunk_proof.receipt().proof().as_bytes().to_vec(),
+            AlpenSpecId::V1,
+        );
+
+        let output = EeAcctProgram::new(EeChunkProgram::test_predicate_key(), AlpenSpecId::V1)
+            .execute(&input)
+            .expect("native execution should succeed");
+
+        assert_eq!(
+            output.new_state().next_inbox_msg_idx(),
+            chunk.transition.inputs().subject_deposits().len() as u64
+        );
+        assert!(!output.outputs().messages().is_empty());
     }
 }

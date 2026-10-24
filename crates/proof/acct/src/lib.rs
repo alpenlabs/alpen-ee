@@ -12,6 +12,8 @@ use zkaleido::ZkVmEnvSerde;
 
 #[cfg(not(target_os = "zkvm"))]
 mod program;
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils;
 
 #[cfg(not(target_os = "zkvm"))]
 pub use program::{EeAcctProgram, EeAcctProofInput};
