@@ -10,11 +10,10 @@ mod common;
 
 use alpen_acct_runtime::{EeVerificationInput, UpdateBuilder};
 use alpen_chain_types::{ExecOutputs, OutputMessage};
-use alpen_simple_ee::SimpleExecutionEnvironment;
 use common::{
     apply_unconditionally, assert_both_paths_succeed, assert_verified_chunks_succeed,
-    assert_verified_path_succeeds, build_update_operation, create_deposit_message,
-    create_initial_state, empty_exec_header_summary, simple_chunk,
+    build_update_operation, create_deposit_message, create_initial_state,
+    empty_exec_header_summary, simple_chunk,
 };
 use strata_acct_types::{AccountId, BitcoinAmount, Hash, MsgPayload, SubjectId};
 use strata_predicate::PredicateKey;
@@ -22,36 +21,30 @@ use strata_predicate::PredicateKey;
 #[test]
 fn test_empty_update_no_chunks() {
     let (initial_state, snark_state) = create_initial_state();
-    let ee = SimpleExecutionEnvironment;
 
-    let (operation, coinputs, snark_priv) =
-        build_update_operation(vec![], &[], &initial_state, &snark_state, &ee);
+    let (operation, coinputs) = build_update_operation(vec![], &[], &initial_state, &snark_state);
 
-    assert_both_paths_succeed(&initial_state, &operation, &coinputs, &ee);
-    assert_verified_path_succeeds(&snark_priv, &[], &ee);
+    assert_both_paths_succeed(&initial_state, &operation, &coinputs);
 }
 
 #[test]
 fn test_single_deposit_no_chunks() {
     let (initial_state, snark_state) = create_initial_state();
-    let ee = SimpleExecutionEnvironment;
 
     let dest = SubjectId::from([1u8; 32]);
     let value = BitcoinAmount::try_from(1000u64).unwrap();
     let source = AccountId::from([2u8; 32]);
     let message = create_deposit_message(dest, value, source, 1);
 
-    let (operation, _coinputs, snark_priv) =
-        build_update_operation(vec![message], &[], &initial_state, &snark_state, &ee);
+    let (operation, coinputs) =
+        build_update_operation(vec![message], &[], &initial_state, &snark_state);
 
-    apply_unconditionally(&initial_state, &operation).expect("unconditional path should succeed");
-    assert_verified_path_succeeds(&snark_priv, &[], &ee);
+    assert_both_paths_succeed(&initial_state, &operation, &coinputs);
 }
 
 #[test]
 fn test_multiple_deposits_no_chunks() {
     let (initial_state, snark_state) = create_initial_state();
-    let ee = SimpleExecutionEnvironment;
 
     let dest1 = SubjectId::from([1u8; 32]);
     let dest2 = SubjectId::from([2u8; 32]);
@@ -62,34 +55,15 @@ fn test_multiple_deposits_no_chunks() {
     let message1 = create_deposit_message(dest1, value1, source, 1);
     let message2 = create_deposit_message(dest2, value2, source, 1);
 
-    let (operation, _coinputs, snark_priv) = build_update_operation(
-        vec![message1, message2],
-        &[],
-        &initial_state,
-        &snark_state,
-        &ee,
-    );
+    let (operation, coinputs) =
+        build_update_operation(vec![message1, message2], &[], &initial_state, &snark_state);
 
-    apply_unconditionally(&initial_state, &operation).expect("unconditional path should succeed");
-    assert_verified_path_succeeds(&snark_priv, &[], &ee);
-}
-
-#[test]
-fn test_empty_update_verified_path() {
-    let (initial_state, snark_state) = create_initial_state();
-    let ee = SimpleExecutionEnvironment;
-
-    let (operation, coinputs, snark_priv) =
-        build_update_operation(vec![], &[], &initial_state, &snark_state, &ee);
-
-    assert_both_paths_succeed(&initial_state, &operation, &coinputs, &ee);
-    assert_verified_path_succeeds(&snark_priv, &[], &ee);
+    assert_both_paths_succeed(&initial_state, &operation, &coinputs);
 }
 
 #[test]
 fn test_single_deposit_with_chunk() {
     let (initial_state, snark_state) = create_initial_state();
-    let ee = SimpleExecutionEnvironment;
 
     // Create deposit message
     let dest = SubjectId::from([1u8; 32]);
@@ -99,7 +73,7 @@ fn test_single_deposit_with_chunk() {
 
     // Build using the builder to get correct pending inputs
     let predicate_key = PredicateKey::always_accept();
-    let vinput = EeVerificationInput::new(&ee, &predicate_key, &[], &[]);
+    let vinput = EeVerificationInput::new(&predicate_key, &[]);
     let mut builder =
         UpdateBuilder::new(snark_state, initial_state.clone(), vinput).expect("create builder");
 
@@ -138,13 +112,12 @@ fn test_single_deposit_with_chunk() {
     apply_unconditionally(&initial_state, &operation).expect("unconditional path should succeed");
 
     // Verified path with chunk proof verification should succeed
-    assert_verified_chunks_succeed(&initial_state, &operation, &coinputs, &[chunk], &ee);
+    assert_verified_chunks_succeed(&initial_state, &operation, &coinputs, &[chunk]);
 }
 
 #[test]
 fn test_chunk_output_does_not_change_inner_tracked_balance() {
     let (initial_state, snark_state) = create_initial_state();
-    let ee = SimpleExecutionEnvironment;
 
     let dest = SubjectId::from([1u8; 32]);
     let value = BitcoinAmount::try_from(1000u64).unwrap();
@@ -152,7 +125,7 @@ fn test_chunk_output_does_not_change_inner_tracked_balance() {
     let message = create_deposit_message(dest, value, source, 1);
 
     let predicate_key = PredicateKey::always_accept();
-    let vinput = EeVerificationInput::new(&ee, &predicate_key, &[], &[]);
+    let vinput = EeVerificationInput::new(&predicate_key, &[]);
     let mut builder =
         UpdateBuilder::new(snark_state, initial_state.clone(), vinput).expect("create builder");
 
@@ -187,13 +160,12 @@ fn test_chunk_output_does_not_change_inner_tracked_balance() {
     let (operation, coinputs) = builder.build().expect("build");
 
     apply_unconditionally(&initial_state, &operation).expect("unconditional path should succeed");
-    assert_verified_chunks_succeed(&initial_state, &operation, &coinputs, &[chunk], &ee);
+    assert_verified_chunks_succeed(&initial_state, &operation, &coinputs, &[chunk]);
 }
 
 #[test]
 fn test_multiple_deposits_multiple_chunks() {
     let (initial_state, snark_state) = create_initial_state();
-    let ee = SimpleExecutionEnvironment;
 
     let dest1 = SubjectId::from([1u8; 32]);
     let dest2 = SubjectId::from([2u8; 32]);
@@ -205,7 +177,7 @@ fn test_multiple_deposits_multiple_chunks() {
     let msg2 = create_deposit_message(dest2, value2, source, 1);
 
     let predicate_key = PredicateKey::always_accept();
-    let vinput = EeVerificationInput::new(&ee, &predicate_key, &[], &[]);
+    let vinput = EeVerificationInput::new(&predicate_key, &[]);
     let mut builder =
         UpdateBuilder::new(snark_state, initial_state.clone(), vinput).expect("create builder");
 
@@ -262,11 +234,5 @@ fn test_multiple_deposits_multiple_chunks() {
     apply_unconditionally(&initial_state, &operation).expect("unconditional path should succeed");
 
     // Verified path with chunk proof verification should succeed
-    assert_verified_chunks_succeed(
-        &initial_state,
-        &operation,
-        &coinputs,
-        &[chunk1, chunk2],
-        &ee,
-    );
+    assert_verified_chunks_succeed(&initial_state, &operation, &coinputs, &[chunk1, chunk2]);
 }

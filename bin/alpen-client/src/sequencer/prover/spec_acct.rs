@@ -272,7 +272,7 @@ impl AcctSpec {
                 .map_err(|e| PaasError::transient(format!("batch witness extraction: {e}")))?;
 
         let ee_private_input =
-            EePrivateInput::new(Vec::new(), range_data.raw_partial_pre_state, chunks.clone());
+            EePrivateInput::new(range_data.raw_partial_pre_state, chunks.clone());
 
         // 5. Build UpdateProofPubParams from ExecBlockRecords.
         //

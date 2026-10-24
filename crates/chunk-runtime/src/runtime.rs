@@ -58,10 +58,10 @@ pub fn verify_input<E: ExecutionEnvironment>(
 mod tests {
     use std::collections::BTreeMap;
 
-    use alpen_acct_types::{EnvError, ExecBlock, ExecHeader, ExecPartialState, Hash};
+    use alpen_acct_types::{ExecBlock, ExecHeader, ExecPartialState, Hash};
     use alpen_chain_types::ChunkTransition;
     use alpen_simple_ee::{
-        SimpleBlock, SimpleBlockBody, SimpleExecutionEnvironment, SimpleHeader,
+        SimpleBlock, SimpleBlockBody, SimpleEnvError, SimpleExecutionEnvironment, SimpleHeader,
         SimpleHeaderIntrinsics, SimplePartialState, SimpleTransaction,
     };
     use rkyv::rancor::Error as RkyvError;
@@ -126,7 +126,7 @@ mod tests {
         pre_state: &SimplePartialState,
         raw_chunk: RawChunkData,
         tsn: ChunkTransition,
-    ) -> ChunkRuntimeResult<(), EnvError> {
+    ) -> ChunkRuntimeResult<(), SimpleEnvError> {
         let private_input = PrivateInput::new(
             tsn,
             raw_chunk,

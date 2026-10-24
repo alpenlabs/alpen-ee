@@ -500,7 +500,6 @@ dependencies = [
  "rkyv_impl 0.2.2",
  "ssz",
  "strata-acct-types",
- "strata-codec",
  "strata-predicate",
  "strata-snark-acct-runtime",
  "strata-snark-acct-types",
@@ -637,7 +636,6 @@ dependencies = [
  "alpen-acct-types",
  "alpen-da-runtime",
  "alpen-da-types",
- "alpen-evm-ee",
  "alpen-params",
  "k256",
  "rkyv",
@@ -2173,7 +2171,6 @@ version = "0.1.0"
 dependencies = [
  "alpen-params",
  "alpen-proof-acct",
- "serde_json",
  "strata-predicate",
  "zkaleido-sp1-guest-env",
 ]

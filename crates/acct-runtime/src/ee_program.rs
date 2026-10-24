@@ -4,48 +4,35 @@
 //! the [`SnarkAccountProgram`] and [`SnarkAccountProgramVerification`] traits
 //! for the EE account type.
 
-use std::marker::PhantomData;
-
-use alpen_acct_types::{
-    DecodedEeMessageData, EeAccountState, EnvError, ExecutionEnvironment, PendingInputEntry,
-    UpdateExtraData,
-};
+use alpen_acct_types::{DecodedEeMessageData, EeAccountState, PendingInputEntry, UpdateExtraData};
 use alpen_chain_types::SubjectDepositData;
 use strata_acct_types::ADMIN_MSG_ACCT_ID;
 use strata_snark_acct_runtime::*;
 
-use crate::verification_state::{EeVerificationInput, EeVerificationState};
+use crate::{
+    errors::{AcctProgramResult, AcctRuntimeError},
+    verification_state::{EeVerificationInput, EeVerificationState},
+};
 
 /// Snark account program for execution environments.
 ///
-/// The type parameter `E` is the execution environment type used for block
-/// execution during verification.
-#[derive(Debug)]
-pub struct EeSnarkAccountProgram<E: ExecutionEnvironment> {
-    _pd: PhantomData<E>,
-}
+/// It never executes blocks. Chunk proofs attest to execution, and this
+/// program checks those proofs and links their transitions to the account.
+#[derive(Debug, Default)]
+pub struct EeSnarkAccountProgram;
 
-impl<E: ExecutionEnvironment> EeSnarkAccountProgram<E> {
+impl EeSnarkAccountProgram {
     /// Creates a new instance.
     pub fn new() -> Self {
-        Self::default()
+        Self
     }
 }
 
-/// Manual impl for [`Default`] because the derive macro wouldn't work here.
-impl<E: ExecutionEnvironment> Default for EeSnarkAccountProgram<E> {
-    fn default() -> Self {
-        Self {
-            _pd: Default::default(),
-        }
-    }
-}
-
-impl<E: ExecutionEnvironment> SnarkAccountProgram for EeSnarkAccountProgram<E> {
+impl SnarkAccountProgram for EeSnarkAccountProgram {
     type State = EeAccountState;
     type Msg = DecodedEeMessageData;
     type ExtraData = UpdateExtraData;
-    type Error = EnvError;
+    type Error = AcctRuntimeError;
 
     fn process_message(
         &self,
@@ -84,9 +71,9 @@ impl<E: ExecutionEnvironment> SnarkAccountProgram for EeSnarkAccountProgram<E> {
     }
 }
 
-impl<E: ExecutionEnvironment> SnarkAccountProgramVerification for EeSnarkAccountProgram<E> {
-    type VState<'a> = EeVerificationState<'a, E>;
-    type VInput<'a> = EeVerificationInput<'a, E>;
+impl SnarkAccountProgramVerification for EeSnarkAccountProgram {
+    type VState<'a> = EeVerificationState<'a>;
+    type VInput<'a> = EeVerificationInput<'a>;
 
     fn start_verification<'i, 'u>(
         &self,
@@ -95,12 +82,10 @@ impl<E: ExecutionEnvironment> SnarkAccountProgramVerification for EeSnarkAccount
         ulinfo: UpdateLedgerInfo<'u>,
     ) -> ProgramResult<Self::VState<'i>, Self::Error> {
         Ok(EeVerificationState::new_from_state(
-            vinput.ee(),
             vinput.chunk_predicate_key(),
             state,
             ulinfo.outputs().clone(), // TODO(STR-3685): ugh, avoid this clone
             vinput.input_chunks(),
-            vinput.raw_partial_pre_state(),
         ))
     }
 
@@ -126,33 +111,21 @@ impl<E: ExecutionEnvironment> SnarkAccountProgramVerification for EeSnarkAccount
         mut vstate: Self::VState<'a>,
         extra_data: &Self::ExtraData,
     ) -> ProgramResult<(), Self::Error> {
-        // Process and verify all chunks sequentially.
-        vstate.process_chunks_on_acct(state, extra_data)?;
-
-        // Make sure the extradata tip blkid matches what we verified.
-        if *extra_data.new_tip_blkid() != vstate.cur_verified_exec_blkid() {
-            return Err(ProgramError::InvalidExtraData);
-        }
-        if *extra_data.new_tip_state_root() != vstate.cur_verified_exec_state_root() {
-            return Err(ProgramError::InvalidExtraData);
-        }
-
-        // Make sure the state matches what we verified.
-        //
-        // This is sorta redundant since we set it based on the extradata tip in
-        // `pre_finalize_state`, but it doesn't hurt to have an extra sanity
-        // check.
-        if state.last_exec_blkid() != vstate.cur_verified_exec_blkid() {
-            return Err(ProgramError::InvalidExtraData);
-        }
-        if state.last_exec_state_root() != vstate.cur_verified_exec_state_root() {
-            return Err(ProgramError::InvalidExtraData);
+        // Process and verify all chunks sequentially, then compare the extra
+        // data they produce to the claimed one as a whole. `pre_finalize_state`
+        // and `finalize_state` apply the claimed extra data, so a field
+        // checked nowhere would be trusted.
+        let computed_extra_data = vstate.process_chunks_on_acct(state)?;
+        if computed_extra_data != *extra_data {
+            return Err(AcctRuntimeError::ExtraDataMismatch {
+                claimed: Box::new(*extra_data),
+                computed: Box::new(computed_extra_data),
+            }
+            .into());
         }
 
         // Check the other internal obligations.
-        vstate
-            .check_obligations()
-            .map_err(|_| ProgramError::UnsatisfiedObligations)?;
+        vstate.check_obligations()?;
 
         Ok(())
     }
@@ -165,7 +138,7 @@ impl<E: ExecutionEnvironment> SnarkAccountProgramVerification for EeSnarkAccount
 pub(crate) fn process_input_message(
     state: &mut EeAccountState,
     msg: &InputMessage<DecodedEeMessageData>,
-) -> ProgramResult<(), EnvError> {
+) -> AcctProgramResult<()> {
     // If we recognize it, then we have to do something with it.
     if let Some(decoded_msg) = msg.message() {
         apply_decoded_message(state, decoded_msg, msg.meta().value(), msg.meta().source())?;
@@ -180,12 +153,12 @@ pub(crate) fn apply_decoded_message(
     msg: &DecodedEeMessageData,
     value: strata_acct_types::BitcoinAmount,
     source: strata_acct_types::AccountId,
-) -> ProgramResult<(), EnvError> {
+) -> AcctProgramResult<()> {
     match msg {
         DecodedEeMessageData::Deposit(data) => {
             // Create deposit data with the actual value from the message.
             let deposit_data = SubjectDepositData::new(*data.dest_subject(), value);
-            state.add_pending_input(PendingInputEntry::Deposit(deposit_data));
+            queue_pending_input(state, PendingInputEntry::Deposit(deposit_data))?;
         }
 
         DecodedEeMessageData::SubjTransfer(_data) => {
@@ -212,9 +185,10 @@ pub(crate) fn apply_decoded_message(
                 // batch/chunk that consumed it — see `apply_decoded_message`'s
                 // callers in block-assembly and
                 // `EeVerificationState::merge_new_outputs`.
-                state.add_pending_input(PendingInputEntry::PredicateRotation(
-                    data.new_key().clone(),
-                ));
+                queue_pending_input(
+                    state,
+                    PendingInputEntry::PredicateRotation(data.new_key().clone()),
+                )?;
             }
         }
     }
@@ -222,10 +196,22 @@ pub(crate) fn apply_decoded_message(
     Ok(())
 }
 
+/// Queues a pending input, failing if the queue is full.
+fn queue_pending_input(
+    state: &mut EeAccountState,
+    input: PendingInputEntry,
+) -> AcctProgramResult<()> {
+    if !state.add_pending_input(input) {
+        return Err(AcctRuntimeError::PendingInputsFull.into());
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use alpen_acct_types::PredicateUpdateMsgData;
-    use strata_acct_types::{AccountId, BitcoinAmount, Hash};
+    use alpen_acct_types::{DepositMsgData, PredicateUpdateMsgData};
+    use strata_acct_types::{AccountId, BitcoinAmount, Hash, SubjectId};
     use strata_predicate::PredicateKey;
 
     use super::*;
@@ -266,5 +252,33 @@ mod tests {
             .expect("apply succeeds");
 
         assert!(state.pending_inputs().is_empty());
+    }
+
+    #[test]
+    fn deposit_into_full_queue_fails() {
+        let mut state = empty_state();
+        let filler = PendingInputEntry::Deposit(SubjectDepositData::new(
+            SubjectId::from([1u8; 32]),
+            BitcoinAmount::default(),
+        ));
+        while state.add_pending_input(filler.clone()) {}
+        let queued = state.pending_inputs().len();
+
+        let msg = DecodedEeMessageData::Deposit(DepositMsgData::new(SubjectId::from([2u8; 32])));
+        let result = apply_decoded_message(
+            &mut state,
+            &msg,
+            BitcoinAmount::default(),
+            AccountId::new([0xBB; 32]),
+        );
+
+        assert!(
+            matches!(
+                result,
+                Err(ProgramError::Internal(AcctRuntimeError::PendingInputsFull))
+            ),
+            "expected PendingInputsFull, got: {result:?}"
+        );
+        assert_eq!(state.pending_inputs().len(), queued);
     }
 }

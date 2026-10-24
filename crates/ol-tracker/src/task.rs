@@ -4,9 +4,7 @@ use alpen_common::{
     chain_status_checked, EeAccountStateAtEpoch, OLChainStatus, OLClient, SnarkAccountUpdateInfo,
     Storage,
 };
-use alpen_evm_ee::EvmExecutionEnvironment;
 use strata_identifiers::{EpochCommitment, Hash};
-use strata_predicate::PredicateKey;
 use strata_snark_acct_runtime::IInnerState;
 use strata_snark_acct_types::UpdateManifest;
 use tracing::{debug, error, info, warn};
@@ -183,11 +181,7 @@ pub(crate) fn apply_epoch_operations(
             op.messages().to_vec(),
         );
 
-        process_update_unconditionally::<EvmExecutionEnvironment>(
-            state,
-            &manifest,
-            PredicateKey::always_accept(),
-        )?;
+        process_update_unconditionally(state, &manifest)?;
     }
 
     let observed = state.compute_state_root();

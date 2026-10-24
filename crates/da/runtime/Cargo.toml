@@ -18,12 +18,15 @@ builders = [
   "dep:bitcoind-async-client",
   "dep:strata-primitives",
 ]
+# Builds a batch's DA from the generated EVM workloads.
+test-utils = ["builders", "dep:alpen-test-utils-evm-workload"]
 
 [dependencies]
 alpen-common = { workspace = true, optional = true }
 alpen-da-types.workspace = true
 alpen-params.workspace = true
 alpen-reth-statediff.workspace = true
+alpen-test-utils-evm-workload = { workspace = true, optional = true }
 
 alloy-primitives.workspace = true
 alpen-acct-runtime.workspace = true
