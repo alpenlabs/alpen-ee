@@ -44,10 +44,6 @@ pub use types::{
     consensus_heads::ConsensusHeads,
     ee_account_state::EeAccountStateAtEpoch,
     exec_record::{ExecBlockPayload, ExecBlockRecord},
-    fees::{
-        FeeBreakdown, FeeModelConfig, FeeModelError, FeeQuoteInputs, GasEquivalentQuote,
-        L1FeeRateSource, DA_OVERHEAD_MULTIPLIER_SCALE_BPS,
-    },
     ol_account_epoch_summary::{SnarkAccountEpochSummary, SnarkAccountUpdateInfo},
     ol_chain_status::{OLChainStatus, OLFinalizedStatus},
     payload_builder::{DepositInfo, PayloadBuildAttributes},
