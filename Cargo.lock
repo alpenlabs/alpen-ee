@@ -2020,6 +2020,7 @@ dependencies = [
  "sha2",
  "strata-acct-types",
  "strata-codec",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
