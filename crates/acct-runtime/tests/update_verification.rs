@@ -12,8 +12,8 @@ use alpen_acct_runtime::{EeVerificationInput, UpdateBuilder};
 use alpen_chain_types::{ExecOutputs, OutputMessage};
 use common::{
     apply_unconditionally, assert_both_paths_succeed, assert_verified_chunks_succeed,
-    assert_verified_path_succeeds, build_update_operation, create_deposit_message,
-    create_initial_state, empty_exec_header_summary, simple_chunk,
+    build_update_operation, create_deposit_message, create_initial_state,
+    empty_exec_header_summary, simple_chunk,
 };
 use strata_acct_types::{AccountId, BitcoinAmount, Hash, MsgPayload, SubjectId};
 use strata_predicate::PredicateKey;
@@ -22,11 +22,9 @@ use strata_predicate::PredicateKey;
 fn test_empty_update_no_chunks() {
     let (initial_state, snark_state) = create_initial_state();
 
-    let (operation, coinputs, snark_priv) =
-        build_update_operation(vec![], &[], &initial_state, &snark_state);
+    let (operation, coinputs) = build_update_operation(vec![], &[], &initial_state, &snark_state);
 
     assert_both_paths_succeed(&initial_state, &operation, &coinputs);
-    assert_verified_path_succeeds(&snark_priv, &[]);
 }
 
 #[test]
@@ -38,11 +36,10 @@ fn test_single_deposit_no_chunks() {
     let source = AccountId::from([2u8; 32]);
     let message = create_deposit_message(dest, value, source, 1);
 
-    let (operation, _coinputs, snark_priv) =
+    let (operation, coinputs) =
         build_update_operation(vec![message], &[], &initial_state, &snark_state);
 
-    apply_unconditionally(&initial_state, &operation).expect("unconditional path should succeed");
-    assert_verified_path_succeeds(&snark_priv, &[]);
+    assert_both_paths_succeed(&initial_state, &operation, &coinputs);
 }
 
 #[test]
@@ -58,22 +55,10 @@ fn test_multiple_deposits_no_chunks() {
     let message1 = create_deposit_message(dest1, value1, source, 1);
     let message2 = create_deposit_message(dest2, value2, source, 1);
 
-    let (operation, _coinputs, snark_priv) =
+    let (operation, coinputs) =
         build_update_operation(vec![message1, message2], &[], &initial_state, &snark_state);
 
-    apply_unconditionally(&initial_state, &operation).expect("unconditional path should succeed");
-    assert_verified_path_succeeds(&snark_priv, &[]);
-}
-
-#[test]
-fn test_empty_update_verified_path() {
-    let (initial_state, snark_state) = create_initial_state();
-
-    let (operation, coinputs, snark_priv) =
-        build_update_operation(vec![], &[], &initial_state, &snark_state);
-
     assert_both_paths_succeed(&initial_state, &operation, &coinputs);
-    assert_verified_path_succeeds(&snark_priv, &[]);
 }
 
 #[test]

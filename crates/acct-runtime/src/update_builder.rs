@@ -7,7 +7,7 @@
 use alpen_acct_types::{EeAccountState, PendingInputEntry};
 use alpen_chain_types::ChunkTransition;
 use strata_acct_types::{Hash, MessageEntry};
-use strata_snark_acct_runtime::{PrivateInput, UpdateBuilder as GenericUpdateBuilder};
+use strata_snark_acct_runtime::UpdateBuilder as GenericUpdateBuilder;
 use strata_snark_acct_types::{
     LedgerRefs, Seqno, SnarkAccountState, UpdateOperationData, UpdateOutputs,
 };
@@ -171,21 +171,5 @@ impl<'i> UpdateBuilder<'i> {
             .inner
             .build_operation_data_unverified(self.chain.extra_data())?;
         Ok((op, coinputs))
-    }
-
-    /// Builds a [`PrivateInput`] for proof generation.
-    ///
-    /// Sets the update's outputs and extra data from the accepted chunks, then
-    /// delegates to the inner builder's verified finalization path. Clones
-    /// internal state so the builder can be reused.
-    ///
-    /// FIXME(STR-3685): the verified path only sees the chunks passed in the `vinput`
-    /// given to [`Self::new`], and its expected outputs were fixed then too.
-    /// After [`Self::accept_chunk_transition`] it fails, so this only works
-    /// for updates with no chunks. Fixing it needs the generic builder to take
-    /// the chunks at finalization.
-    pub fn build_private_input(&mut self) -> BuilderResult<PrivateInput> {
-        *self.inner.outputs_mut() = self.chain.outputs().clone();
-        Ok(self.inner.build_private_input(self.chain.extra_data())?)
     }
 }

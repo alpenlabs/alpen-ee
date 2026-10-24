@@ -225,7 +225,7 @@ pub(crate) fn build_update_operation(
     chunks: &[ChunkTransition],
     initial_state: &EeAccountState,
     snark_state: &SnarkAccountState,
-) -> (UpdateOperationData, Vec<Vec<u8>>, SnarkPrivateInput) {
+) -> (UpdateOperationData, Vec<Vec<u8>>) {
     let predicate_key = PredicateKey::always_accept();
     let vinput = EeVerificationInput::new(&predicate_key, &[]);
 
@@ -240,11 +240,8 @@ pub(crate) fn build_update_operation(
             .expect("accept chunk should succeed");
     }
 
-    let snark_priv = builder
-        .build_private_input()
-        .expect("build_private_input should succeed");
     let (op, coinputs) = builder.build().expect("build should succeed");
-    (op, coinputs, snark_priv)
+    (op, coinputs)
 }
 
 /// Creates a simple [`ChunkTransition`] from deposits and outputs.
@@ -362,14 +359,6 @@ pub(crate) fn verify_with_private_input(
         let program = EeSnarkAccountProgram::new();
         strata_snark_acct_runtime::verify_and_process_update(&program, archived_snark, vinput)
     })
-}
-
-/// Asserts that the verified path succeeds using the builder's private input.
-pub(crate) fn assert_verified_path_succeeds(
-    snark_priv: &SnarkPrivateInput,
-    chunks: &[ChunkTransition],
-) {
-    verify_with_private_input(snark_priv, chunks).expect("verified path should succeed");
 }
 
 /// Asserts that the verified path with chunks succeeds.
