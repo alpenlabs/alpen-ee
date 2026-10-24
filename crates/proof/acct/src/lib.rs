@@ -64,6 +64,11 @@ pub fn process_ee_acct_update(
     alpen_acct_runtime::verify_and_process_update(chunk_predicate_key, ee_input, upd_input)
         .expect("account update verification failed");
 
+    // TODO(STR-3685): the update check above already decoded the pub params, the pre
+    // state and every chunk transition, and the DA check decodes them again
+    // (it decodes the last chunk's transition itself). Sharing them needs
+    // `strata_snark_acct_runtime::verify_and_process_update` to hand back what
+    // it decoded, so it waits on an upstream change.
     let update_pub_params = upd_input
         .try_decode_update_pub_params()
         .expect("failed to decode update public params");
