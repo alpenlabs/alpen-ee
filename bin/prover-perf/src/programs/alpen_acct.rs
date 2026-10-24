@@ -189,11 +189,7 @@ mod tests {
                 .expect("native chunk proof");
 
         let input = prepare_input(&chunk_proof);
-        let program = EeAcctProgram::new(
-            EeChunkProgram::test_predicate_key(),
-            perf_alpen_params(),
-            PERF_SPEC_VERSION,
-        );
+        let program = EeAcctProgram::new(EeChunkProgram::test_predicate_key(), PERF_SPEC_VERSION);
         let output = program.execute(&input).expect("native execution");
 
         assert_eq!(

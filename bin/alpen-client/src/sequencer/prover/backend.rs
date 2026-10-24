@@ -150,15 +150,9 @@ async fn build_ee_provers(
                 let chunk = (builders.chunk)(*spec_version).native(chunk_host);
 
                 let acct_host = {
-                    let acct_params = (*params).clone();
                     let spec_version = *spec_version;
                     NativeHost::new(acct_signing_key, move |zkvm| {
-                        process_ee_acct_update(
-                            zkvm,
-                            &acct_params,
-                            spec_version,
-                            &chunk_predicate_key,
-                        )
+                        process_ee_acct_update(zkvm, spec_version, &chunk_predicate_key)
                     })
                 };
                 let account = (builders.account)(*spec_version).native(acct_host);

@@ -28,7 +28,6 @@ thiserror = { workspace = true, optional = true }
 ssz_derive.workspace = true
 strata-msg-fmt.workspace = true
 strata-ol-msg-types.workspace = true
-alpen-simple-ee.workspace = true
 
 [lints]
 workspace = true

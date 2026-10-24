@@ -4,8 +4,7 @@
 //! processing in SNARK proofs.
 
 use alpen_acct_types::{
-    EeAccountState, EnvError, EnvProgramResult, EnvResult, ExecutionEnvironment, PendingInputEntry,
-    UpdateExtraData,
+    EeAccountState, EnvError, EnvProgramResult, EnvResult, PendingInputEntry, UpdateExtraData,
 };
 use alpen_chain_types::{ChunkTransition, ExecOutputs, SequenceTracker};
 use strata_acct_types::Hash;
@@ -16,47 +15,27 @@ use crate::private_input::ArchivedChunkInput;
 
 /// Verification input for EE accounts.
 ///
-/// Contains references to:
-/// - The shared private input (chain segments, prev header, pre-state)
-/// - The execution environment for block execution
-///
 /// This is passed by value to `start_verification` when using the verification
 /// path, so that its contents (the references) can be moved into `VState`.
-#[expect(missing_debug_implementations, reason = "E may not implement Debug")]
-pub struct EeVerificationInput<'a, E: ExecutionEnvironment> {
-    /// Execution environment for block execution.
-    ee: &'a E,
-
+#[derive(Clone, Debug)]
+pub struct EeVerificationInput<'a> {
     /// Predicate used for verifying chunk proofs.
     chunk_predicate_key: &'a PredicateKey,
 
-    /// Chunk transitions that we've already proven.
+    /// Chunk transitions and their proofs, in chain order.
     input_chunks: &'a [ArchivedChunkInput],
-
-    /// Pre-state needed for processing and verifying the update transitions.
-    raw_partial_pre_state: &'a [u8],
 }
 
-impl<'a, E: ExecutionEnvironment> EeVerificationInput<'a, E> {
+impl<'a> EeVerificationInput<'a> {
     /// Constructs a new instance.
-    ///
-    /// The input chunk transitions MUST already be verified.
     pub fn new(
-        ee: &'a E,
         chunk_predicate_key: &'a PredicateKey,
         input_chunks: &'a [ArchivedChunkInput],
-        raw_partial_pre_state: &'a [u8],
     ) -> Self {
         Self {
-            ee,
             chunk_predicate_key,
             input_chunks,
-            raw_partial_pre_state,
         }
-    }
-
-    pub fn ee(&self) -> &'a E {
-        self.ee
     }
 
     pub fn chunk_predicate_key(&self) -> &'a PredicateKey {
@@ -66,22 +45,14 @@ impl<'a, E: ExecutionEnvironment> EeVerificationInput<'a, E> {
     pub fn input_chunks(&self) -> &'a [ArchivedChunkInput] {
         self.input_chunks
     }
-
-    pub fn raw_partial_pre_state(&self) -> &'a [u8] {
-        self.raw_partial_pre_state
-    }
 }
 
 /// Verification state for EE accounts.
 ///
-/// This type tracks all verification-related state during update processing,
-/// including balance bookkeeping, pending commits, outputs, and references to
-/// the private input data needed for chain segment verification.
-#[expect(missing_debug_implementations, reason = "E may not implement Debug")]
-pub struct EeVerificationState<'a, E: ExecutionEnvironment> {
-    /// Execution environment for block execution.
-    ee: &'a E,
-
+/// This type tracks all verification-related state during update processing:
+/// the verified chain tip, the outputs, and the chunks still to verify.
+#[derive(Clone, Debug)]
+pub struct EeVerificationState<'a> {
     /// Predicate used for verifying chunk proofs.
     chunk_predicate_key: &'a PredicateKey,
 
@@ -99,38 +70,25 @@ pub struct EeVerificationState<'a, E: ExecutionEnvironment> {
 
     /// Chunk transitions to verify.
     input_chunks: &'a [ArchivedChunkInput],
-
-    /// Partial pre-state corresponding to the last verified block.
-    // TODO(STR-3685): use this to support DA
-    raw_partial_pre_state: &'a [u8],
 }
 
-impl<'a, E: ExecutionEnvironment> EeVerificationState<'a, E> {
+impl<'a> EeVerificationState<'a> {
     /// Constructs a verification state using the account's initial state as a
     /// reference, along with the verification input data.
     pub fn new_from_state(
-        ee: &'a E,
         chunk_predicate_key: &'a PredicateKey,
         state: &EeAccountState,
         expected_outputs: UpdateOutputs,
         input_chunks: &'a [ArchivedChunkInput],
-        raw_partial_pre_state: &'a [u8],
     ) -> Self {
         Self {
-            ee,
             chunk_predicate_key,
             cur_verified_exec_blkid: state.last_exec_blkid(),
             cur_verified_exec_state_root: state.last_exec_state_root(),
             expected_outputs,
             accumulated_outputs: UpdateOutputs::new_empty(),
             input_chunks,
-            raw_partial_pre_state,
         }
-    }
-
-    /// Returns the execution environment.
-    pub fn exec_env(&self) -> &'a E {
-        self.ee
     }
 
     /// Returns the predkey used to verify chunk transition proofs.
@@ -144,11 +102,6 @@ impl<'a, E: ExecutionEnvironment> EeVerificationState<'a, E> {
 
     pub fn cur_verified_exec_state_root(&self) -> Hash {
         self.cur_verified_exec_state_root
-    }
-
-    /// Returns the raw partial pre-state.
-    pub fn raw_partial_pre_state(&self) -> &'a [u8] {
-        self.raw_partial_pre_state
     }
 
     /// Appends a package block's outputs into the pending outputs being
@@ -311,21 +264,5 @@ impl<'a, E: ExecutionEnvironment> EeVerificationState<'a, E> {
         // Maybe more in the future.
 
         Ok(())
-    }
-}
-
-/// Manual `Clone` impl to avoid requiring `E: Clone` (we only hold `&'a E`).
-impl<'a, E: ExecutionEnvironment> Clone for EeVerificationState<'a, E> {
-    fn clone(&self) -> Self {
-        Self {
-            ee: self.ee,
-            chunk_predicate_key: self.chunk_predicate_key,
-            cur_verified_exec_blkid: self.cur_verified_exec_blkid,
-            cur_verified_exec_state_root: self.cur_verified_exec_state_root,
-            expected_outputs: self.expected_outputs.clone(),
-            accumulated_outputs: self.accumulated_outputs.clone(),
-            input_chunks: self.input_chunks,
-            raw_partial_pre_state: self.raw_partial_pre_state,
-        }
     }
 }
