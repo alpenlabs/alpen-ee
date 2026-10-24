@@ -1,14 +1,16 @@
 //! Simple execution environment implementation.
 
 use alpen_acct_types::{
-    EnvError, EnvResult, ExecBlock, ExecBlockOutput, ExecHeader, ExecPartialState,
-    ExecutionEnvironment,
+    ExecBlock, ExecBlockOutput, ExecHeader, ExecPartialState, ExecutionEnvironment,
 };
 use alpen_chain_types::{ExecInputs, ExecOutputs};
 
-use crate::types::{
-    SimpleBlock, SimpleBlockBody, SimpleHeader, SimpleHeaderIntrinsics, SimplePartialState,
-    SimpleWriteBatch,
+use crate::{
+    errors::{SimpleEnvError, SimpleEnvResult},
+    types::{
+        SimpleBlock, SimpleBlockBody, SimpleHeader, SimpleHeaderIntrinsics, SimplePartialState,
+        SimpleWriteBatch,
+    },
 };
 
 /// Simple execution environment for testing.
@@ -25,7 +27,7 @@ impl SimpleExecutionEnvironment {
         &self,
         pre_state: &SimplePartialState,
         body: &SimpleBlockBody,
-    ) -> EnvResult<ExecBlockOutput<Self>> {
+    ) -> SimpleEnvResult<ExecBlockOutput<Self>> {
         // Start with a copy of the pre-state
         let mut accounts = pre_state.accounts().clone();
         let mut outputs = ExecOutputs::new_empty();
@@ -35,7 +37,7 @@ impl SimpleExecutionEnvironment {
             let balance = accounts.entry(deposit.dest()).or_insert(0);
             *balance = balance
                 .checked_add(deposit.value().to_sat())
-                .ok_or(EnvError::InvalidBlockTx)?;
+                .ok_or(SimpleEnvError::InvalidTx)?;
         }
 
         // 2. Apply transactions from the block body
@@ -70,13 +72,13 @@ impl ExecutionEnvironment for SimpleExecutionEnvironment {
     type Block = SimpleBlock;
     type WriteBatch = SimpleWriteBatch;
     type BlockOutput = ();
-    type Error = EnvError;
+    type Error = SimpleEnvError;
 
-    fn verify_header(&self, parent: &SimpleHeader, header: &SimpleHeader) -> EnvResult<()> {
+    fn verify_header(&self, parent: &SimpleHeader, header: &SimpleHeader) -> SimpleEnvResult<()> {
         if header.get_parent_id() != parent.compute_block_id()
             || parent.index().checked_add(1) != Some(header.index())
         {
-            return Err(EnvError::InvalidHeader);
+            return Err(SimpleEnvError::InvalidHeader);
         }
         Ok(())
     }
@@ -85,11 +87,11 @@ impl ExecutionEnvironment for SimpleExecutionEnvironment {
         &self,
         block: &Self::Block,
         claimed_inputs: &ExecInputs,
-    ) -> EnvResult<()> {
+    ) -> SimpleEnvResult<()> {
         // The simple header does not commit to its body, so only the claimed
         // inputs need checking.
         if block.body().deposits() != claimed_inputs.subject_deposits() {
-            return Err(EnvError::InvalidBlock);
+            return Err(SimpleEnvError::InputMismatch);
         }
         Ok(())
     }
@@ -98,7 +100,7 @@ impl ExecutionEnvironment for SimpleExecutionEnvironment {
         &self,
         pre_state: &Self::PartialState,
         block: Self::Block,
-    ) -> EnvResult<ExecBlockOutput<Self>> {
+    ) -> SimpleEnvResult<ExecBlockOutput<Self>> {
         self.execute_body(pre_state, block.body())
     }
 
@@ -107,11 +109,11 @@ impl ExecutionEnvironment for SimpleExecutionEnvironment {
         _header: &<Self::Block as ExecBlock>::Header,
         exec_output: &ExecBlockOutput<Self>,
         claimed_outputs: &ExecOutputs,
-    ) -> EnvResult<()> {
+    ) -> SimpleEnvResult<()> {
         // The simple header commits to nothing from execution, so only the
         // claimed outputs need checking.
         if !claimed_outputs.matches_executed(exec_output.outputs()) {
-            return Err(EnvError::OutputMismatch);
+            return Err(SimpleEnvError::OutputMismatch);
         }
         Ok(())
     }
@@ -120,7 +122,7 @@ impl ExecutionEnvironment for SimpleExecutionEnvironment {
         &self,
         state: &mut Self::PartialState,
         wb: &Self::WriteBatch,
-    ) -> EnvResult<()> {
+    ) -> SimpleEnvResult<()> {
         *state = SimplePartialState::new(wb.accounts().clone());
         Ok(())
     }
@@ -130,7 +132,6 @@ impl ExecutionEnvironment for SimpleExecutionEnvironment {
 mod tests {
     use std::collections::BTreeMap;
 
-    use alpen_acct_types::{EnvError, EnvResult};
     use alpen_chain_types::SubjectDepositData;
     use strata_acct_types::{AccountId, BitcoinAmount, SubjectId};
     use strata_codec::{decode_buf_exact, encode_to_vec};
@@ -159,7 +160,7 @@ mod tests {
         ee: SimpleExecutionEnvironment,
         pre_state: &SimplePartialState,
         body: SimpleBlockBody,
-    ) -> EnvResult<SimplePartialState> {
+    ) -> SimpleEnvResult<SimplePartialState> {
         let output = ee.execute_body(pre_state, &body)?;
 
         let mut post_state = pre_state.clone();
@@ -544,7 +545,7 @@ mod tests {
         let body = SimpleBlockBody::new(vec![tx]);
 
         let result = execute_block(ee, &pre_state, body);
-        assert!(matches!(result, Err(EnvError::InvalidBlockTx)));
+        assert!(matches!(result, Err(SimpleEnvError::InvalidTx)));
     }
 
     #[test]
@@ -563,7 +564,7 @@ mod tests {
         let body = SimpleBlockBody::new(vec![tx]);
 
         let result = execute_block(ee, &pre_state, body);
-        assert!(matches!(result, Err(EnvError::InvalidBlockTx)));
+        assert!(matches!(result, Err(SimpleEnvError::InvalidTx)));
     }
 
     #[test]
@@ -584,7 +585,7 @@ mod tests {
         let body = SimpleBlockBody::new(vec![tx]);
 
         let result = execute_block(ee, &pre_state, body);
-        assert!(matches!(result, Err(EnvError::InvalidBlockTx)));
+        assert!(matches!(result, Err(SimpleEnvError::InvalidTx)));
     }
 
     #[test]
@@ -603,7 +604,7 @@ mod tests {
         let body = SimpleBlockBody::new(vec![tx]);
 
         let result = execute_block(ee, &pre_state, body);
-        assert!(matches!(result, Err(EnvError::InvalidBlockTx)));
+        assert!(matches!(result, Err(SimpleEnvError::InvalidTx)));
     }
 
     #[test]
@@ -677,7 +678,7 @@ mod tests {
 
         let result = execute_block(ee, &pre_state, body);
         assert!(
-            matches!(result, Err(EnvError::InvalidBlockTx)),
+            matches!(result, Err(SimpleEnvError::InvalidTx)),
             "Block should fail when any transaction underflows"
         );
     }
@@ -857,7 +858,7 @@ mod tests {
         let body = SimpleBlockBody::new(vec![tx]);
 
         let result = execute_block(ee, &pre_state, body);
-        assert!(matches!(result, Err(EnvError::InvalidBlockTx)));
+        assert!(matches!(result, Err(SimpleEnvError::InvalidTx)));
     }
 
     #[test]
@@ -878,7 +879,7 @@ mod tests {
         let body = SimpleBlockBody::new(vec![tx]);
 
         let result = execute_block(ee, &pre_state, body);
-        assert!(matches!(result, Err(EnvError::InvalidBlockTx)));
+        assert!(matches!(result, Err(SimpleEnvError::InvalidTx)));
     }
 
     #[test]
@@ -993,7 +994,7 @@ mod tests {
         let err = ee
             .verify_block_pre_execution(&block, &wrong.exec_inputs())
             .expect_err("inputs that differ from the body's deposits must be rejected");
-        assert!(matches!(err, EnvError::InvalidBlock));
+        assert!(matches!(err, SimpleEnvError::InputMismatch));
     }
 
     #[test]
