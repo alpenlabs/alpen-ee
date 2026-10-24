@@ -110,26 +110,12 @@ impl SnarkAccountProgramVerification for EeSnarkAccountProgram {
         mut vstate: Self::VState<'a>,
         extra_data: &Self::ExtraData,
     ) -> ProgramResult<(), Self::Error> {
-        // Process and verify all chunks sequentially.
-        vstate.process_chunks_on_acct(state, extra_data)?;
-
-        // Make sure the extradata tip blkid matches what we verified.
-        if *extra_data.new_tip_blkid() != vstate.cur_verified_exec_blkid() {
-            return Err(ProgramError::InvalidExtraData);
-        }
-        if *extra_data.new_tip_state_root() != vstate.cur_verified_exec_state_root() {
-            return Err(ProgramError::InvalidExtraData);
-        }
-
-        // Make sure the state matches what we verified.
-        //
-        // This is sorta redundant since we set it based on the extradata tip in
-        // `pre_finalize_state`, but it doesn't hurt to have an extra sanity
-        // check.
-        if state.last_exec_blkid() != vstate.cur_verified_exec_blkid() {
-            return Err(ProgramError::InvalidExtraData);
-        }
-        if state.last_exec_state_root() != vstate.cur_verified_exec_state_root() {
+        // Process and verify all chunks sequentially, then compare the extra
+        // data they produce to the claimed one as a whole. `pre_finalize_state`
+        // and `finalize_state` apply the claimed extra data, so a field
+        // checked nowhere would be trusted.
+        let computed_extra_data = vstate.process_chunks_on_acct(state)?;
+        if computed_extra_data != *extra_data {
             return Err(ProgramError::InvalidExtraData);
         }
 

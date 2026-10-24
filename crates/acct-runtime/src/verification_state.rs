@@ -212,11 +212,13 @@ impl<'a> EeVerificationState<'a> {
     /// Verifies all chunk transitions against the account's predicate key,
     /// checks chain linkage, matches inputs against pending inputs, and
     /// merges outputs.
+    ///
+    /// Returns the extra data the chunks produce, for the caller to compare
+    /// whole against the claimed extra data.
     pub(crate) fn process_chunks_on_acct(
         &mut self,
         state: &EeAccountState,
-        extra_data: &UpdateExtraData,
-    ) -> EnvResult<()> {
+    ) -> EnvResult<UpdateExtraData> {
         let mut pending_inp_tracker = SequenceTracker::new(state.pending_inputs());
 
         // Loop through all the chunks and verify them.
@@ -234,13 +236,16 @@ impl<'a> EeVerificationState<'a> {
             self.process_decoded_transition(&transition, &mut pending_inp_tracker)?;
         }
 
-        // Check that the number of consumed pending inputs matches what
-        // extra_data claims were processed.
-        if pending_inp_tracker.consumed() != *extra_data.processed_inputs() as usize {
-            return Err(EnvError::InconsistentChunkIo);
-        }
+        // TODO(STR-3257): chunks don't process forced inclusions yet, so an update
+        // processes none. Count the ones the chunks process once they do.
+        let processed_fincls = 0;
 
-        Ok(())
+        Ok(UpdateExtraData::new(
+            self.cur_verified_exec_blkid,
+            self.cur_verified_exec_state_root,
+            pending_inp_tracker.consumed() as u32,
+            processed_fincls,
+        ))
     }
 
     /// Final checks to see if there's anything in the verification state that

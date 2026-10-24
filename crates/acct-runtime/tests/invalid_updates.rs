@@ -155,6 +155,59 @@ fn test_extra_data_tip_mismatch() {
     );
 }
 
+/// Builds an update with no messages, no outputs and the given extra data.
+fn operation_with_extra_data(extra_data: &UpdateExtraData) -> UpdateOperationData {
+    UpdateOperationData::new(
+        1,
+        ProofState::new(Hash::default(), 0),
+        vec![],
+        LedgerRefs::new_empty(),
+        UpdateOutputs::new_empty(),
+        encode_to_vec(extra_data).unwrap(),
+    )
+}
+
+#[test]
+fn test_extra_data_claimed_fincls_rejected() {
+    let (initial_state, _snark_state) = create_initial_state();
+
+    // No chunk processes forced inclusions, so claiming one must fail. The
+    // queue is empty, so removing it would otherwise do nothing and pass.
+    let extra_data = UpdateExtraData::new(
+        initial_state.last_exec_blkid(),
+        initial_state.last_exec_state_root(),
+        0,
+        1,
+    );
+    let operation = operation_with_extra_data(&extra_data);
+
+    let result = verify_update(&initial_state, &operation, &[]);
+    assert!(
+        matches!(result, Err(ProgramError::InvalidExtraData)),
+        "expected InvalidExtraData, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_extra_data_processed_inputs_mismatch() {
+    let (initial_state, _snark_state) = create_initial_state();
+
+    // No chunk consumes an input, so claiming one must fail.
+    let extra_data = UpdateExtraData::new(
+        initial_state.last_exec_blkid(),
+        initial_state.last_exec_state_root(),
+        1,
+        0,
+    );
+    let operation = operation_with_extra_data(&extra_data);
+
+    let result = verify_update(&initial_state, &operation, &[]);
+    assert!(
+        matches!(result, Err(ProgramError::InvalidExtraData)),
+        "expected InvalidExtraData, got: {result:?}"
+    );
+}
+
 // ---- Builder chunk validation ----
 
 #[test]
