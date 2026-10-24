@@ -3,13 +3,12 @@
 //! This module contains the verification state types used during update
 //! processing in SNARK proofs.
 
-use alpen_acct_types::{EeAccountState, PendingInputEntry, UpdateExtraData};
-use alpen_chain_types::{ChunkTransition, ExecOutputs, SequenceTracker};
-use strata_acct_types::Hash;
+use alpen_acct_types::{EeAccountState, UpdateExtraData};
 use strata_predicate::PredicateKey;
-use strata_snark_acct_types::{OutputMessage, OutputTransfer, UpdateOutputs};
+use strata_snark_acct_types::UpdateOutputs;
 
 use crate::{
+    chunk_chain::ChunkChain,
     errors::{AcctRuntimeError, AcctRuntimeResult},
     private_input::ArchivedChunkInput,
 };
@@ -51,23 +50,18 @@ impl<'a> EeVerificationInput<'a> {
 /// Verification state for EE accounts.
 ///
 /// This type tracks all verification-related state during update processing:
-/// the verified chain tip, the outputs, and the chunks still to verify.
+/// the chain of verified chunk transitions, the outputs the update claims, and
+/// the chunks still to verify.
 #[derive(Clone, Debug)]
 pub struct EeVerificationState<'a> {
     /// Predicate used for verifying chunk proofs.
     chunk_predicate_key: &'a PredicateKey,
 
-    /// Current verified chain tip.
-    cur_verified_exec_blkid: Hash,
-
-    /// Current verified execution state root.
-    cur_verified_exec_state_root: Hash,
-
-    /// Outputs we expect to have.
+    /// Outputs the update claims.
     expected_outputs: UpdateOutputs,
 
-    /// Recorded outputs we'll check later.
-    accumulated_outputs: UpdateOutputs,
+    /// Chunk transitions verified so far.
+    chain: ChunkChain,
 
     /// Chunk transitions to verify.
     input_chunks: &'a [ArchivedChunkInput],
@@ -84,10 +78,8 @@ impl<'a> EeVerificationState<'a> {
     ) -> Self {
         Self {
             chunk_predicate_key,
-            cur_verified_exec_blkid: state.last_exec_blkid(),
-            cur_verified_exec_state_root: state.last_exec_state_root(),
             expected_outputs,
-            accumulated_outputs: UpdateOutputs::new_empty(),
+            chain: ChunkChain::new(state),
             input_chunks,
         }
     }
@@ -97,128 +89,13 @@ impl<'a> EeVerificationState<'a> {
         self.chunk_predicate_key
     }
 
-    pub fn cur_verified_exec_blkid(&self) -> Hash {
-        self.cur_verified_exec_blkid
+    /// Returns the chunk transitions verified so far.
+    pub fn chain(&self) -> &ChunkChain {
+        &self.chain
     }
 
-    pub fn cur_verified_exec_state_root(&self) -> Hash {
-        self.cur_verified_exec_state_root
-    }
-
-    /// Appends a package block's outputs into the pending outputs being
-    /// built internally. This way we can compare it against the update op data
-    /// later.
-    ///
-    /// # Errors
-    ///
-    /// If this results in overflowing buffers, then returns an error and leaves
-    /// us in a dirty state where we should abort anyways.
-    pub(crate) fn merge_new_outputs(&mut self, outputs: &ExecOutputs) -> AcctRuntimeResult<()> {
-        // Just merge the entries into the buffer. This is a little more
-        // complicated than it really is because we have to convert between two
-        // sets of similar types that are separately defined to avoid semantic
-        // confusion because they do refer to different concepts.
-        self.accumulated_outputs
-            .try_extend_transfers(
-                outputs
-                    .output_transfers()
-                    .iter()
-                    .map(|e| OutputTransfer::new(e.dest(), e.value())),
-            )
-            .map_err(|_| AcctRuntimeError::OutputOverflow)?;
-
-        self.accumulated_outputs
-            .try_extend_messages(
-                outputs
-                    .output_messages()
-                    .iter()
-                    .map(|e| OutputMessage::new(e.dest(), e.payload().clone())),
-            )
-            .map_err(|_| AcctRuntimeError::OutputOverflow)?;
-
-        // Propagate a predicate rotation this transition consumed. This
-        // overwrites rather than accumulates, which is only safe because
-        // `process_decoded_transition` rejects any transition that follows a
-        // rotation — so an update holds at most one, and there is never a
-        // previous key here to clobber.
-        if let Some(new_key) = outputs.new_predicate() {
-            self.accumulated_outputs
-                .set_new_predicate(Some(new_key.clone()));
-        }
-
-        Ok(())
-    }
-
-    /// Processes a single decoded chunk transition: validates chain linkage,
-    /// matches inputs against pending inputs, merges outputs, advances tip.
-    ///
-    /// Separated from proof verification for independent testability.
-    pub fn process_decoded_transition(
-        &mut self,
-        transition: &ChunkTransition,
-        pending_inp_tracker: &mut SequenceTracker<'_, PendingInputEntry>,
-    ) -> AcctRuntimeResult<()> {
-        // A consumed rotation ends the update. The sequencer seals the batch
-        // right after the rotating block, but that's only host behavior —
-        // without this check a proof could chain further transitions onto the
-        // rotation, and those blocks would be authorized by the predecessor
-        // predicate. `accumulated_outputs` is the latch: `merge_new_outputs`
-        // sets the key below and nothing ever clears it.
-        if self.accumulated_outputs.new_predicate().is_some() {
-            return Err(AcctRuntimeError::NonTerminalRotation);
-        }
-
-        // Chain linkage: parent must match current verified tip.
-        if transition.parent_exec_blkid() != self.cur_verified_exec_blkid {
-            return Err(AcctRuntimeError::ChainLinkage {
-                tip: self.cur_verified_exec_blkid,
-                parent: transition.parent_exec_blkid(),
-            });
-        }
-
-        // Match inputs in the transition with our pending inputs.
-        //
-        // Each chunk deposit must match the next pending input in order by
-        // type.
-        for deposit in transition.inputs().subject_deposits() {
-            let position = pending_inp_tracker.consumed();
-            pending_inp_tracker
-                .consume_input_with(|pending| {
-                    matches!(
-                        pending,
-                        PendingInputEntry::Deposit(expected) if deposit == expected,
-                    )
-                })
-                .map_err(|_| AcctRuntimeError::DepositMismatch { position })?;
-        }
-
-        // A declared predicate rotation must be the next queued entry after
-        // this transition's deposits — consume it too.
-        if let Some(new_key) = transition.outputs().new_predicate() {
-            let position = pending_inp_tracker.consumed();
-            pending_inp_tracker
-                .consume_input_with(|pending| {
-                    matches!(
-                        pending,
-                        PendingInputEntry::PredicateRotation(queued) if queued == new_key,
-                    )
-                })
-                .map_err(|_| AcctRuntimeError::RotationMismatch { position })?;
-        }
-
-        // Merge outputs into accumulated state.
-        self.merge_new_outputs(transition.outputs())?;
-
-        // Advance the verified tip.
-        self.cur_verified_exec_blkid = transition.tip_exec_blkid();
-        self.cur_verified_exec_state_root = transition.tip_state_root();
-
-        Ok(())
-    }
-
-    /// Verifies all chunk transitions against the account's predicate key,
-    /// checks chain linkage, matches inputs against pending inputs, and
-    /// merges outputs.
+    /// Verifies all chunk transitions against the account's predicate key and
+    /// applies them to the chain.
     ///
     /// Returns the extra data the chunks produce, for the caller to compare
     /// whole against the claimed extra data.
@@ -226,33 +103,19 @@ impl<'a> EeVerificationState<'a> {
         &mut self,
         state: &EeAccountState,
     ) -> AcctRuntimeResult<UpdateExtraData> {
-        let mut pending_inp_tracker = SequenceTracker::new(state.pending_inputs());
-
-        // Loop through all the chunks and verify them.
         for (index, chunk) in self.input_chunks.iter().enumerate() {
             self.chunk_predicate_key()
                 .verify_claim_witness(chunk.chunk_transition_ssz(), chunk.proof())
                 .map_err(|_| AcctRuntimeError::InvalidChunkProof { index })?;
 
-            // Decode the transition for linkage, input matching, and outputs.
             let transition = chunk
                 .try_decode_chunk_transition()
                 .map_err(|source| AcctRuntimeError::DecodeChunkTransition { index, source })?;
 
-            // Process the decoded transition.
-            self.process_decoded_transition(&transition, &mut pending_inp_tracker)?;
+            self.chain.apply(&transition, state.pending_inputs())?;
         }
 
-        // TODO(STR-3257): chunks don't process forced inclusions yet, so an update
-        // processes none. Count the ones the chunks process once they do.
-        let processed_fincls = 0;
-
-        Ok(UpdateExtraData::new(
-            self.cur_verified_exec_blkid,
-            self.cur_verified_exec_state_root,
-            pending_inp_tracker.consumed() as u32,
-            processed_fincls,
-        ))
+        Ok(self.chain.extra_data())
     }
 
     /// Final checks to see if there's anything in the verification state that
@@ -261,13 +124,13 @@ impl<'a> EeVerificationState<'a> {
     /// Predicate rotations: the OL applies whatever predicate an update
     /// declares, without restriction — declaring only the queued key is this
     /// EE's own policy, enforced here since `expected_outputs` (declared)
-    /// must equal `accumulated_outputs` (accumulated from processing the
-    /// admin message via `merge_new_outputs`).
+    /// must equal the chain's outputs (accumulated from the transition that
+    /// consumed the admin message's rotation).
     pub(crate) fn check_obligations(&self) -> AcctRuntimeResult<()> {
-        if self.expected_outputs != self.accumulated_outputs {
+        if self.expected_outputs != *self.chain.outputs() {
             return Err(AcctRuntimeError::OutputsMismatch {
                 claimed: Box::new(self.expected_outputs.clone()),
-                computed: Box::new(self.accumulated_outputs.clone()),
+                computed: Box::new(self.chain.outputs().clone()),
             });
         }
 

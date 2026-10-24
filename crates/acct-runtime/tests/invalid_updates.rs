@@ -9,13 +9,14 @@ mod common;
 
 use std::iter;
 
-use alpen_acct_runtime::{AcctRuntimeError, BuilderError, EeVerificationInput, UpdateBuilder};
+use alpen_acct_runtime::{
+    AcctRuntimeError, BuilderError, ChunkChain, EeVerificationInput, UpdateBuilder,
+};
 use alpen_acct_types::{PendingInputEntry, UpdateExtraData};
-use alpen_chain_types::{ExecInputs, ExecOutputs, SequenceTracker, SubjectDepositData};
+use alpen_chain_types::{ExecInputs, ExecOutputs, SubjectDepositData};
 use common::{
     build_update_operation, create_chunk_transition, create_deposit_message, create_initial_state,
-    create_vstate, empty_exec_header_summary, simple_chunk, verify_update,
-    verify_with_private_input,
+    empty_exec_header_summary, simple_chunk, verify_update, verify_with_private_input,
 };
 use ssz::Encode;
 use strata_acct_types::{AccountId, BitcoinAmount, Hash, SubjectId};
@@ -440,16 +441,13 @@ fn test_process_decoded_transition_happy_path() {
         ExecInputs::new_empty(),
         ExecOutputs::new_empty(),
     );
-
-    let predicate_key = PredicateKey::always_accept();
-    let mut vstate = create_vstate(&predicate_key, &initial_state, UpdateOutputs::new_empty());
+    let mut chain = ChunkChain::new(&initial_state);
 
     let pending: Vec<PendingInputEntry> = vec![];
-    let mut tracker = SequenceTracker::new(&pending);
 
-    let result = vstate.process_decoded_transition(&transition, &mut tracker);
+    let result = chain.apply(&transition, &pending);
     assert!(result.is_ok(), "happy path should succeed: {result:?}");
-    assert_eq!(vstate.cur_verified_exec_blkid(), tip);
+    assert_eq!(chain.tip_blkid(), tip);
 }
 
 #[test]
@@ -467,14 +465,11 @@ fn test_chain_linkage_mismatch() {
         ExecInputs::new_empty(),
         ExecOutputs::new_empty(),
     );
-
-    let predicate_key = PredicateKey::always_accept();
-    let mut vstate = create_vstate(&predicate_key, &initial_state, UpdateOutputs::new_empty());
+    let mut chain = ChunkChain::new(&initial_state);
 
     let pending: Vec<PendingInputEntry> = vec![];
-    let mut tracker = SequenceTracker::new(&pending);
 
-    let result = vstate.process_decoded_transition(&transition, &mut tracker);
+    let result = chain.apply(&transition, &pending);
     assert!(
         matches!(
             result,
@@ -514,14 +509,11 @@ fn test_deposit_mismatch_in_chunk() {
         inputs,
         ExecOutputs::new_empty(),
     );
-
-    let predicate_key = PredicateKey::always_accept();
-    let mut vstate = create_vstate(&predicate_key, &initial_state, UpdateOutputs::new_empty());
+    let mut chain = ChunkChain::new(&initial_state);
 
     let pending = initial_state.pending_inputs().to_vec();
-    let mut tracker = SequenceTracker::new(&pending);
 
-    let result = vstate.process_decoded_transition(&transition, &mut tracker);
+    let result = chain.apply(&transition, &pending);
     assert!(
         matches!(
             result,
@@ -557,14 +549,11 @@ fn test_input_count_mismatch() {
         inputs,
         ExecOutputs::new_empty(),
     );
-
-    let predicate_key = PredicateKey::always_accept();
-    let mut vstate = create_vstate(&predicate_key, &initial_state, UpdateOutputs::new_empty());
+    let mut chain = ChunkChain::new(&initial_state);
 
     let pending: Vec<PendingInputEntry> = vec![];
-    let mut tracker = SequenceTracker::new(&pending);
 
-    let result = vstate.process_decoded_transition(&transition, &mut tracker);
+    let result = chain.apply(&transition, &pending);
     assert!(
         matches!(
             result,
@@ -572,4 +561,56 @@ fn test_input_count_mismatch() {
         ),
         "expected DepositMismatch, got: {result:?}"
     );
+}
+
+#[test]
+fn test_deposit_mismatch_reports_queue_position() {
+    let value = BitcoinAmount::try_from(1000u64).unwrap();
+    let first = SubjectDepositData::new(SubjectId::from([1u8; 32]), value);
+    let second = SubjectDepositData::new(SubjectId::from([2u8; 32]), value);
+    let pending = vec![
+        PendingInputEntry::Deposit(first.clone()),
+        PendingInputEntry::Deposit(second),
+    ];
+    let initial_state = alpen_acct_types::EeAccountState::new(
+        Hash::new([0u8; 32]),
+        Hash::zero(),
+        pending.clone(),
+        Vec::new(),
+    );
+    let mut chain = ChunkChain::new(&initial_state);
+
+    let tip1 = Hash::new([0xA1; 32]);
+    let chunk1 = simple_chunk(
+        initial_state.last_exec_blkid(),
+        tip1,
+        Hash::zero(),
+        empty_exec_header_summary(),
+        vec![first.clone()],
+        ExecOutputs::new_empty(),
+    );
+    chain
+        .apply(&chunk1, &pending)
+        .expect("first deposit matches");
+
+    // The second chunk repeats the first deposit, so it breaks at the second
+    // queue entry, not at the first entry of its own deposits.
+    let chunk2 = simple_chunk(
+        tip1,
+        Hash::new([0xA2; 32]),
+        Hash::zero(),
+        empty_exec_header_summary(),
+        vec![first],
+        ExecOutputs::new_empty(),
+    );
+    let result = chain.apply(&chunk2, &pending);
+    assert!(
+        matches!(
+            result,
+            Err(AcctRuntimeError::DepositMismatch { position: 1 })
+        ),
+        "expected DepositMismatch at 1, got: {result:?}"
+    );
+    assert_eq!(chain.tip_blkid(), tip1, "a rejected chunk leaves the chain");
+    assert_eq!(chain.inputs_consumed(), 1);
 }

@@ -3,6 +3,7 @@
 #![cfg_attr(test, expect(unused_crate_dependencies, reason = "test weirdness"))]
 
 mod block_assembly;
+mod chunk_chain;
 mod ee_program;
 mod errors;
 mod private_input;
@@ -10,6 +11,7 @@ mod update_processing;
 mod verification_state;
 
 pub use block_assembly::apply_input_messages;
+pub use chunk_chain::ChunkChain;
 pub use ee_program::EeSnarkAccountProgram;
 pub use errors::{AcctProgramResult, AcctRuntimeError, AcctRuntimeResult};
 pub use private_input::{

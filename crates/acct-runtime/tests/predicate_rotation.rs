@@ -7,17 +7,15 @@
 
 mod common;
 
-use alpen_acct_runtime::{AcctRuntimeError, EeVerificationInput, UpdateBuilder};
+use alpen_acct_runtime::{AcctRuntimeError, ChunkChain, EeVerificationInput, UpdateBuilder};
 use alpen_acct_types::PendingInputEntry;
-use alpen_chain_types::{ExecOutputs, SequenceTracker};
+use alpen_chain_types::ExecOutputs;
 use common::{
     apply_unconditionally, assert_verified_chunks_succeed, create_deposit_message,
-    create_initial_state, create_predicate_update_message, create_vstate,
-    empty_exec_header_summary, simple_chunk,
+    create_initial_state, create_predicate_update_message, empty_exec_header_summary, simple_chunk,
 };
 use strata_acct_types::{AccountId, BitcoinAmount, Hash, SubjectId};
 use strata_predicate::{PredicateKey, PredicateTypeId};
-use strata_snark_acct_types::UpdateOutputs;
 
 #[test]
 fn test_deposit_then_rotation_single_chunk() {
@@ -122,11 +120,9 @@ fn test_transition_after_a_rotation_is_rejected() {
     let (initial_state, _snark_state) = create_initial_state();
 
     let new_key = rotation_key(0x01);
-    let predicate_key = PredicateKey::always_accept();
-    let mut vstate = create_vstate(&predicate_key, &initial_state, UpdateOutputs::new_empty());
+    let mut chain = ChunkChain::new(&initial_state);
 
     let pending = vec![PendingInputEntry::PredicateRotation(new_key.clone())];
-    let mut tracker = SequenceTracker::new(&pending);
 
     // First transition consumes the queued rotation.
     let tip1 = Hash::new([0xA1; 32]);
@@ -140,8 +136,8 @@ fn test_transition_after_a_rotation_is_rejected() {
         vec![],
         outputs,
     );
-    vstate
-        .process_decoded_transition(&rotating, &mut tracker)
+    chain
+        .apply(&rotating, &pending)
         .expect("the rotating transition itself is fine");
 
     // A second, otherwise valid transition chains onto it.
@@ -154,7 +150,7 @@ fn test_transition_after_a_rotation_is_rejected() {
         ExecOutputs::new_empty(),
     );
 
-    let result = vstate.process_decoded_transition(&following, &mut tracker);
+    let result = chain.apply(&following, &pending);
     assert!(
         matches!(result, Err(AcctRuntimeError::NonTerminalRotation)),
         "expected NonTerminalRotation, got: {result:?}"
@@ -171,14 +167,12 @@ fn test_second_rotation_in_one_update_is_rejected() {
 
     let first_key = rotation_key(0x01);
     let second_key = rotation_key(0x02);
-    let predicate_key = PredicateKey::always_accept();
-    let mut vstate = create_vstate(&predicate_key, &initial_state, UpdateOutputs::new_empty());
+    let mut chain = ChunkChain::new(&initial_state);
 
     let pending = vec![
         PendingInputEntry::PredicateRotation(first_key.clone()),
         PendingInputEntry::PredicateRotation(second_key.clone()),
     ];
-    let mut tracker = SequenceTracker::new(&pending);
 
     let tip1 = Hash::new([0xB1; 32]);
     let mut first_outputs = ExecOutputs::new_empty();
@@ -191,8 +185,8 @@ fn test_second_rotation_in_one_update_is_rejected() {
         vec![],
         first_outputs,
     );
-    vstate
-        .process_decoded_transition(&first, &mut tracker)
+    chain
+        .apply(&first, &pending)
         .expect("the first rotation is fine");
 
     let mut second_outputs = ExecOutputs::new_empty();
@@ -206,7 +200,7 @@ fn test_second_rotation_in_one_update_is_rejected() {
         second_outputs,
     );
 
-    let result = vstate.process_decoded_transition(&second, &mut tracker);
+    let result = chain.apply(&second, &pending);
     assert!(
         matches!(result, Err(AcctRuntimeError::NonTerminalRotation)),
         "expected NonTerminalRotation, got: {result:?}"
