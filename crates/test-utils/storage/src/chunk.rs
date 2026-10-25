@@ -1,9 +1,9 @@
 //! The [`ChunkStorage`] acceptance suite.
 
-use alpen_common::{Batch, BatchStorage, Chunk, ChunkStatus, ChunkStorage, ProofId};
-use alpen_params::AlpenSpecId;
-use strata_acct_types::Hash;
+use alpen_common::{BatchStorage, Chunk, ChunkStatus, ChunkStorage, ProofId};
 use strata_identifiers::Buf32;
+
+use crate::batch::{create_test_batch, create_test_genesis_batch, create_test_hash};
 
 /// Macro to instantiate all ChunkStorage tests for a given storage setup.
 #[macro_export]
@@ -53,39 +53,11 @@ macro_rules! chunk_storage_tests {
     };
 }
 
-fn create_test_hash(value: u8) -> Hash {
-    let mut bytes = [0u8; 32];
-    bytes[0] = 1; // ensure non-zero
-    bytes[31] = value;
-    Hash::from(Buf32::new(bytes))
-}
-
 /// Create a chunk for testing.
 pub fn create_test_chunk(idx: u64, prev_block_val: u8, last_block_val: u8) -> Chunk {
     let prev_block = create_test_hash(prev_block_val);
     let last_block = create_test_hash(last_block_val);
     Chunk::new(idx, prev_block, last_block, 0, 0, Vec::new())
-}
-
-/// Create a genesis batch for testing (needed by isolation tests).
-fn create_test_genesis_batch() -> Batch {
-    let genesis_hash = create_test_hash(1);
-    Batch::new_genesis_batch(genesis_hash, 0).unwrap()
-}
-
-/// Create a non-genesis batch for testing (needed by isolation tests).
-fn create_test_batch(idx: u64, prev_block_val: u8, last_block_val: u8) -> Batch {
-    let prev_block = create_test_hash(prev_block_val);
-    let last_block = create_test_hash(last_block_val);
-    Batch::new(
-        idx,
-        prev_block,
-        last_block,
-        idx * 10,
-        Vec::new(),
-        AlpenSpecId::V0,
-    )
-    .unwrap()
 }
 
 /// Test saving chunks.

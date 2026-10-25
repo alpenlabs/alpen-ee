@@ -59,7 +59,7 @@ macro_rules! batch_storage_tests {
     };
 }
 
-fn create_test_hash(value: u8) -> Hash {
+pub(crate) fn create_test_hash(value: u8) -> Hash {
     let mut bytes = [0u8; 32];
     bytes[0] = 1; // ensure non-zero
     bytes[31] = value;
