@@ -2,7 +2,8 @@ use std::{fmt::Debug, future::Future, time::Duration};
 
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::ForkchoiceState;
-use alpen_common::{BlockNumHash, ConsensusHeads, ExecutionEngine};
+use alpen_common::{BlockNumHash, ConsensusHeads};
+use alpen_engine_api::ExecutionEngine;
 use reth_node_builder::NodeTypesWithDB;
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
@@ -271,7 +272,7 @@ mod tests {
         time::Duration,
     };
 
-    use alpen_common::ExecutionEngineError;
+    use alpen_engine_api::ExecutionEngineError;
     use alpen_reth_node::AlpenBuiltPayload;
     use async_trait::async_trait;
     use strata_acct_types::Hash;

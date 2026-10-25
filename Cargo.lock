@@ -1197,6 +1197,7 @@ dependencies = [
  "alpen-acct-types",
  "alpen-chain-types",
  "alpen-common",
+ "alpen-engine-api",
  "alpen-params",
  "alpen-primitives",
  "async-trait",
@@ -1338,28 +1339,18 @@ dependencies = [
 name = "alpen-common"
 version = "0.3.0-alpha.1"
 dependencies = [
- "alloy-eips 2.0.4",
  "alloy-primitives",
- "alloy-rlp",
- "alloy-rpc-types-engine",
  "alpen-acct-types",
  "alpen-chain-types",
  "alpen-da-types",
  "alpen-params",
- "alpen-primitives",
- "alpen-reth-node",
  "alpen-reth-statediff",
  "async-trait",
- "bincode",
  "bitcoin",
  "borsh",
  "eyre",
  "hex",
  "mockall",
- "reth-ethereum-engine-primitives",
- "reth-ethereum-primitives",
- "reth-node-builder",
- "reth-primitives-traits",
  "serde",
  "strata-acct-types",
  "strata-codec",
@@ -1369,7 +1360,6 @@ dependencies = [
  "strata-snark-acct-types",
  "thiserror 2.0.20",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -1526,6 +1516,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "alpen-engine-api"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rpc-types-engine",
+ "alpen-params",
+ "alpen-primitives",
+ "async-trait",
+ "eyre",
+ "strata-acct-types",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "alpen-engine-reth"
 version = "0.3.0-alpha.1"
 dependencies = [
@@ -1535,6 +1539,7 @@ dependencies = [
  "alpen-acct-types",
  "alpen-chain-types",
  "alpen-common",
+ "alpen-engine-api",
  "alpen-params",
  "alpen-primitives",
  "alpen-reth-node",
@@ -1838,10 +1843,12 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types",
+ "alpen-engine-api",
  "alpen-params",
  "alpen-primitives",
  "alpen-reth-evm",
  "alpen-reth-rpc",
+ "bincode",
  "ciborium",
  "eyre",
  "futures",
@@ -1872,8 +1879,11 @@ dependencies = [
  "revm-primitives",
  "serde",
  "serde_json",
+ "strata-acct-types",
  "strata-identifiers",
+ "strata-ol-bridge-types",
  "strata-primitives",
+ "thiserror 2.0.20",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -1985,6 +1995,7 @@ dependencies = [
  "alpen-block-assembly",
  "alpen-chain-types",
  "alpen-common",
+ "alpen-engine-api",
  "alpen-exec-chain",
  "alpen-params",
  "anyhow",

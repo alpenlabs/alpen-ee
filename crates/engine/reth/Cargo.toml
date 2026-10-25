@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 alpen-common.workspace = true
+alpen-engine-api.workspace = true
 alpen-primitives.workspace = true
 alpen-reth-node.workspace = true
 strata-acct-types.workspace = true

@@ -3,7 +3,8 @@ use std::num::NonZero;
 use alpen_acct_runtime::apply_input_messages;
 use alpen_acct_types::EeAccountState;
 use alpen_chain_types::ExecBlockPackage;
-use alpen_common::{EnginePayload, ExecBlockPayload, PayloadBuilderEngine};
+use alpen_common::ExecBlockPayload;
+use alpen_engine_api::{EnginePayload, PayloadBuilderEngine};
 use alpen_params::AlpenSpecId;
 use eyre::Context;
 use strata_acct_types::{AccountId, Hash, MessageEntry};
@@ -153,7 +154,7 @@ mod tests {
     use std::convert::Infallible;
 
     use alpen_acct_types::PendingInputEntry;
-    use alpen_common::{
+    use alpen_engine_api::{
         ExecutionEngine, ExecutionEngineError, ForkchoiceState, PayloadBuildAttributes,
     };
     use alpen_primitives::WithdrawalIntent;

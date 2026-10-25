@@ -16,6 +16,7 @@ alpen-acct-types.workspace = true
 alpen-block-assembly.workspace = true
 alpen-chain-types.workspace = true
 alpen-common.workspace = true
+alpen-engine-api.workspace = true
 alpen-exec-chain.workspace = true
 alpen-params.workspace = true
 strata-acct-types.workspace = true

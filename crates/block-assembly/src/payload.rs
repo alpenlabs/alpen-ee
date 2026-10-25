@@ -2,7 +2,7 @@ use std::num::NonZero;
 
 use alloy_primitives::B256;
 use alpen_acct_types::{PendingInputEntry, UpdateExtraData};
-use alpen_common::{DepositInfo, EnginePayload, PayloadBuildAttributes, PayloadBuilderEngine};
+use alpen_engine_api::{DepositInfo, EnginePayload, PayloadBuildAttributes, PayloadBuilderEngine};
 use alpen_params::AlpenSpecId;
 use alpen_primitives::subject_to_address_unchecked;
 use strata_acct_types::Hash;

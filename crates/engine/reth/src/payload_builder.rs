@@ -7,9 +7,10 @@ use std::{
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
-use alpen_common::{
-    BlockWitnessStore, EnginePayload, ExecutionEngine, ExecutionEngineError,
-    PayloadBuildAttributes, PayloadBuilderEngine,
+use alpen_common::BlockWitnessStore;
+use alpen_engine_api::{
+    EnginePayload, ExecutionEngine, ExecutionEngineError, PayloadBuildAttributes,
+    PayloadBuilderEngine,
 };
 use alpen_primitives::sats_to_gwei;
 use alpen_reth_node::{AlpenBuiltPayload, AlpenEngineTypes, AlpenPayloadAttributes};
