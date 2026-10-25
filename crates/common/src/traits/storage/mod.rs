@@ -15,7 +15,7 @@ pub use accessed_state::AccessedStateStore;
 #[cfg(feature = "test-utils")]
 pub use accessed_state::MockAccessedStateStore;
 #[cfg(feature = "test-utils")]
-pub use account::{tests, MockStorage};
+pub use account::MockStorage;
 pub use account::{OLBlockOrEpoch, Storage};
 pub use batch::BatchStorage;
 #[cfg(feature = "test-utils")]

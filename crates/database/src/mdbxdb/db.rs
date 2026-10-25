@@ -721,13 +721,15 @@ mod tests {
 
     use alpen_common::{
         batch_storage_tests, chunk_storage_tests, exec_block_storage_test_fns::create_exec_block,
-        exec_block_storage_tests, storage_tests,
     };
     use alpen_mdbx::MdbxConfig;
     use tokio::runtime::{Handle, Runtime};
 
     use super::*;
     use crate::storage::NodeStorage;
+
+    mod account_state;
+    mod exec_block;
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -752,8 +754,6 @@ mod tests {
         NodeStorage::new(test_runtime_handle(), Arc::new(temp_db()))
     }
 
-    storage_tests!(setup_storage());
-    exec_block_storage_tests!(setup_storage());
     batch_storage_tests!(setup_storage());
     chunk_storage_tests!(setup_storage());
 

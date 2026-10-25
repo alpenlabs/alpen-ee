@@ -15,8 +15,8 @@ pub use traits::{
     prover::MockBatchProver,
     storage::{
         batch_storage_test_fns, chunk_storage_test_fns, exec_block_storage_test_fns,
-        tests as storage_test_fns, InMemoryStorage, MockAccessedStateStore, MockBatchStorage,
-        MockBlockWitnessStore, MockChunkStorage, MockExecBlockStorage, MockStorage,
+        InMemoryStorage, MockAccessedStateStore, MockBatchStorage, MockBlockWitnessStore,
+        MockChunkStorage, MockExecBlockStorage, MockStorage,
     },
 };
 pub use traits::{
