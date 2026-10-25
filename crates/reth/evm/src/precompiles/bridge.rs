@@ -1,11 +1,11 @@
-use alpen_primitives::{WithdrawalCalldata, WithdrawalIntentEvent};
+use alpen_primitives::{
+    wei_to_sats, WithdrawalCalldata, WithdrawalIntentEvent, BRIDGEOUT_PRECOMPILE_ADDRESS,
+};
 use reth_evm::precompiles::PrecompileInput;
 use revm::precompile::{PrecompileError, PrecompileHalt, PrecompileOutput, PrecompileResult};
 use revm_primitives::{Bytes, Log, LogData, U256};
 use strata_bridge_params::BridgeParams;
 use strata_primitives::bitcoin_bosd::Descriptor;
-
-use crate::{constants::BRIDGEOUT_PRECOMPILE_ADDRESS, utils::wei_to_sats};
 
 // REVIEW(STR-3676): Replace these draft values with protocol-approved launch constants.
 /// Fixed raw EVM gas charged for bridge-out precompile execution.
@@ -233,7 +233,13 @@ mod tests {
     use strata_ol_bridge_types::OperatorSelection;
 
     use super::*;
-    use crate::utils::{u256_from, WEI_PER_BTC};
+
+    /// Number of wei per rollup BTC (1e18).
+    const WEI_PER_BTC: u128 = 1_000_000_000_000_000_000u128;
+
+    const fn u256_from(val: u128) -> U256 {
+        U256::from_limbs([(val & ((1 << 64) - 1)) as u64, (val >> 64) as u64, 0, 0])
+    }
 
     /// Test-only denomination constant (1 BTC in wei).
     const FIXED_WITHDRAWAL_WEI: U256 = u256_from(WEI_PER_BTC);

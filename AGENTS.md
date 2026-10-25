@@ -160,7 +160,7 @@ The EE types shared with the specs and the proofs, and the runtimes the proofs w
 | `chain-types` | EE chain types: blocks, chunks, inputs and outputs (SSZ) |
 | `chunk-runtime` | Chunk proof runtime for generic execution environments |
 | `evm-ee` | The EVM implementation of the `ExecutionEnvironment` trait |
-| `primitives` | The bridge-out withdrawal format and the sat to gwei conversion |
+| `primitives` | BTC unit conversions, subject to EVM address mapping, and the bridge-out withdrawal format |
 
 ### Data Availability (`crates/da/`)
 

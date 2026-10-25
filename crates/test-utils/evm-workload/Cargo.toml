@@ -29,6 +29,7 @@ alpen-common = { workspace = true, optional = true }
 alpen-evm-ee = { workspace = true, optional = true }
 alpen-exex = { workspace = true, optional = true }
 alpen-params = { workspace = true, features = ["test-utils"], optional = true }
+alpen-primitives = { workspace = true, optional = true }
 alpen-reth-evm = { workspace = true, optional = true }
 alpen-reth-node = { workspace = true, optional = true }
 alpen-reth-statediff = { workspace = true, optional = true }
@@ -71,6 +72,7 @@ generator = [
   "dep:alpen-evm-ee",
   "dep:alpen-exex",
   "dep:alpen-params",
+  "dep:alpen-primitives",
   "dep:alpen-reth-evm",
   "dep:alpen-reth-node",
   "dep:alpen-reth-statediff",

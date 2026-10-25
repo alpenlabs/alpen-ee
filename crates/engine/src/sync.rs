@@ -327,6 +327,7 @@ mod tests {
         MockExecBlockStorage, StorageError,
     };
     use alpen_params::AlpenSpecId;
+    use alpen_primitives::WithdrawalIntent;
     use async_trait::async_trait;
 
     use super::*;
@@ -374,7 +375,7 @@ mod tests {
             Hash::zero()
         }
 
-        fn withdrawal_intents(&self) -> &[alpen_reth_node::WithdrawalIntent] {
+        fn withdrawal_intents(&self) -> &[WithdrawalIntent] {
             &[]
         }
 

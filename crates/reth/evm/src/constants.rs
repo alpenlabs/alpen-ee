@@ -1,9 +1,5 @@
 use revm::primitives::{address, Address};
 
-/// The address for the Bridgeout precompile contract.
-pub const BRIDGEOUT_PRECOMPILE_ADDRESS: Address =
-    address!("5400000000000000000000000000000000000001");
-
 /// Custom PrecompileId for the Bridgeout precompile contract.
 pub const BRIDGEOUT_PRECOMPILE_ID: &str = "alpen-bridgeout-precompile";
 

@@ -606,10 +606,15 @@ dependencies = [
 name = "alpen-primitives"
 version = "0.3.0-alpha.1"
 dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
  "alloy-sol-types",
  "serde",
+ "strata-bridge-params",
+ "strata-identifiers",
  "strata-ol-bridge-types",
  "strata-primitives",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -635,7 +640,6 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips 2.0.4",
  "alloy-rpc-types-engine",
- "alloy-sol-types",
  "alpen-params",
  "alpen-primitives",
  "reth-chainspec",
@@ -650,8 +654,6 @@ dependencies = [
  "revm-primitives",
  "strata-bridge-params",
  "strata-crypto",
- "strata-identifiers",
- "strata-ol-bridge-types",
  "strata-primitives",
  "thiserror 2.0.18",
 ]

@@ -49,7 +49,7 @@ sequencer = [
   "dep:alpen-exec-chain",
   "dep:alpen-sequencer",
   "dep:alpen-exex",
-  "dep:alpen-reth-evm",
+  "dep:alpen-primitives",
   "dep:alpen-reth-statediff",
   "dep:alpen-witness",
   "dep:bitcoind-async-client",
@@ -109,9 +109,9 @@ alpen-exex = { workspace = true, optional = true }
 alpen-genesis.workspace = true
 alpen-ol-tracker.workspace = true
 alpen-params.workspace = true
+alpen-primitives = { workspace = true, optional = true }
 alpen-proof-acct = { workspace = true, optional = true }
 alpen-proof-chunk = { workspace = true, optional = true }
-alpen-reth-evm = { workspace = true, optional = true }
 alpen-reth-node.workspace = true
 alpen-reth-rpc.workspace = true
 alpen-reth-statediff = { workspace = true, optional = true }

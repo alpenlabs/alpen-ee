@@ -611,8 +611,8 @@ sequenceDiagram
 - Only messages from finalized OL blocks are processed (to avoid reorg issues)
 - Deposits are rate-limited per block (`max_deposits_per_block`)
 - Deposits are applied by reusing the EVM's withdrawal (EIP-4895) mechanism to mint into EVM state
-- The deposit's destination subject ID (32 bytes) maps to a 20-byte EVM address by taking its last 20 bytes ([`subject_to_address_unchecked`](../../crates/reth/evm/src/utils.rs))
-- Bitcoin amounts (sats) are converted to gwei for the EVM ([`sats_to_gwei`](../../crates/primitives/src/lib.rs))
+- The deposit's destination subject ID (32 bytes) maps to a 20-byte EVM address by taking its last 20 bytes ([`subject_to_address_unchecked`](../../crates/primitives/src/subject.rs))
+- Bitcoin amounts (sats) are converted to gwei for the EVM ([`sats_to_gwei`](../../crates/primitives/src/units.rs))
 
 ---
 
@@ -634,7 +634,7 @@ sequenceDiagram
 ```
 
 - A user initiates a withdrawal by calling the special [bridge-out precompile](../../crates/reth/evm/src/precompiles/bridge.rs) address with the amount to withdraw
-- The precompile converts the amount from wei to satoshis ([`wei_to_sats`](../../crates/reth/evm/src/utils.rs)) and validates it — the amount must be a positive exact multiple of the bridge denomination and within the withdrawal cap — then emits a **withdrawal intent**
+- The precompile converts the amount from wei to satoshis ([`wei_to_sats`](../../crates/primitives/src/units.rs)) and validates it — the amount must be a positive exact multiple of the bridge denomination and within the withdrawal cap — then emits a **withdrawal intent**
 - Withdrawal intents are extracted during block execution and aggregated into the batch's `SnarkAccountUpdate` outputs
 - The Update Submitter submits the update to OL, which routes the withdrawal to the bridge for L1 settlement
 

@@ -1,11 +1,10 @@
+use alpen_primitives::BRIDGEOUT_PRECOMPILE_ADDRESS;
 use reth_evm::precompiles::{DynPrecompile, PrecompilesMap};
 use revm::precompile::{kzg_point_evaluation, PrecompileId, PrecompileSpecId, Precompiles};
 use revm_primitives::{hardfork::SpecId, Address};
 use strata_bridge_params::BridgeParams;
 
-use crate::constants::{
-    BRIDGEOUT_PRECOMPILE_ADDRESS, BRIDGEOUT_PRECOMPILE_ID, SCHNORR_PRECOMPILE_ADDRESS,
-};
+use crate::constants::{BRIDGEOUT_PRECOMPILE_ID, SCHNORR_PRECOMPILE_ADDRESS};
 
 mod bridge;
 mod schnorr;

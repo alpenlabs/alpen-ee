@@ -7,10 +7,10 @@ use alloy_consensus::Header;
 use alpen_acct_types::{ExecBlockOutput, ExecutionEnvironment};
 use alpen_chain_types::{ExecInputs, ExecOutputs, OutputMessage};
 use alpen_params::{AlpenParams, AlpenSpecId};
+use alpen_primitives::{WithdrawalIntent, extract_withdrawal_intents};
 use alpen_reth_evm::{
     config::AlpenEvmConfig,
     consensus::{FlooredConsensus, validate_header_extra_against_parent},
-    extract_withdrawal_intents,
 };
 use reth_consensus::{Consensus, FullConsensus, HeaderValidator};
 use reth_ethereum_primitives::{Block, BlockBody, Receipt as EthereumReceipt};
@@ -50,7 +50,7 @@ pub struct EvmExecutionEnvironment {
 /// - The withdrawal amount (as message value)
 /// - The destination descriptor (encoded in message data)
 fn convert_withdrawal_intents_to_messages(
-    withdrawal_intents: Vec<alpen_primitives::WithdrawalIntent>,
+    withdrawal_intents: Vec<WithdrawalIntent>,
     outputs: &mut ExecOutputs,
 ) {
     for intent in withdrawal_intents {
@@ -342,7 +342,7 @@ mod tests {
             Descriptor::from_bytes(&destination_bytes).expect("valid p2wpkh descriptor");
         let withdrawal_sats = 1_000_000_000;
 
-        let intent = alpen_primitives::WithdrawalIntent {
+        let intent = WithdrawalIntent {
             amt: withdrawal_sats,
             selected_operator: OperatorSelection::any(),
             destination,

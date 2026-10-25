@@ -12,7 +12,6 @@ mod payload;
 mod payload_builder;
 mod pool;
 
-pub use alpen_primitives::WithdrawalIntent;
 pub use block_witness::{build_block_witness_from_executed_state, BlockWitnessRecord};
 pub use consensus::{AlpenConsensus, AlpenConsensusBuilder};
 pub use da_fee_rate::{da_fee_rate_channel, DaFeeRateHandle, DaFeeRateUpdater};

@@ -10,10 +10,8 @@ use alloy_consensus::Header;
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use alpen_evm_ee::EvmPartialState;
 use alpen_params::{AlpenParams, DEV_PARAMS_JSON};
-use alpen_reth_evm::{
-    address_to_subject,
-    constants::{BRIDGEOUT_PRECOMPILE_ADDRESS, SCHNORR_PRECOMPILE_ADDRESS},
-};
+use alpen_primitives::{address_to_subject, BRIDGEOUT_PRECOMPILE_ADDRESS};
+use alpen_reth_evm::constants::SCHNORR_PRECOMPILE_ADDRESS;
 use alpen_reth_statediff::BatchBuilder;
 use eyre::{ensure, eyre};
 use rand_chacha::{
