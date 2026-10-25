@@ -565,8 +565,8 @@ dependencies = [
  "alpen-chain-types",
  "alpen-da-types",
  "alpen-params",
+ "alpen-primitives",
  "alpen-reth-evm",
- "alpen-reth-primitives",
  "bincode",
  "itertools 0.14.0",
  "ref-cast",
@@ -603,6 +603,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "alpen-primitives"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alloy-sol-types",
+ "serde",
+ "strata-ol-bridge-types",
+ "strata-primitives",
+]
+
+[[package]]
 name = "alpen-proof-chunk"
 version = "0.3.0-alpha.1"
 dependencies = [
@@ -627,7 +637,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-sol-types",
  "alpen-params",
- "alpen-reth-primitives",
+ "alpen-primitives",
  "reth-chainspec",
  "reth-consensus",
  "reth-consensus-common",
@@ -644,16 +654,6 @@ dependencies = [
  "strata-ol-bridge-types",
  "strata-primitives",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "alpen-reth-primitives"
-version = "0.3.0-alpha.1"
-dependencies = [
- "alloy-sol-types",
- "serde",
- "strata-ol-bridge-types",
- "strata-primitives",
 ]
 
 [[package]]

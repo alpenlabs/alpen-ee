@@ -50,7 +50,7 @@ pub struct EvmExecutionEnvironment {
 /// - The withdrawal amount (as message value)
 /// - The destination descriptor (encoded in message data)
 fn convert_withdrawal_intents_to_messages(
-    withdrawal_intents: Vec<alpen_reth_primitives::WithdrawalIntent>,
+    withdrawal_intents: Vec<alpen_primitives::WithdrawalIntent>,
     outputs: &mut ExecOutputs,
 ) {
     for intent in withdrawal_intents {
@@ -342,7 +342,7 @@ mod tests {
             Descriptor::from_bytes(&destination_bytes).expect("valid p2wpkh descriptor");
         let withdrawal_sats = 1_000_000_000;
 
-        let intent = alpen_reth_primitives::WithdrawalIntent {
+        let intent = alpen_primitives::WithdrawalIntent {
             amt: withdrawal_sats,
             selected_operator: OperatorSelection::any(),
             destination,

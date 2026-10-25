@@ -156,7 +156,7 @@ mod tests {
     use alpen_common::{
         ExecutionEngine, ExecutionEngineError, ForkchoiceState, PayloadBuildAttributes,
     };
-    use alpen_reth_primitives::WithdrawalIntent;
+    use alpen_primitives::WithdrawalIntent;
     use async_trait::async_trait;
     use strata_predicate::PredicateKey;
 

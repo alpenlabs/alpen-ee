@@ -1,4 +1,4 @@
-use alpen_reth_primitives::{WithdrawalCalldata, WithdrawalIntentEvent};
+use alpen_primitives::{WithdrawalCalldata, WithdrawalIntentEvent};
 use reth_evm::precompiles::PrecompileInput;
 use revm::precompile::{PrecompileError, PrecompileHalt, PrecompileOutput, PrecompileResult};
 use revm_primitives::{Bytes, Log, LogData, U256};

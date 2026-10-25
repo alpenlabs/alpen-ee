@@ -1,4 +1,4 @@
-//! Primitives for Reth.
+//! Primitives shared by the Alpen EVM, the proofs and the node.
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 

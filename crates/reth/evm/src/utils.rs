@@ -2,7 +2,7 @@ use std::mem::size_of;
 
 use alloy_consensus::TxReceipt;
 use alloy_sol_types::SolEvent;
-use alpen_reth_primitives::{WithdrawalIntent, WithdrawalIntentEvent};
+use alpen_primitives::{WithdrawalIntent, WithdrawalIntentEvent};
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use revm_primitives::{alloy_primitives::Bloom, Address, Log, U256};
 use strata_bridge_params::BridgeParams;
@@ -167,7 +167,7 @@ pub fn address_to_subject(address: Address) -> SubjectId {
 
 #[cfg(test)]
 mod tests {
-    use alpen_reth_primitives::WithdrawalIntentEvent;
+    use alpen_primitives::WithdrawalIntentEvent;
     use proptest::prelude::*;
     use revm_primitives::{Bytes, LogData};
     use strata_bridge_params::DEFAULT_MAX_WITHDRAWAL_DESCRIPTOR_LEN;

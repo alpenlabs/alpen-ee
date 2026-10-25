@@ -612,7 +612,7 @@ sequenceDiagram
 - Deposits are rate-limited per block (`max_deposits_per_block`)
 - Deposits are applied by reusing the EVM's withdrawal (EIP-4895) mechanism to mint into EVM state
 - The deposit's destination subject ID (32 bytes) maps to a 20-byte EVM address by taking its last 20 bytes ([`subject_to_address_unchecked`](../../crates/reth/evm/src/utils.rs))
-- Bitcoin amounts (sats) are converted to gwei for the EVM ([`sats_to_gwei`](../../crates/reth/primitives/src/lib.rs))
+- Bitcoin amounts (sats) are converted to gwei for the EVM ([`sats_to_gwei`](../../crates/primitives/src/lib.rs))
 
 ---
 

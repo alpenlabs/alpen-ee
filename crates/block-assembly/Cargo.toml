@@ -30,7 +30,7 @@ tracing.workspace = true
 [dev-dependencies]
 alpen-common = { workspace = true, features = ["test-utils"] }
 alloy-primitives.workspace = true
-alpen-reth-primitives.workspace = true
+alpen-primitives.workspace = true
 async-trait.workspace = true
 alpen-acct-runtime = { workspace = true, features = ["test-utils"] }
 tokio = { workspace = true, features = ["macros", "rt"] }

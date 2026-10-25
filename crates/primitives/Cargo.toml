@@ -1,6 +1,6 @@
 [package]
 edition.workspace = true
-name = "alpen-reth-primitives"
+name = "alpen-primitives"
 version.workspace = true
 license.workspace = true
 repository.workspace = true

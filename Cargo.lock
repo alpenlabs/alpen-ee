@@ -1199,8 +1199,8 @@ dependencies = [
  "alpen-chain-types",
  "alpen-common",
  "alpen-params",
+ "alpen-primitives",
  "alpen-reth-evm",
- "alpen-reth-primitives",
  "async-trait",
  "bitcoin-bosd",
  "eyre",
@@ -1350,8 +1350,8 @@ dependencies = [
  "alpen-chain-types",
  "alpen-da-types",
  "alpen-params",
+ "alpen-primitives",
  "alpen-reth-node",
- "alpen-reth-primitives",
  "alpen-reth-statediff",
  "async-trait",
  "bincode",
@@ -1563,8 +1563,8 @@ dependencies = [
  "alpen-chain-types",
  "alpen-da-types",
  "alpen-params",
+ "alpen-primitives",
  "alpen-reth-evm",
- "alpen-reth-primitives",
  "alpen-test-utils-evm-workload",
  "bincode",
  "itertools 0.14.0",
@@ -1712,6 +1712,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "alpen-primitives"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alloy-sol-types",
+ "serde",
+ "strata-ol-bridge-types",
+ "strata-primitives",
+]
+
+[[package]]
 name = "alpen-proof-acct"
 version = "0.3.0-alpha.1"
 dependencies = [
@@ -1802,7 +1812,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-sol-types",
  "alpen-params",
- "alpen-reth-primitives",
+ "alpen-primitives",
  "proptest",
  "reth-chainspec",
  "reth-consensus",
@@ -1834,8 +1844,8 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types",
  "alpen-params",
+ "alpen-primitives",
  "alpen-reth-evm",
- "alpen-reth-primitives",
  "alpen-reth-rpc",
  "ciborium",
  "eyre",
@@ -1872,16 +1882,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
-]
-
-[[package]]
-name = "alpen-reth-primitives"
-version = "0.3.0-alpha.1"
-dependencies = [
- "alloy-sol-types",
- "serde",
- "strata-ol-bridge-types",
- "strata-primitives",
 ]
 
 [[package]]
