@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use alpen_common::{require_latest_batch, BlockNumHash, ExecBlockStorage, SequencerOLClient};
 use alpen_database::{NodeStorage, SequencerDatabases, Stores};
-use alpen_engine::{sync_chainstate_to_engine, AlpenRethExecEngine};
+use alpen_engine_reth::{sync_chainstate_to_engine, AlpenRethExecEngine};
 use alpen_exec_chain::{init_exec_chain_state_from_storage, ExecChainState};
 use alpen_exex::{AccessedStateGenerator, StateDiffGenerator};
 use alpen_genesis::{ensure_batch_genesis, ensure_finalized_exec_chain_genesis};

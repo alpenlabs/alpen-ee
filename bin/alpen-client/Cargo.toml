@@ -102,7 +102,7 @@ alpen-da-runtime = { workspace = true, optional = true, features = [
 ] }
 alpen-da-types = { workspace = true, optional = true }
 alpen-database.workspace = true
-alpen-engine.workspace = true
+alpen-engine-reth.workspace = true
 alpen-evm-ee = { workspace = true, optional = true }
 alpen-exec-chain = { workspace = true, optional = true }
 alpen-exex = { workspace = true, optional = true }

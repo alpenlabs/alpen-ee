@@ -11,7 +11,7 @@ use alpen_common::{
     BlockWitnessStore, EnginePayload, ExecutionEngine, ExecutionEngineError,
     PayloadBuildAttributes, PayloadBuilderEngine,
 };
-use alpen_engine::AlpenRethExecEngine;
+use alpen_engine_reth::AlpenRethExecEngine;
 use alpen_primitives::sats_to_gwei;
 use alpen_reth_node::{AlpenBuiltPayload, AlpenEngineTypes, AlpenPayloadAttributes};
 use eyre::{eyre, Context};

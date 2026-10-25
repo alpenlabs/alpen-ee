@@ -16,7 +16,7 @@ use std::{future::Future, net::SocketAddr, path::Path, sync::Arc};
 
 use alpen_common::{chain_status_checked, BlockNumHash, ConsensusHeads, OLClient};
 use alpen_database::{open_stores, NodeStorage};
-use alpen_engine::{create_engine_control_task, AlpenRethExecEngine};
+use alpen_engine_reth::{create_engine_control_task, AlpenRethExecEngine};
 use alpen_genesis::ensure_genesis_ee_account_state;
 use alpen_ol_tracker::init_ol_tracker_state;
 use alpen_params::AlpenParams;

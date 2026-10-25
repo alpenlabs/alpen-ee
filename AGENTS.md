@@ -130,7 +130,6 @@ The services that make up the EE node, each a workspace crate at the top level.
 |-------|-------------|
 | `params` | Consolidated Alpen chain parameters, spec version schedule |
 | `common` | Shared EE types and the trait families (engine, storage, DA, OL client, prover) |
-| `engine` | Execution engine control: drives the reth engine API |
 | `exec-chain` | In-memory view of the canonical execution chain, orphan tracking |
 | `ol-tracker` | Follows the paired OL node: epochs, checkpoints, finalization, inbox messages |
 | `genesis` | Deterministic EE genesis state |
@@ -177,6 +176,12 @@ The EE types shared with the specs and the proofs, and the runtimes the proofs w
 | `rpc/api` | Alpen EE RPC API traits |
 | `rpc/types` | Alpen EE RPC wire types |
 | `rpc/server` | Alpen EE RPC server implementation |
+
+### Engine (`crates/engine/`)
+
+| Crate | Description |
+|-------|-------------|
+| `engine/reth` | Execution engine control: drives the reth engine API |
 
 ### Reth Integration (`crates/reth/`)
 

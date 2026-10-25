@@ -1266,7 +1266,7 @@ dependencies = [
  "alpen-da-runtime",
  "alpen-da-types",
  "alpen-database",
- "alpen-engine",
+ "alpen-engine-reth",
  "alpen-evm-ee",
  "alpen-exec-chain",
  "alpen-exex",
@@ -1528,7 +1528,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "alpen-engine"
+name = "alpen-engine-reth"
 version = "0.3.0-alpha.1"
 dependencies = [
  "alloy-primitives",

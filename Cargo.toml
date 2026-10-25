@@ -13,7 +13,7 @@ members = [
   "crates/da/types",
   "crates/database",
   "crates/dbconsole-core",
-  "crates/engine",
+  "crates/engine/reth",
   "crates/evm-ee",
   "crates/exec-chain",
   "crates/exex",
@@ -80,7 +80,7 @@ alpen-da-runtime = { path = "crates/da/runtime" }
 alpen-da-types = { path = "crates/da/types" }
 alpen-database = { path = "crates/database", default-features = false }
 alpen-dbconsole-core = { path = "crates/dbconsole-core" }
-alpen-engine = { path = "crates/engine" }
+alpen-engine-reth = { path = "crates/engine/reth" }
 alpen-evm-ee = { path = "crates/evm-ee" }
 alpen-exec-chain = { path = "crates/exec-chain" }
 alpen-exex = { path = "crates/exex" }

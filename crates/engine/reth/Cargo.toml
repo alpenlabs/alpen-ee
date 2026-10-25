@@ -1,6 +1,6 @@
 [package]
 edition.workspace = true
-name = "alpen-engine"
+name = "alpen-engine-reth"
 version.workspace = true
 license.workspace = true
 repository.workspace = true

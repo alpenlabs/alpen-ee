@@ -321,7 +321,7 @@ Only messages from **finalized** OL blocks are exposed, avoiding reorg hazards.
 
 **Purpose**: Bridges OL consensus state to Reth's Engine API, managing fork choice updates.
 
-**Location**: [crates/engine/src/control.rs](../../crates/engine/src/control.rs)
+**Location**: [crates/engine/reth/src/control.rs](../../crates/engine/reth/src/control.rs)
 
 **Inputs**:
 - consensus heads — from OL Tracker (confirmed/finalized)
