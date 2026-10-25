@@ -424,6 +424,5 @@ impl AccessedStateStore for NodeStorage {
     }
 }
 
-// The storage-layer acceptance suite (`storage_tests!`, `exec_block_storage_tests!`,
-// `batch_storage_tests!`, `chunk_storage_tests!`) runs against `NodeStorage`
-// over the MDBX-backed `NodeDbMdbx` in `crate::mdbxdb::db`.
+// The storage-layer acceptance tests run against `NodeStorage` over the
+// MDBX-backed `NodeDbMdbx` in `crate::mdbxdb::db`.
