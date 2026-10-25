@@ -181,7 +181,7 @@ The EE types shared with the specs and the proofs, and the runtimes the proofs w
 
 | Crate | Description |
 |-------|-------------|
-| `engine/reth` | Execution engine control: drives the reth engine API |
+| `engine/reth` | The reth-backed execution engine: payload building, block submission, forkchoice control and the startup chainstate sync |
 
 ### Reth Integration (`crates/reth/`)
 

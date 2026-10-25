@@ -1252,11 +1252,9 @@ name = "alpen-client"
 version = "0.3.0-alpha.1"
 dependencies = [
  "alloy-consensus 2.0.4",
- "alloy-eips 2.0.4",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
- "alloy-rpc-types-engine",
  "alpen-acct-runtime",
  "alpen-acct-types",
  "alpen-chain-types",
@@ -1531,6 +1529,7 @@ dependencies = [
 name = "alpen-engine-reth"
 version = "0.3.0-alpha.1"
 dependencies = [
+ "alloy-eips 2.0.4",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "alpen-acct-types",
@@ -1540,8 +1539,10 @@ dependencies = [
  "alpen-primitives",
  "alpen-reth-node",
  "async-trait",
+ "eyre",
  "mockall",
  "reth-node-builder",
+ "reth-payload-builder",
  "reth-provider",
  "strata-acct-types",
  "strata-common",

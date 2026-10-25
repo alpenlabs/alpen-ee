@@ -11,15 +11,17 @@ use alpen_common::{
     BlockWitnessStore, EnginePayload, ExecutionEngine, ExecutionEngineError,
     PayloadBuildAttributes, PayloadBuilderEngine,
 };
-use alpen_engine_reth::AlpenRethExecEngine;
 use alpen_primitives::sats_to_gwei;
 use alpen_reth_node::{AlpenBuiltPayload, AlpenEngineTypes, AlpenPayloadAttributes};
+use async_trait::async_trait;
 use eyre::{eyre, Context};
 use reth_node_builder::{ConsensusEngineHandle, PayloadKind};
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderError, PayloadBuilderHandle};
 use strata_acct_types::Hash;
 use tokio::time::sleep;
 use tracing::{debug, info, info_span, warn, Instrument};
+
+use crate::AlpenRethExecEngine;
 
 const MISSING_PARENT_RETRY_DELAY_MS: u64 = 250;
 const MISSING_PARENT_MAX_RETRIES: u16 = 120;
@@ -59,7 +61,8 @@ async fn sleep_before_missing_parent_retry(
     sleep(Duration::from_millis(MISSING_PARENT_RETRY_DELAY_MS)).await;
 }
 
-pub(crate) struct AlpenRethPayloadEngine {
+/// Payload-building execution engine backed by reth's payload builder.
+pub struct AlpenRethPayloadEngine {
     payload_builder_handle: PayloadBuilderHandle<AlpenEngineTypes>,
     exec_engine: AlpenRethExecEngine,
     beneficiary_address: Address,
@@ -78,7 +81,8 @@ impl fmt::Debug for AlpenRethPayloadEngine {
 }
 
 impl AlpenRethPayloadEngine {
-    pub(crate) fn new(
+    /// Creates a new Alpen Reth payload engine.
+    pub fn new(
         payload_builder_handle: PayloadBuilderHandle<AlpenEngineTypes>,
         beacon_engine_handle: ConsensusEngineHandle<AlpenEngineTypes>,
         beneficiary_address: Address,
@@ -276,7 +280,7 @@ impl AlpenRethPayloadEngine {
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl ExecutionEngine for AlpenRethPayloadEngine {
     type TEnginePayload = AlpenBuiltPayload;
 
@@ -292,7 +296,7 @@ impl ExecutionEngine for AlpenRethPayloadEngine {
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl PayloadBuilderEngine for AlpenRethPayloadEngine {
     async fn build_payload(
         &self,
