@@ -1898,6 +1898,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth 2.0.4",
  "alpen-params",
+ "alpen-primitives",
  "alpen-reth-evm",
  "async-trait",
  "eyre",

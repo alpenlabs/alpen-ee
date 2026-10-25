@@ -224,6 +224,7 @@ fn validate_bosd(data: &[u8], bridge_params: &BridgeParams) -> Result<(), Bridge
 
 #[cfg(test)]
 mod tests {
+    use alpen_primitives::WEI_PER_BTC;
     use reth_evm::EvmInternals;
     use revm::{
         context::{BlockEnv, CfgEnv, Journal, JournalEntry, JournalTr, TxEnv},
@@ -233,9 +234,6 @@ mod tests {
     use strata_ol_bridge_types::OperatorSelection;
 
     use super::*;
-
-    /// Number of wei per rollup BTC (1e18).
-    const WEI_PER_BTC: u128 = 1_000_000_000_000_000_000u128;
 
     const fn u256_from(val: u128) -> U256 {
         U256::from_limbs([(val & ((1 << 64) - 1)) as u64, (val >> 64) as u64, 0, 0])

@@ -10,6 +10,7 @@ use alloy_eips::eip4895::{Withdrawal, Withdrawals};
 use alloy_primitives::{address, Address, Bytes, B256};
 use alpen_exex::build_accessed_state;
 use alpen_params::{AlpenParams, AlpenSpecId, HeaderExtra};
+use alpen_primitives::GWEI_PER_SAT;
 use alpen_reth_evm::{
     base_fee::next_floored_base_fee,
     da_fee::{DA_COVERAGE_CAPPED, DA_COVERAGE_UNKNOWN},
@@ -134,8 +135,8 @@ impl DevChain {
                 index: index as u64,
                 validator_index: 0,
                 address: *address,
-                // EIP-4895 amounts are in gwei, and 1 sat is 10 gwei.
-                amount: sats * 10,
+                // EIP-4895 amounts are in gwei.
+                amount: sats * GWEI_PER_SAT,
             })
             .collect();
         let timestamp = self.parent.timestamp + BLOCK_TIME_SECS;

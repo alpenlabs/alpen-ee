@@ -10,7 +10,7 @@ use alloy_consensus::Header;
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use alpen_evm_ee::EvmPartialState;
 use alpen_params::{AlpenParams, DEV_PARAMS_JSON};
-use alpen_primitives::{address_to_subject, BRIDGEOUT_PRECOMPILE_ADDRESS};
+use alpen_primitives::{address_to_subject, BRIDGEOUT_PRECOMPILE_ADDRESS, WEI_PER_BTC};
 use alpen_reth_evm::constants::SCHNORR_PRECOMPILE_ADDRESS;
 use alpen_reth_statediff::BatchBuilder;
 use eyre::{ensure, eyre};
@@ -28,9 +28,6 @@ use super::{
     contracts,
 };
 use crate::{Deposit, Workload, WorkloadBlock};
-
-/// One BTC in wei, the bridge's withdrawal denomination on dev.
-const BTC: u128 = 1_000_000_000_000_000_000;
 
 /// One whole token, at 18 decimals.
 const TOKEN: u128 = 1_000_000_000_000_000_000;
@@ -228,7 +225,7 @@ impl Generator {
                     self.funder.eip1559(
                         chain_id,
                         Some(*to),
-                        U256::from(10 * BTC),
+                        U256::from(10 * WEI_PER_BTC),
                         Bytes::new(),
                         TRANSFER_GAS,
                     )
@@ -479,7 +476,7 @@ impl Generator {
             Kind::NativeTransfer => {
                 let (from, to) = self.two_eoas(self.config.eoas);
                 let to = self.eoas[to].address();
-                let value = U256::from(self.between(BTC / 1_000, BTC / 10));
+                let value = U256::from(self.between(WEI_PER_BTC / 1_000, WEI_PER_BTC / 10));
                 self.eoas[from].eip1559(chain_id, Some(to), value, Bytes::new(), TRANSFER_GAS)
             }
             Kind::NativeToFreshAddress => {
@@ -488,7 +485,7 @@ impl Generator {
                 self.eoas[from].eip1559(
                     chain_id,
                     Some(to),
-                    U256::from(BTC / 100),
+                    U256::from(WEI_PER_BTC / 100),
                     Bytes::new(),
                     TRANSFER_GAS,
                 )
@@ -496,7 +493,7 @@ impl Generator {
             Kind::LegacyTransfer => {
                 let (from, to) = self.two_eoas(self.config.eoas);
                 let to = self.eoas[to].address();
-                let value = U256::from(self.between(BTC / 1_000, BTC / 10));
+                let value = U256::from(self.between(WEI_PER_BTC / 1_000, WEI_PER_BTC / 10));
                 self.eoas[from].legacy_transfer(chain_id, to, value, TRANSFER_GAS)
             }
             Kind::TokenTransfer => {
@@ -578,7 +575,8 @@ impl Generator {
         let tx = self.eoas[from].eip1559(
             self.chain_id,
             Some(BRIDGEOUT_PRECOMPILE_ADDRESS),
-            U256::from(BTC),
+            // One BTC, the bridge's withdrawal denomination on dev.
+            U256::from(WEI_PER_BTC),
             contracts::bridge_out(pubkey_hash),
             PRECOMPILE_GAS,
         );
