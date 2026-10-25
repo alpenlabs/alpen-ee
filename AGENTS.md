@@ -207,6 +207,7 @@ The SP1 guest packages are local manifests with their own lockfiles, used by the
 |-------|-------------|
 | `test-utils/simple-ee` | A minimal `ExecutionEnvironment` for the runtime tests and Miri |
 | `test-utils/evm-workload` | Realistic multi-block EVM workloads: the stored format, and a generator (`generator` feature) that builds them on a throwaway reth database |
+| `test-utils/storage` | Test support for the `common` storage traits: `InMemoryStorage`, the batch and chunk suites every store must pass, and exec block fixtures |
 | `test-utils/data/` | Fixtures (no crate): the RSP block witness the `evm-ee` codec and partial state tests read, and the workloads the `evm-ee` execution tests, the `proof/chunk` tests and `prover-perf` run on |
 
 ### Network Params

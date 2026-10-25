@@ -5,13 +5,12 @@ use std::{
     sync::RwLock,
 };
 
-use async_trait::async_trait;
-use strata_acct_types::Hash;
-
-use crate::{
+use alpen_common::{
     AccessedStateRecord, AccessedStateStore, Batch, BatchId, BatchStatus, BatchStorage,
     BlockWitnessStore, Chunk, ChunkId, ChunkStatus, ChunkStorage, StorageError,
 };
+use async_trait::async_trait;
+use strata_acct_types::Hash;
 
 /// In-memory storage for batches and chunks.
 #[derive(Debug, Default)]
@@ -318,20 +317,4 @@ impl BlockWitnessStore for InMemoryStorage {
         self.block_witnesses.write().unwrap().remove(&block_id);
         Ok(())
     }
-}
-
-#[cfg(all(test, feature = "test-utils"))]
-mod in_memory_batch_tests {
-    use super::InMemoryStorage;
-    use crate::batch_storage_tests;
-
-    batch_storage_tests!(InMemoryStorage::new_empty());
-}
-
-#[cfg(all(test, feature = "test-utils"))]
-mod in_memory_chunk_tests {
-    use super::InMemoryStorage;
-    use crate::chunk_storage_tests;
-
-    chunk_storage_tests!(InMemoryStorage::new_empty());
 }

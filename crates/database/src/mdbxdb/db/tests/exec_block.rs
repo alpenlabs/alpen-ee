@@ -1,10 +1,8 @@
 //! [`ExecBlockStorage`] behaviour of [`NodeStorage`](crate::storage::NodeStorage).
 
-use alpen_common::{
-    exec_block_storage_test_fns::{
-        create_exec_block, create_exec_block_with_messages, create_message_entry,
-    },
-    ExecBlockPayload, ExecBlockRecord, ExecBlockStorage,
+use alpen_common::{ExecBlockPayload, ExecBlockRecord, ExecBlockStorage};
+use alpen_test_utils_storage::{
+    create_exec_block, create_exec_block_with_messages, create_message_entry,
 };
 use strata_acct_types::Hash;
 use strata_identifiers::Buf32;

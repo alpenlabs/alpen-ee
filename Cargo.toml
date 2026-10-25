@@ -34,6 +34,7 @@ members = [
   "crates/sequencer",
   "crates/test-utils/evm-workload",
   "crates/test-utils/simple-ee",
+  "crates/test-utils/storage",
   "crates/witness",
   "provers/sp1",
 
@@ -101,6 +102,7 @@ alpen-rpc-types = { path = "crates/rpc/types" }
 alpen-sequencer = { path = "crates/sequencer" }
 alpen-simple-ee = { path = "crates/test-utils/simple-ee" }
 alpen-test-utils-evm-workload = { path = "crates/test-utils/evm-workload" }
+alpen-test-utils-storage = { path = "crates/test-utils/storage" }
 alpen-witness = { path = "crates/witness" }
 
 # strata dependencies, pinned to a release tag of the pre-split repo so the EE

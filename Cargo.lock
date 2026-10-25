@@ -1455,6 +1455,7 @@ dependencies = [
  "alpen-mdbx",
  "alpen-params",
  "alpen-reth-statediff",
+ "alpen-test-utils-storage",
  "async-trait",
  "bincode",
  "bitcoin",
@@ -1599,6 +1600,7 @@ dependencies = [
  "alpen-chain-types",
  "alpen-common",
  "alpen-params",
+ "alpen-test-utils-storage",
  "anyhow",
  "eyre",
  "serde",
@@ -1991,6 +1993,7 @@ dependencies = [
  "alpen-common",
  "alpen-exec-chain",
  "alpen-params",
+ "alpen-test-utils-storage",
  "anyhow",
  "async-trait",
  "bitcoin",
@@ -2075,6 +2078,20 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber 0.3.23",
+]
+
+[[package]]
+name = "alpen-test-utils-storage"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alpen-acct-types",
+ "alpen-chain-types",
+ "alpen-common",
+ "alpen-params",
+ "async-trait",
+ "strata-acct-types",
+ "strata-identifiers",
+ "tokio",
 ]
 
 [[package]]

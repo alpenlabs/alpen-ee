@@ -101,9 +101,8 @@ where
 mod tests {
     use std::sync::Arc;
 
-    use alpen_common::{
-        DaStatus, InMemoryStorage, MockBatchDaProvider, MockBatchProver, ProofGenerationStatus,
-    };
+    use alpen_common::{DaStatus, MockBatchDaProvider, MockBatchProver, ProofGenerationStatus};
+    use alpen_test_utils_storage::InMemoryStorage;
     use eyre::eyre;
     use tokio::sync::watch;
 

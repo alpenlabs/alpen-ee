@@ -14,9 +14,8 @@ pub use traits::{
     ol_client::{MockOLClient, MockSequencerOLClient},
     prover::MockBatchProver,
     storage::{
-        batch_storage_test_fns, chunk_storage_test_fns, exec_block_storage_test_fns,
-        InMemoryStorage, MockAccessedStateStore, MockBatchStorage, MockBlockWitnessStore,
-        MockChunkStorage, MockExecBlockStorage, MockStorage,
+        MockAccessedStateStore, MockBatchStorage, MockBlockWitnessStore, MockChunkStorage,
+        MockExecBlockStorage, MockStorage,
     },
 };
 pub use traits::{

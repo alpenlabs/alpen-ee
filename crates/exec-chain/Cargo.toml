@@ -26,3 +26,4 @@ alpen-acct-types.workspace = true
 alpen-chain-types.workspace = true
 alpen-common = { workspace = true, features = ["test-utils"] }
 alpen-params.workspace = true
+alpen-test-utils-storage.workspace = true
