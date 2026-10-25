@@ -592,8 +592,8 @@ dependencies = [
  "alpen-chain-types",
  "alpen-da-types",
  "alpen-params",
+ "alpen-primitives",
  "alpen-reth-evm",
- "alpen-reth-primitives",
  "bincode",
  "itertools 0.14.0",
  "ref-cast",
@@ -630,6 +630,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "alpen-primitives"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "alloy-sol-types",
+ "serde",
+ "strata-bridge-params",
+ "strata-identifiers",
+ "strata-ol-bridge-types",
+ "strata-primitives",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "alpen-proof-acct"
 version = "0.3.0-alpha.1"
 dependencies = [
@@ -656,9 +671,8 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips 2.0.4",
  "alloy-rpc-types-engine",
- "alloy-sol-types",
  "alpen-params",
- "alpen-reth-primitives",
+ "alpen-primitives",
  "reth-chainspec",
  "reth-consensus",
  "reth-consensus-common",
@@ -671,20 +685,8 @@ dependencies = [
  "revm-primitives",
  "strata-bridge-params",
  "strata-crypto",
- "strata-identifiers",
- "strata-ol-bridge-types",
  "strata-primitives",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "alpen-reth-primitives"
-version = "0.3.0-alpha.1"
-dependencies = [
- "alloy-sol-types",
- "serde",
- "strata-ol-bridge-types",
- "strata-primitives",
 ]
 
 [[package]]

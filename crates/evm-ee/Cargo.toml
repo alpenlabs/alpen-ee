@@ -9,6 +9,7 @@ repository.workspace = true
 # Alpen crates
 alpen-da-types.workspace = true
 alpen-params.workspace = true
+alpen-primitives.workspace = true
 
 # Strata crates
 alpen-acct-types.workspace = true
@@ -23,7 +24,6 @@ rsp-mpt.workspace = true
 
 # Reth for EVM execution
 alpen-reth-evm.workspace = true
-alpen-reth-primitives.workspace = true
 reth-consensus.workspace = true
 reth-errors.workspace = true
 reth-ethereum-primitives.workspace = true

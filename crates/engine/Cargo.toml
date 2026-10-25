@@ -26,6 +26,7 @@ tracing.workspace = true
 [dev-dependencies]
 alpen-common = { workspace = true, features = ["test-utils"] }
 alpen-params.workspace = true
+alpen-primitives.workspace = true
 strata-acct-types.workspace = true
 alpen-acct-types.workspace = true
 alpen-chain-types.workspace = true

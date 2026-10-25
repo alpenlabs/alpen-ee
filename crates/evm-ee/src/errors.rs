@@ -2,7 +2,7 @@
 
 use alpen_chain_types::ExecOutputs;
 use alpen_params::AlpenSpecId;
-use alpen_reth_evm::WithdrawalIntentExtractionError;
+use alpen_primitives::WithdrawalIntentExtractionError;
 use reth_consensus::ConsensusError;
 use reth_evm::execute::BlockExecutionError;
 use revm_primitives::B256;

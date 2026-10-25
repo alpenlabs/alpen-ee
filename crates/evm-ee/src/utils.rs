@@ -5,8 +5,7 @@
 
 use alloy_consensus::BlockBody;
 use alpen_chain_types::ExecInputs;
-use alpen_reth_evm::subject_to_address;
-use alpen_reth_primitives::sats_to_gwei;
+use alpen_primitives::{sats_to_gwei, subject_to_address};
 use reth_ethereum_primitives::{Block, TransactionSigned};
 use reth_primitives_traits::RecoveredBlock;
 

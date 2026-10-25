@@ -19,11 +19,10 @@
 //! all the components (rpc, execution, guest) can access it without necessarily
 //! depending on heavy reth crates.
 
+use alpen_primitives::BPS_DENOMINATOR;
 use reth_evm::{eth::EthEvmContext, Database};
 use revm::state::EvmState;
 use revm_primitives::{KECCAK_EMPTY, U256};
-
-const BPS_DENOMINATOR: u64 = 10_000;
 
 /// Safety margin used by fee quotes and as the maximum next-block DA-rate increase.
 pub const DA_RATE_SAFETY_MARGIN_BPS: u64 = 1_000;

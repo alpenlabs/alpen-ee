@@ -151,7 +151,7 @@ The engine is generic infrastructure; the store and the console core are the EE'
 
 ### Protocol Types and Runtimes (`crates/`)
 
-The EE account and chain types shared with the specs, and the runtimes the proofs wrap.
+The EE types shared with the specs and the proofs, and the runtimes the proofs wrap.
 
 | Crate | Description |
 |-------|-------------|
@@ -160,6 +160,7 @@ The EE account and chain types shared with the specs, and the runtimes the proof
 | `chain-types` | EE chain types: blocks, chunks, inputs and outputs (SSZ) |
 | `chunk-runtime` | Chunk proof runtime for generic execution environments |
 | `evm-ee` | The EVM implementation of the `ExecutionEnvironment` trait |
+| `primitives` | Unit constants and conversions, subject to EVM address mapping, and the bridge-out withdrawal format |
 
 ### Data Availability (`crates/da/`)
 
@@ -183,7 +184,6 @@ Alpen's configuration of reth. These sit below `common` in the dependency graph.
 
 | Crate | Description |
 |-------|-------------|
-| `reth/primitives` | Reth primitive type bindings |
 | `reth/evm` | Custom EVM with the Alpen precompiles |
 | `reth/rpc` | Custom reth RPC endpoints |
 | `reth/node` | Alpen Reth node implementation and gossip |

@@ -14,7 +14,7 @@ alpen-acct-types.workspace = true
 alpen-chain-types.workspace = true
 alpen-common.workspace = true
 alpen-params.workspace = true
-alpen-reth-evm.workspace = true
+alpen-primitives.workspace = true
 strata-acct-types.workspace = true
 strata-codec.workspace = true
 strata-msg-fmt.workspace = true
@@ -30,7 +30,6 @@ tracing.workspace = true
 [dev-dependencies]
 alpen-common = { workspace = true, features = ["test-utils"] }
 alloy-primitives.workspace = true
-alpen-reth-primitives.workspace = true
 async-trait.workspace = true
 alpen-acct-runtime = { workspace = true, features = ["test-utils"] }
 tokio = { workspace = true, features = ["macros", "rt"] }

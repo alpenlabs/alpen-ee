@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use alpen_reth_evm::WEI_PER_SAT;
+use alpen_primitives::WEI_PER_SAT;
 use async_trait::async_trait;
 use bitcoind_async_client::Client as BtcClient;
 use strata_btcio::writer::{resolve_fee_rate, FeeRateResolutionTimeouts};

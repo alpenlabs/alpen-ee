@@ -4,7 +4,7 @@ use alloy_primitives::B256;
 use alpen_acct_types::{PendingInputEntry, UpdateExtraData};
 use alpen_common::{DepositInfo, EnginePayload, PayloadBuildAttributes, PayloadBuilderEngine};
 use alpen_params::AlpenSpecId;
-use alpen_reth_evm::subject_to_address_unchecked;
+use alpen_primitives::subject_to_address_unchecked;
 use strata_acct_types::Hash;
 use strata_predicate::PredicateKey;
 use tracing::{debug, info};

@@ -7,7 +7,6 @@ mod traits;
 mod types;
 mod utils;
 
-pub use alpen_reth_primitives::sats_to_gwei;
 #[cfg(feature = "test-utils")]
 pub use traits::{
     da::MockBatchDaProvider,
