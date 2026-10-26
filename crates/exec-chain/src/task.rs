@@ -102,7 +102,7 @@ pub(crate) async fn handle_ol_update<TStorage: ExecBlockStorage>(
 #[cfg(test)]
 mod tests {
     use alpen_common::ConsensusHeads;
-    use alpen_storage_api::{exec_block_storage_test_fns::create_exec_block, MockExecBlockStorage};
+    use alpen_storage_api::{testing::create_exec_block, MockExecBlockStorage};
     use strata_acct_types::Hash;
 
     use super::*;

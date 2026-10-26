@@ -29,4 +29,6 @@ mockall = { workspace = true, optional = true }
 thiserror.workspace = true
 
 [dev-dependencies]
+alpen-chain-types.workspace = true
+alpen-params.workspace = true
 tokio.workspace = true

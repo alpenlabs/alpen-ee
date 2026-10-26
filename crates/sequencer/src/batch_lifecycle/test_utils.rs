@@ -2,7 +2,7 @@
 
 use alpen_common::{Batch, BatchId, BatchStatus, L1DaBlockInfo, L1DaBlockRef, ProofId};
 use alpen_params::AlpenSpecId;
-use alpen_storage_api::{BatchStorage, InMemoryStorage};
+use alpen_storage_api::{testing::InMemoryStorage, BatchStorage};
 use bitcoin::{hashes::Hash as _, BlockHash, Txid, Wtxid};
 use strata_acct_types::Hash;
 use strata_btc_types::BlockHashExt;

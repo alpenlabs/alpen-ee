@@ -257,7 +257,7 @@ pub(crate) async fn recover_from_storage(
 
 #[cfg(test)]
 mod tests {
-    use alpen_storage_api::InMemoryStorage;
+    use alpen_storage_api::testing::InMemoryStorage;
 
     use super::*;
     use crate::batch_lifecycle::test_utils::{

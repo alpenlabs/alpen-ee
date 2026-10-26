@@ -317,19 +317,3 @@ impl BlockWitnessStore for InMemoryStorage {
         Ok(())
     }
 }
-
-#[cfg(all(test, feature = "test-utils"))]
-mod in_memory_batch_tests {
-    use super::InMemoryStorage;
-    use crate::batch_storage_tests;
-
-    batch_storage_tests!(InMemoryStorage::new_empty());
-}
-
-#[cfg(all(test, feature = "test-utils"))]
-mod in_memory_chunk_tests {
-    use super::InMemoryStorage;
-    use crate::chunk_storage_tests;
-
-    chunk_storage_tests!(InMemoryStorage::new_empty());
-}

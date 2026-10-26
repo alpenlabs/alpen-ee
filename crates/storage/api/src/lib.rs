@@ -1,8 +1,8 @@
 //! Storage traits for the EE node: what each service reads and writes, and
 //! the errors a store reports.
-
-#[cfg(test)]
-use tokio as _;
+//!
+//! The `test-utils` feature adds mocks of every trait and the `testing`
+//! module: an in-memory store and the acceptance suites a store must pass.
 
 mod accessed_state;
 mod account;
@@ -12,9 +12,9 @@ mod chunk;
 mod da_context;
 mod errors;
 mod exec_block;
-#[cfg(feature = "test-utils")]
-mod in_memory;
 mod state_diff;
+#[cfg(any(test, feature = "test-utils"))]
+pub mod testing;
 mod utils;
 
 pub use accessed_state::AccessedStateStore;
@@ -25,20 +25,18 @@ pub use account::MockStorage;
 pub use account::{OLBlockOrEpoch, Storage};
 pub use batch::BatchStorage;
 #[cfg(feature = "test-utils")]
-pub use batch::{tests as batch_storage_test_fns, MockBatchStorage};
+pub use batch::MockBatchStorage;
 pub use block_witness::BlockWitnessStore;
 #[cfg(feature = "test-utils")]
 pub use block_witness::MockBlockWitnessStore;
 pub use chunk::ChunkStorage;
 #[cfg(feature = "test-utils")]
-pub use chunk::{tests as chunk_storage_test_fns, MockChunkStorage};
+pub use chunk::MockChunkStorage;
 pub use da_context::DaContext;
 pub use errors::StorageError;
 pub use exec_block::ExecBlockStorage;
 #[cfg(feature = "test-utils")]
-pub use exec_block::{exec_block_storage_test_fns, MockExecBlockStorage};
-#[cfg(feature = "test-utils")]
-pub use in_memory::InMemoryStorage;
+pub use exec_block::MockExecBlockStorage;
 pub use state_diff::{StateDiffProvider, StateDiffStore};
 pub use utils::{
     require_best_ee_account_state, require_best_finalized_block, require_genesis_batch,

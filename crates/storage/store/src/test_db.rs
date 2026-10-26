@@ -22,9 +22,7 @@ use alpen_acct_types::EeAccountState;
 use alpen_common::{AccessedAccount, AccessedStateRecord, Batch, Chunk};
 use alpen_params::AlpenSpecId;
 use alpen_reth_statediff::BlockStateChanges;
-use alpen_storage_api::{
-    exec_block_storage_test_fns::create_exec_block, DaContext, StateDiffStore,
-};
+use alpen_storage_api::{testing::create_exec_block, DaContext, StateDiffStore};
 use alpen_storage_mdbx::{MdbxConfig, MdbxEnv};
 use strata_acct_types::Hash;
 use strata_db_types::{

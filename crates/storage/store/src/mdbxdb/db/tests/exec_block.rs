@@ -2,9 +2,7 @@
 
 use alpen_common::{ExecBlockPayload, ExecBlockRecord};
 use alpen_storage_api::{
-    exec_block_storage_test_fns::{
-        create_exec_block, create_exec_block_with_messages, create_message_entry,
-    },
+    testing::{create_exec_block, create_exec_block_with_messages, create_message_entry},
     ExecBlockStorage,
 };
 use strata_acct_types::Hash;

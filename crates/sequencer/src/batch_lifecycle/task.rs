@@ -103,7 +103,7 @@ mod tests {
     use std::sync::Arc;
 
     use alpen_common::{DaStatus, MockBatchDaProvider, MockBatchProver, ProofGenerationStatus};
-    use alpen_storage_api::InMemoryStorage;
+    use alpen_storage_api::testing::InMemoryStorage;
     use eyre::eyre;
     use tokio::sync::watch;
 

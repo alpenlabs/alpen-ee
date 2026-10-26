@@ -719,9 +719,7 @@ mod tests {
         },
     };
 
-    use alpen_storage_api::{
-        batch_storage_tests, chunk_storage_tests, exec_block_storage_test_fns::create_exec_block,
-    };
+    use alpen_storage_api::{batch_storage_tests, chunk_storage_tests, testing::create_exec_block};
     use alpen_storage_mdbx::MdbxConfig;
     use tokio::runtime::{Handle, Runtime};
 
