@@ -4,7 +4,8 @@ use std::future::Future;
 
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::ForkchoiceState;
-use alpen_common::{EnginePayload, ExecBlockStorage, ExecutionEngine};
+use alpen_common::ExecBlockStorage;
+use alpen_engine_api::{EnginePayload, ExecutionEngine};
 use reth_node_builder::NodeTypesWithDB;
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
@@ -322,10 +323,8 @@ mod tests {
 
     use alpen_acct_types::EeAccountState;
     use alpen_chain_types::{ExecBlockCommitment, ExecBlockPackage, ExecInputs, ExecOutputs};
-    use alpen_common::{
-        EnginePayload, ExecBlockPayload, ExecBlockRecord, ExecutionEngineError,
-        MockExecBlockStorage, StorageError,
-    };
+    use alpen_common::{ExecBlockPayload, ExecBlockRecord, MockExecBlockStorage, StorageError};
+    use alpen_engine_api::{EnginePayload, ExecutionEngineError};
     use alpen_params::AlpenSpecId;
     use alpen_primitives::WithdrawalIntent;
     use async_trait::async_trait;

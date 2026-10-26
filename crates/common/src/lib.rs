@@ -20,9 +20,6 @@ pub use traits::{
 };
 pub use traits::{
     da::{BatchDaProvider, DaStatus, HeaderSummaryProvider},
-    engine::{
-        EnginePayload, ExecutionEngine, ExecutionEngineError, ForkchoiceState, PayloadBuilderEngine,
-    },
     ol_client::{
         chain_status_checked, get_inbox_messages_checked, OLAccountStateView, OLBlockData,
         OLBlockLink, OLClient, OLClientError, SequencerOLClient,
@@ -45,7 +42,6 @@ pub use types::{
     exec_record::{ExecBlockPayload, ExecBlockRecord},
     ol_account_epoch_summary::{SnarkAccountEpochSummary, SnarkAccountUpdateInfo},
     ol_chain_status::{OLChainStatus, OLFinalizedStatus},
-    payload_builder::{DepositInfo, PayloadBuildAttributes},
     prover::{Proof, ProofId},
     prover_task_key::{
         decode_batch_task_key, decode_chunk_task_key, encode_batch_task_key, encode_chunk_task_key,

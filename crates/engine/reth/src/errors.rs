@@ -1,6 +1,7 @@
 //! Error module for the engine crate.
 
-use alpen_common::{ExecutionEngineError, StorageError};
+use alpen_common::StorageError;
+use alpen_engine_api::ExecutionEngineError;
 use reth_provider::ProviderError;
 use strata_acct_types::Hash;
 use thiserror::Error;

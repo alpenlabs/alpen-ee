@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::{types::payload_builder::PayloadBuildAttributes, ExecutionEngine};
+use crate::{ExecutionEngine, PayloadBuildAttributes};
 
 #[async_trait]
 pub trait PayloadBuilderEngine: ExecutionEngine {

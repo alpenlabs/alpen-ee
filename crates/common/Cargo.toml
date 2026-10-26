@@ -17,8 +17,6 @@ alpen-acct-types.workspace = true
 alpen-chain-types.workspace = true
 alpen-da-types.workspace = true
 alpen-params.workspace = true
-alpen-primitives.workspace = true
-alpen-reth-node.workspace = true
 alpen-reth-statediff.workspace = true
 strata-acct-types.workspace = true
 strata-codec.workspace = true
@@ -27,25 +25,16 @@ strata-identifiers.workspace = true
 strata-predicate.workspace = true
 strata-snark-acct-types.workspace = true
 
-alloy-eips.workspace = true
 alloy-primitives.workspace = true
-alloy-rlp.workspace = true
-alloy-rpc-types-engine.workspace = true
 async-trait.workspace = true
-bincode.workspace = true
 bitcoin.workspace = true
 borsh.workspace = true
 eyre.workspace = true
 hex.workspace = true
 mockall = { workspace = true, optional = true }
-reth-ethereum-engine-primitives.workspace = true
-reth-ethereum-primitives.workspace = true
-reth-node-builder.workspace = true
-reth-primitives-traits.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-tracing.workspace = true
 
 [dev-dependencies]
 mockall.workspace = true

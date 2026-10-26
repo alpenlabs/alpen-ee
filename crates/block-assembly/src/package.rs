@@ -2,7 +2,7 @@ use alpen_acct_types::PendingInputEntry;
 use alpen_chain_types::{
     ExecBlockCommitment, ExecBlockPackage, ExecInputs, ExecOutputs, OutputMessage,
 };
-use alpen_common::EnginePayload;
+use alpen_engine_api::EnginePayload;
 use bitcoin_bosd::Descriptor;
 use strata_acct_types::{AccountId, BitcoinAmount, Hash, MsgPayload};
 use strata_codec::encode_to_vec;

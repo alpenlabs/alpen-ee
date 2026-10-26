@@ -129,8 +129,7 @@ The services that make up the EE node, each a workspace crate at the top level.
 | Crate | Description |
 |-------|-------------|
 | `params` | Consolidated Alpen chain parameters, spec version schedule |
-| `common` | Shared EE types and the trait families (engine, storage, DA, OL client, prover) |
-| `engine` | Execution engine control: drives the reth engine API |
+| `common` | Shared EE types and the trait families (storage, DA, OL client, prover) |
 | `exec-chain` | In-memory view of the canonical execution chain, orphan tracking |
 | `ol-tracker` | Follows the paired OL node: epochs, checkpoints, finalization, inbox messages |
 | `genesis` | Deterministic EE genesis state |
@@ -178,6 +177,13 @@ The EE types shared with the specs and the proofs, and the runtimes the proofs w
 | `rpc/types` | Alpen EE RPC wire types |
 | `rpc/server` | Alpen EE RPC server implementation |
 
+### Engine (`crates/engine/`)
+
+| Crate | Description |
+|-------|-------------|
+| `engine/api` | Execution engine traits: block submission, forkchoice, payload building and its inputs |
+| `engine/reth` | The reth-backed execution engine: payload building, block submission, forkchoice control and the startup chainstate sync |
+
 ### Reth Integration (`crates/reth/`)
 
 Alpen's configuration of reth. These sit below `common` in the dependency graph.
@@ -186,7 +192,7 @@ Alpen's configuration of reth. These sit below `common` in the dependency graph.
 |-------|-------------|
 | `reth/evm` | Custom EVM with the Alpen precompiles |
 | `reth/rpc` | Custom reth RPC endpoints |
-| `reth/node` | Alpen Reth node implementation and gossip |
+| `reth/node` | Alpen Reth node implementation, gossip, and the built payload's stored encoding |
 | `reth/statediff` | State diff generation |
 
 ### Proofs (`crates/proof/`, `provers/sp1/`)

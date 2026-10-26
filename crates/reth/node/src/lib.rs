@@ -4,6 +4,7 @@ mod block_witness;
 mod consensus;
 mod da_fee_rate;
 mod engine;
+mod engine_payload;
 mod evm;
 mod evm_config;
 mod gossip;
@@ -16,6 +17,7 @@ pub use block_witness::{build_block_witness_from_executed_state, BlockWitnessRec
 pub use consensus::{AlpenConsensus, AlpenConsensusBuilder};
 pub use da_fee_rate::{da_fee_rate_channel, DaFeeRateHandle, DaFeeRateUpdater};
 pub use engine::{AlpenEngineTypes, AlpenEngineValidator};
+pub use engine_payload::AlpenEnginePayloadError;
 pub use evm_config::{payload_spec_version, MultiSpecEvmConfig};
 pub use gossip::{
     AlpenGossipCommand, AlpenGossipConnection, AlpenGossipConnectionHandler, AlpenGossipEvent,

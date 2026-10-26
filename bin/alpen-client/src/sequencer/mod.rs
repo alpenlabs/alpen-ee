@@ -11,7 +11,6 @@
 pub(crate) mod da_fee_rate;
 mod da_pipeline;
 mod header_summary;
-mod payload_builder;
 mod prover;
 mod provers;
 mod sealing_policy;
@@ -21,7 +20,7 @@ use std::sync::Arc;
 
 use alpen_common::{require_latest_batch, BlockNumHash, ExecBlockStorage, SequencerOLClient};
 use alpen_database::{NodeStorage, SequencerDatabases, Stores};
-use alpen_engine::{sync_chainstate_to_engine, AlpenRethExecEngine};
+use alpen_engine_reth::{sync_chainstate_to_engine, AlpenRethExecEngine, AlpenRethPayloadEngine};
 use alpen_exec_chain::{init_exec_chain_state_from_storage, ExecChainState};
 use alpen_exex::{AccessedStateGenerator, StateDiffGenerator};
 use alpen_genesis::{ensure_batch_genesis, ensure_finalized_exec_chain_genesis};
@@ -65,9 +64,7 @@ use strata_primitives::buf::Buf32;
 use tokio::sync::{mpsc, watch};
 use tracing::{error, info, info_span, Instrument};
 
-use self::{
-    payload_builder::AlpenRethPayloadEngine, sealing_policy::gas_data_provider::RethGasDataProvider,
-};
+use self::sealing_policy::gas_data_provider::RethGasDataProvider;
 use crate::{
     config::SequencerMode,
     gossip::GossipConfig,
