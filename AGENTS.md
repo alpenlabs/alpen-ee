@@ -138,15 +138,15 @@ The services that make up the EE node, each a workspace crate at the top level.
 | `witness` | Block range witness extraction for EVM proof generation |
 | `exex` | Reth execution extensions: per-block state-diff persistence and accessed-state capture |
 
-### Storage (`crates/`)
+### Storage (`crates/storage/`)
 
 The engine is generic infrastructure; the store and the console core are the EE's.
 
 | Crate | Description |
 |-------|-------------|
-| `mdbx` | Generic MDBX typed table store: environments, codecs, versioned values; knows nothing of the EE |
-| `database` | The EE store: node, prover, witness and DA-pipeline tables, the trait impls and store opening; its `schema` and `records` modules publish the on-disk model for tooling |
-| `dbconsole-core` | Operator console core: table registry, row reflection through the production codecs, staged writes, the sled migration rules; `bin/dbconsole` is its shell |
+| `storage/mdbx` | Generic MDBX typed table store: environments, codecs, versioned values; knows nothing of the EE |
+| `storage/store` | The EE store: node, prover, witness and DA-pipeline tables, the trait impls and store opening; its `schema` and `records` modules publish the on-disk model for tooling |
+| `storage/console` | Operator console core: table registry, row reflection through the production codecs, staged writes, the sled migration rules; `bin/dbconsole` is its shell |
 
 ### Protocol Types and Runtimes (`crates/`)
 
