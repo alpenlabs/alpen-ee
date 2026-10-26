@@ -1,6 +1,7 @@
+use alpen_common::{Batch, BatchId, BatchStatus};
 use async_trait::async_trait;
 
-use crate::{Batch, BatchId, BatchStatus, StorageError};
+use crate::StorageError;
 
 /// Storage for Batches.
 ///
@@ -100,12 +101,12 @@ macro_rules! batch_storage_tests {
 
 #[cfg(feature = "test-utils")]
 pub mod tests {
+    use alpen_common::{Batch, BatchStatus};
     use alpen_params::AlpenSpecId;
     use strata_acct_types::Hash;
     use strata_identifiers::Buf32;
 
     use super::*;
-    use crate::{Batch, BatchStatus};
 
     fn create_test_hash(value: u8) -> Hash {
         let mut bytes = [0u8; 32];

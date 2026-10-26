@@ -1,7 +1,8 @@
 //! For handling deterministic genesis blocks used in EE.
 
-use alpen_common::{Batch, BatchStorage};
+use alpen_common::Batch;
 use alpen_params::AlpenParams;
+use alpen_storage_api::BatchStorage;
 use eyre::{eyre, Context};
 
 pub async fn ensure_batch_genesis<TStorage: BatchStorage>(

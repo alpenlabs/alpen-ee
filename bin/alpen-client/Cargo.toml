@@ -114,6 +114,7 @@ alpen-reth-rpc.workspace = true
 alpen-reth-statediff = { workspace = true, optional = true }
 alpen-rpc-server.workspace = true
 alpen-sequencer = { workspace = true, optional = true }
+alpen-storage-api.workspace = true
 alpen-storage-store.workspace = true
 alpen-witness = { workspace = true, optional = true }
 bitcoind-async-client = { workspace = true, optional = true }

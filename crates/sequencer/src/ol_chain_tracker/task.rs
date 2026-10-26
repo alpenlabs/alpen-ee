@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use alpen_common::{ExecBlockStorage, OLBlockData, OLFinalizedStatus, SequencerOLClient};
+use alpen_common::{OLBlockData, OLFinalizedStatus, SequencerOLClient};
+use alpen_storage_api::ExecBlockStorage;
 use eyre::eyre;
 use strata_identifiers::OLBlockCommitment;
 use tokio::{
@@ -190,7 +191,8 @@ async fn handle_state_pruning(
 
 #[cfg(test)]
 mod tests {
-    use alpen_common::{MockExecBlockStorage, MockSequencerOLClient, OLClientError};
+    use alpen_common::{MockSequencerOLClient, OLClientError};
+    use alpen_storage_api::MockExecBlockStorage;
 
     use super::*;
     use crate::ol_chain_tracker::test_utils::{
@@ -522,7 +524,7 @@ mod tests {
                 .expect_get_exec_block()
                 .times(1)
                 .returning(|_| {
-                    Err(alpen_common::StorageError::Other(eyre::eyre!(
+                    Err(alpen_storage_api::StorageError::Other(eyre::eyre!(
                         "db connection failed"
                     )))
                 });

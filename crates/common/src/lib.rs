@@ -12,11 +12,6 @@ pub use traits::{
     da::MockBatchDaProvider,
     ol_client::{MockOLClient, MockSequencerOLClient},
     prover::MockBatchProver,
-    storage::{
-        batch_storage_test_fns, chunk_storage_test_fns, exec_block_storage_test_fns,
-        InMemoryStorage, MockAccessedStateStore, MockBatchStorage, MockBlockWitnessStore,
-        MockChunkStorage, MockExecBlockStorage, MockStorage,
-    },
 };
 pub use traits::{
     da::{BatchDaProvider, DaStatus, EvmCodeProvider, HeaderSummaryProvider},
@@ -25,12 +20,6 @@ pub use traits::{
         OLBlockLink, OLClient, OLClientError, SequencerOLClient,
     },
     prover::{BatchProver, ProofGenerationStatus},
-    storage::{
-        require_best_ee_account_state, require_best_finalized_block, require_genesis_batch,
-        require_latest_batch, AccessedStateStore, BatchStorage, BlockWitnessStore, ChunkStorage,
-        DaContext, ExecBlockStorage, OLBlockOrEpoch, StateDiffProvider, StateDiffStore, Storage,
-        StorageError,
-    },
 };
 pub use types::{
     accessed_state::{AccessedAccount, AccessedStateRecord},

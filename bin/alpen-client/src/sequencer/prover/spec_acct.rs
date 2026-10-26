@@ -18,13 +18,13 @@ use alpen_acct_types::UpdateExtraData;
 use alpen_chain_types::ChunkTransition;
 use alpen_common::{
     build_ledger_refs_from_da, decode_batch_task_key, encode_batch_task_key, BatchId, BatchStatus,
-    BatchStorage, ChunkStorage, DaContext, ExecBlockStorage, L1DaBlockRef,
-    ProverTaskKeyDecodeError, Storage,
+    L1DaBlockRef, ProverTaskKeyDecodeError,
 };
 use alpen_da_runtime::builders::{
     build_da_witness, BatchDaWitness, DaDedupResolver, DaWitnessBuildError,
 };
 use alpen_proof_acct::{EeAcctProgram, EeAcctProofInput};
+use alpen_storage_api::{BatchStorage, ChunkStorage, DaContext, ExecBlockStorage, Storage};
 use alpen_storage_store::NodeStorage;
 use alpen_witness::RangeWitnessData;
 use async_trait::async_trait;

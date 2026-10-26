@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use alpen_common::ExecBlockStorage;
+use alpen_storage_api::ExecBlockStorage;
 use async_trait::async_trait;
 use eyre::eyre;
 use strata_acct_types::Hash;

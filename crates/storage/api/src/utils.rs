@@ -1,5 +1,7 @@
+use alpen_common::{Batch, BatchStatus, EeAccountStateAtEpoch, ExecBlockRecord};
+
 use super::{account::Storage, exec_block::ExecBlockStorage, BatchStorage};
-use crate::{Batch, BatchStatus, EeAccountStateAtEpoch, ExecBlockRecord, StorageError};
+use crate::StorageError;
 
 /// Gets the latest batch from storage, returning an error if none exists.
 ///

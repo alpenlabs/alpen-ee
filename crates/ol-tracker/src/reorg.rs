@@ -1,4 +1,5 @@
-use alpen_common::{chain_status_checked, EeAccountStateAtEpoch, OLChainStatus, OLClient, Storage};
+use alpen_common::{chain_status_checked, EeAccountStateAtEpoch, OLChainStatus, OLClient};
+use alpen_storage_api::Storage;
 use tracing::{debug, error, info, warn};
 
 use crate::{
@@ -115,7 +116,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use alpen_common::{MockOLClient, MockStorage, OLBlockOrEpoch, OLClientError, StorageError};
+    use alpen_common::{MockOLClient, OLClientError};
+    use alpen_storage_api::{MockStorage, OLBlockOrEpoch, StorageError};
 
     use super::*;
     use crate::test_utils::*;

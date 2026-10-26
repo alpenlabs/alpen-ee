@@ -51,7 +51,7 @@
 //!
 //! [`BatchDaProvider`]: alpen_common::BatchDaProvider
 //! [`BatchProver`]: alpen_common::BatchProver
-//! [`BatchStorage`]: alpen_common::BatchStorage
+//! [`BatchStorage`]: alpen_storage_api::BatchStorage
 
 mod ctx;
 mod handle;

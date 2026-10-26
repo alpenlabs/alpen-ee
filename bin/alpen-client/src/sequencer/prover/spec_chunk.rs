@@ -12,12 +12,12 @@ use alpen_acct_types::{ExecBlock, ExecHeader};
 use alpen_chain_types::{ChunkTransition, ExecHeaderSummary, ExecInputs, ExecOutputs};
 use alpen_chunk_runtime::{PrivateInput, RawBlockData, RawChunkData};
 use alpen_common::{
-    decode_chunk_task_key, encode_chunk_task_key, BlockWitnessStore, ChunkId, ChunkStorage,
-    ExecBlockStorage, ProverTaskKeyDecodeError,
+    decode_chunk_task_key, encode_chunk_task_key, ChunkId, ProverTaskKeyDecodeError,
 };
 use alpen_evm_ee::{EvmBlock, EvmExecutionEnvironment, EvmHeader, EvmPartialState};
 use alpen_proof_chunk::{EeChunkProgram, EeChunkProofInput};
 use alpen_reth_node::BlockWitnessRecord;
+use alpen_storage_api::{BlockWitnessStore, ChunkStorage, ExecBlockStorage};
 use alpen_storage_store::NodeStorage;
 use async_trait::async_trait;
 use reth_ethereum_primitives::Block;

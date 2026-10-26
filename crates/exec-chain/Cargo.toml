@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 alpen-common.workspace = true
+alpen-storage-api.workspace = true
 strata-acct-types.workspace = true
 
 anyhow.workspace = true
@@ -24,5 +25,5 @@ tracing.workspace = true
 strata-identifiers.workspace = true
 alpen-acct-types.workspace = true
 alpen-chain-types.workspace = true
-alpen-common = { workspace = true, features = ["test-utils"] }
+alpen-storage-api = { workspace = true, features = ["test-utils"] }
 alpen-params.workspace = true

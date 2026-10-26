@@ -2,9 +2,12 @@ use std::{num::NonZeroUsize, sync::Arc};
 
 use alpen_acct_types::EeAccountState;
 use alpen_common::{
-    AccessedStateRecord, AccessedStateStore, Batch, BatchId, BatchStatus, BatchStorage,
-    BlockWitnessStore, Chunk, ChunkId, ChunkStatus, ChunkStorage, EeAccountStateAtEpoch,
-    ExecBlockPayload, ExecBlockRecord, ExecBlockStorage, OLBlockOrEpoch, Storage, StorageError,
+    AccessedStateRecord, Batch, BatchId, BatchStatus, Chunk, ChunkId, ChunkStatus,
+    EeAccountStateAtEpoch, ExecBlockPayload, ExecBlockRecord,
+};
+use alpen_storage_api::{
+    AccessedStateStore, BatchStorage, BlockWitnessStore, ChunkStorage, ExecBlockStorage,
+    OLBlockOrEpoch, Storage, StorageError,
 };
 use async_trait::async_trait;
 use strata_acct_types::Hash;

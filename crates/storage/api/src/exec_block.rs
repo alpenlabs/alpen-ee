@@ -1,8 +1,8 @@
+use alpen_common::{ExecBlockPayload, ExecBlockRecord};
 use async_trait::async_trait;
 use strata_acct_types::Hash;
 
 use super::StorageError;
-use crate::{ExecBlockPayload, ExecBlockRecord};
 
 #[cfg_attr(feature = "test-utils", mockall::automock)]
 #[async_trait]
@@ -98,11 +98,10 @@ pub trait ExecBlockStorage: Send + Sync {
 pub mod exec_block_storage_test_fns {
     use alpen_acct_types::EeAccountState;
     use alpen_chain_types::{ExecBlockCommitment, ExecBlockPackage, ExecInputs, ExecOutputs};
+    use alpen_common::ExecBlockRecord;
     use alpen_params::AlpenSpecId;
     use strata_acct_types::{AccountId, BitcoinAmount, Hash, MessageEntry, MsgPayload};
     use strata_identifiers::{Buf32, OLBlockCommitment, OLBlockId};
-
-    use crate::ExecBlockRecord;
 
     /// Helper to create a test OL block commitment
     fn create_ol_block(slot: u64, value: u8) -> OLBlockCommitment {

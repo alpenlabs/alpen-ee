@@ -2,7 +2,8 @@
 
 use std::time::Duration;
 
-use alpen_common::{Batch, BatchId, BatchStorage, BlockNumHash, ExecBlockStorage};
+use alpen_common::{Batch, BatchId, BlockNumHash};
+use alpen_storage_api::{BatchStorage, ExecBlockStorage};
 use eyre::{eyre, Result};
 use strata_acct_types::Hash;
 use tokio::{sync::mpsc, time};
@@ -423,11 +424,10 @@ mod tests {
 
     use alpen_acct_types::EeAccountState;
     use alpen_chain_types::{ExecBlockCommitment, ExecBlockPackage, ExecInputs, ExecOutputs};
-    use alpen_common::{
-        Batch, BatchId, ExecBlockRecord, MockBatchStorage, MockExecBlockStorage, StorageError,
-    };
+    use alpen_common::{Batch, BatchId, ExecBlockRecord};
     use alpen_exec_chain::{ExecChainHandle, ExecChainMsg};
     use alpen_params::AlpenSpecId;
+    use alpen_storage_api::{MockBatchStorage, MockExecBlockStorage, StorageError};
     use strata_identifiers::{Buf32, OLBlockCommitment};
     use strata_predicate::PredicateKey;
     use strata_service::CommandHandle;

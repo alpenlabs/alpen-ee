@@ -12,10 +12,11 @@
 
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc, time::Duration};
 
-use alpen_common::{BatchStorage, ChunkStorage, SequencerOLClient};
+use alpen_common::SequencerOLClient;
 use alpen_params::{AlpenParams, AlpenSpecId};
 use alpen_proof_acct::process_ee_acct_update;
 use alpen_proof_chunk::process_ee_chunk;
+use alpen_storage_api::{BatchStorage, ChunkStorage};
 use eyre::Context;
 use k256::schnorr::SigningKey;
 use strata_paas::{Prover, ProverBuilder, ProverServiceBuilder};

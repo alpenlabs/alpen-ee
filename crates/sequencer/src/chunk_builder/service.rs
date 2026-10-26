@@ -2,7 +2,7 @@
 
 use std::{fmt, marker::PhantomData, sync::Arc};
 
-use alpen_common::{BatchStorage, ChunkStorage, ExecBlockStorage};
+use alpen_storage_api::{BatchStorage, ChunkStorage, ExecBlockStorage};
 use serde::Serialize;
 use strata_service::{AsyncService, Response, Service, ServiceState, TickMsg};
 use tracing::error;

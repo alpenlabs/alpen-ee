@@ -1,3 +1,9 @@
+//! Storage traits for the EE node: what each service reads and writes, and
+//! the errors a store reports.
+
+#[cfg(test)]
+use tokio as _;
+
 mod accessed_state;
 mod account;
 mod batch;

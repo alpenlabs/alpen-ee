@@ -1,9 +1,9 @@
 use alpen_acct_types::EeAccountState;
+use alpen_common::EeAccountStateAtEpoch;
 use async_trait::async_trait;
 use strata_identifiers::{EpochCommitment, OLBlockId};
 
 use super::StorageError;
-use crate::EeAccountStateAtEpoch;
 
 /// Identifies an OL block either by block ID or slot number.
 #[derive(Debug)]

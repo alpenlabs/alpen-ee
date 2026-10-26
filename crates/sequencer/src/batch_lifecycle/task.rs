@@ -2,7 +2,8 @@
 
 use std::time::Duration;
 
-use alpen_common::{require_latest_batch, BatchDaProvider, BatchProver, BatchStorage};
+use alpen_common::{BatchDaProvider, BatchProver};
+use alpen_storage_api::{require_latest_batch, BatchStorage};
 use eyre::Result;
 use tokio::time;
 use tracing::{error, warn};
@@ -101,9 +102,8 @@ where
 mod tests {
     use std::sync::Arc;
 
-    use alpen_common::{
-        DaStatus, InMemoryStorage, MockBatchDaProvider, MockBatchProver, ProofGenerationStatus,
-    };
+    use alpen_common::{DaStatus, MockBatchDaProvider, MockBatchProver, ProofGenerationStatus};
+    use alpen_storage_api::InMemoryStorage;
     use eyre::eyre;
     use tokio::sync::watch;
 

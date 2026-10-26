@@ -2,8 +2,9 @@
 
 use std::{collections::HashMap, sync::Mutex};
 
-use alpen_common::{AccessedStateRecord, AccessedStateStore, StorageError};
+use alpen_common::AccessedStateRecord;
 use alpen_exex::BytecodeEntry;
+use alpen_storage_api::{AccessedStateStore, StorageError};
 use async_trait::async_trait;
 use strata_acct_types::Hash;
 

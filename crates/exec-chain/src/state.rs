@@ -1,6 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 
-use alpen_common::{BlockNumHash, ExecBlockRecord, ExecBlockStorage, StorageError};
+use alpen_common::{BlockNumHash, ExecBlockRecord};
+use alpen_storage_api::{ExecBlockStorage, StorageError};
 use strata_acct_types::Hash;
 use thiserror::Error;
 use tracing::warn;

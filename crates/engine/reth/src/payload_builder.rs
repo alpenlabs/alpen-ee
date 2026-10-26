@@ -7,12 +7,12 @@ use std::{
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
-use alpen_common::BlockWitnessStore;
 use alpen_engine_api::{
     EnginePayload, ExecutionEngine, ExecutionEngineError, PayloadBuildAttributes,
     PayloadBuilderEngine,
 };
 use alpen_reth_node::{AlpenBuiltPayload, AlpenEngineTypes, AlpenPayloadAttributes};
+use alpen_storage_api::BlockWitnessStore;
 use async_trait::async_trait;
 use eyre::{eyre, Context};
 use reth_node_builder::{ConsensusEngineHandle, PayloadKind};

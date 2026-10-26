@@ -12,6 +12,7 @@ workspace = true
 alpen-common.workspace = true
 alpen-engine-api.workspace = true
 alpen-reth-node.workspace = true
+alpen-storage-api.workspace = true
 strata-acct-types.workspace = true
 strata-retry.workspace = true
 
@@ -28,7 +29,7 @@ tokio.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-alpen-common = { workspace = true, features = ["test-utils"] }
+alpen-storage-api = { workspace = true, features = ["test-utils"] }
 alpen-params.workspace = true
 alpen-primitives.workspace = true
 strata-acct-types.workspace = true

@@ -1,8 +1,8 @@
 use alpen_acct_types::UpdateExtraData;
 use alpen_common::{
-    build_ledger_refs_from_da, Batch, BatchProver, ExecBlockRecord, ExecBlockStorage, L1DaBlockRef,
-    ProofId,
+    build_ledger_refs_from_da, Batch, BatchProver, ExecBlockRecord, L1DaBlockRef, ProofId,
 };
+use alpen_storage_api::ExecBlockStorage;
 use eyre::{eyre, OptionExt, Result};
 use futures::{future::try_join_all, FutureExt};
 use strata_acct_types::{

@@ -13,7 +13,7 @@ workspace = true
 # writes; enabled by alpen-storage-console, which holds the migration rules.
 migration = ["dep:ssz_derive", "dep:ssz_types"]
 # Exposes helpers for constructing and seeding EE stores in downstream tests.
-test-utils = ["dep:strata-l1-txfmt", "alpen-common/test-utils"]
+test-utils = ["alpen-storage-api/test-utils", "dep:strata-l1-txfmt"]
 
 [dependencies]
 alloy-primitives.workspace = true
@@ -22,6 +22,7 @@ alpen-chain-types.workspace = true
 alpen-common.workspace = true
 alpen-params.workspace = true
 alpen-reth-statediff.workspace = true
+alpen-storage-api.workspace = true
 alpen-storage-mdbx.workspace = true
 bitcoin.workspace = true
 hex.workspace = true
@@ -51,5 +52,5 @@ tracing.workspace = true
 
 [dev-dependencies]
 strata-l1-txfmt.workspace = true
-alpen-common = { workspace = true, features = ["test-utils"] }
+alpen-storage-api = { workspace = true, features = ["test-utils"] }
 strata-db-tests.workspace = true

@@ -12,6 +12,7 @@ workspace = true
 alpen-common.workspace = true
 alpen-da-types.workspace = true
 alpen-reth-statediff.workspace = true
+alpen-storage-api.workspace = true
 
 alloy-primitives.workspace = true
 async-trait.workspace = true

@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use alpen_common::{BatchStorage, BlockNumHash, ChunkStorage, ExecBlockStorage};
+use alpen_common::BlockNumHash;
 use alpen_sequencer::{
     chunk_builder::{
         cleanup_orphaned_chunks, create_chunk_builder_state, init_chunk_builder_state,
@@ -9,6 +9,7 @@ use alpen_sequencer::{
     sealing_policy::{AccumulationPolicy, BlockDataProvider, SealingPolicy},
     BatchBuilderEvent,
 };
+use alpen_storage_api::{BatchStorage, ChunkStorage, ExecBlockStorage};
 use strata_service::{AsyncExecutor, ServiceBuilder, ServiceMonitor, TickingInput, TokioMpscInput};
 use tokio::sync::mpsc;
 

@@ -6,9 +6,9 @@
 use std::collections::BTreeSet;
 
 use alloy_primitives::{keccak256, Address, B256, KECCAK256_EMPTY};
-use alpen_common::DaContext;
 use alpen_da_types::{DaBlob, DedupWitness};
 use alpen_reth_statediff::AccountChange;
+use alpen_storage_api::DaContext;
 use async_trait::async_trait;
 
 use super::DaWitnessBuildError;

@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
-use alpen_common::{BlockNumHash, ConsensusHeads, ExecBlockStorage};
+use alpen_common::{BlockNumHash, ConsensusHeads};
 use alpen_exec_chain::{
     ExecChainHandle, ExecChainMsg, ExecChainService, ExecChainServiceState, ExecChainState,
 };
+use alpen_storage_api::ExecBlockStorage;
 use strata_service::{AsyncExecutor, ServiceBuilder, TokioMpscInput};
 use tokio::sync::watch;
 use tracing::{info_span, warn, Instrument};

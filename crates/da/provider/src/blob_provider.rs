@@ -3,11 +3,10 @@
 use std::{collections::BTreeSet, fmt, mem, sync::Arc};
 
 use alloy_primitives::{Bytes, B256, KECCAK256_EMPTY};
-use alpen_common::{
-    BatchId, BatchStorage, DaContext, EvmCodeProvider, HeaderSummaryProvider, StateDiffProvider,
-};
+use alpen_common::{BatchId, EvmCodeProvider, HeaderSummaryProvider};
 use alpen_da_types::DaBlob;
 use alpen_reth_statediff::{AccountChange, BatchBuilder, BatchStateDiff};
+use alpen_storage_api::{BatchStorage, DaContext, StateDiffProvider};
 use async_trait::async_trait;
 use tracing::*;
 

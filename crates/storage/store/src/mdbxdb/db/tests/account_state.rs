@@ -1,7 +1,7 @@
 //! [`Storage`] behaviour of [`NodeStorage`](crate::storage::NodeStorage).
 
 use alpen_acct_types::EeAccountState;
-use alpen_common::{OLBlockOrEpoch, Storage, StorageError};
+use alpen_storage_api::{OLBlockOrEpoch, Storage, StorageError};
 use strata_identifiers::{Buf32, EpochCommitment, OLBlockId};
 
 use super::setup_storage;

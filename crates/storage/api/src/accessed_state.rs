@@ -7,10 +7,11 @@
 //! Consumer: the chunk-builder at chunk-seal time, replacing today's
 //! per-block re-execution loop inside `RangeWitnessExtractor`.
 
+use alpen_common::AccessedStateRecord;
 use async_trait::async_trait;
 use strata_acct_types::Hash;
 
-use crate::{AccessedStateRecord, StorageError};
+use crate::StorageError;
 
 /// Per-block accessed-state records + bytecode cache.
 ///

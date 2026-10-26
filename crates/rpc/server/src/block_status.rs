@@ -3,10 +3,11 @@
 use std::{fmt, future::Future, sync::Arc};
 
 use alloy_primitives::B256;
-use alpen_common::{ChunkStatus, ChunkStorage, ConsensusHeads, OLBlockOrEpoch, Storage};
+use alpen_common::{ChunkStatus, ConsensusHeads};
 use alpen_rpc_api::{
     AlpenEeRpcServer, BlockStatus, BlockStatusResponse, ChunkProofCoverageResponse,
 };
+use alpen_storage_api::{ChunkStorage, OLBlockOrEpoch, Storage};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_node_builder::NodeTypesWithDB;

@@ -11,9 +11,10 @@
 //! ... | --- Chunk 1 ---- | --- Chunk 2 --- | -------- Chunk 3 -------- | ...
 //! ```
 
+use alpen_common::{BatchId, Chunk, ChunkId, ChunkStatus};
 use async_trait::async_trait;
 
-use crate::{BatchId, Chunk, ChunkId, ChunkStatus, StorageError};
+use crate::StorageError;
 
 /// Storage for Chunks and batch-chunk associations.
 ///
@@ -122,12 +123,13 @@ macro_rules! chunk_storage_tests {
 
 #[cfg(feature = "test-utils")]
 pub mod tests {
+    use alpen_common::{Batch, Chunk, ChunkStatus, ProofId};
     use alpen_params::AlpenSpecId;
     use strata_acct_types::Hash;
     use strata_identifiers::Buf32;
 
     use super::*;
-    use crate::{Batch, BatchStorage, Chunk, ChunkStatus, ProofId};
+    use crate::BatchStorage;
 
     fn create_test_hash(value: u8) -> Hash {
         let mut bytes = [0u8; 32];

@@ -1,5 +1,5 @@
-use alpen_common::Storage;
 use alpen_params::AlpenParams;
+use alpen_storage_api::Storage;
 use eyre::eyre;
 use strata_identifiers::EpochCommitment;
 use tracing::{error, warn};

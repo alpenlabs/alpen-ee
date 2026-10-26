@@ -2,8 +2,8 @@ use alpen_acct_runtime::process_update_unconditionally;
 use alpen_acct_types::EeAccountState;
 use alpen_common::{
     chain_status_checked, EeAccountStateAtEpoch, OLChainStatus, OLClient, SnarkAccountUpdateInfo,
-    Storage,
 };
+use alpen_storage_api::Storage;
 use strata_identifiers::{EpochCommitment, Hash};
 use strata_snark_acct_runtime::IInnerState;
 use strata_snark_acct_types::UpdateManifest;

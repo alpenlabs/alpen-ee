@@ -5,13 +5,11 @@ use std::{
     sync::RwLock,
 };
 
+use alpen_common::{AccessedStateRecord, Batch, BatchId, BatchStatus, Chunk, ChunkId, ChunkStatus};
 use async_trait::async_trait;
 use strata_acct_types::Hash;
 
-use crate::{
-    AccessedStateRecord, AccessedStateStore, Batch, BatchId, BatchStatus, BatchStorage,
-    BlockWitnessStore, Chunk, ChunkId, ChunkStatus, ChunkStorage, StorageError,
-};
+use crate::{AccessedStateStore, BatchStorage, BlockWitnessStore, ChunkStorage, StorageError};
 
 /// In-memory storage for batches and chunks.
 #[derive(Debug, Default)]

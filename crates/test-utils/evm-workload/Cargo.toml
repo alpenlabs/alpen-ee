@@ -33,6 +33,7 @@ alpen-primitives = { workspace = true, optional = true }
 alpen-reth-evm = { workspace = true, optional = true }
 alpen-reth-node = { workspace = true, optional = true }
 alpen-reth-statediff = { workspace = true, optional = true }
+alpen-storage-api = { workspace = true, optional = true }
 alpen-witness = { workspace = true, optional = true }
 async-trait = { workspace = true, optional = true }
 clap = { workspace = true, features = [
@@ -69,6 +70,7 @@ generator = [
   "dep:alloy-signer-local",
   "dep:alloy-sol-types",
   "dep:alpen-common",
+  "dep:alpen-storage-api",
   "dep:alpen-evm-ee",
   "dep:alpen-exex",
   "dep:alpen-params",
