@@ -146,7 +146,7 @@ fn deduped_account_code_hashes(blob: &DaBlob) -> Vec<B256> {
 ///
 /// NOTE: these preimages prove bytecode identity, not prior L1 publication.
 /// TODO(STR-1907): replace with an authenticated prior-publication proof.
-fn bytecode_preimages_from_batch_diff(
+pub(crate) fn bytecode_preimages_from_batch_diff(
     blob: &DaBlob,
     batch_state_diff: &BatchStateDiff,
 ) -> (Vec<BytecodePreimage>, Vec<B256>) {

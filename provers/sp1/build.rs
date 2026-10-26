@@ -94,9 +94,8 @@ fn main() {
 
     fs::create_dir_all(GENERATED_DIR).unwrap_or_else(|e| panic!("create {GENERATED_DIR}: {e}"));
 
-    // Written once, before either guest is built — both `guest-alpen-chunk`
-    // and `guest-alpen-acct` need the identical `AlpenParams`, so generate it
-    // in one shared location instead of duplicating the write per guest.
+    // Written before the chunk guest is built, which embeds it. The account
+    // guest executes no blocks and takes no params.
     write_alpen_params_const(params_path);
 
     // The account guest embeds the chunk guest's predicate condition, so the
@@ -272,7 +271,7 @@ fn write_chunk_predicate_const(condition: &[u8]) {
 
 /// Reads the `AlpenParams` JSON at `path`, validates it parses, and writes
 /// `generated/alpen_params.rs`: the re-serialized JSON embedded as a string
-/// literal (decoded by each guest at startup via `serde_json`), which also
+/// literal (decoded by the chunk guest at startup via `serde_json`), which also
 /// doubles as a compact one-line doc comment for a quick, at-a-glance record
 /// of what got baked in.
 ///

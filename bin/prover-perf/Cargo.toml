@@ -9,7 +9,6 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-alpen-da-types.workspace = true
 alpen-params = { workspace = true, features = ["test-utils"] }
 alpen-test-utils-evm-workload.workspace = true
 ssz.workspace = true
@@ -17,24 +16,10 @@ zkaleido.workspace = true
 zkaleido-perf-report.workspace = true
 
 # proof programs
-alpen-proof-acct.workspace = true
+alpen-proof-acct = { workspace = true, features = ["test-utils"] }
 alpen-proof-chunk = { workspace = true, features = ["test-utils"] }
 
-alpen-acct-runtime.workspace = true
-alpen-acct-types.workspace = true
 alpen-chain-types.workspace = true
-alpen-reth-statediff.workspace = true
-strata-acct-types.workspace = true
-strata-codec.workspace = true
-strata-l1-envelope-fmt.workspace = true
-strata-msg-fmt.workspace = true
-strata-snark-acct-runtime.workspace = true
-strata-snark-acct-types.workspace = true
-
-alloy-consensus.workspace = true
-alloy-primitives.workspace = true
-alloy-rlp.workspace = true
-bitcoin.workspace = true
 
 # sp1
 alpen-sp1-guest-builder = { path = "../../provers/sp1", optional = true }

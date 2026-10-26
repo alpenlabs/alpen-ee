@@ -126,10 +126,10 @@ pub fn compute_chunk_transition<E: ExecutionEnvironment>(
 mod tests {
     use std::collections::BTreeMap;
 
-    use alpen_acct_types::{EnvError, ExecBlock, ExecBlockOutput, ExecHeader, Hash};
+    use alpen_acct_types::{ExecBlock, ExecBlockOutput, ExecHeader, Hash};
     use alpen_chain_types::{ExecInputs, ExecOutputs};
     use alpen_simple_ee::{
-        SimpleBlock, SimpleBlockBody, SimpleExecutionEnvironment, SimpleHeader,
+        SimpleBlock, SimpleBlockBody, SimpleEnvError, SimpleExecutionEnvironment, SimpleHeader,
         SimpleHeaderIntrinsics, SimplePartialState, SimpleTransaction,
     };
     use strata_predicate::PredicateKey;
@@ -333,7 +333,7 @@ mod tests {
             .expect_err("a block off the parent must be rejected");
         assert!(matches!(
             err,
-            ChunkRuntimeError::Env(EnvError::InvalidHeader)
+            ChunkRuntimeError::Env(SimpleEnvError::InvalidHeader)
         ));
     }
 
@@ -370,7 +370,7 @@ mod tests {
             .expect_err("a header that skips an index must be rejected");
         assert!(matches!(
             err,
-            ChunkRuntimeError::Env(EnvError::InvalidHeader)
+            ChunkRuntimeError::Env(SimpleEnvError::InvalidHeader)
         ));
     }
 

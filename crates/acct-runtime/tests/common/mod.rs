@@ -4,14 +4,13 @@
 #![allow(dead_code, reason = "utilities used by different test files")]
 
 use alpen_acct_runtime::{
-    ArchivedEePrivateInput, ChunkInput, EePrivateInput, EeSnarkAccountProgram, EeVerificationInput,
-    EeVerificationState, UpdateBuilder,
+    AcctProgramResult, ArchivedEePrivateInput, ChunkInput, EePrivateInput, EeSnarkAccountProgram,
+    EeVerificationInput, UpdateBuilder,
 };
-use alpen_acct_types::{DecodedEeMessageData, EeAccountState, EnvError, UpdateExtraData};
+use alpen_acct_types::{DecodedEeMessageData, EeAccountState, UpdateExtraData};
 use alpen_chain_types::{
     ChunkTransition, ExecHeaderSummary, ExecInputs, ExecOutputs, SubjectDepositData,
 };
-use alpen_simple_ee::SimpleExecutionEnvironment;
 use rkyv::rancor::Error as RkyvError;
 use ssz::Encode;
 use strata_acct_types::{AccountId, BitcoinAmount, Hash, MessageEntry, MsgPayload, SubjectId};
@@ -20,7 +19,7 @@ use strata_msg_fmt::Msg as MsgTrait;
 use strata_predicate::PredicateKey;
 use strata_snark_acct_runtime::{
     ArchivedPrivateInput as ArchivedSnarkPrivateInput, Coinput, IInnerState, InputMessage,
-    PrivateInput as SnarkPrivateInput, ProgramResult, SnarkAccountProgram,
+    PrivateInput as SnarkPrivateInput, SnarkAccountProgram,
 };
 use strata_snark_acct_types::*;
 
@@ -70,7 +69,7 @@ fn compute_post_state(
     initial_state: &EeAccountState,
     operation: &UpdateOperationData,
 ) -> EeAccountState {
-    let prog = EeSnarkAccountProgram::<SimpleExecutionEnvironment>::new();
+    let prog = EeSnarkAccountProgram::new();
     let mut state = initial_state.clone();
 
     prog.start_update(&mut state).expect("start_update");
@@ -95,7 +94,7 @@ fn compute_post_state(
 pub fn apply_unconditionally(
     initial_state: &EeAccountState,
     operation: &UpdateOperationData,
-) -> ProgramResult<(), EnvError> {
+) -> AcctProgramResult<()> {
     let mut state = initial_state.clone();
 
     let post_state = compute_post_state(initial_state, operation);
@@ -107,12 +106,7 @@ pub fn apply_unconditionally(
         operation.processed_messages().to_vec(),
     );
 
-    let predicate_key = PredicateKey::always_accept();
-    alpen_acct_runtime::process_update_unconditionally::<SimpleExecutionEnvironment>(
-        &mut state,
-        &manifest,
-        predicate_key,
-    )?;
+    alpen_acct_runtime::process_update_unconditionally(&mut state, &manifest)?;
 
     Ok(())
 }
@@ -122,8 +116,7 @@ pub fn verify_update(
     initial_state: &EeAccountState,
     operation: &UpdateOperationData,
     coinputs: &[Vec<u8>],
-    ee: &SimpleExecutionEnvironment,
-) -> ProgramResult<(), EnvError> {
+) -> AcctProgramResult<()> {
     let pre_root = initial_state.compute_state_root();
     let post_state = compute_post_state(initial_state, operation);
     let post_root = post_state.compute_state_root();
@@ -147,9 +140,9 @@ pub fn verify_update(
 
     with_archived_inputs(&ee_priv, &snark_priv, |archived_ee, archived_snark| {
         let predicate_key = PredicateKey::always_accept();
-        let vinput = EeVerificationInput::new(ee, &predicate_key, archived_ee.chunks(), &[]);
+        let vinput = EeVerificationInput::new(&predicate_key, archived_ee.chunks());
 
-        let program = EeSnarkAccountProgram::<SimpleExecutionEnvironment>::new();
+        let program = EeSnarkAccountProgram::new();
         strata_snark_acct_runtime::verify_and_process_update(&program, archived_snark, vinput)
     })
 }
@@ -159,9 +152,8 @@ pub fn assert_both_paths_succeed(
     initial_state: &EeAccountState,
     operation: &UpdateOperationData,
     coinputs: &[Vec<u8>],
-    ee: &SimpleExecutionEnvironment,
 ) {
-    verify_update(initial_state, operation, coinputs, ee).expect("verified path should succeed");
+    verify_update(initial_state, operation, coinputs).expect("verified path should succeed");
 
     apply_unconditionally(initial_state, operation).expect("unconditional path should succeed");
 }
@@ -233,10 +225,9 @@ pub(crate) fn build_update_operation(
     chunks: &[ChunkTransition],
     initial_state: &EeAccountState,
     snark_state: &SnarkAccountState,
-    ee: &SimpleExecutionEnvironment,
-) -> (UpdateOperationData, Vec<Vec<u8>>, SnarkPrivateInput) {
+) -> (UpdateOperationData, Vec<Vec<u8>>) {
     let predicate_key = PredicateKey::always_accept();
-    let vinput = EeVerificationInput::new(ee, &predicate_key, &[], &[]);
+    let vinput = EeVerificationInput::new(&predicate_key, &[]);
 
     let mut builder = UpdateBuilder::new(snark_state.clone(), initial_state.clone(), vinput)
         .expect("create builder");
@@ -249,11 +240,8 @@ pub(crate) fn build_update_operation(
             .expect("accept chunk should succeed");
     }
 
-    let snark_priv = builder
-        .build_private_input()
-        .expect("build_private_input should succeed");
     let (op, coinputs) = builder.build().expect("build should succeed");
-    (op, coinputs, snark_priv)
+    (op, coinputs)
 }
 
 /// Creates a simple [`ChunkTransition`] from deposits and outputs.
@@ -322,8 +310,7 @@ pub(crate) fn verify_with_chunks(
     operation: &UpdateOperationData,
     coinputs: &[Vec<u8>],
     chunks: &[ChunkTransition],
-    ee: &SimpleExecutionEnvironment,
-) -> ProgramResult<(), EnvError> {
+) -> AcctProgramResult<()> {
     let pre_root = initial_state.compute_state_root();
     let post_state = compute_post_state(initial_state, operation);
     let post_root = post_state.compute_state_root();
@@ -348,8 +335,8 @@ pub(crate) fn verify_with_chunks(
 
     with_archived_inputs(&ee_priv, &snark_priv, |archived_ee, archived_snark| {
         let predicate_key = PredicateKey::always_accept();
-        let vinput = EeVerificationInput::new(ee, &predicate_key, archived_ee.chunks(), &[]);
-        let program = EeSnarkAccountProgram::<SimpleExecutionEnvironment>::new();
+        let vinput = EeVerificationInput::new(&predicate_key, archived_ee.chunks());
+        let program = EeSnarkAccountProgram::new();
         strata_snark_acct_runtime::verify_and_process_update(&program, archived_snark, vinput)
     })
 }
@@ -362,26 +349,16 @@ pub(crate) fn verify_with_chunks(
 pub(crate) fn verify_with_private_input(
     snark_priv: &SnarkPrivateInput,
     chunks: &[ChunkTransition],
-    ee: &SimpleExecutionEnvironment,
-) -> ProgramResult<(), EnvError> {
+) -> AcctProgramResult<()> {
     let chunk_inputs = make_chunk_inputs(chunks);
     let ee_priv = EePrivateInput::new(vec![], vec![], chunk_inputs);
 
     with_archived_inputs(&ee_priv, snark_priv, |archived_ee, archived_snark| {
         let predicate_key = PredicateKey::always_accept();
-        let vinput = EeVerificationInput::new(ee, &predicate_key, archived_ee.chunks(), &[]);
-        let program = EeSnarkAccountProgram::<SimpleExecutionEnvironment>::new();
+        let vinput = EeVerificationInput::new(&predicate_key, archived_ee.chunks());
+        let program = EeSnarkAccountProgram::new();
         strata_snark_acct_runtime::verify_and_process_update(&program, archived_snark, vinput)
     })
-}
-
-/// Asserts that the verified path succeeds using the builder's private input.
-pub(crate) fn assert_verified_path_succeeds(
-    snark_priv: &SnarkPrivateInput,
-    chunks: &[ChunkTransition],
-    ee: &SimpleExecutionEnvironment,
-) {
-    verify_with_private_input(snark_priv, chunks, ee).expect("verified path should succeed");
 }
 
 /// Asserts that the verified path with chunks succeeds.
@@ -390,25 +367,7 @@ pub(crate) fn assert_verified_chunks_succeed(
     operation: &UpdateOperationData,
     coinputs: &[Vec<u8>],
     chunks: &[ChunkTransition],
-    ee: &SimpleExecutionEnvironment,
 ) {
-    verify_with_chunks(initial_state, operation, coinputs, chunks, ee)
+    verify_with_chunks(initial_state, operation, coinputs, chunks)
         .expect("verified path with chunks should succeed");
-}
-
-/// Creates an [`EeVerificationState`] for testing.
-pub(crate) fn create_vstate<'a>(
-    ee: &'a SimpleExecutionEnvironment,
-    chunk_predicate_key: &'a PredicateKey,
-    initial_state: &EeAccountState,
-    expected_outputs: UpdateOutputs,
-) -> EeVerificationState<'a, SimpleExecutionEnvironment> {
-    EeVerificationState::new_from_state(
-        ee,
-        chunk_predicate_key,
-        initial_state,
-        expected_outputs,
-        &[],
-        &[],
-    )
 }

@@ -1,45 +1,24 @@
 //! Error types for builder utilities.
 
-use alpen_acct_types::{EnvError, MessageDecodeError};
-use strata_acct_types::Hash;
-use strata_codec::CodecError;
 use strata_snark_acct_runtime::ProgramError;
 use thiserror::Error;
 
+use crate::errors::AcctRuntimeError;
+
 #[derive(Debug, Error)]
 pub enum BuilderError {
-    /// Codec error during encoding or decoding.
-    #[error("codec error")]
-    Codec(#[from] CodecError),
+    /// A chunk transition breaks a rule the verifier checks.
+    #[error("account runtime: {0}")]
+    Runtime(#[from] AcctRuntimeError),
 
-    /// Execution environment error.
-    #[error("execution environment error")]
-    Env(#[from] EnvError),
-
-    /// Message decode error.
-    #[error("message decode error")]
-    MessageDecode(#[from] MessageDecodeError),
-
-    /// Program error during message processing.
+    /// Program error during message processing or finalization.
     #[error("snark program: {0}")]
-    Program(ProgramError<EnvError>),
-
-    /// Chain linkage mismatch when accepting a chunk transition.
-    #[error("chunk parent {parent} does not match current tip {expected}")]
-    ChainLinkage { expected: Hash, parent: Hash },
-
-    /// Pending input mismatch when accepting a chunk transition.
-    #[error("chunk input at position {position} does not match pending input")]
-    InputMismatch { position: usize },
-
-    /// Accumulated output transfers or messages exceeded protocol capacity.
-    #[error("output overflow")]
-    OutputOverflow,
+    Program(ProgramError<AcctRuntimeError>),
 }
 
 /// Manual impl for this trait due to macro inflexibility, I guess?
-impl From<ProgramError<EnvError>> for BuilderError {
-    fn from(value: ProgramError<EnvError>) -> Self {
+impl From<ProgramError<AcctRuntimeError>> for BuilderError {
+    fn from(value: ProgramError<AcctRuntimeError>) -> Self {
         Self::Program(value)
     }
 }
