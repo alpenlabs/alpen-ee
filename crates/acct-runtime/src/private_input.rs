@@ -11,6 +11,9 @@ use ssz::{Decode, DecodeError, Encode};
 #[rkyv(derive(Debug))]
 pub struct PrivateInput {
     /// Previous header that we already have in our state.
+    // TODO(STR-3685): the acct guest never reads this and the sequencer always
+    // sends it empty. Dropping it changes the guest's input format, so it waits
+    // until the prover can serve the old and new formats during an upgrade.
     raw_prev_header: Vec<u8>,
 
     /// Partial pre-state corresponding to the previous header.
