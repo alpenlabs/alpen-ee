@@ -28,6 +28,6 @@ strata-l1-txfmt.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-alpen-database = { workspace = true, features = ["test-utils"] }
+alpen-storage-store = { workspace = true, features = ["test-utils"] }
 alpen-params.workspace = true
 tokio.workspace = true

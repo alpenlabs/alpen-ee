@@ -31,7 +31,7 @@
 //! | --- | --- | --- |
 //! | paas task bytes | `prev ‖ last`, 64 | `strata-paas`: its `TaskStore` is keyed by opaque bytes, and `ProofSpec::Task` (`ChunkTask`, `BatchTask` in the node) converts to and from exactly this through `encode_chunk_task_key` and friends in `alpen-common`. paas never sees the version. |
 //! | typed key | [`ChunkTaskKey`] / [`BatchTaskKey`] | the store's API and everything above it: the node's task-store adapter, the console. |
-//! | stored key | `version(u16 BE) ‖ prev ‖ last`, 66 | the MDBX row, through the [`KeyCodec`](alpen_mdbx::KeyCodec) impls in the schema module, which call [`encode_versioned_range`] and [`decode_versioned_range`]. |
+//! | stored key | `version(u16 BE) ‖ prev ‖ last`, 66 | the MDBX row, through the [`KeyCodec`](alpen_storage_mdbx::KeyCodec) impls in the schema module, which call [`encode_versioned_range`] and [`decode_versioned_range`]. |
 //!
 //! The conversions sit where the knowledge is. [`ChunkTaskKey::from_task_bytes`]
 //! and [`ChunkTaskKey::task_bytes`] (and their batch twins) add and strip the
@@ -53,8 +53,8 @@ use alpen_common::{
     decode_batch_task_key, decode_chunk_task_key, encode_batch_task_key, encode_chunk_task_key,
     BatchId, ChunkId, ProverTaskKeyDecodeError, RANGE_TASK_KEY_BYTES,
 };
-use alpen_mdbx::CodecError;
 use alpen_params::AlpenSpecId;
+use alpen_storage_mdbx::CodecError;
 use strata_acct_types::Hash;
 
 /// Key of a chunk prover task: the owning spec version and the chunk range.
@@ -187,7 +187,7 @@ pub(crate) fn decode_versioned_range(
 
 #[cfg(test)]
 mod tests {
-    use alpen_mdbx::KeyCodec;
+    use alpen_storage_mdbx::KeyCodec;
 
     use super::*;
 

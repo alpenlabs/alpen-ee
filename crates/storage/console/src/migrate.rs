@@ -35,17 +35,17 @@
 //! chain, which is what proves each rule produced what the table reads.
 
 use alloy_primitives::B256;
-use alpen_database::{
+use alpen_params::AlpenSpecId;
+#[cfg(any(test, feature = "test-utils"))]
+use alpen_storage_mdbx::UpgradeCtx;
+use alpen_storage_mdbx::ValueCodec;
+use alpen_storage_store::{
     records::{DBBatchWithStatus, DBExecBlockRecord},
     schema::{
         BatchByIdxSchema, BlockHashByNumber, ChunkProverTaskSchema, ExecBlockSchema,
         L1BroadcastTxSchema, L1ChunkedEnvelopeSchema,
     },
 };
-#[cfg(any(test, feature = "test-utils"))]
-use alpen_mdbx::UpgradeCtx;
-use alpen_mdbx::ValueCodec;
-use alpen_params::AlpenSpecId;
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::Serialize;
 use strata_db_types::{
@@ -754,13 +754,13 @@ fn rule_for(table: &str) -> eyre::Result<SledTree> {
 #[cfg(test)]
 mod tests {
     use alpen_common::ChunkId;
-    use alpen_database::{
+    use alpen_reth_statediff::BlockStateChanges;
+    use alpen_storage_mdbx::{KeyCodec, VersionedTable};
+    use alpen_storage_store::{
         records::DBChunkId,
         schema::{BlockStateChangesSchema, ChunkProofReceiptSchema, L1BroadcastActiveTxNodeSchema},
         ChunkTaskKey,
     };
-    use alpen_mdbx::{KeyCodec, VersionedTable};
-    use alpen_reth_statediff::BlockStateChanges;
     use strata_acct_types::Hash;
 
     use super::{super::registry::ee_envs, *};
@@ -1076,7 +1076,7 @@ mod tests {
     #[test]
     fn the_package_reencode_adds_the_empty_predicate_rotation() {
         use alpen_chain_types::{ExecBlockCommitment, ExecInputs, ExecOutputs};
-        use alpen_database::records::{package_from_sled_era, package_to_sled_era};
+        use alpen_storage_store::records::{package_from_sled_era, package_to_sled_era};
         use ssz::Encode;
 
         let package = alpen_chain_types::ExecBlockPackage::new(
