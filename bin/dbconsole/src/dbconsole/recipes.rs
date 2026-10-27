@@ -90,6 +90,7 @@ mod tests {
             "prover_reset",
             "prover_summary",
             "prover_task",
+            "prune_witnesses_before",
             "revert_batches_from",
             "revert_chunks_from",
             "set_next_spec_version",
@@ -401,6 +402,42 @@ mod tests {
         assert_eq!(session.db().count("ExecBlockSchema").unwrap(), 3);
         assert_eq!(session.db().count("BlockHashByNumber").unwrap(), 0);
         assert_eq!(int(&mut session, "drop_chain_above(2)"), 0);
+    }
+
+    #[test]
+    fn prune_witnesses_before_removes_only_the_witness_rows_below_the_height() {
+        let (_datadir, mut session) = seeded_session();
+        // Seeded: heights 0..=2 finalized, block 1 with a witness and an
+        // accessed-state record.
+        assert_eq!(int(&mut session, "prune_witnesses_before(1)"), 0);
+        assert_eq!(int(&mut session, "prune_witnesses_before(2)"), 2);
+        let ops = session.db().staged();
+        assert_eq!(staged_of(&ops, "BlockWitnessSchema").len(), 1);
+        assert_eq!(staged_of(&ops, "BlockAccessedStateSchema").len(), 1);
+
+        assert_eq!(int(&mut session, "commit()"), 2);
+        let db = session.db();
+        assert_eq!(db.count("BlockWitnessSchema").unwrap(), 0);
+        assert_eq!(db.count("BlockAccessedStateSchema").unwrap(), 0);
+        assert_eq!(db.count("ExecBlockSchema").unwrap(), 3);
+        assert_eq!(db.count("ExecBlockPayloadSchema").unwrap(), 3);
+        assert_eq!(db.count("BytecodeSchema").unwrap(), 1);
+        assert_eq!(db.count("BlockStateChangesSchema").unwrap(), 1);
+        assert_eq!(int(&mut session, "prune_witnesses_before(2)"), 0);
+    }
+
+    #[test]
+    fn prune_witnesses_before_refuses_a_height_above_the_finalized_tip() {
+        let (_datadir, mut session) = full_node_session();
+        // Only genesis is finalized.
+        let err = session.eval("prune_witnesses_before(1)").unwrap_err();
+        assert!(
+            err.to_string().contains("above the finalized height 0"),
+            "{err}"
+        );
+        assert!(session.db().staged().is_empty());
+        assert_eq!(int(&mut session, "prune_witnesses_before(0)"), 0);
+        assert!(session.eval(r#"prune_witnesses_before("1")"#).is_err());
     }
 
     /// A drop on a full node's datadir, which has no witness environment,
