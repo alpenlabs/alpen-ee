@@ -40,4 +40,19 @@ ignore = [
   # Sp1Groth16.
   # Revisit when reth, alloy and sp1 move to elliptic-curve 0.14.
   "RUSTSEC-2026-0387",
+
+  # zstd 0.13.3, zstd-safe 7.2.4 and zstd-sys 2.0.16
+  # Reached through reth v2.2.0 (reth-zstd-compressors, reth-nippy-jar,
+  # async-compression in reth-downloaders) and sp1-sdk 6.8.1, in the node and
+  # both guest lockfiles. The fixes need zstd 0.14 and zstd-safe 8, but even
+  # reth-zstd-compressors 0.8.2 and sp1-sdk 6.10.0 still pin zstd 0.13, so no
+  # bump clears them. None of the flawed paths is reachable here:
+  "RUSTSEC-2026-0391", # stream `with_context` constructors; nothing calls them
+  "RUSTSEC-2026-0398", # `seekable` feature; not enabled
+  # Legacy-frame errors in `DCtx::decompress_stream`. The only streaming
+  # decoder is async-compression in reth-downloaders, which decodes chain
+  # files the operator imports, not network input.
+  "RUSTSEC-2026-0403",
+  "RUSTSEC-2026-0410", # wasm32 only; we build no wasm targets
+  # Revisit when reth and sp1 move to zstd 0.14.
 ]
