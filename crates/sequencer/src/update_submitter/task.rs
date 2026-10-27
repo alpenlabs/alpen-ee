@@ -12,19 +12,18 @@ use strata_snark_acct_types::SnarkAccountUpdate;
 use tokio::{sync::watch, time};
 use tracing::{debug, error, info, warn};
 
-use crate::update_submitter::update_builder::build_update_from_batch;
+use crate::{
+    batch_lifecycle::BATCH_LATEST_IDX_METRIC,
+    update_submitter::update_builder::build_update_from_batch,
+};
 
 /// Maximum number of entries in the update cache.
 const DEFAULT_UPDATE_CACHE_MAX_SIZE: usize = 64;
 /// Polling interval to process batches regardless of events.
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(60);
 
-/// Counts successful OL update submission RPC calls, including resubmissions, in updates.
-const UPDATES_SUBMITTED_METRIC: &str = "alpen_ee_updates_submitted_total";
-/// Counts failed OL update submission RPC calls, in errors.
-const UPDATE_SUBMISSION_ERRORS_METRIC: &str = "alpen_ee_update_submission_errors_total";
-/// Tracks the sequence number of the last successfully submitted OL update, in sequence numbers.
-const UPDATE_LAST_SUBMITTED_SEQ_NO_METRIC: &str = "alpen_ee_update_last_submitted_seq_no";
+/// Counts failed update submitter passes, including OL account state reads, in errors.
+const UPDATE_SUBMITTER_ERRORS_METRIC: &str = "alpen_ee_update_submitter_errors_total";
 
 /// Cache for built updates, keyed by BatchId.
 /// Stores (batch_idx, update) to allow eviction based on sequence number.
@@ -92,6 +91,7 @@ pub async fn create_update_submitter_task<C, S, ES, P>(
     )
     .await
     {
+        counter!(UPDATE_SUBMITTER_ERRORS_METRIC).increment(1);
         error!(error = %e, "Update submitter error");
     }
 
@@ -126,6 +126,7 @@ pub async fn create_update_submitter_task<C, S, ES, P>(
         )
         .await
         {
+            counter!(UPDATE_SUBMITTER_ERRORS_METRIC).increment(1);
             error!(error = %e, "Update submitter error");
         }
     }
@@ -147,6 +148,9 @@ async fn process_ready_batches(
     let account_state = ol_client.get_latest_account_state().await?;
     debug!(?account_state, "Latest account state");
     let next_sequence_no = *account_state.seq_no.inner();
+    // Batch `n` carries update seq_no `n - 1`, so the OL tip includes batches up to
+    // `next_sequence_no`.
+    gauge!(BATCH_LATEST_IDX_METRIC, "status" => "ol_latest").set(next_sequence_no as f64);
     // NOTE: ensure batch 0 (genesis batch) is never sent in an update.
     let next_batch_idx = next_sequence_no
         .checked_add(1)
@@ -192,15 +196,7 @@ async fn process_ready_batches(
             .iter()
             .map(|message| message.payload().value().to_sat())
             .sum();
-        let txid = match ol_client.submit_update(update).await {
-            Ok(txid) => txid,
-            Err(error) => {
-                counter!(UPDATE_SUBMISSION_ERRORS_METRIC).increment(1);
-                return Err(error.into());
-            }
-        };
-        counter!(UPDATES_SUBMITTED_METRIC).increment(1);
-        gauge!(UPDATE_LAST_SUBMITTED_SEQ_NO_METRIC).set(seq_no as f64);
+        let txid = ol_client.submit_update(update).await?;
 
         info!(
             component = "alpen_ee_update_submitter",
