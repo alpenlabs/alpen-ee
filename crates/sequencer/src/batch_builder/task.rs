@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use alpen_common::{Batch, BatchId, BatchStorage, BlockNumHash, ExecBlockStorage};
 use eyre::{eyre, Result};
-use metrics::{counter, histogram};
+use metrics::counter;
 use strata_acct_types::Hash;
 use tokio::{sync::mpsc, time};
 use tracing::{debug, error, warn};
@@ -24,8 +24,6 @@ const MAX_BLOCKS_PER_CYCLE: usize = 10;
 
 /// Counts durably sealed batches by policy reason, in batches.
 const BATCH_SEALED_METRIC: &str = "alpen_ee_batch_sealed_total";
-/// Records the number of execution blocks in each durably sealed batch, in blocks.
-const BATCH_BLOCKS_METRIC: &str = "alpen_ee_batch_blocks";
 
 /// Get block hashes and heights from `from_hash` (exclusive) to `to_hash` (inclusive).
 ///
@@ -140,7 +138,6 @@ async fn seal_batch<P: AccumulationPolicy>(
     storage.save_next_batch(batch).await?;
 
     counter!(BATCH_SEALED_METRIC, "reason" => reason).increment(1);
-    histogram!(BATCH_BLOCKS_METRIC).record(state.accumulator().block_count() as f64);
 
     // The batch is durable, so the blocks it covers can go.
     // `advance_batch` resets the accumulator.
