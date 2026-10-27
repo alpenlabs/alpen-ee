@@ -4,7 +4,7 @@ use alpen_common::{require_genesis_batch, BatchId, BatchStatus, BatchStorage, St
 use metrics::gauge;
 
 /// Tracks the latest canonical batch to reach each lifecycle status, in batch indices.
-pub(super) const BATCH_LATEST_IDX_METRIC: &str = "alpen_ee_batch_latest_idx";
+pub(crate) const BATCH_LATEST_IDX_METRIC: &str = "alpen_ee_batch_latest_idx";
 
 /// A frontier tracks the latest batch that has reached a particular status.
 ///
