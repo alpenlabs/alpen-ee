@@ -3,16 +3,65 @@
 //! This module provides utility functions for encoding and decoding data with length prefixes,
 //! useful for variable-length fields in the EVM execution environment types.
 //!
-//! Also includes custom Codec implementations for external types (RSP and Reth) that don't
-//! have native Codec support, avoiding the use of unstable bincode serialization.
+//! It also provides custom encodings for external RSP and Reth types that do not implement
+//! [`Codec`]. MPT nodes use bincode because RSP does not expose the node internals required for a
+//! custom lossless encoding.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, io};
 
 use alloy_consensus::constants::EMPTY_ROOT_HASH;
 use reth_trie::{HashedPostState, TrieAccount};
 use revm_primitives::{B256, HashMap as RevmHashMap};
-use rsp_mpt::EthereumState;
+use rsp_mpt::{EthereumState, MptNode};
 use strata_codec::{Codec, CodecError, Varint};
+
+/// Adapts a [`strata_codec::Encoder`] to [`io::Write`] while preserving encoder failures.
+///
+/// Retains the first [`CodecError`] so the caller can recover the typed encoder failure after
+/// [`io::Write`] reports it as an [`io::Error`].
+struct EncoderWriter<'a, E> {
+    encoder: &'a mut E,
+    encoder_error: Option<CodecError>,
+}
+
+impl<'a, E> EncoderWriter<'a, E> {
+    fn new(encoder: &'a mut E) -> Self {
+        Self {
+            encoder,
+            encoder_error: None,
+        }
+    }
+
+    /// Consumes the adapter and returns the first error produced by the wrapped encoder.
+    ///
+    /// Returns [`Ok`] if all forwarded writes succeeded. Serializer failures are reported
+    /// separately by the serializer.
+    fn into_encoder_result(self) -> Result<(), CodecError> {
+        match self.encoder_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+}
+
+impl<E: strata_codec::Encoder> io::Write for EncoderWriter<'_, E> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self.encoder.write_buf(buf) {
+            Ok(()) => Ok(buf.len()),
+            Err(error) => {
+                // Preserve the encoder failure instead of exposing bincode's synthetic I/O error.
+                if self.encoder_error.is_none() {
+                    self.encoder_error = Some(error);
+                }
+                Err(io::Error::other("encoder rejected the written buffer"))
+            }
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
 
 /// Encodes an RLP-encodable item with a varint length prefix.
 ///
@@ -23,8 +72,7 @@ pub(crate) fn encode_rlp_with_length<T: alloy_rlp::Encodable>(
     enc: &mut impl strata_codec::Encoder,
 ) -> Result<(), CodecError> {
     let rlp_encoded = alloy_rlp::encode(item);
-    let len = Varint::new(rlp_encoded.len() as u32)
-        .ok_or(CodecError::MalformedField("length too large for varint"))?;
+    let len = Varint::new_usize(rlp_encoded.len()).ok_or(CodecError::OverflowContainer)?;
     len.encode(enc)?;
     enc.write_buf(&rlp_encoded)?;
     Ok(())
@@ -53,11 +101,27 @@ pub(crate) fn encode_bytes_with_length(
     bytes: &[u8],
     enc: &mut impl strata_codec::Encoder,
 ) -> Result<(), CodecError> {
-    let len = Varint::new(bytes.len() as u32)
-        .ok_or(CodecError::MalformedField("length too large for varint"))?;
+    let len = Varint::new_usize(bytes.len()).ok_or(CodecError::OverflowContainer)?;
     len.encode(enc)?;
     enc.write_buf(bytes)?;
     Ok(())
+}
+
+// Use the same default bincode configuration for sizing and serialization to preserve framing.
+fn encode_mpt_node_with_length(
+    node: &MptNode,
+    enc: &mut impl strata_codec::Encoder,
+) -> Result<(), CodecError> {
+    let size =
+        bincode::serialized_size(node).map_err(|_| CodecError::MalformedField("MPT node"))?;
+    let encoded_size = usize::try_from(size).map_err(|_| CodecError::OverflowContainer)?;
+    let len = Varint::new_usize(encoded_size).ok_or(CodecError::OverflowContainer)?;
+    len.encode(enc)?;
+
+    let mut writer = EncoderWriter::new(enc);
+    let serialization_result = bincode::serialize_into(&mut writer, node);
+    writer.into_encoder_result()?;
+    serialization_result.map_err(|_| CodecError::MalformedField("MPT node"))
 }
 
 /// Decodes raw bytes with a varint length prefix.
@@ -91,11 +155,7 @@ pub(crate) fn encode_ethereum_state(
     state: &EthereumState,
     enc: &mut impl strata_codec::Encoder,
 ) -> Result<(), CodecError> {
-    // REVIEW: bincode is used because MptNode/MptNodeData are private in rsp_mpt,
-    // but our guidelines discourage bincode. Open to alternative lossless encodings.
-    let trie_bytes = bincode::serialize(&state.state_trie)
-        .map_err(|_| CodecError::MalformedField("state_trie bincode encode failed"))?;
-    encode_bytes_with_length(&trie_bytes, enc)?;
+    encode_mpt_node_with_length(&state.state_trie, enc)?;
 
     // Sort storage_tries by key for deterministic encoding
     let sorted_storage: BTreeMap<_, _> = state.storage_tries.iter().collect();
@@ -103,9 +163,7 @@ pub(crate) fn encode_ethereum_state(
 
     for (address_hash, storage_trie) in sorted_storage {
         enc.write_buf(address_hash.as_slice())?;
-        let storage_bytes = bincode::serialize(storage_trie)
-            .map_err(|_| CodecError::MalformedField("storage_trie bincode encode failed"))?;
-        encode_bytes_with_length(&storage_bytes, enc)?;
+        encode_mpt_node_with_length(storage_trie, enc)?;
     }
 
     Ok(())
@@ -307,4 +365,110 @@ pub(crate) fn decode_hashed_post_state(
     }
 
     Ok(state)
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy_rpc_types_debug::ExecutionWitness;
+    use reth_primitives_traits::Account;
+    use reth_trie::HashedStorage;
+    use revm_primitives::{Address, Bytes, U256, keccak256};
+
+    use super::*;
+
+    struct FailAfterLengthPrefix {
+        writes: usize,
+    }
+
+    impl strata_codec::Encoder for FailAfterLengthPrefix {
+        fn write_buf(&mut self, _buf: &[u8]) -> Result<(), CodecError> {
+            self.writes += 1;
+            if self.writes == 1 {
+                Ok(())
+            } else {
+                Err(CodecError::OverrunInput)
+            }
+        }
+    }
+
+    // Keep the previous algorithm here to pin the encoding while changing its allocation shape.
+    fn encode_ethereum_state_buffered(
+        state: &EthereumState,
+        enc: &mut impl strata_codec::Encoder,
+    ) -> Result<(), CodecError> {
+        let trie_bytes = bincode::serialize(&state.state_trie)
+            .map_err(|_| CodecError::MalformedField("state_trie bincode encode failed"))?;
+        encode_bytes_with_length(&trie_bytes, enc)?;
+
+        let sorted_storage: BTreeMap<_, _> = state.storage_tries.iter().collect();
+        (sorted_storage.len() as u32).encode(enc)?;
+
+        for (address_hash, storage_trie) in sorted_storage {
+            enc.write_buf(address_hash.as_slice())?;
+            let storage_bytes = bincode::serialize(storage_trie)
+                .map_err(|_| CodecError::MalformedField("storage_trie bincode encode failed"))?;
+            encode_bytes_with_length(&storage_bytes, enc)?;
+        }
+
+        Ok(())
+    }
+
+    // Build valid account leaves that commit to several storage tries inserted out of order.
+    fn build_populated_state() -> EthereumState {
+        let witness = ExecutionWitness {
+            state: vec![Bytes::from_static(&[0x80])],
+            ..Default::default()
+        };
+        let mut state = EthereumState::from_execution_witness(&witness, EMPTY_ROOT_HASH);
+        let mut post_state = HashedPostState::default();
+
+        for byte in [0x22, 0x01, 0x13] {
+            let hashed_address = keccak256(Address::from([byte; 20]));
+            post_state.accounts.insert(
+                hashed_address,
+                Some(Account {
+                    nonce: u64::from(byte),
+                    balance: U256::from(byte),
+                    bytecode_hash: None,
+                }),
+            );
+
+            let mut storage = HashedStorage::new(false);
+            storage
+                .storage
+                .insert(keccak256([byte; 32]), U256::from(byte));
+            post_state.storages.insert(hashed_address, storage);
+        }
+
+        state.update(&post_state);
+        state
+    }
+
+    #[test]
+    fn test_streamed_encoding_matches_buffered_encoding() {
+        let state = build_populated_state();
+        assert_eq!(
+            state.storage_tries.len(),
+            3,
+            "state exercises several tries"
+        );
+
+        let mut streamed = Vec::new();
+        encode_ethereum_state(&state, &mut streamed).expect("streaming encode succeeds");
+        let mut buffered = Vec::new();
+        encode_ethereum_state_buffered(&state, &mut buffered).expect("buffered encode succeeds");
+
+        assert_eq!(streamed, buffered);
+    }
+
+    #[test]
+    fn test_streamed_encoding_preserves_encoder_error() {
+        let state = build_populated_state();
+        let mut encoder = FailAfterLengthPrefix { writes: 0 };
+
+        let error = encode_ethereum_state(&state, &mut encoder)
+            .expect_err("injected encoder failure must propagate");
+
+        assert!(matches!(error, CodecError::OverrunInput));
+    }
 }
