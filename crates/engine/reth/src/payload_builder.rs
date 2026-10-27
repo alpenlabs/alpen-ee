@@ -21,7 +21,7 @@ use reth_node_builder::{ConsensusEngineHandle, PayloadKind};
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderError, PayloadBuilderHandle};
 use strata_acct_types::Hash;
 use tokio::time::sleep;
-use tracing::{debug, debug_span, info, info_span, warn, Instrument};
+use tracing::{debug, info, info_span, warn, Instrument};
 
 use crate::AlpenRethExecEngine;
 
@@ -277,7 +277,6 @@ impl AlpenRethPayloadEngine {
             .ok_or_else(|| eyre!("payload {block_hash:?} built without inline witness"))?;
         self.block_witness_store
             .put_block_witness(block_hash, witness)
-            .instrument(debug_span!("store_block_witness", ?block_hash))
             .await
             .map_err(|e| eyre!("persist block witness {block_hash:?}: {e}"))?;
         info!(?block_hash, "persisted block witness");

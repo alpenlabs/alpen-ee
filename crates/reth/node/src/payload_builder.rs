@@ -36,7 +36,7 @@ use reth_transaction_pool::{
 };
 use revm::{context::Block, database::State};
 use revm_primitives::U256;
-use tracing::{debug, debug_span, info, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 use crate::{
     block_witness::build_block_witness_from_executed_state,
@@ -227,7 +227,6 @@ where
         attributes,
         payload_id,
     } = config;
-    let _span = debug_span!("build_payload", %payload_id, parent = %parent_header.hash()).entered();
     // Refuse a spec version this binary has no variant for: it was resolved by newer code,
     // and failing beats building under rules older than the ones asked for.
     let spec_version = attributes
@@ -498,22 +497,18 @@ where
     // on the payload back to the sequencer, which persists it. A failure fails
     // the payload build, so a block is never produced without its witness.
     let block_num = block.header().number;
-    let block_witness = debug_span!("block_witness", block_num).in_scope(|| {
-        let block_rlp = alloy_rlp::encode(block.sealed_block().clone_block());
-        let record = build_block_witness_from_executed_state(
-            &db,
-            &state_provider,
-            &client,
-            block_num,
-            block_rlp,
-            parent_header.header(),
-        )
-        .map_err(|e| {
-            PayloadBuilderError::other(io::Error::other(format!("witness capture: {e}")))
-        })?;
-        record.encode().map_err(|e| {
-            PayloadBuilderError::other(io::Error::other(format!("witness encode: {e}")))
-        })
+    let block_rlp = alloy_rlp::encode(block.sealed_block().clone_block());
+    let record = build_block_witness_from_executed_state(
+        &db,
+        &state_provider,
+        &client,
+        block_num,
+        block_rlp,
+        parent_header.header(),
+    )
+    .map_err(|e| PayloadBuilderError::other(io::Error::other(format!("witness capture: {e}"))))?;
+    let block_witness = record.encode().map_err(|e| {
+        PayloadBuilderError::other(io::Error::other(format!("witness encode: {e}")))
     })?;
 
     let requests = chain_spec
