@@ -2,14 +2,13 @@ use std::{future::Future, sync::Arc};
 
 use alpen_common::ExecBlockStorage;
 use alpen_ol_api::SequencerOLClient;
-use alpen_ol_tracker::OLFinalizedStatus;
 use strata_identifiers::OLBlockCommitment;
 use tokio::sync::{mpsc, oneshot, watch};
 
 use super::task::OLChainTrackerQuery;
 use crate::{
-    ol_chain_tracker::{state::InboxMessages, task::ol_chain_tracker_task},
-    OLChainTrackerState,
+    inbox::{state::InboxMessages, task::ol_chain_tracker_task, OLChainTrackerState},
+    OLFinalizedStatus,
 };
 
 #[derive(Debug)]

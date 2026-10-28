@@ -63,7 +63,7 @@ mod tests {
     use alpen_ol_api::MockSequencerOLClient;
 
     use super::*;
-    use crate::ol_chain_tracker::test_utils::{
+    use crate::inbox::test_utils::{
         create_block_data_chain, make_block, make_block_link, make_block_with_id,
     };
 

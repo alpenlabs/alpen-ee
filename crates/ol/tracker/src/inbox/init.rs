@@ -5,7 +5,7 @@ use strata_identifiers::OLBlockCommitment;
 use tracing::error;
 
 use super::fetch::{fetch_blocks_after, Extension};
-use crate::OLChainTrackerState;
+use crate::inbox::OLChainTrackerState;
 
 /// Initializes tracker state by syncing from local storage and the OL client.
 ///
@@ -118,7 +118,7 @@ mod tests {
         use alpen_ol_api::{MockSequencerOLClient, OLChainStatus, OLClientError};
 
         use super::*;
-        use crate::ol_chain_tracker::test_utils::{
+        use crate::inbox::test_utils::{
             create_block_data_chain, create_mock_exec_record,
             create_mock_exec_record_with_inbox_idx, make_block_link, make_block_with_id,
             make_chain_status,

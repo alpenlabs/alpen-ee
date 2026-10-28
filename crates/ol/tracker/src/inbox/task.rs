@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use alpen_common::ExecBlockStorage;
 use alpen_ol_api::{OLBlockData, SequencerOLClient};
-use alpen_ol_tracker::OLFinalizedStatus;
 use eyre::eyre;
 use strata_identifiers::OLBlockCommitment;
 use tokio::{
@@ -15,7 +14,7 @@ use super::{
     fetch::{fetch_blocks_after, Extension},
     state::OLChainTrackerState,
 };
-use crate::ol_chain_tracker::state::InboxMessages;
+use crate::{inbox::state::InboxMessages, OLFinalizedStatus};
 
 pub(crate) enum OLChainTrackerQuery {
     GetFinalizedBlock(oneshot::Sender<OLBlockCommitment>),
@@ -196,7 +195,7 @@ mod tests {
     use alpen_ol_api::{MockSequencerOLClient, OLClientError};
 
     use super::*;
-    use crate::ol_chain_tracker::test_utils::{
+    use crate::inbox::test_utils::{
         create_block_data_chain, create_mock_exec_record, create_ol_block_chain, make_block,
         make_block_link, make_block_with_id,
     };

@@ -26,6 +26,7 @@ use alpen_exex::{AccessedStateGenerator, StateDiffGenerator};
 use alpen_genesis::{ensure_batch_genesis, ensure_finalized_exec_chain_genesis};
 use alpen_ol_api::SequencerOLClient;
 use alpen_ol_client::OLClientKind;
+use alpen_ol_tracker::{build_ol_chain_tracker, init_ol_chain_tracker_state, OLChainTrackerState};
 use alpen_reth_node::{
     AlpenEngineTypes, AlpenEthereumNode, AlpenGossipProtocolHandler, AlpenGossipState,
     AlpenNodeMode,
@@ -33,16 +34,14 @@ use alpen_reth_node::{
 use alpen_reth_rpc::AlpenFeeApiServer;
 use alpen_rpc_server::{AlpenEeRpcServer, EeRpcServer};
 use alpen_sequencer::{
-    block_builder_task, build_ol_chain_tracker, compose_policy, create_batch_builder,
-    create_batch_lifecycle_task, create_update_submitter_task, init_batch_builder_state,
-    init_lifecycle_state, init_ol_chain_tracker_state, or_sealing,
+    block_builder_task, compose_policy, create_batch_builder, create_batch_lifecycle_task,
+    create_update_submitter_task, init_batch_builder_state, init_lifecycle_state, or_sealing,
     sealing_policy::{
         block_count_data_provider::BlockCountDataProvider,
         max_value_policy::{MaxValueSealing, ValueAccumulatorPolicy},
         rotation_policy::{RotationDataProvider, RotationPolicy, SealOnRotation},
     },
     BatchBuilderEvent, BatchBuilderState, BatchLifecycleState, BlockBuilderConfig,
-    OLChainTrackerState,
 };
 use bitcoind_async_client::{
     corepc_types::bitcoin::{

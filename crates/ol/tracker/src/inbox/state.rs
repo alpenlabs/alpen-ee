@@ -249,7 +249,7 @@ impl OLChainTrackerState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ol_chain_tracker::test_utils::{make_block, make_block_with_id, make_message};
+    use crate::inbox::test_utils::{make_block, make_block_with_id, make_message};
 
     mod best_block {
         use super::*;
