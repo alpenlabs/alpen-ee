@@ -7,7 +7,7 @@ use strata_snark_acct_runtime::IInnerState;
 use strata_snark_acct_types::UpdateManifest;
 use tracing::{debug, error, info, warn};
 
-use crate::{
+use crate::epoch::{
     error::{OLTrackerError, Result},
     service::EpochTrackingMode,
     state::{build_tracker_state, OLTrackerState},
@@ -265,7 +265,7 @@ mod tests {
     use alpen_ol_api::{MockOLClient, OLChainStatus, SnarkAccountEpochSummary};
 
     use super::*;
-    use crate::test_utils::*;
+    use crate::epoch::test_utils::*;
 
     mod track_ol_state_tests {
         use strata_acct_types::Hash;

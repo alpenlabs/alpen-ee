@@ -13,7 +13,7 @@ use strata_service::{AsyncService, Response, Service, ServiceState};
 use tokio::sync::watch;
 use tracing::{debug, error};
 
-use crate::{
+use crate::epoch::{
     error::OLTrackerError,
     reorg::handle_reorg,
     state::OLTrackerState,

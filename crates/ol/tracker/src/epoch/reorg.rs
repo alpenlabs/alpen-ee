@@ -2,7 +2,7 @@ use alpen_common::{EeAccountStateAtEpoch, Storage};
 use alpen_ol_api::{chain_status_checked, OLChainStatus, OLClient};
 use tracing::{debug, error, info, warn};
 
-use crate::{
+use crate::epoch::{
     error::{OLTrackerError, Result},
     state::{build_tracker_state, OLTrackerState},
 };
@@ -120,7 +120,7 @@ mod tests {
     use alpen_ol_api::{MockOLClient, OLClientError};
 
     use super::*;
-    use crate::test_utils::*;
+    use crate::epoch::test_utils::*;
 
     mod find_fork_point_tests {
 

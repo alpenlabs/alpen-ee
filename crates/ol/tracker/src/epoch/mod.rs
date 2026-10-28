@@ -1,8 +1,8 @@
-//! Tracks and manages the OL chain state for Alpen execution environment.
+//! Follows the OL chain epoch by epoch and keeps the EE account state for each one.
 
 mod error;
 mod reorg;
-pub mod service;
+mod service;
 mod state;
 mod task;
 #[cfg(test)]
