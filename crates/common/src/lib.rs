@@ -35,7 +35,6 @@ pub use types::{
     consensus_heads::ConsensusHeads,
     ee_account_state::EeAccountStateAtEpoch,
     exec_record::{ExecBlockPayload, ExecBlockRecord},
-    ol_chain_status::OLFinalizedStatus,
     prover::{Proof, ProofId},
     prover_task_key::{
         decode_batch_task_key, decode_chunk_task_key, encode_batch_task_key, encode_chunk_task_key,

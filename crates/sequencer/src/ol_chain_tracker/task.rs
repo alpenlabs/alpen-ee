@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
-use alpen_common::{ExecBlockStorage, OLFinalizedStatus};
+use alpen_common::ExecBlockStorage;
 use alpen_ol_api::{OLBlockData, SequencerOLClient};
+use alpen_ol_tracker::OLFinalizedStatus;
 use eyre::eyre;
 use strata_identifiers::OLBlockCommitment;
 use tokio::{

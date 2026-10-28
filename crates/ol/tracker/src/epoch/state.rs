@@ -1,10 +1,13 @@
 use alpen_acct_types::EeAccountState;
-use alpen_common::{ConsensusHeads, EeAccountStateAtEpoch, OLFinalizedStatus, Storage};
+use alpen_common::{ConsensusHeads, EeAccountStateAtEpoch, Storage};
 use alpen_ol_api::OLChainStatus;
 use strata_identifiers::EpochCommitment;
 use tracing::info;
 
-use crate::epoch::error::{OLTrackerError, Result};
+use crate::{
+    epoch::error::{OLTrackerError, Result},
+    OLFinalizedStatus,
+};
 
 /// Internal State of the OL tracker.
 #[derive(Debug, Clone)]

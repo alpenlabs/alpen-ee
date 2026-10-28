@@ -6,18 +6,21 @@ use std::{
     sync::Arc,
 };
 
-use alpen_common::{ConsensusHeads, OLFinalizedStatus, Storage};
+use alpen_common::{ConsensusHeads, Storage};
 use alpen_ol_api::OLClient;
 use serde::{Deserialize, Serialize};
 use strata_service::{AsyncService, Response, Service, ServiceState};
 use tokio::sync::watch;
 use tracing::{debug, error};
 
-use crate::epoch::{
-    error::OLTrackerError,
-    reorg::handle_reorg,
-    state::OLTrackerState,
-    task::{handle_extend_ee_state, handle_refresh_finalized, track_ol_state, TrackOLAction},
+use crate::{
+    epoch::{
+        error::OLTrackerError,
+        reorg::handle_reorg,
+        state::OLTrackerState,
+        task::{handle_extend_ee_state, handle_refresh_finalized, track_ol_state, TrackOLAction},
+    },
+    OLFinalizedStatus,
 };
 
 /// OL tracker service marker type.

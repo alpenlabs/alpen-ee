@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use alpen_common::{ConsensusHeads, OLFinalizedStatus, Storage};
+use alpen_common::{ConsensusHeads, Storage};
 use alpen_ol_api::OLClient;
 use strata_service::{
     AsyncExecutor, DumbTickHandle, DumbTickingInput, ServiceBuilder, ServiceMonitor,
@@ -8,8 +8,11 @@ use strata_service::{
 use tokio::sync::watch;
 use tracing::warn;
 
-use crate::epoch::{
-    EpochTrackingMode, OLTrackerService, OLTrackerServiceState, OLTrackerState, OLTrackerStatus,
+use crate::{
+    epoch::{
+        EpochTrackingMode, OLTrackerService, OLTrackerServiceState, OLTrackerState, OLTrackerStatus,
+    },
+    OLFinalizedStatus,
 };
 
 /// Default number of OL epochs to process in each cycle.
