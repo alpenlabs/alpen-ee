@@ -153,7 +153,7 @@ mod tests {
         /// Sets up mock OL client to return inbox messages for the given block data.
         fn setup_mock_client_inbox_messages(
             mock_client: &mut MockSequencerOLClient,
-            block_data: Vec<alpen_ol_api::OLBlockData>,
+            block_data: Vec<alpen_ol_api::AccountBlockSummary>,
         ) {
             mock_client
                 .expect_get_inbox_messages()
@@ -164,7 +164,7 @@ mod tests {
         /// Sets up mock OL client to return the given block link.
         fn setup_mock_client_block_link(
             mock_client: &mut MockSequencerOLClient,
-            link: alpen_ol_api::OLBlockLink,
+            link: alpen_ol_api::OLBlockHeader,
         ) {
             mock_client
                 .expect_get_block_link()

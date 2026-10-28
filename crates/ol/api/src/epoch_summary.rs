@@ -6,7 +6,7 @@ use strata_identifiers::{EpochCommitment, Hash};
 /// `new_state_root` is `None` for intermediate updates fetched from a
 /// checkpoint-sync source.
 #[derive(Clone, Debug)]
-pub struct SnarkAccountUpdateInfo {
+pub struct AccountUpdate {
     seq_no: u64,
     extra_data: Vec<u8>,
     messages: Vec<MessageEntry>,
@@ -14,7 +14,7 @@ pub struct SnarkAccountUpdateInfo {
     new_next_msg_idx: u64,
 }
 
-impl SnarkAccountUpdateInfo {
+impl AccountUpdate {
     pub fn new(
         seq_no: u64,
         extra_data: Vec<u8>,
@@ -65,20 +65,21 @@ impl SnarkAccountUpdateInfo {
     }
 }
 
+/// The EE account's updates in one OL epoch, with the epoch and the one before it.
 #[derive(Debug)]
-pub struct SnarkAccountEpochSummary {
+pub struct AccountEpochSummary {
     epoch: EpochCommitment,
     prev: EpochCommitment,
     final_state_root: Hash,
-    updates: Vec<SnarkAccountUpdateInfo>,
+    updates: Vec<AccountUpdate>,
 }
 
-impl SnarkAccountEpochSummary {
+impl AccountEpochSummary {
     pub fn new(
         epoch: EpochCommitment,
         prev: EpochCommitment,
         final_state_root: Hash,
-        updates: Vec<SnarkAccountUpdateInfo>,
+        updates: Vec<AccountUpdate>,
     ) -> Self {
         Self {
             epoch,
@@ -88,14 +89,7 @@ impl SnarkAccountEpochSummary {
         }
     }
 
-    pub fn into_parts(
-        self,
-    ) -> (
-        EpochCommitment,
-        EpochCommitment,
-        Hash,
-        Vec<SnarkAccountUpdateInfo>,
-    ) {
+    pub fn into_parts(self) -> (EpochCommitment, EpochCommitment, Hash, Vec<AccountUpdate>) {
         (self.epoch, self.prev, self.final_state_root, self.updates)
     }
 
@@ -111,7 +105,7 @@ impl SnarkAccountEpochSummary {
         self.final_state_root
     }
 
-    pub fn updates(&self) -> &[SnarkAccountUpdateInfo] {
+    pub fn updates(&self) -> &[AccountUpdate] {
         &self.updates
     }
 }

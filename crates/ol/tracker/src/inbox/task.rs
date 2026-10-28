@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use alpen_common::ExecBlockStorage;
-use alpen_ol_api::{OLBlockData, SequencerOLClient};
+use alpen_ol_api::{AccountBlockSummary, SequencerOLClient};
 use eyre::eyre;
 use strata_identifiers::OLBlockCommitment;
 use tokio::{
@@ -82,7 +82,7 @@ async fn handle_chain_update(
     match track_ol_state(state, ol_finalized_status, client).await {
         Ok(TrackAction::Extend(ol_blocks)) => {
             // update tracker state with new blocks
-            for OLBlockData {
+            for AccountBlockSummary {
                 commitment,
                 inbox_messages,
                 next_inbox_msg_idx,
@@ -121,7 +121,7 @@ async fn handle_chain_update(
 
 #[derive(Debug)]
 enum TrackAction {
-    Extend(Vec<OLBlockData>),
+    Extend(Vec<AccountBlockSummary>),
     Reorg(OLBlockCommitment),
 }
 

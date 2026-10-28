@@ -5,7 +5,7 @@ use strata_predicate::PredicateKey;
 use strata_snark_acct_types::{ProofState, Seqno, SnarkAccountUpdate};
 use thiserror::Error;
 
-use crate::{OLChainStatus, SnarkAccountEpochSummary};
+use crate::{AccountEpochSummary, OLChainStatus};
 
 /// Client interface for interacting with the OL chain.
 ///
@@ -19,7 +19,7 @@ pub trait OLClient: Sized + Send + Sync {
     async fn chain_status(&self) -> Result<OLChainStatus, OLClientError>;
 
     /// Retrieves epoch commitment and update operations for the specified epoch.
-    async fn epoch_summary(&self, epoch: Epoch) -> Result<SnarkAccountEpochSummary, OLClientError>;
+    async fn epoch_summary(&self, epoch: Epoch) -> Result<AccountEpochSummary, OLClientError>;
 
     /// Returns the epoch commitment for the epoch in which this client's account
     /// was first created.
@@ -46,23 +46,24 @@ pub async fn chain_status_checked(client: &impl OLClient) -> Result<OLChainStatu
     Ok(status)
 }
 
+/// The EE account's view of one OL block: the block and the inbox messages it added.
 #[derive(Debug, Clone)]
-pub struct OLBlockData {
+pub struct AccountBlockSummary {
     pub commitment: OLBlockCommitment,
     pub inbox_messages: Vec<MessageEntry>,
     pub next_inbox_msg_idx: u64,
 }
 
-/// An OL block and the ID of its parent, read from the block's header.
+/// The fields of an OL block header that the EE reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct OLBlockLink {
+pub struct OLBlockHeader {
     pub commitment: OLBlockCommitment,
     pub parent_blkid: OLBlockId,
 }
 
-/// View of OL Account State used by EE.
+/// The EE account's state on the OL chain.
 #[derive(Debug, Clone)]
-pub struct OLAccountStateView {
+pub struct AccountState {
     /// Next expected update sequence number.
     pub seq_no: Seqno,
     /// State stored in Account in OL.
@@ -89,16 +90,16 @@ pub trait SequencerOLClient {
         &self,
         min_slot: u64,
         max_slot: u64,
-    ) -> Result<Vec<OLBlockData>, OLClientError>;
+    ) -> Result<Vec<AccountBlockSummary>, OLClientError>;
 
     /// Retrieves the canonical OL block at `slot` together with its parent's ID.
     ///
     /// Reads only that block's header, so it works on an OL node that holds no
     /// block bodies at or below the parent's slot.
-    async fn get_block_link(&self, slot: u64) -> Result<OLBlockLink, OLClientError>;
+    async fn get_block_link(&self, slot: u64) -> Result<OLBlockHeader, OLClientError>;
 
     /// Retrieves latest account state in the OL Chain for this account.
-    async fn get_latest_account_state(&self) -> Result<OLAccountStateView, OLClientError>;
+    async fn get_latest_account_state(&self) -> Result<AccountState, OLClientError>;
 
     /// Retrieves the latest account-update predicate key committed in OL.
     async fn get_latest_account_update_vk(&self) -> Result<PredicateKey, OLClientError>;
@@ -118,7 +119,7 @@ pub async fn get_inbox_messages_checked(
     client: &impl SequencerOLClient,
     min_slot: u64,
     max_slot: u64,
-) -> Result<Vec<OLBlockData>, OLClientError> {
+) -> Result<Vec<AccountBlockSummary>, OLClientError> {
     if max_slot < min_slot {
         return Err(OLClientError::InvalidSlotRange { min_slot, max_slot });
     }

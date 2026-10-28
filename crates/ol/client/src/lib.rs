@@ -4,8 +4,8 @@ mod dummy;
 mod rpc;
 
 use alpen_ol_api::{
-    OLAccountStateView, OLBlockData, OLBlockLink, OLChainStatus, OLClient, OLClientError,
-    SequencerOLClient, SnarkAccountEpochSummary,
+    AccountBlockSummary, AccountEpochSummary, AccountState, OLBlockHeader, OLChainStatus, OLClient,
+    OLClientError, SequencerOLClient,
 };
 use async_trait::async_trait;
 use strata_identifiers::{Epoch, EpochCommitment, OLTxId};
@@ -35,7 +35,7 @@ impl OLClient for OLClientKind {
         }
     }
 
-    async fn epoch_summary(&self, epoch: Epoch) -> Result<SnarkAccountEpochSummary, OLClientError> {
+    async fn epoch_summary(&self, epoch: Epoch) -> Result<AccountEpochSummary, OLClientError> {
         match self {
             Self::Rpc(client) => <RpcOLClient as OLClient>::epoch_summary(client, epoch).await,
             Self::Dummy(client) => <DummyOLClient as OLClient>::epoch_summary(client, epoch).await,
@@ -63,21 +63,21 @@ impl SequencerOLClient for OLClientKind {
         &self,
         min_slot: u64,
         max_slot: u64,
-    ) -> Result<Vec<OLBlockData>, OLClientError> {
+    ) -> Result<Vec<AccountBlockSummary>, OLClientError> {
         match self {
             Self::Rpc(client) => client.get_inbox_messages(min_slot, max_slot).await,
             Self::Dummy(client) => client.get_inbox_messages(min_slot, max_slot).await,
         }
     }
 
-    async fn get_block_link(&self, slot: u64) -> Result<OLBlockLink, OLClientError> {
+    async fn get_block_link(&self, slot: u64) -> Result<OLBlockHeader, OLClientError> {
         match self {
             Self::Rpc(client) => client.get_block_link(slot).await,
             Self::Dummy(client) => client.get_block_link(slot).await,
         }
     }
 
-    async fn get_latest_account_state(&self) -> Result<OLAccountStateView, OLClientError> {
+    async fn get_latest_account_state(&self) -> Result<AccountState, OLClientError> {
         match self {
             Self::Rpc(client) => client.get_latest_account_state().await,
             Self::Dummy(client) => client.get_latest_account_state().await,

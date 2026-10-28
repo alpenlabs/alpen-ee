@@ -1,6 +1,6 @@
 //! Fetches the OL blocks that extend a block the tracker already holds.
 
-use alpen_ol_api::{get_inbox_messages_checked, OLBlockData, SequencerOLClient};
+use alpen_ol_api::{get_inbox_messages_checked, AccountBlockSummary, SequencerOLClient};
 use eyre::eyre;
 use strata_identifiers::OLBlockCommitment;
 
@@ -8,7 +8,7 @@ use strata_identifiers::OLBlockCommitment;
 #[derive(Debug)]
 pub(super) enum Extension {
     /// Blocks after the tracked block, one per slot, in slot order.
-    Blocks(Vec<OLBlockData>),
+    Blocks(Vec<AccountBlockSummary>),
     /// The OL's block at the tracked block's slot, which is not the tracked block.
     Diverged(OLBlockCommitment),
 }

@@ -1,6 +1,6 @@
 use alpen_acct_types::EeAccountState;
 use alpen_common::{EeAccountStateAtEpoch, MockStorage, OLBlockOrEpoch};
-use alpen_ol_api::{MockOLClient, OLClientError, SnarkAccountEpochSummary};
+use alpen_ol_api::{AccountEpochSummary, MockOLClient, OLClientError};
 use strata_acct_types::Hash;
 use strata_identifiers::{Buf32, EpochCommitment, OLBlockCommitment, OLBlockId};
 
@@ -80,7 +80,7 @@ pub(crate) fn setup_mock_client_with_chain(
         } else {
             EpochCommitment::null()
         };
-        Ok(SnarkAccountEpochSummary::new(
+        Ok(AccountEpochSummary::new(
             *current.epoch_commitment(),
             prev_commitment,
             Hash::default(),

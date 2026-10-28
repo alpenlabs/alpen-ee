@@ -5,8 +5,8 @@
 //! in isolation without needing to run a full OL node.
 
 use alpen_ol_api::{
-    OLAccountStateView, OLBlockData, OLBlockLink, OLChainStatus, OLClient, OLClientError,
-    SequencerOLClient, SnarkAccountEpochSummary,
+    AccountBlockSummary, AccountEpochSummary, AccountState, OLBlockHeader, OLChainStatus, OLClient,
+    OLClientError, SequencerOLClient,
 };
 use async_trait::async_trait;
 use strata_acct_types::Hash;
@@ -61,7 +61,7 @@ impl OLClient for DummyOLClient {
         Ok(self.genesis_epoch)
     }
 
-    async fn epoch_summary(&self, epoch: Epoch) -> Result<SnarkAccountEpochSummary, OLClientError> {
+    async fn epoch_summary(&self, epoch: Epoch) -> Result<AccountEpochSummary, OLClientError> {
         let commitment = EpochCommitment::new(
             epoch,
             epoch as u64,
@@ -79,7 +79,7 @@ impl OLClient for DummyOLClient {
                 self.slot_to_block_commitment(prev_epoch as u64).blkid,
             )
         };
-        Ok(SnarkAccountEpochSummary::new(
+        Ok(AccountEpochSummary::new(
             commitment,
             prev,
             Hash::default(),
@@ -98,11 +98,11 @@ impl SequencerOLClient for DummyOLClient {
         &self,
         min_slot: u64,
         max_slot: u64,
-    ) -> Result<Vec<OLBlockData>, OLClientError> {
+    ) -> Result<Vec<AccountBlockSummary>, OLClientError> {
         let mut blocks = Vec::with_capacity((max_slot - min_slot + 1) as usize);
         for slot in min_slot..=max_slot {
             let commitment = self.slot_to_block_commitment(slot);
-            blocks.push(OLBlockData {
+            blocks.push(AccountBlockSummary {
                 commitment,
                 inbox_messages: vec![],
                 next_inbox_msg_idx: 0,
@@ -111,20 +111,20 @@ impl SequencerOLClient for DummyOLClient {
         Ok(blocks)
     }
 
-    async fn get_block_link(&self, slot: u64) -> Result<OLBlockLink, OLClientError> {
+    async fn get_block_link(&self, slot: u64) -> Result<OLBlockHeader, OLClientError> {
         let parent_slot = slot
             .checked_sub(1)
             .ok_or_else(|| OLClientError::rpc(format!("block at slot {slot} has no parent")))?;
-        Ok(OLBlockLink {
+        Ok(OLBlockHeader {
             commitment: self.slot_to_block_commitment(slot),
             parent_blkid: *self.slot_to_block_commitment(parent_slot).blkid(),
         })
     }
 
-    async fn get_latest_account_state(&self) -> Result<OLAccountStateView, OLClientError> {
+    async fn get_latest_account_state(&self) -> Result<AccountState, OLClientError> {
         let proof_state = ProofState::new(Hash::zero(), 0);
         let seq_no = Seqno::zero();
-        Ok(OLAccountStateView {
+        Ok(AccountState {
             seq_no,
             proof_state,
         })

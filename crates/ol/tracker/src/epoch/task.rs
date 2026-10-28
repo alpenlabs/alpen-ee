@@ -1,7 +1,7 @@
 use alpen_acct_runtime::process_update_unconditionally;
 use alpen_acct_types::EeAccountState;
 use alpen_common::{EeAccountStateAtEpoch, Storage};
-use alpen_ol_api::{chain_status_checked, OLChainStatus, OLClient, SnarkAccountUpdateInfo};
+use alpen_ol_api::{chain_status_checked, AccountUpdate, OLChainStatus, OLClient};
 use strata_identifiers::{EpochCommitment, Hash};
 use strata_snark_acct_runtime::IInnerState;
 use strata_snark_acct_types::UpdateManifest;
@@ -17,7 +17,7 @@ use crate::epoch::{
 pub(crate) struct OLEpochUpdates {
     pub epoch: EpochCommitment,
     pub final_state_root: Hash,
-    pub updates: Vec<SnarkAccountUpdateInfo>,
+    pub updates: Vec<AccountUpdate>,
 }
 
 #[derive(Debug)]
@@ -160,7 +160,7 @@ pub(crate) async fn track_ol_state(
 
 pub(crate) fn apply_epoch_operations(
     state: &mut EeAccountState,
-    epoch_operations: &[SnarkAccountUpdateInfo],
+    epoch_operations: &[AccountUpdate],
     final_state_root: Hash,
 ) -> Result<()> {
     for op in epoch_operations {
@@ -262,7 +262,7 @@ pub(crate) async fn handle_extend_ee_state<TStorage: Storage>(
 
 #[cfg(test)]
 mod tests {
-    use alpen_ol_api::{MockOLClient, OLChainStatus, SnarkAccountEpochSummary};
+    use alpen_ol_api::{AccountEpochSummary, MockOLClient, OLChainStatus};
 
     use super::*;
     use crate::epoch::test_utils::*;
@@ -583,7 +583,7 @@ mod tests {
                 .expect_epoch_summary()
                 .withf(|epoch| *epoch == 3)
                 .returning(|_| {
-                    Ok(SnarkAccountEpochSummary::new(
+                    Ok(AccountEpochSummary::new(
                         make_epoch_commitment(3, 30, 103),
                         make_epoch_commitment(2, 20, 102),
                         Hash::default(),
@@ -595,7 +595,7 @@ mod tests {
                 .expect_epoch_summary()
                 .withf(|epoch| *epoch == 4)
                 .returning(|_| {
-                    Ok(SnarkAccountEpochSummary::new(
+                    Ok(AccountEpochSummary::new(
                         make_epoch_commitment(4, 40, 104),
                         make_epoch_commitment(3, 30, 103),
                         Hash::default(),
@@ -607,7 +607,7 @@ mod tests {
                 .expect_epoch_summary()
                 .withf(|epoch| *epoch == 5)
                 .returning(|_| {
-                    Ok(SnarkAccountEpochSummary::new(
+                    Ok(AccountEpochSummary::new(
                         make_epoch_commitment(5, 50, 105),
                         make_epoch_commitment(4, 40, 199), /* Discontinuity: prev doesn't match
                                                             * epoch 4 */
