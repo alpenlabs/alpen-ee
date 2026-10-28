@@ -7,19 +7,23 @@ use thiserror::Error;
 
 use crate::{AccountEpochSummary, OLChainStatus};
 
-/// Client interface for interacting with the OL chain.
+/// Reads the OL chain at epoch granularity.
 ///
-/// Provides methods to view OL Chain data required by an alpen EE fullnode.
+/// Every node needs this view. `account_*` methods are scoped to the EE account the
+/// client was built for.
 #[cfg_attr(feature = "test-utils", mockall::automock)]
 #[async_trait]
-pub trait OLClient: Sized + Send + Sync {
+pub trait OLEpochClient: Sized + Send + Sync {
     /// Returns the current status of the OL chain.
     ///
     /// Includes the tip block commitment and confirmed/finalized epoch commitments.
     async fn chain_status(&self) -> Result<OLChainStatus, OLClientError>;
 
-    /// Retrieves epoch commitment and update operations for the specified epoch.
-    async fn epoch_summary(&self, epoch: Epoch) -> Result<AccountEpochSummary, OLClientError>;
+    /// Retrieves the account's epoch commitment and updates for the specified epoch.
+    async fn account_epoch_summary(
+        &self,
+        epoch: Epoch,
+    ) -> Result<AccountEpochSummary, OLClientError>;
 
     /// Returns the epoch commitment for the epoch in which this client's account
     /// was first created.
@@ -28,9 +32,11 @@ pub trait OLClient: Sized + Send + Sync {
 
 /// Returns the current status of the OL chain.
 ///
-/// This is a checked version of [`OLClient::chain_status`] that validates
+/// This is a checked version of [`OLEpochClient::chain_status`] that validates
 /// the slot numbers of tip >= latest terminal >= confirmed >= finalized.
-pub async fn chain_status_checked(client: &impl OLClient) -> Result<OLChainStatus, OLClientError> {
+pub async fn chain_status_checked(
+    client: &impl OLEpochClient,
+) -> Result<OLChainStatus, OLClientError> {
     let status = client.chain_status().await?;
     if status.finalized.last_slot() > status.confirmed.last_slot()
         || status.confirmed.last_slot() > status.latest.last_slot()
@@ -72,50 +78,66 @@ pub struct AccountState {
     pub update_vk: PredicateKey,
 }
 
-/// Client interface for sequencer-specific OL chain interactions.
+/// Reads the OL chain at block granularity.
 ///
-/// Extends the base OL client functionality with methods needed by the sequencer
-/// to read inbox messages and submit state updates to the OL chain.
-#[cfg_attr(feature = "test-utils", mockall::automock)]
+/// Only the sequencer needs this view: it reads per-block inbox messages and the
+/// account's state at the OL tip.
 #[async_trait]
-pub trait SequencerOLClient {
-    /// Returns the current status of the OL chain.
+pub trait OLBlockClient: OLEpochClient {
+    /// Retrieves the account's block summaries for the specified slot range (inclusive).
     ///
-    /// Includes the tip block commitment and confirmed/finalized epoch commitments.
-    async fn chain_status(&self) -> Result<OLChainStatus, OLClientError>;
-
-    /// Retrieves inbox messages for the specified slot range (inclusive).
-    ///
-    /// Returns block data containing commitments and inbox messages for each slot
-    /// from `min_slot` to `max_slot`.
-    async fn get_inbox_messages(
+    /// Returns one summary, with the block's commitment and new inbox messages, for each
+    /// slot from `min_slot` to `max_slot`.
+    async fn account_block_summaries(
         &self,
         min_slot: u64,
         max_slot: u64,
     ) -> Result<Vec<AccountBlockSummary>, OLClientError>;
 
-    /// Retrieves the canonical OL block at `slot` together with its parent's ID.
+    /// Retrieves the header of the canonical OL block at `slot`.
     ///
     /// Reads only that block's header, so it works on an OL node that holds no
     /// block bodies at or below the parent's slot.
-    async fn get_block_link(&self, slot: u64) -> Result<OLBlockHeader, OLClientError>;
+    async fn block_header(&self, slot: u64) -> Result<OLBlockHeader, OLClientError>;
 
     /// Retrieves this account's state at the OL chain's `Latest` block.
     async fn latest_account_state(&self) -> Result<AccountState, OLClientError>;
-
-    /// Submits an account update with proof to the OL chain sequencer.
-    ///
-    /// Returns the OL transaction ID assigned to the submitted update.
-    async fn submit_update(&self, update: SnarkAccountUpdate) -> Result<OLTxId, OLClientError>;
 }
 
-/// Retrieves inbox messages with validation checks.
+#[cfg(feature = "test-utils")]
+mockall::mock! {
+    /// Mock of an [`OLBlockClient`], together with its [`OLEpochClient`] supertrait.
+    pub OLBlockClient {}
+
+    #[async_trait]
+    impl OLEpochClient for OLBlockClient {
+        async fn chain_status(&self) -> Result<OLChainStatus, OLClientError>;
+        async fn account_epoch_summary(
+            &self,
+            epoch: Epoch,
+        ) -> Result<AccountEpochSummary, OLClientError>;
+        async fn account_genesis_epoch(&self) -> Result<EpochCommitment, OLClientError>;
+    }
+
+    #[async_trait]
+    impl OLBlockClient for OLBlockClient {
+        async fn account_block_summaries(
+            &self,
+            min_slot: u64,
+            max_slot: u64,
+        ) -> Result<Vec<AccountBlockSummary>, OLClientError>;
+        async fn block_header(&self, slot: u64) -> Result<OLBlockHeader, OLClientError>;
+        async fn latest_account_state(&self) -> Result<AccountState, OLClientError>;
+    }
+}
+
+/// Retrieves the account's block summaries with validation checks.
 ///
-/// This is a checked version of [`SequencerOLClient::get_inbox_messages`] that validates:
+/// This is a checked version of [`OLBlockClient::account_block_summaries`] that validates:
 /// - The slot range is valid (`min_slot <= max_slot`)
-/// - The returned message count matches the expected number of slots
-pub async fn get_inbox_messages_checked(
-    client: &impl SequencerOLClient,
+/// - The returned summary count matches the expected number of slots
+pub async fn account_block_summaries_checked(
+    client: &impl OLBlockClient,
     min_slot: u64,
     max_slot: u64,
 ) -> Result<Vec<AccountBlockSummary>, OLClientError> {
@@ -124,7 +146,7 @@ pub async fn get_inbox_messages_checked(
     }
 
     let expected_len = (max_slot - min_slot + 1) as usize;
-    let res = client.get_inbox_messages(min_slot, max_slot).await?;
+    let res = client.account_block_summaries(min_slot, max_slot).await?;
     if res.len() != expected_len {
         return Err(OLClientError::UnexpectedInboxMessageCount {
             expected: expected_len,
@@ -133,6 +155,19 @@ pub async fn get_inbox_messages_checked(
     }
 
     Ok(res)
+}
+
+/// Submits the EE account's updates to the OL chain.
+///
+/// Submission goes through its own authenticated endpoint, so it is separate from
+/// the read traits.
+#[cfg_attr(feature = "test-utils", mockall::automock)]
+#[async_trait]
+pub trait OLSubmitClient {
+    /// Submits an account update with proof to the OL chain sequencer.
+    ///
+    /// Returns the OL transaction ID assigned to the submitted update.
+    async fn submit_update(&self, update: SnarkAccountUpdate) -> Result<OLTxId, OLClientError>;
 }
 
 /// Errors that can occur when interacting with the OL client.

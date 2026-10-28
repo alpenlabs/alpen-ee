@@ -5,8 +5,8 @@
 //! in isolation without needing to run a full OL node.
 
 use alpen_ol_api::{
-    AccountBlockSummary, AccountEpochSummary, AccountState, OLBlockHeader, OLChainStatus, OLClient,
-    OLClientError, SequencerOLClient,
+    AccountBlockSummary, AccountEpochSummary, AccountState, OLBlockClient, OLBlockHeader,
+    OLChainStatus, OLClientError, OLEpochClient, OLSubmitClient,
 };
 use async_trait::async_trait;
 use strata_acct_types::Hash;
@@ -47,7 +47,7 @@ impl DummyOLClient {
 }
 
 #[async_trait]
-impl OLClient for DummyOLClient {
+impl OLEpochClient for DummyOLClient {
     async fn chain_status(&self) -> Result<OLChainStatus, OLClientError> {
         Ok(OLChainStatus {
             tip: self.genesis_epoch.to_block_commitment(),
@@ -61,7 +61,10 @@ impl OLClient for DummyOLClient {
         Ok(self.genesis_epoch)
     }
 
-    async fn epoch_summary(&self, epoch: Epoch) -> Result<AccountEpochSummary, OLClientError> {
+    async fn account_epoch_summary(
+        &self,
+        epoch: Epoch,
+    ) -> Result<AccountEpochSummary, OLClientError> {
         let commitment = EpochCommitment::new(
             epoch,
             epoch as u64,
@@ -89,12 +92,8 @@ impl OLClient for DummyOLClient {
 }
 
 #[async_trait]
-impl SequencerOLClient for DummyOLClient {
-    async fn chain_status(&self) -> Result<OLChainStatus, OLClientError> {
-        <Self as OLClient>::chain_status(self).await
-    }
-
-    async fn get_inbox_messages(
+impl OLBlockClient for DummyOLClient {
+    async fn account_block_summaries(
         &self,
         min_slot: u64,
         max_slot: u64,
@@ -111,7 +110,7 @@ impl SequencerOLClient for DummyOLClient {
         Ok(blocks)
     }
 
-    async fn get_block_link(&self, slot: u64) -> Result<OLBlockHeader, OLClientError> {
+    async fn block_header(&self, slot: u64) -> Result<OLBlockHeader, OLClientError> {
         let parent_slot = slot
             .checked_sub(1)
             .ok_or_else(|| OLClientError::rpc(format!("block at slot {slot} has no parent")))?;
@@ -134,7 +133,10 @@ impl SequencerOLClient for DummyOLClient {
             update_vk,
         })
     }
+}
 
+#[async_trait]
+impl OLSubmitClient for DummyOLClient {
     async fn submit_update(&self, _update: SnarkAccountUpdate) -> Result<OLTxId, OLClientError> {
         Ok(OLTxId::default())
     }

@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use alpen_common::{BatchStorage, ChunkStorage};
 use alpen_database::{NodeStorage, SequencerDatabases};
-use alpen_ol_api::SequencerOLClient;
+use alpen_ol_api::OLBlockClient;
 use alpen_params::{AlpenParams, AlpenSpecId};
 use alpen_witness::RangeWitnessExtractor;
 use bitcoind_async_client::Client as BtcClient;
@@ -49,7 +49,7 @@ pub(crate) struct EeProverInputs<P> {
 pub(crate) async fn launch<P>(
     service_executor: &ServiceExecutor,
     dbs: &SequencerDatabases,
-    ol_client: &(impl SequencerOLClient + Send + Sync),
+    ol_client: &impl OLBlockClient,
     inputs: EeProverInputs<P>,
 ) -> eyre::Result<Arc<PaasBatchProver>>
 where

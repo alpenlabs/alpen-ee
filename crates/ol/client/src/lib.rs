@@ -4,8 +4,8 @@ mod dummy;
 mod rpc;
 
 use alpen_ol_api::{
-    AccountBlockSummary, AccountEpochSummary, AccountState, OLBlockHeader, OLChainStatus, OLClient,
-    OLClientError, SequencerOLClient,
+    AccountBlockSummary, AccountEpochSummary, AccountState, OLBlockClient, OLBlockHeader,
+    OLChainStatus, OLClientError, OLEpochClient, OLSubmitClient,
 };
 use async_trait::async_trait;
 use strata_identifiers::{Epoch, EpochCommitment, OLTxId};
@@ -29,18 +29,21 @@ pub enum OLClientKind {
 }
 
 #[async_trait]
-impl OLClient for OLClientKind {
+impl OLEpochClient for OLClientKind {
     async fn chain_status(&self) -> Result<OLChainStatus, OLClientError> {
         match self {
-            Self::Rpc(client) => <RpcOLClient as OLClient>::chain_status(client).await,
-            Self::Dummy(client) => <DummyOLClient as OLClient>::chain_status(client).await,
+            Self::Rpc(client) => client.chain_status().await,
+            Self::Dummy(client) => client.chain_status().await,
         }
     }
 
-    async fn epoch_summary(&self, epoch: Epoch) -> Result<AccountEpochSummary, OLClientError> {
+    async fn account_epoch_summary(
+        &self,
+        epoch: Epoch,
+    ) -> Result<AccountEpochSummary, OLClientError> {
         match self {
-            Self::Rpc(client) => <RpcOLClient as OLClient>::epoch_summary(client, epoch).await,
-            Self::Dummy(client) => <DummyOLClient as OLClient>::epoch_summary(client, epoch).await,
+            Self::Rpc(client) => client.account_epoch_summary(epoch).await,
+            Self::Dummy(client) => client.account_epoch_summary(epoch).await,
         }
     }
 
@@ -53,29 +56,22 @@ impl OLClient for OLClientKind {
 }
 
 #[async_trait]
-impl SequencerOLClient for OLClientKind {
-    async fn chain_status(&self) -> Result<OLChainStatus, OLClientError> {
-        match self {
-            Self::Rpc(client) => <RpcOLClient as SequencerOLClient>::chain_status(client).await,
-            Self::Dummy(client) => <DummyOLClient as SequencerOLClient>::chain_status(client).await,
-        }
-    }
-
-    async fn get_inbox_messages(
+impl OLBlockClient for OLClientKind {
+    async fn account_block_summaries(
         &self,
         min_slot: u64,
         max_slot: u64,
     ) -> Result<Vec<AccountBlockSummary>, OLClientError> {
         match self {
-            Self::Rpc(client) => client.get_inbox_messages(min_slot, max_slot).await,
-            Self::Dummy(client) => client.get_inbox_messages(min_slot, max_slot).await,
+            Self::Rpc(client) => client.account_block_summaries(min_slot, max_slot).await,
+            Self::Dummy(client) => client.account_block_summaries(min_slot, max_slot).await,
         }
     }
 
-    async fn get_block_link(&self, slot: u64) -> Result<OLBlockHeader, OLClientError> {
+    async fn block_header(&self, slot: u64) -> Result<OLBlockHeader, OLClientError> {
         match self {
-            Self::Rpc(client) => client.get_block_link(slot).await,
-            Self::Dummy(client) => client.get_block_link(slot).await,
+            Self::Rpc(client) => client.block_header(slot).await,
+            Self::Dummy(client) => client.block_header(slot).await,
         }
     }
 
@@ -85,7 +81,10 @@ impl SequencerOLClient for OLClientKind {
             Self::Dummy(client) => client.latest_account_state().await,
         }
     }
+}
 
+#[async_trait]
+impl OLSubmitClient for OLClientKind {
     async fn submit_update(&self, update: SnarkAccountUpdate) -> Result<OLTxId, OLClientError> {
         match self {
             Self::Rpc(client) => client.submit_update(update).await,

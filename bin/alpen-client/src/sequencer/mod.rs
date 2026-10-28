@@ -24,7 +24,7 @@ use alpen_engine_reth::{sync_chainstate_to_engine, AlpenRethExecEngine, AlpenRet
 use alpen_exec_chain::{init_exec_chain_state_from_storage, ExecChainState};
 use alpen_exex::{AccessedStateGenerator, StateDiffGenerator};
 use alpen_genesis::{ensure_batch_genesis, ensure_finalized_exec_chain_genesis};
-use alpen_ol_api::SequencerOLClient;
+use alpen_ol_api::OLBlockClient;
 use alpen_ol_client::OLClientKind;
 use alpen_ol_tracker::{build_ol_chain_tracker, init_ol_chain_tracker_state, OLChainTrackerState};
 use alpen_reth_node::{
@@ -183,7 +183,7 @@ pub(crate) fn sequencer_gossip_pubkey(privkey: &Buf32) -> eyre::Result<Buf32> {
 /// and batch lifecycle.
 async fn init_boot_state(
     storage: &NodeStorage,
-    ol_client: &(impl SequencerOLClient + Send + Sync),
+    ol_client: &impl OLBlockClient,
 ) -> eyre::Result<SequencerBootState> {
     let exec_chain = init_exec_chain_state_from_storage(storage)
         .instrument(info_span!("init_exec_chain", component = "alpen"))

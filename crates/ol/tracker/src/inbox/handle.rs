@@ -1,7 +1,7 @@
 use std::{future::Future, sync::Arc};
 
 use alpen_common::ExecBlockStorage;
-use alpen_ol_api::SequencerOLClient;
+use alpen_ol_api::OLBlockClient;
 use strata_identifiers::OLBlockCommitment;
 use tokio::sync::{mpsc, oneshot, watch};
 
@@ -42,7 +42,7 @@ impl OLChainTrackerHandle {
     }
 }
 
-pub fn build_ol_chain_tracker<TClient: SequencerOLClient, TStorage: ExecBlockStorage>(
+pub fn build_ol_chain_tracker<TClient: OLBlockClient, TStorage: ExecBlockStorage>(
     state: OLChainTrackerState,
     chainstatus_rx: watch::Receiver<OLFinalizedStatus>,
     client: Arc<TClient>,

@@ -1,6 +1,6 @@
 use alpen_acct_types::EeAccountState;
 use alpen_common::{EeAccountStateAtEpoch, MockStorage, OLBlockOrEpoch};
-use alpen_ol_api::{AccountEpochSummary, MockOLClient, OLClientError};
+use alpen_ol_api::{AccountEpochSummary, MockOLEpochClient, OLClientError};
 use strata_acct_types::Hash;
 use strata_identifiers::{Buf32, EpochCommitment, OLBlockCommitment, OLBlockId};
 
@@ -65,28 +65,30 @@ pub(crate) fn create_epochs(terminal_ids: &[u8]) -> Vec<EeAccountStateAtEpoch> {
 /// The prev_epoch in each summary correctly references the previous epoch's commitment.
 /// For epoch 0, the prev is `EpochCommitment::null()`.
 pub(crate) fn setup_mock_client_with_chain(
-    mock_client: &mut MockOLClient,
+    mock_client: &mut MockOLEpochClient,
     chain: Vec<EeAccountStateAtEpoch>,
 ) {
-    mock_client.expect_epoch_summary().returning(move |epoch| {
-        let epoch_idx = epoch as usize;
-        if epoch_idx >= chain.len() {
-            return Err(OLClientError::network("epoch not found"));
-        }
-        let current = &chain[epoch_idx];
-        // For epoch 0, prev is null; for others, get the actual prev epoch's commitment
-        let prev_commitment = if epoch > 0 {
-            *chain[epoch_idx - 1].epoch_commitment()
-        } else {
-            EpochCommitment::null()
-        };
-        Ok(AccountEpochSummary::new(
-            *current.epoch_commitment(),
-            prev_commitment,
-            Hash::default(),
-            vec![],
-        ))
-    });
+    mock_client
+        .expect_account_epoch_summary()
+        .returning(move |epoch| {
+            let epoch_idx = epoch as usize;
+            if epoch_idx >= chain.len() {
+                return Err(OLClientError::network("epoch not found"));
+            }
+            let current = &chain[epoch_idx];
+            // For epoch 0, prev is null; for others, get the actual prev epoch's commitment
+            let prev_commitment = if epoch > 0 {
+                *chain[epoch_idx - 1].epoch_commitment()
+            } else {
+                EpochCommitment::null()
+            };
+            Ok(AccountEpochSummary::new(
+                *current.epoch_commitment(),
+                prev_commitment,
+                Hash::default(),
+                vec![],
+            ))
+        });
 }
 
 /// Sets up mock storage to return epochs from a pre-built chain.

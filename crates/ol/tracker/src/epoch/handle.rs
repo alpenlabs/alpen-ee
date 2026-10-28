@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use alpen_common::{ConsensusHeads, Storage};
-use alpen_ol_api::OLClient;
+use alpen_ol_api::OLEpochClient;
 use strata_service::{
     AsyncExecutor, DumbTickHandle, DumbTickingInput, ServiceBuilder, ServiceMonitor,
 };
@@ -66,7 +66,7 @@ pub async fn start_ol_tracker_service<TStorage, TOLClient>(
 ) -> anyhow::Result<OLTrackerHandle>
 where
     TStorage: Storage + 'static,
-    TOLClient: OLClient + 'static,
+    TOLClient: OLEpochClient + 'static,
 {
     start_ol_tracker_service_with(
         state,
@@ -98,7 +98,7 @@ async fn start_ol_tracker_service_with<TStorage, TOLClient>(
 ) -> anyhow::Result<OLTrackerHandle>
 where
     TStorage: Storage + 'static,
-    TOLClient: OLClient + 'static,
+    TOLClient: OLEpochClient + 'static,
 {
     // Initialize watch channels from current state.
     let (ol_status_tx, ol_status_rx) = watch::channel(state.get_ol_status());

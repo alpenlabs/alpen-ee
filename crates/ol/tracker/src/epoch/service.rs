@@ -7,7 +7,7 @@ use std::{
 };
 
 use alpen_common::{ConsensusHeads, Storage};
-use alpen_ol_api::OLClient;
+use alpen_ol_api::OLEpochClient;
 use serde::{Deserialize, Serialize};
 use strata_service::{AsyncService, Response, Service, ServiceState};
 use tokio::sync::watch;
@@ -83,7 +83,7 @@ impl<TStorage, TOLClient> OLTrackerServiceState<TStorage, TOLClient> {
 impl<TStorage, TOLClient> ServiceState for OLTrackerServiceState<TStorage, TOLClient>
 where
     TStorage: Storage + 'static,
-    TOLClient: OLClient + 'static,
+    TOLClient: OLEpochClient + 'static,
 {
     fn name(&self) -> &str {
         "ol_tracker"
@@ -97,7 +97,7 @@ where
 impl<TStorage, TOLClient> Service for OLTrackerService<TStorage, TOLClient>
 where
     TStorage: Storage + 'static,
-    TOLClient: OLClient + 'static,
+    TOLClient: OLEpochClient + 'static,
 {
     type State = OLTrackerServiceState<TStorage, TOLClient>;
     type Msg = ();
@@ -111,7 +111,7 @@ where
 impl<TStorage, TOLClient> AsyncService for OLTrackerService<TStorage, TOLClient>
 where
     TStorage: Storage + 'static,
-    TOLClient: OLClient + 'static,
+    TOLClient: OLEpochClient + 'static,
 {
     async fn process_input(state: &mut Self::State, _input: ()) -> anyhow::Result<Response> {
         match track_ol_state(

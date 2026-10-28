@@ -3,7 +3,7 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use alpen_common::{BatchId, BatchProver, BatchStatus, BatchStorage, ExecBlockStorage};
-use alpen_ol_api::SequencerOLClient;
+use alpen_ol_api::{OLBlockClient, OLSubmitClient};
 use alpen_ol_tracker::OLFinalizedStatus;
 use eyre::{eyre, Result};
 use strata_snark_acct_types::SnarkAccountUpdate;
@@ -66,7 +66,7 @@ pub async fn create_update_submitter_task<C, S, ES, P>(
     mut batch_ready_rx: watch::Receiver<Option<BatchId>>,
     mut ol_status_rx: watch::Receiver<OLFinalizedStatus>,
 ) where
-    C: SequencerOLClient + Send + Sync,
+    C: OLBlockClient + OLSubmitClient,
     S: BatchStorage,
     ES: ExecBlockStorage,
     P: BatchProver,
@@ -128,7 +128,7 @@ pub async fn create_update_submitter_task<C, S, ES, P>(
 /// batches in storage starting from the next expected sequence number. For each
 /// batch in `ProofReady` state, it builds and submits an update.
 async fn process_ready_batches(
-    ol_client: &(impl SequencerOLClient + Send + Sync),
+    ol_client: &(impl OLBlockClient + OLSubmitClient),
     batch_storage: &impl BatchStorage,
     exec_storage: &impl ExecBlockStorage,
     prover: &impl BatchProver,

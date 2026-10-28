@@ -64,7 +64,7 @@ pub(crate) fn make_block_data(
 }
 
 /// Helper to create an OLBlockHeader for a block and its parent.
-pub(crate) fn make_block_link(
+pub(crate) fn make_block_header(
     block: OLBlockCommitment,
     parent: OLBlockCommitment,
 ) -> OLBlockHeader {

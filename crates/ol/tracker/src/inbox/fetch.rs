@@ -1,6 +1,6 @@
 //! Fetches the OL blocks that extend a block the tracker already holds.
 
-use alpen_ol_api::{get_inbox_messages_checked, AccountBlockSummary, SequencerOLClient};
+use alpen_ol_api::{account_block_summaries_checked, AccountBlockSummary, OLBlockClient};
 use eyre::eyre;
 use strata_identifiers::OLBlockCommitment;
 
@@ -20,7 +20,7 @@ pub(super) enum Extension {
 /// An OL node promoted from checkpoint sync holds no block bodies at or below its history
 /// anchor, so it cannot serve `base` when `base` is that anchor.
 pub(super) async fn fetch_blocks_after(
-    client: &impl SequencerOLClient,
+    client: &impl OLBlockClient,
     base: OLBlockCommitment,
     max_slot: u64,
 ) -> eyre::Result<Extension> {
@@ -32,15 +32,15 @@ pub(super) async fn fetch_blocks_after(
     }
     let first_slot = base.slot() + 1;
 
-    let first_link = client.get_block_link(first_slot).await?;
-    if first_link.parent_blkid != *base.blkid() {
+    let first_header = client.block_header(first_slot).await?;
+    if first_header.parent_blkid != *base.blkid() {
         return Ok(Extension::Diverged(OLBlockCommitment::new(
             base.slot(),
-            first_link.parent_blkid,
+            first_header.parent_blkid,
         )));
     }
 
-    let blocks = get_inbox_messages_checked(client, first_slot, max_slot).await?;
+    let blocks = account_block_summaries_checked(client, first_slot, max_slot).await?;
 
     // The parent check covers these blocks only if they start at the block whose
     // header was checked.
@@ -48,10 +48,10 @@ pub(super) async fn fetch_blocks_after(
         .first()
         .expect("checked fetch returns one block per slot")
         .commitment;
-    if first_block != first_link.commitment {
+    if first_block != first_header.commitment {
         return Err(eyre!(
             "OL returned different blocks at slot {first_slot} (header {:?}, summary {first_block:?})",
-            first_link.commitment
+            first_header.commitment
         ));
     }
 
@@ -60,11 +60,11 @@ pub(super) async fn fetch_blocks_after(
 
 #[cfg(test)]
 mod tests {
-    use alpen_ol_api::MockSequencerOLClient;
+    use alpen_ol_api::MockOLBlockClient;
 
     use super::*;
     use crate::inbox::test_utils::{
-        create_block_data_chain, make_block, make_block_link, make_block_with_id,
+        create_block_data_chain, make_block, make_block_header, make_block_with_id,
     };
 
     #[tokio::test]
@@ -73,14 +73,14 @@ mod tests {
         let new_blocks: Vec<_> = (11..=13).map(make_block).collect();
         let block_data = create_block_data_chain(&new_blocks, 0);
 
-        let mut mock_client = MockSequencerOLClient::new();
+        let mut mock_client = MockOLBlockClient::new();
         mock_client
-            .expect_get_block_link()
+            .expect_block_header()
             .withf(|slot| *slot == 11)
             .times(1)
-            .returning(move |_| Ok(make_block_link(make_block(11), base)));
+            .returning(move |_| Ok(make_block_header(make_block(11), base)));
         mock_client
-            .expect_get_inbox_messages()
+            .expect_account_block_summaries()
             .withf(|min, max| *min == 11 && *max == 13)
             .times(1)
             .returning(move |_, _| Ok(block_data.clone()));
@@ -99,11 +99,11 @@ mod tests {
         let base = make_block_with_id(10, 0xAA);
         let remote_at_10 = make_block_with_id(10, 0xBB);
 
-        let mut mock_client = MockSequencerOLClient::new();
+        let mut mock_client = MockOLBlockClient::new();
         mock_client
-            .expect_get_block_link()
+            .expect_block_header()
             .times(1)
-            .returning(move |_| Ok(make_block_link(make_block(11), remote_at_10)));
+            .returning(move |_| Ok(make_block_header(make_block(11), remote_at_10)));
 
         let extension = fetch_blocks_after(&mock_client, base, 13).await.unwrap();
 
@@ -118,13 +118,13 @@ mod tests {
         let base = make_block(10);
         let block_data = create_block_data_chain(&[make_block_with_id(11, 0xCC)], 0);
 
-        let mut mock_client = MockSequencerOLClient::new();
+        let mut mock_client = MockOLBlockClient::new();
         mock_client
-            .expect_get_block_link()
+            .expect_block_header()
             .times(1)
-            .returning(move |_| Ok(make_block_link(make_block(11), base)));
+            .returning(move |_| Ok(make_block_header(make_block(11), base)));
         mock_client
-            .expect_get_inbox_messages()
+            .expect_account_block_summaries()
             .times(1)
             .returning(move |_, _| Ok(block_data.clone()));
 
@@ -139,7 +139,7 @@ mod tests {
     #[tokio::test]
     async fn errors_when_nothing_to_fetch() {
         let base = make_block(10);
-        let mock_client = MockSequencerOLClient::new();
+        let mock_client = MockOLBlockClient::new();
 
         let result = fetch_blocks_after(&mock_client, base, 10).await;
 

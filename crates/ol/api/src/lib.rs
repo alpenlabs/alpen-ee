@@ -9,9 +9,9 @@ mod epoch_summary;
 
 pub use chain_status::OLChainStatus;
 pub use client::{
-    chain_status_checked, get_inbox_messages_checked, AccountBlockSummary, AccountState,
-    OLBlockHeader, OLClient, OLClientError, SequencerOLClient,
+    account_block_summaries_checked, chain_status_checked, AccountBlockSummary, AccountState,
+    OLBlockClient, OLBlockHeader, OLClientError, OLEpochClient, OLSubmitClient,
 };
 #[cfg(feature = "test-utils")]
-pub use client::{MockOLClient, MockSequencerOLClient};
+pub use client::{MockOLBlockClient, MockOLEpochClient, MockOLSubmitClient};
 pub use epoch_summary::{AccountEpochSummary, AccountUpdate};
