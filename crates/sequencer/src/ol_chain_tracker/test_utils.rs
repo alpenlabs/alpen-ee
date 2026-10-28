@@ -2,7 +2,8 @@
 
 use alpen_acct_types::EeAccountState;
 use alpen_chain_types::{ExecBlockCommitment, ExecBlockPackage, ExecInputs, ExecOutputs};
-use alpen_common::{ExecBlockRecord, OLBlockData, OLBlockLink, OLChainStatus};
+use alpen_common::ExecBlockRecord;
+use alpen_ol_api::{OLBlockData, OLBlockLink, OLChainStatus};
 use alpen_params::AlpenSpecId;
 use strata_acct_types::{AccountId, BitcoinAmount, Hash, MessageEntry, MsgPayload};
 use strata_identifiers::{Buf32, EpochCommitment, OLBlockCommitment, OLBlockId};

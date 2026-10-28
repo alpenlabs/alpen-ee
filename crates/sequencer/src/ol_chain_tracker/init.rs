@@ -1,4 +1,5 @@
-use alpen_common::{ExecBlockRecord, ExecBlockStorage, SequencerOLClient};
+use alpen_common::{ExecBlockRecord, ExecBlockStorage};
+use alpen_ol_api::SequencerOLClient;
 use eyre::eyre;
 use strata_identifiers::OLBlockCommitment;
 use tracing::error;
@@ -113,9 +114,8 @@ mod tests {
     use super::*;
 
     mod init_ol_chain_tracker_state_tests {
-        use alpen_common::{
-            MockExecBlockStorage, MockSequencerOLClient, OLChainStatus, OLClientError,
-        };
+        use alpen_common::MockExecBlockStorage;
+        use alpen_ol_api::{MockSequencerOLClient, OLChainStatus, OLClientError};
 
         use super::*;
         use crate::ol_chain_tracker::test_utils::{
@@ -153,7 +153,7 @@ mod tests {
         /// Sets up mock OL client to return inbox messages for the given block data.
         fn setup_mock_client_inbox_messages(
             mock_client: &mut MockSequencerOLClient,
-            block_data: Vec<alpen_common::OLBlockData>,
+            block_data: Vec<alpen_ol_api::OLBlockData>,
         ) {
             mock_client
                 .expect_get_inbox_messages()
@@ -164,7 +164,7 @@ mod tests {
         /// Sets up mock OL client to return the given block link.
         fn setup_mock_client_block_link(
             mock_client: &mut MockSequencerOLClient,
-            link: alpen_common::OLBlockLink,
+            link: alpen_ol_api::OLBlockLink,
         ) {
             mock_client
                 .expect_get_block_link()

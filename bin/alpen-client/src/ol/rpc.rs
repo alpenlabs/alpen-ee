@@ -1,4 +1,4 @@
-use alpen_common::{
+use alpen_ol_api::{
     OLAccountStateView, OLBlockData, OLBlockLink, OLChainStatus, OLClient, OLClientError,
     SequencerOLClient, SnarkAccountEpochSummary, SnarkAccountUpdateInfo,
 };

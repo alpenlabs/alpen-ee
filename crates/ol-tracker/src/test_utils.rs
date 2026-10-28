@@ -1,8 +1,6 @@
 use alpen_acct_types::EeAccountState;
-use alpen_common::{
-    EeAccountStateAtEpoch, MockOLClient, MockStorage, OLBlockOrEpoch, OLClientError,
-    SnarkAccountEpochSummary,
-};
+use alpen_common::{EeAccountStateAtEpoch, MockStorage, OLBlockOrEpoch};
+use alpen_ol_api::{MockOLClient, OLClientError, SnarkAccountEpochSummary};
 use strata_acct_types::Hash;
 use strata_identifiers::{Buf32, EpochCommitment, OLBlockCommitment, OLBlockId};
 

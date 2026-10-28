@@ -16,8 +16,9 @@
 
 use std::sync::Arc;
 
-use alpen_common::{BatchStorage, ChunkStorage, SequencerOLClient};
+use alpen_common::{BatchStorage, ChunkStorage};
 use alpen_database::{NodeStorage, SequencerDatabases};
+use alpen_ol_api::SequencerOLClient;
 use alpen_params::{AlpenParams, AlpenSpecId};
 use alpen_witness::RangeWitnessExtractor;
 use bitcoind_async_client::Client as BtcClient;

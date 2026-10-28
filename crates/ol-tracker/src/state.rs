@@ -1,7 +1,6 @@
 use alpen_acct_types::EeAccountState;
-use alpen_common::{
-    ConsensusHeads, EeAccountStateAtEpoch, OLChainStatus, OLFinalizedStatus, Storage,
-};
+use alpen_common::{ConsensusHeads, EeAccountStateAtEpoch, OLFinalizedStatus, Storage};
+use alpen_ol_api::OLChainStatus;
 use strata_identifiers::EpochCommitment;
 use tracing::info;
 
@@ -124,7 +123,8 @@ async fn effective_account_state(
 
 #[cfg(test)]
 mod tests {
-    use alpen_common::{MockStorage, OLBlockOrEpoch, OLChainStatus, StorageError};
+    use alpen_common::{MockStorage, OLBlockOrEpoch, StorageError};
+    use alpen_ol_api::OLChainStatus;
 
     use super::*;
     use crate::test_utils::*;

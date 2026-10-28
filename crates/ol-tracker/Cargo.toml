@@ -12,6 +12,7 @@ workspace = true
 alpen-acct-runtime.workspace = true
 alpen-acct-types.workspace = true
 alpen-common.workspace = true
+alpen-ol-api.workspace = true
 strata-identifiers.workspace = true
 strata-service.workspace = true
 strata-snark-acct-runtime.workspace = true
@@ -25,4 +26,5 @@ tracing.workspace = true
 
 [dev-dependencies]
 alpen-common = { workspace = true, features = ["test-utils"] }
+alpen-ol-api = { workspace = true, features = ["test-utils"] }
 strata-acct-types.workspace = true

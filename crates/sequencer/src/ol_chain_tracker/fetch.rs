@@ -1,6 +1,6 @@
 //! Fetches the OL blocks that extend a block the tracker already holds.
 
-use alpen_common::{get_inbox_messages_checked, OLBlockData, SequencerOLClient};
+use alpen_ol_api::{get_inbox_messages_checked, OLBlockData, SequencerOLClient};
 use eyre::eyre;
 use strata_identifiers::OLBlockCommitment;
 
@@ -60,7 +60,7 @@ pub(super) async fn fetch_blocks_after(
 
 #[cfg(test)]
 mod tests {
-    use alpen_common::MockSequencerOLClient;
+    use alpen_ol_api::MockSequencerOLClient;
 
     use super::*;
     use crate::ol_chain_tracker::test_utils::{

@@ -105,6 +105,7 @@ alpen-evm-ee = { workspace = true, optional = true }
 alpen-exec-chain = { workspace = true, optional = true }
 alpen-exex = { workspace = true, optional = true }
 alpen-genesis.workspace = true
+alpen-ol-api.workspace = true
 alpen-ol-tracker.workspace = true
 alpen-params.workspace = true
 alpen-primitives = { workspace = true, optional = true }

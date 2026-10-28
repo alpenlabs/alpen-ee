@@ -20,6 +20,7 @@ members = [
   "crates/exex",
   "crates/genesis",
   "crates/mdbx",
+  "crates/ol/api",
   "crates/ol-tracker",
   "crates/params",
   "crates/primitives",
@@ -88,6 +89,7 @@ alpen-exec-chain = { path = "crates/exec-chain" }
 alpen-exex = { path = "crates/exex" }
 alpen-genesis = { path = "crates/genesis" }
 alpen-mdbx = { path = "crates/mdbx" }
+alpen-ol-api = { path = "crates/ol/api" }
 alpen-ol-tracker = { path = "crates/ol-tracker" }
 alpen-params = { path = "crates/params" }
 alpen-primitives = { path = "crates/primitives" }

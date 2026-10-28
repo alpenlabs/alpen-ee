@@ -1269,6 +1269,7 @@ dependencies = [
  "alpen-exec-chain",
  "alpen-exex",
  "alpen-genesis",
+ "alpen-ol-api",
  "alpen-ol-tracker",
  "alpen-params",
  "alpen-primitives",
@@ -1355,7 +1356,6 @@ dependencies = [
  "strata-codec",
  "strata-db-types",
  "strata-identifiers",
- "strata-predicate",
  "strata-snark-acct-types",
  "thiserror 2.0.20",
  "tokio",
@@ -1669,12 +1669,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "alpen-ol-api"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "async-trait",
+ "eyre",
+ "mockall",
+ "strata-acct-types",
+ "strata-identifiers",
+ "strata-predicate",
+ "strata-snark-acct-types",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "alpen-ol-tracker"
 version = "0.3.0-alpha.1"
 dependencies = [
  "alpen-acct-runtime",
  "alpen-acct-types",
  "alpen-common",
+ "alpen-ol-api",
  "anyhow",
  "serde",
  "strata-acct-types",
@@ -1996,6 +2011,7 @@ dependencies = [
  "alpen-common",
  "alpen-engine-api",
  "alpen-exec-chain",
+ "alpen-ol-api",
  "alpen-params",
  "anyhow",
  "async-trait",

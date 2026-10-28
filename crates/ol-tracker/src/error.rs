@@ -1,7 +1,8 @@
 use std::result;
 
 use alpen_acct_runtime::AcctRuntimeError;
-use alpen_common::{OLClientError, StorageError};
+use alpen_common::StorageError;
+use alpen_ol_api::OLClientError;
 use strata_identifiers::Hash;
 use strata_snark_acct_runtime::ProgramError;
 use thiserror::Error;

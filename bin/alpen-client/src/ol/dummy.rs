@@ -5,8 +5,8 @@
 //! in isolation without needing to run a full OL node.
 
 #[cfg(feature = "sequencer")]
-use alpen_common::{OLAccountStateView, OLBlockData, OLBlockLink, SequencerOLClient};
-use alpen_common::{OLChainStatus, OLClient, OLClientError, SnarkAccountEpochSummary};
+use alpen_ol_api::{OLAccountStateView, OLBlockData, OLBlockLink, SequencerOLClient};
+use alpen_ol_api::{OLChainStatus, OLClient, OLClientError, SnarkAccountEpochSummary};
 #[cfg(feature = "sequencer")]
 use alpen_proof_acct::EeAcctProgram;
 use async_trait::async_trait;

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use alpen_common::{ExecBlockStorage, OLBlockData, OLFinalizedStatus, SequencerOLClient};
+use alpen_common::{ExecBlockStorage, OLFinalizedStatus};
+use alpen_ol_api::{OLBlockData, SequencerOLClient};
 use eyre::eyre;
 use strata_identifiers::OLBlockCommitment;
 use tokio::{
@@ -190,7 +191,8 @@ async fn handle_state_pruning(
 
 #[cfg(test)]
 mod tests {
-    use alpen_common::{MockExecBlockStorage, MockSequencerOLClient, OLClientError};
+    use alpen_common::MockExecBlockStorage;
+    use alpen_ol_api::{MockSequencerOLClient, OLClientError};
 
     use super::*;
     use crate::ol_chain_tracker::test_utils::{

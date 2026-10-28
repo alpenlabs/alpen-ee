@@ -2,7 +2,8 @@ use std::{sync::Arc, time::Duration};
 
 #[cfg(feature = "sequencer")]
 use alpen_common::OLFinalizedStatus;
-use alpen_common::{ConsensusHeads, OLClient, Storage};
+use alpen_common::{ConsensusHeads, Storage};
+use alpen_ol_api::OLClient;
 use alpen_ol_tracker::{
     EpochTrackingMode, OLTrackerService, OLTrackerServiceState, OLTrackerState, OLTrackerStatus,
 };

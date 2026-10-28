@@ -4,8 +4,8 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use alpen_common::{
     BatchId, BatchProver, BatchStatus, BatchStorage, ExecBlockStorage, OLFinalizedStatus,
-    SequencerOLClient,
 };
+use alpen_ol_api::SequencerOLClient;
 use eyre::{eyre, Result};
 use strata_snark_acct_types::SnarkAccountUpdate;
 use tokio::{sync::watch, time};
