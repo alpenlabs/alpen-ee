@@ -73,7 +73,7 @@ volumes:
 The image does not ship the SP1 guest ELFs. Each network's guests bake in its
 params, so one set of ELFs cannot serve every network. A sequencer with
 `sequencer.prover.backend = "sp1"` takes them from the network's GitHub
-Release (see [`provers/sp1/README.md`](../provers/sp1/README.md#publishing))
+Release (see [`docs/releasing.md`](../docs/releasing.md#what-a-release-publishes))
 and mounts them at the paths its `[sequencer.prover.programs.<version>]`
 entries name.
 
