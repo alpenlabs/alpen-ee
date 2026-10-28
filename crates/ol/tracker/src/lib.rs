@@ -3,6 +3,6 @@
 mod epoch;
 
 pub use epoch::{
-    init_ol_tracker_state, EpochTrackingMode, OLTrackerService, OLTrackerServiceState,
-    OLTrackerState, OLTrackerStatus,
+    init_ol_tracker_state, start_ol_tracker_service, EpochTrackingMode, OLTrackerHandle,
+    OLTrackerService, OLTrackerServiceState, OLTrackerState, OLTrackerStatus,
 };

@@ -38,7 +38,6 @@ mod node;
 #[cfg(feature = "sequencer")]
 mod sequencer;
 mod service_executor;
-mod services;
 
 use std::{env, process};
 

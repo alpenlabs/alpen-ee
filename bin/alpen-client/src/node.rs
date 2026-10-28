@@ -20,7 +20,7 @@ use alpen_engine_reth::{create_engine_control_task, AlpenRethExecEngine};
 use alpen_genesis::ensure_genesis_ee_account_state;
 use alpen_ol_api::{chain_status_checked, OLClient};
 use alpen_ol_client::{DummyOLClient, OLClientKind, RpcOLClient};
-use alpen_ol_tracker::init_ol_tracker_state;
+use alpen_ol_tracker::{init_ol_tracker_state, start_ol_tracker_service, OLTrackerHandle};
 use alpen_params::AlpenParams;
 #[cfg(feature = "sequencer")]
 use alpen_proof_acct::EeAcctProgram;
@@ -56,7 +56,6 @@ use crate::{
     full_node,
     gossip::{create_gossip_task, GossipConfig},
     service_executor::ServiceExecutor,
-    services,
 };
 
 pub(crate) async fn launch(
@@ -123,7 +122,7 @@ pub(crate) struct NodeBootstrap {
     /// Kept as the handle (not pre-extracted watchers) so each mode pulls
     /// exactly the watchers it needs, where it needs them — a full node
     /// never reads `ol_status_watcher` at all, for instance.
-    pub(crate) ol_tracker: services::ol_tracker::OLTrackerHandle,
+    pub(crate) ol_tracker: OLTrackerHandle,
     #[cfg(feature = "sequencer")]
     pub(crate) sequencer: sequencer::BootstrapResources,
 }
@@ -206,7 +205,7 @@ async fn bootstrap_node(
         .await
         .context("ol tracker state initialization should not fail")?;
 
-    let ol_tracker = services::ol_tracker::start_ol_tracker_service(
+    let ol_tracker = start_ol_tracker_service(
         ol_tracker_state,
         genesis_epoch.epoch(),
         storage.clone(),
