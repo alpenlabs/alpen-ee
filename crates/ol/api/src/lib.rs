@@ -1,8 +1,5 @@
 //! The EE's view of the OL chain: the client traits and the data they return.
 
-#[cfg(test)]
-use mockall as _;
-
 mod chain_status;
 mod client;
 mod epoch_summary;
@@ -13,5 +10,5 @@ pub use client::{
     OLBlockClient, OLBlockHeader, OLClientError, OLEpochClient, OLSubmitClient,
 };
 #[cfg(feature = "test-utils")]
-pub use client::{MockOLBlockClient, MockOLEpochClient, MockOLSubmitClient};
+pub use client::{MockOLBlockClient, MockOLEpochClient};
 pub use epoch_summary::{AccountEpochSummary, AccountUpdate};

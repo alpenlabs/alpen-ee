@@ -38,7 +38,6 @@ tracing.workspace = true
 
 [dev-dependencies]
 alpen-common = { workspace = true, features = ["test-utils"] }
-alpen-ol-api = { workspace = true, features = ["test-utils"] }
 mockall.workspace = true
 strata-predicate.workspace = true
 bitcoin.workspace = true

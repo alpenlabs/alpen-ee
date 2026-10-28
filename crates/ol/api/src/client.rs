@@ -161,7 +161,6 @@ pub async fn account_block_summaries_checked(
 ///
 /// Submission goes through its own authenticated endpoint, so it is separate from
 /// the read traits.
-#[cfg_attr(feature = "test-utils", mockall::automock)]
 #[async_trait]
 pub trait OLSubmitClient {
     /// Submits an account update with proof to the OL chain sequencer.
