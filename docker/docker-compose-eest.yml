@@ -69,7 +69,7 @@ services:
       # Native EE prover signing keys, named by [sequencer.prover] in the
       # mounted config. Checked in rather than generated: this service runs
       # against the dummy OL client (ol.source = "dummy"), whose mock
-      # `get_latest_account_update_vk` (see ol/dummy.rs) hardcodes the same
+      # `latest_account_state` (see crates/ol/client/src/dummy.rs) reports the same
       # fixed acct predicate `EeAcctProgram::test_signing_key` produces
       # (0x02 * 32), so signing with any other acct key fails
       # prover-predicate validation at startup. The chunk key isn't checked

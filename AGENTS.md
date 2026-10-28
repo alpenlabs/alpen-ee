@@ -129,9 +129,8 @@ The services that make up the EE node, each a workspace crate at the top level.
 | Crate | Description |
 |-------|-------------|
 | `params` | Consolidated Alpen chain parameters, spec version schedule |
-| `common` | Shared EE types and the trait families (storage, DA, OL client, prover) |
+| `common` | Shared EE types and the trait families (storage, DA, prover) |
 | `exec-chain` | In-memory view of the canonical execution chain, orphan tracking |
-| `ol-tracker` | Follows the paired OL node: epochs, checkpoints, finalization, inbox messages |
 | `genesis` | Deterministic EE genesis state |
 | `block-assembly` | EE block and package assembly |
 | `sequencer` | Sequencer workers: block, chunk and batch builders, batch lifecycle, update submitter |
@@ -183,6 +182,16 @@ The EE types shared with the specs and the proofs, and the runtimes the proofs w
 |-------|-------------|
 | `engine/api` | Execution engine traits: block submission, forkchoice, payload building and its inputs |
 | `engine/reth` | The reth-backed execution engine: payload building, block submission, forkchoice control and the startup chainstate sync |
+
+### OL (`crates/ol/`)
+
+The EE's side of its paired OL node.
+
+| Crate | Description |
+|-------|-------------|
+| `ol/api` | The OL client traits (epoch, block and submit) and the data they return |
+| `ol/client` | The JSON-RPC client for the paired OL node, and a dummy client that sits at genesis for testing without one |
+| `ol/tracker` | Follows the paired OL node: the epoch tracker (epochs, checkpoints, finalization) and the sequencer's inbox tracker |
 
 ### Reth Integration (`crates/reth/`)
 

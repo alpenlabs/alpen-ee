@@ -262,7 +262,7 @@ Components marked **(Sequencer)** run only when the node's `--alpen-config` sets
 
 **Purpose**: Polls the OL chain and maintains the EE's view of consensus state.
 
-**Location**: [crates/ol-tracker/src/](../../crates/ol-tracker/src/), started via [src/services/ol_tracker.rs](src/services/ol_tracker.rs)
+**Location**: [crates/ol/tracker/src/epoch/](../../crates/ol/tracker/src/epoch/), started from [src/node.rs](src/node.rs)
 
 **Responsibilities**:
 - Poll the OL node for chain status at a regular interval
@@ -285,7 +285,7 @@ sequenceDiagram
         OL-->>OLT: OLChainStatus
 
         alt New epochs available
-            OLT->>OL: epoch_summary(epoch)
+            OLT->>OL: account_epoch_summary(epoch)
             OL-->>OLT: summary
             OLT->>OLT: Update state
             OLT->>EC: broadcast ConsensusHeads
@@ -302,7 +302,7 @@ sequenceDiagram
 
 **Purpose**: Tracks finalized OL blocks and caches their inbox messages so the block builder can include them during block assembly.
 
-**Location**: [crates/sequencer/src/ol_chain_tracker/](../../crates/sequencer/src/ol_chain_tracker/)
+**Location**: [crates/ol/tracker/src/inbox/](../../crates/ol/tracker/src/inbox/)
 
 **Responsibilities**:
 - React to finalized-OL updates from the OL Tracker
@@ -642,14 +642,22 @@ sequenceDiagram
 
 ## Key Abstractions
 
-All traits and types below are re-exported flat from the `alpen_common` crate.
+Unless noted otherwise, the traits and types below are re-exported flat from the `alpen_common` crate.
+
+### OL Client Traits
+
+| Trait | Purpose |
+|-------|---------|
+| `OLEpochClient` | Read OL chain state at epoch granularity, which every node needs |
+| `OLBlockClient` | Read OL chain state at block granularity: inbox messages and the account's tip state, for the sequencer |
+| `OLSubmitClient` | Submit account updates through the authenticated OL endpoint |
+
+These traits, `OLChainStatus` and the data types they return live in `alpen_ol_api`. Location: [crates/ol/api/src/](../../crates/ol/api/src/)
 
 ### Core Traits
 
 | Trait | Purpose |
 |-------|---------|
-| `OLClient` | Read OL chain state required by a fullnode |
-| `SequencerOLClient` | Extended OL access for the sequencer (inbox messages, submit updates) |
 | `Storage` | EE account state persistence |
 | `ExecBlockStorage` | Execution block persistence |
 | `BatchStorage` | Batch persistence and lifecycle status |
@@ -666,7 +674,7 @@ Location: [crates/common/src/traits/](../../crates/common/src/traits/)
 | Type | Purpose |
 |------|---------|
 | `ConsensusHeads` | Confirmed + finalized EE block hashes and epochs |
-| `OLChainStatus` / `OLFinalizedStatus` | OL tip status; finalized OL block + its EE block |
+| `OLFinalizedStatus` | Finalized OL block + its EE block, published by the OL Tracker (in `alpen_ol_tracker`) |
 | `EeAccountStateAtEpoch` | EE account state at a specific OL epoch |
 | `ExecBlockRecord` / `ExecBlockPayload` | Full block with metadata; raw payload bytes |
 | `Batch` / `BatchId` / `BatchStatus` | A batch, its deterministic id, and lifecycle state |
