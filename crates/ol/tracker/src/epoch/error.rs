@@ -1,7 +1,8 @@
 use std::result;
 
 use alpen_acct_runtime::AcctRuntimeError;
-use alpen_common::{OLClientError, StorageError};
+use alpen_common::StorageError;
+use alpen_ol_api::OLClientError;
 use strata_identifiers::Hash;
 use strata_snark_acct_runtime::ProgramError;
 use thiserror::Error;
@@ -20,7 +21,7 @@ pub enum OLTrackerError {
 
     /// OL client operation failed (recoverable - network/RPC issues)
     #[error("OL client error: {0}")]
-    OLClient(#[from] OLClientError),
+    OLEpochClient(#[from] OLClientError),
 
     /// Failed to build tracker state from storage data (recoverable - may succeed on retry)
     #[error("failed to build tracker state: {0}")]
@@ -66,7 +67,7 @@ impl OLTrackerError {
 
             // All others are potentially recoverable
             OLTrackerError::Storage(_)
-            | OLTrackerError::OLClient(_)
+            | OLTrackerError::OLEpochClient(_)
             | OLTrackerError::BuildStateFailed(_)
             | OLTrackerError::MissingBlock { .. }
             | OLTrackerError::Other(_) => true,

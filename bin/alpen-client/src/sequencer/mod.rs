@@ -18,12 +18,15 @@ mod services;
 
 use std::sync::Arc;
 
-use alpen_common::{require_latest_batch, BlockNumHash, ExecBlockStorage, SequencerOLClient};
+use alpen_common::{require_latest_batch, BlockNumHash, ExecBlockStorage};
 use alpen_database::{NodeStorage, SequencerDatabases, Stores};
 use alpen_engine_reth::{sync_chainstate_to_engine, AlpenRethExecEngine, AlpenRethPayloadEngine};
 use alpen_exec_chain::{init_exec_chain_state_from_storage, ExecChainState};
 use alpen_exex::{AccessedStateGenerator, StateDiffGenerator};
 use alpen_genesis::{ensure_batch_genesis, ensure_finalized_exec_chain_genesis};
+use alpen_ol_api::OLBlockClient;
+use alpen_ol_client::OLClientKind;
+use alpen_ol_tracker::{build_ol_chain_tracker, init_ol_chain_tracker_state, OLChainTrackerState};
 use alpen_reth_node::{
     AlpenEngineTypes, AlpenEthereumNode, AlpenGossipProtocolHandler, AlpenGossipState,
     AlpenNodeMode,
@@ -31,16 +34,14 @@ use alpen_reth_node::{
 use alpen_reth_rpc::AlpenFeeApiServer;
 use alpen_rpc_server::{AlpenEeRpcServer, EeRpcServer};
 use alpen_sequencer::{
-    block_builder_task, build_ol_chain_tracker, compose_policy, create_batch_builder,
-    create_batch_lifecycle_task, create_update_submitter_task, init_batch_builder_state,
-    init_lifecycle_state, init_ol_chain_tracker_state, or_sealing,
+    block_builder_task, compose_policy, create_batch_builder, create_batch_lifecycle_task,
+    create_update_submitter_task, init_batch_builder_state, init_lifecycle_state, or_sealing,
     sealing_policy::{
         block_count_data_provider::BlockCountDataProvider,
         max_value_policy::{MaxValueSealing, ValueAccumulatorPolicy},
         rotation_policy::{RotationDataProvider, RotationPolicy, SealOnRotation},
     },
     BatchBuilderEvent, BatchBuilderState, BatchLifecycleState, BlockBuilderConfig,
-    OLChainTrackerState,
 };
 use bitcoind_async_client::{
     corepc_types::bitcoin::{
@@ -69,7 +70,6 @@ use crate::{
     config::SequencerMode,
     gossip::GossipConfig,
     node::{LaunchedNode, NodeBootstrap},
-    ol::OLClientKind,
     sequencer::sealing_policy::da_size::{DaBatchSizePolicy, DaSizeProvider, MaxDaSizeSealing},
     service_executor::ServiceExecutor,
 };
@@ -183,7 +183,7 @@ pub(crate) fn sequencer_gossip_pubkey(privkey: &Buf32) -> eyre::Result<Buf32> {
 /// and batch lifecycle.
 async fn init_boot_state(
     storage: &NodeStorage,
-    ol_client: &(impl SequencerOLClient + Send + Sync),
+    ol_client: &impl OLBlockClient,
 ) -> eyre::Result<SequencerBootState> {
     let exec_chain = init_exec_chain_state_from_storage(storage)
         .instrument(info_span!("init_exec_chain", component = "alpen"))

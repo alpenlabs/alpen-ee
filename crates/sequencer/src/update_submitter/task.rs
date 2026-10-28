@@ -2,10 +2,9 @@
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use alpen_common::{
-    BatchId, BatchProver, BatchStatus, BatchStorage, ExecBlockStorage, OLFinalizedStatus,
-    SequencerOLClient,
-};
+use alpen_common::{BatchId, BatchProver, BatchStatus, BatchStorage, ExecBlockStorage};
+use alpen_ol_api::{OLBlockClient, OLSubmitClient};
+use alpen_ol_tracker::OLFinalizedStatus;
 use eyre::{eyre, Result};
 use strata_snark_acct_types::SnarkAccountUpdate;
 use tokio::{sync::watch, time};
@@ -67,7 +66,7 @@ pub async fn create_update_submitter_task<C, S, ES, P>(
     mut batch_ready_rx: watch::Receiver<Option<BatchId>>,
     mut ol_status_rx: watch::Receiver<OLFinalizedStatus>,
 ) where
-    C: SequencerOLClient + Send + Sync,
+    C: OLBlockClient + OLSubmitClient,
     S: BatchStorage,
     ES: ExecBlockStorage,
     P: BatchProver,
@@ -129,14 +128,14 @@ pub async fn create_update_submitter_task<C, S, ES, P>(
 /// batches in storage starting from the next expected sequence number. For each
 /// batch in `ProofReady` state, it builds and submits an update.
 async fn process_ready_batches(
-    ol_client: &(impl SequencerOLClient + Send + Sync),
+    ol_client: &(impl OLBlockClient + OLSubmitClient),
     batch_storage: &impl BatchStorage,
     exec_storage: &impl ExecBlockStorage,
     prover: &impl BatchProver,
     update_cache: &mut UpdateCache,
 ) -> Result<()> {
     // Get latest account state from OL to determine next expected seq_no
-    let account_state = ol_client.get_latest_account_state().await?;
+    let account_state = ol_client.latest_account_state().await?;
     debug!(?account_state, "Latest account state");
     let next_sequence_no = *account_state.seq_no.inner();
     // NOTE: ensure batch 0 (genesis batch) is never sent in an update.

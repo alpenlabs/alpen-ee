@@ -20,7 +20,9 @@ members = [
   "crates/exex",
   "crates/genesis",
   "crates/mdbx",
-  "crates/ol-tracker",
+  "crates/ol/api",
+  "crates/ol/client",
+  "crates/ol/tracker",
   "crates/params",
   "crates/primitives",
   "crates/proof/acct",
@@ -88,7 +90,9 @@ alpen-exec-chain = { path = "crates/exec-chain" }
 alpen-exex = { path = "crates/exex" }
 alpen-genesis = { path = "crates/genesis" }
 alpen-mdbx = { path = "crates/mdbx" }
-alpen-ol-tracker = { path = "crates/ol-tracker" }
+alpen-ol-api = { path = "crates/ol/api" }
+alpen-ol-client = { path = "crates/ol/client" }
+alpen-ol-tracker = { path = "crates/ol/tracker" }
 alpen-params = { path = "crates/params" }
 alpen-primitives = { path = "crates/primitives" }
 alpen-proof-acct = { path = "crates/proof/acct" }

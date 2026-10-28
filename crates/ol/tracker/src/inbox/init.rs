@@ -1,10 +1,11 @@
-use alpen_common::{ExecBlockRecord, ExecBlockStorage, SequencerOLClient};
+use alpen_common::{ExecBlockRecord, ExecBlockStorage};
+use alpen_ol_api::OLBlockClient;
 use eyre::eyre;
 use strata_identifiers::OLBlockCommitment;
 use tracing::error;
 
 use super::fetch::{fetch_blocks_after, Extension};
-use crate::OLChainTrackerState;
+use crate::inbox::OLChainTrackerState;
 
 /// Initializes tracker state by syncing from local storage and the OL client.
 ///
@@ -13,7 +14,7 @@ use crate::OLChainTrackerState;
 /// the tip keeps the tracker from asking the OL again for blocks the EE has already
 /// consumed. An OL node promoted from checkpoint sync can't serve blocks at or below its
 /// history anchor.
-pub async fn init_ol_chain_tracker_state<TStorage: ExecBlockStorage, TClient: SequencerOLClient>(
+pub async fn init_ol_chain_tracker_state<TStorage: ExecBlockStorage, TClient: OLBlockClient>(
     storage: &TStorage,
     exec_tip: &ExecBlockRecord,
     ol_client: &TClient,
@@ -113,14 +114,13 @@ mod tests {
     use super::*;
 
     mod init_ol_chain_tracker_state_tests {
-        use alpen_common::{
-            MockExecBlockStorage, MockSequencerOLClient, OLChainStatus, OLClientError,
-        };
+        use alpen_common::MockExecBlockStorage;
+        use alpen_ol_api::{MockOLBlockClient, OLChainStatus, OLClientError};
 
         use super::*;
-        use crate::ol_chain_tracker::test_utils::{
+        use crate::inbox::test_utils::{
             create_block_data_chain, create_mock_exec_record,
-            create_mock_exec_record_with_inbox_idx, make_block_link, make_block_with_id,
+            create_mock_exec_record_with_inbox_idx, make_block_header, make_block_with_id,
             make_chain_status,
         };
 
@@ -141,7 +141,7 @@ mod tests {
 
         /// Sets up mock OL client to return the given chain status.
         fn setup_mock_client_chain_status(
-            mock_client: &mut MockSequencerOLClient,
+            mock_client: &mut MockOLBlockClient,
             status: OLChainStatus,
         ) {
             mock_client
@@ -152,22 +152,22 @@ mod tests {
 
         /// Sets up mock OL client to return inbox messages for the given block data.
         fn setup_mock_client_inbox_messages(
-            mock_client: &mut MockSequencerOLClient,
-            block_data: Vec<alpen_common::OLBlockData>,
+            mock_client: &mut MockOLBlockClient,
+            block_data: Vec<alpen_ol_api::AccountBlockSummary>,
         ) {
             mock_client
-                .expect_get_inbox_messages()
+                .expect_account_block_summaries()
                 .times(1)
                 .returning(move |_, _| Ok(block_data.clone()));
         }
 
-        /// Sets up mock OL client to return the given block link.
+        /// Sets up mock OL client to return the given block header.
         fn setup_mock_client_block_link(
-            mock_client: &mut MockSequencerOLClient,
-            link: alpen_common::OLBlockLink,
+            mock_client: &mut MockOLBlockClient,
+            link: alpen_ol_api::OLBlockHeader,
         ) {
             mock_client
-                .expect_get_block_link()
+                .expect_block_header()
                 .withf(move |slot| *slot == link.commitment.slot())
                 .times(1)
                 .returning(move |_| Ok(link));
@@ -191,7 +191,7 @@ mod tests {
             let chain_status = make_chain_status(finalized_block);
 
             let mut mock_storage = MockExecBlockStorage::new();
-            let mut mock_client = MockSequencerOLClient::new();
+            let mut mock_client = MockOLBlockClient::new();
 
             setup_mock_storage_finalized(&mut mock_storage, exec_record.clone());
             setup_mock_client_chain_status(&mut mock_client, chain_status);
@@ -216,7 +216,7 @@ mod tests {
             let chain_status = make_chain_status(finalized_block);
 
             let mut mock_storage = MockExecBlockStorage::new();
-            let mut mock_client = MockSequencerOLClient::new();
+            let mut mock_client = MockOLBlockClient::new();
 
             setup_mock_storage_finalized(&mut mock_storage, exec_record.clone());
             setup_mock_client_chain_status(&mut mock_client, chain_status);
@@ -253,13 +253,13 @@ mod tests {
             let chain_status = make_chain_status(remote_finalized);
 
             let mut mock_storage = MockExecBlockStorage::new();
-            let mut mock_client = MockSequencerOLClient::new();
+            let mut mock_client = MockOLBlockClient::new();
 
             setup_mock_storage_finalized(&mut mock_storage, exec_record.clone());
             setup_mock_client_chain_status(&mut mock_client, chain_status);
             setup_mock_client_block_link(
                 &mut mock_client,
-                make_block_link(ol_blocks[0], local_finalized),
+                make_block_header(ol_blocks[0], local_finalized),
             );
             setup_mock_client_inbox_messages(&mut mock_client, block_data);
 
@@ -300,16 +300,16 @@ mod tests {
             let block_data = create_block_data_chain(&ol_blocks, 4);
 
             let mut mock_storage = MockExecBlockStorage::new();
-            let mut mock_client = MockSequencerOLClient::new();
+            let mut mock_client = MockOLBlockClient::new();
 
             setup_mock_storage_finalized(&mut mock_storage, finalized_record);
             setup_mock_client_chain_status(&mut mock_client, make_chain_status(remote_finalized));
             setup_mock_client_block_link(
                 &mut mock_client,
-                make_block_link(ol_blocks[0], tip_ol_block),
+                make_block_header(ol_blocks[0], tip_ol_block),
             );
             mock_client
-                .expect_get_inbox_messages()
+                .expect_account_block_summaries()
                 .withf(|min, max| *min == 11 && *max == 12)
                 .times(1)
                 .returning(move |_, _| Ok(block_data.clone()));
@@ -340,13 +340,13 @@ mod tests {
             let block_data = create_block_data_chain(&[remote_finalized], 0);
 
             let mut mock_storage = MockExecBlockStorage::new();
-            let mut mock_client = MockSequencerOLClient::new();
+            let mut mock_client = MockOLBlockClient::new();
 
             setup_mock_storage_finalized(&mut mock_storage, finalized_record);
             setup_mock_client_chain_status(&mut mock_client, make_chain_status(remote_finalized));
             setup_mock_client_block_link(
                 &mut mock_client,
-                make_block_link(remote_finalized, local_finalized),
+                make_block_header(remote_finalized, local_finalized),
             );
             setup_mock_client_inbox_messages(&mut mock_client, block_data);
 
@@ -370,7 +370,7 @@ mod tests {
             let exec_record = create_mock_exec_record(make_block_with_id(10, 10));
 
             let mut mock_storage = MockExecBlockStorage::new();
-            let mock_client = MockSequencerOLClient::new();
+            let mock_client = MockOLBlockClient::new();
 
             mock_storage
                 .expect_best_finalized_block()
@@ -402,7 +402,7 @@ mod tests {
             let chain_status = make_chain_status(remote_finalized);
 
             let mut mock_storage = MockExecBlockStorage::new();
-            let mut mock_client = MockSequencerOLClient::new();
+            let mut mock_client = MockOLBlockClient::new();
 
             setup_mock_storage_finalized(&mut mock_storage, exec_record.clone());
             setup_mock_client_chain_status(&mut mock_client, chain_status);
@@ -435,13 +435,13 @@ mod tests {
             let chain_status = make_chain_status(remote_finalized);
 
             let mut mock_storage = MockExecBlockStorage::new();
-            let mut mock_client = MockSequencerOLClient::new();
+            let mut mock_client = MockOLBlockClient::new();
 
             setup_mock_storage_finalized(&mut mock_storage, exec_record.clone());
             setup_mock_client_chain_status(&mut mock_client, chain_status);
             setup_mock_client_block_link(
                 &mut mock_client,
-                make_block_link(remote_finalized, remote_block_at_10),
+                make_block_header(remote_finalized, remote_block_at_10),
             );
 
             let result =
@@ -470,7 +470,7 @@ mod tests {
             let chain_status = make_chain_status(remote_finalized);
 
             let mut mock_storage = MockExecBlockStorage::new();
-            let mut mock_client = MockSequencerOLClient::new();
+            let mut mock_client = MockOLBlockClient::new();
 
             setup_mock_storage_finalized(&mut mock_storage, exec_record.clone());
             setup_mock_client_chain_status(&mut mock_client, chain_status);
@@ -494,7 +494,7 @@ mod tests {
             let exec_record = create_mock_exec_record(local_finalized);
 
             let mut mock_storage = MockExecBlockStorage::new();
-            let mut mock_client = MockSequencerOLClient::new();
+            let mut mock_client = MockOLBlockClient::new();
 
             setup_mock_storage_finalized(&mut mock_storage, exec_record.clone());
             mock_client
@@ -527,16 +527,16 @@ mod tests {
             let chain_status = make_chain_status(remote_finalized);
 
             let mut mock_storage = MockExecBlockStorage::new();
-            let mut mock_client = MockSequencerOLClient::new();
+            let mut mock_client = MockOLBlockClient::new();
 
             setup_mock_storage_finalized(&mut mock_storage, exec_record.clone());
             setup_mock_client_chain_status(&mut mock_client, chain_status);
             setup_mock_client_block_link(
                 &mut mock_client,
-                make_block_link(remote_finalized, local_finalized),
+                make_block_header(remote_finalized, local_finalized),
             );
             mock_client
-                .expect_get_inbox_messages()
+                .expect_account_block_summaries()
                 .returning(|_, _| Err(OLClientError::network("timeout fetching messages")));
 
             let result =

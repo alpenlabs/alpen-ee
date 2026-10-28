@@ -6,6 +6,7 @@ use alpen_chain_types::ExecBlockPackage;
 use alpen_common::{Clock, ExecBlockPayload, ExecBlockRecord, ExecBlockStorage, SystemClock};
 use alpen_engine_api::{EnginePayload, PayloadBuilderEngine};
 use alpen_exec_chain::ExecChainHandle;
+use alpen_ol_tracker::OLChainTrackerHandle;
 use alpen_params::AlpenSpecId;
 use eyre::Context;
 use strata_acct_types::{Hash, MessageEntry};
@@ -13,7 +14,7 @@ use strata_identifiers::{OLBlockCommitment, OLBlockId};
 use thiserror::Error;
 use tracing::{debug, error, warn};
 
-use crate::{block_builder::BlockBuilderConfig, ol_chain_tracker::OLChainTrackerHandle};
+use crate::block_builder::BlockBuilderConfig;
 
 /// Error type for block builder that distinguishes retriable from real errors.
 #[derive(Debug, Error)]

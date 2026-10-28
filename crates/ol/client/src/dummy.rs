@@ -4,20 +4,15 @@
 //! minimal valid responses. It's useful for testing EE-specific functionality
 //! in isolation without needing to run a full OL node.
 
-#[cfg(feature = "sequencer")]
-use alpen_common::{OLAccountStateView, OLBlockData, OLBlockLink, SequencerOLClient};
-use alpen_common::{OLChainStatus, OLClient, OLClientError, SnarkAccountEpochSummary};
-#[cfg(feature = "sequencer")]
-use alpen_proof_acct::EeAcctProgram;
+use alpen_ol_api::{
+    AccountBlockSummary, AccountEpochSummary, AccountState, OLBlockClient, OLBlockHeader,
+    OLChainStatus, OLClientError, OLEpochClient, OLSubmitClient,
+};
 use async_trait::async_trait;
 use strata_acct_types::Hash;
-use strata_identifiers::{Buf32, Epoch, OLBlockCommitment};
-#[cfg(feature = "sequencer")]
-use strata_identifiers::{L1Height, OLTxId};
-#[cfg(feature = "sequencer")]
+use strata_identifiers::{Buf32, Epoch, OLBlockCommitment, OLTxId};
 use strata_predicate::PredicateKey;
 use strata_primitives::EpochCommitment;
-#[cfg(feature = "sequencer")]
 use strata_snark_acct_types::{ProofState, Seqno, SnarkAccountUpdate};
 
 /// A dummy OL client that returns mock responses for testing.
@@ -25,11 +20,23 @@ use strata_snark_acct_types::{ProofState, Seqno, SnarkAccountUpdate};
 /// This client does not communicate with any real OL node. Instead, it returns
 /// minimal valid responses that allow the EE to function in isolation.
 #[derive(Debug)]
-pub(crate) struct DummyOLClient {
-    pub(crate) genesis_epoch: EpochCommitment,
+pub struct DummyOLClient {
+    genesis_epoch: EpochCommitment,
+    update_vk: Option<PredicateKey>,
 }
 
 impl DummyOLClient {
+    /// Creates a dummy client whose chain sits at `genesis_epoch`.
+    ///
+    /// `update_vk` is the account-update predicate key it reports. Only the
+    /// sequencer path reads it, so a full node passes `None`.
+    pub fn new(genesis_epoch: EpochCommitment, update_vk: Option<PredicateKey>) -> Self {
+        Self {
+            genesis_epoch,
+            update_vk,
+        }
+    }
+
     fn slot_to_block_commitment(&self, slot: u64) -> OLBlockCommitment {
         if slot == self.genesis_epoch.last_slot() {
             self.genesis_epoch.to_block_commitment()
@@ -40,7 +47,7 @@ impl DummyOLClient {
 }
 
 #[async_trait]
-impl OLClient for DummyOLClient {
+impl OLEpochClient for DummyOLClient {
     async fn chain_status(&self) -> Result<OLChainStatus, OLClientError> {
         Ok(OLChainStatus {
             tip: self.genesis_epoch.to_block_commitment(),
@@ -54,7 +61,10 @@ impl OLClient for DummyOLClient {
         Ok(self.genesis_epoch)
     }
 
-    async fn epoch_summary(&self, epoch: Epoch) -> Result<SnarkAccountEpochSummary, OLClientError> {
+    async fn account_epoch_summary(
+        &self,
+        epoch: Epoch,
+    ) -> Result<AccountEpochSummary, OLClientError> {
         let commitment = EpochCommitment::new(
             epoch,
             epoch as u64,
@@ -72,7 +82,7 @@ impl OLClient for DummyOLClient {
                 self.slot_to_block_commitment(prev_epoch as u64).blkid,
             )
         };
-        Ok(SnarkAccountEpochSummary::new(
+        Ok(AccountEpochSummary::new(
             commitment,
             prev,
             Hash::default(),
@@ -81,25 +91,17 @@ impl OLClient for DummyOLClient {
     }
 }
 
-// Only the sequencer path drives this trait, and answering
-// `get_latest_account_update_vk` needs the account proof program. Gating the
-// impl keeps that proving dependency out of a full-node-only build.
-#[cfg(feature = "sequencer")]
 #[async_trait]
-impl SequencerOLClient for DummyOLClient {
-    async fn chain_status(&self) -> Result<OLChainStatus, OLClientError> {
-        <Self as OLClient>::chain_status(self).await
-    }
-
-    async fn get_inbox_messages(
+impl OLBlockClient for DummyOLClient {
+    async fn account_block_summaries(
         &self,
         min_slot: u64,
         max_slot: u64,
-    ) -> Result<Vec<OLBlockData>, OLClientError> {
+    ) -> Result<Vec<AccountBlockSummary>, OLClientError> {
         let mut blocks = Vec::with_capacity((max_slot - min_slot + 1) as usize);
         for slot in min_slot..=max_slot {
             let commitment = self.slot_to_block_commitment(slot);
-            blocks.push(OLBlockData {
+            blocks.push(AccountBlockSummary {
                 commitment,
                 inbox_messages: vec![],
                 next_inbox_msg_idx: 0,
@@ -108,36 +110,33 @@ impl SequencerOLClient for DummyOLClient {
         Ok(blocks)
     }
 
-    async fn get_block_link(&self, slot: u64) -> Result<OLBlockLink, OLClientError> {
+    async fn block_header(&self, slot: u64) -> Result<OLBlockHeader, OLClientError> {
         let parent_slot = slot
             .checked_sub(1)
             .ok_or_else(|| OLClientError::rpc(format!("block at slot {slot} has no parent")))?;
-        Ok(OLBlockLink {
+        Ok(OLBlockHeader {
             commitment: self.slot_to_block_commitment(slot),
             parent_blkid: *self.slot_to_block_commitment(parent_slot).blkid(),
         })
     }
 
-    async fn get_latest_account_state(&self) -> Result<OLAccountStateView, OLClientError> {
+    async fn latest_account_state(&self) -> Result<AccountState, OLClientError> {
         let proof_state = ProofState::new(Hash::zero(), 0);
         let seq_no = Seqno::zero();
-        Ok(OLAccountStateView {
+        let update_vk = self
+            .update_vk
+            .clone()
+            .ok_or_else(|| OLClientError::rpc("dummy OL client has no account update key"))?;
+        Ok(AccountState {
             seq_no,
             proof_state,
+            update_vk,
         })
     }
+}
 
-    async fn get_latest_account_update_vk(&self) -> Result<PredicateKey, OLClientError> {
-        Ok(EeAcctProgram::test_predicate_key())
-    }
-
-    async fn get_asm_manifest_commitment(
-        &self,
-        l1_height: L1Height,
-    ) -> Result<Hash, OLClientError> {
-        Ok(Hash::from(u64_to_256(l1_height as u64)))
-    }
-
+#[async_trait]
+impl OLSubmitClient for DummyOLClient {
     async fn submit_update(&self, _update: SnarkAccountUpdate) -> Result<OLTxId, OLClientError> {
         Ok(OLTxId::default())
     }

@@ -35,7 +35,7 @@ Main components, for locating the code a finding touches:
 |-----------|-------------|---------------|
 | `alpen-client` | Node binary. Wires reth, the OL tracker and gossip, plus block building, batching, proving, DA and update submission in sequencer mode. | `bin/alpen-client` |
 | Alpen Reth node | Reth with the Alpen chainspec, a custom EVM with the bridge-out precompile (`0x54…0001`) and Schnorr verification precompile (`0x54…0002`), the `alpen_gossip` RLPx subprotocol, `alpen_*` RPC methods and a state-diff exex. | `crates/reth/*` |
-| OL tracker | Follows the paired OL node: epochs, checkpoints, finalization, inbox messages. | `crates/ol-tracker`, `bin/alpen-client/src/ol` |
+| OL tracker | Follows the paired OL node: epochs, checkpoints, finalization, inbox messages. | `crates/ol/{api,client,tracker}` |
 | Engine and exec chain | Drives the reth engine API and tracks the execution chain, including orphans. | `crates/engine/reth`, `crates/exec-chain` |
 | Block, chunk and batch assembly | Builds blocks, including deposit minting, and the chunk and batch packages the prover consumes. | `crates/block-assembly`, `crates/sequencer` |
 | Prover | Chunk and account (batch) proofs via SP1 remote proving, or a signature-based native backend for tests. | `bin/alpen-client/src/sequencer/prover`, `crates/proof/*`, `crates/chunk-runtime`, `crates/acct-runtime` |

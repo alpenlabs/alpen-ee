@@ -12,12 +12,15 @@
 
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc, time::Duration};
 
-use alpen_common::{BatchStorage, ChunkStorage, SequencerOLClient};
+use alpen_common::{BatchStorage, ChunkStorage};
+use alpen_ol_api::OLBlockClient;
+use alpen_ol_client::STARTUP_RPC_MAX_RETRIES;
 use alpen_params::{AlpenParams, AlpenSpecId};
 use alpen_proof_acct::process_ee_acct_update;
 use alpen_proof_chunk::process_ee_chunk;
 use eyre::Context;
 use k256::schnorr::SigningKey;
+use strata_common::retry::{policies::ExponentialBackoff, retry_with_backoff_async};
 use strata_paas::{Prover, ProverBuilder, ProverServiceBuilder};
 use strata_predicate::{PredicateKey, PredicateTypeId};
 use strata_primitives::buf::Buf32;
@@ -71,17 +74,23 @@ struct EeProvers {
 /// and hard-fails unless one of them derives the account predicate key the
 /// OL expects as its `update_vk`.
 pub(crate) async fn launch_validated_ee_batch_prover(
-    ol_client: &(impl SequencerOLClient + Send + Sync),
+    ol_client: &impl OLBlockClient,
     service_executor: &ServiceExecutor,
     builders: EeProverBuilders,
     stores: EeProverStores,
     backend: ProverBackendConfig,
     params: Arc<AlpenParams>,
 ) -> eyre::Result<Arc<PaasBatchProver>> {
-    let ol_account_update_vk = ol_client
-        .get_latest_account_update_vk()
-        .await
-        .context("failed to fetch OL account update_vk for prover validation")?;
+    // The OL node may still be booting, so this startup read retries.
+    let ol_account_update_vk = retry_with_backoff_async(
+        "ol_client_get_latest_account_update_vk",
+        STARTUP_RPC_MAX_RETRIES,
+        &ExponentialBackoff::default(),
+        || ol_client.latest_account_state(),
+    )
+    .await
+    .context("failed to fetch OL account update_vk for prover validation")?
+    .update_vk;
     let governing_version = governing_spec_version(stores.batch_storage.as_ref(), &params).await?;
     let provers = build_ee_provers(
         &builders,
@@ -262,7 +271,7 @@ async fn governing_spec_version(
 /// deliberately so. The two inputs are read at different freshness and move
 /// independently, so they disagree during any rotation, in both directions:
 ///
-/// - `get_latest_account_update_vk` reads OL's `Latest` tag, so the live key flips as soon as the
+/// - The OL account update key is read at OL's `Latest` tag, so the live key flips as soon as the
 ///   update carrying a rotation lands at the OL tip, while batches keep being sealed under the old
 ///   version until the rotation-consuming block's batch is sealed.
 /// - The sequencer builds ahead of OL, so it can seal batches under the new version before the

@@ -14,12 +14,16 @@
 
 use std::{future::Future, net::SocketAddr, path::Path, sync::Arc};
 
-use alpen_common::{chain_status_checked, BlockNumHash, ConsensusHeads, OLClient};
+use alpen_common::{BlockNumHash, ConsensusHeads};
 use alpen_database::{open_stores, NodeStorage};
 use alpen_engine_reth::{create_engine_control_task, AlpenRethExecEngine};
 use alpen_genesis::ensure_genesis_ee_account_state;
-use alpen_ol_tracker::init_ol_tracker_state;
+use alpen_ol_api::{chain_status_checked, OLEpochClient};
+use alpen_ol_client::{DummyOLClient, OLClientKind, RpcOLClient};
+use alpen_ol_tracker::{init_ol_tracker_state, start_ol_tracker_service, OLTrackerHandle};
 use alpen_params::AlpenParams;
+#[cfg(feature = "sequencer")]
+use alpen_proof_acct::EeAcctProgram;
 use alpen_reth_node::{AlpenEngineTypes, AlpenGossipEvent};
 use alpen_rpc_server::{
     get_or_create_jwt_secret, start_authenticated_rpc_server, AdminRpcServer, AlpenAdminRpcServer,
@@ -51,9 +55,7 @@ use crate::{
     config::{AdminRpcConfig, AlpenClientConfig, NodeMode, OlSource},
     full_node,
     gossip::{create_gossip_task, GossipConfig},
-    ol::{DummyOLClient, OLClientKind, RpcOLClient},
     service_executor::ServiceExecutor,
-    services,
 };
 
 pub(crate) async fn launch(
@@ -120,7 +122,7 @@ pub(crate) struct NodeBootstrap {
     /// Kept as the handle (not pre-extracted watchers) so each mode pulls
     /// exactly the watchers it needs, where it needs them — a full node
     /// never reads `ol_status_watcher` at all, for instance.
-    pub(crate) ol_tracker: services::ol_tracker::OLTrackerHandle,
+    pub(crate) ol_tracker: OLTrackerHandle,
     #[cfg(feature = "sequencer")]
     pub(crate) sequencer: sequencer::BootstrapResources,
 }
@@ -203,7 +205,7 @@ async fn bootstrap_node(
         .await
         .context("ol tracker state initialization should not fail")?;
 
-    let ol_tracker = services::ol_tracker::start_ol_tracker_service(
+    let ol_tracker = start_ol_tracker_service(
         ol_tracker_state,
         genesis_epoch.epoch(),
         storage.clone(),
@@ -362,7 +364,13 @@ async fn resolve_ol_client(
             use strata_primitives::EpochCommitment;
             let genesis_epoch = EpochCommitment::new(0, 0, OLBlockId::from(Buf32([1; 32])));
             info!(target: "alpen-client", component = "alpen", "Using dummy OL client (no real OL connection)");
-            OLClientKind::Dummy(DummyOLClient { genesis_epoch })
+            // Only the sequencer path reads the update key, and its value is
+            // the account proof program's test key.
+            #[cfg(feature = "sequencer")]
+            let update_vk = Some(EeAcctProgram::test_predicate_key());
+            #[cfg(not(feature = "sequencer"))]
+            let update_vk = None;
+            OLClientKind::Dummy(DummyOLClient::new(genesis_epoch, update_vk))
         }
         OlSource::Rpc { client_url } => {
             // A URL here means this node submits, so it needs the token that

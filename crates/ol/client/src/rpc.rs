@@ -1,6 +1,6 @@
-use alpen_common::{
-    OLAccountStateView, OLBlockData, OLBlockLink, OLChainStatus, OLClient, OLClientError,
-    SequencerOLClient, SnarkAccountEpochSummary, SnarkAccountUpdateInfo,
+use alpen_ol_api::{
+    AccountBlockSummary, AccountEpochSummary, AccountState, AccountUpdate, OLBlockClient,
+    OLBlockHeader, OLChainStatus, OLClientError, OLEpochClient, OLSubmitClient,
 };
 use async_trait::async_trait;
 use http::{header::AUTHORIZATION, HeaderMap, HeaderValue};
@@ -13,19 +13,16 @@ use strata_common::{
     },
     ws_client::{ManagedWsClient, WsClientConfig},
 };
-use strata_identifiers::{
-    AccountId, Epoch, EpochCommitment, Hash, L1Height, OLBlockCommitment, OLTxId,
-};
+use strata_identifiers::{AccountId, Epoch, EpochCommitment, Hash, OLBlockCommitment, OLTxId};
 use strata_ol_rpc_api::{OLClientRpcClient, OLFullNodeRpcClient, OLSubmitRpcClient};
 use strata_ol_rpc_types::{
     OLBlockTag, RpcOLTransaction, RpcSnarkAccountUpdate, RpcTransactionPayload, RpcTxConstraints,
 };
-use strata_predicate::PredicateKey;
 use strata_snark_acct_types::{ProofState, SnarkAccountUpdate};
 use tracing::info;
 
 /// Max retries for startup RPC calls where the OL node may still be booting.
-const STARTUP_RPC_MAX_RETRIES: u16 = 10;
+pub const STARTUP_RPC_MAX_RETRIES: u16 = 10;
 
 /// Number of OL slots to advance per `get_blocks_summaries` request.
 ///
@@ -60,7 +57,7 @@ fn inbox_slot_windows(min_slot: u64, max_slot: u64) -> Vec<(u64, u64)> {
 
 /// RPC-based OL client that communicates with an OL node via JSON-RPC.
 #[derive(Debug)]
-pub(crate) struct RpcOLClient {
+pub struct RpcOLClient {
     /// Own account id
     account_id: AccountId,
     /// RPC client used for read-only OL calls.
@@ -71,7 +68,7 @@ pub(crate) struct RpcOLClient {
 
 impl RpcOLClient {
     /// Creates a new [`RpcOLClient`] with the given account ID and RPC URL.
-    pub(crate) fn try_new(
+    pub fn try_new(
         account_id: AccountId,
         ol_rpc_url: impl Into<String>,
         ol_submit_url: Option<&str>,
@@ -183,7 +180,7 @@ impl RpcTransportClient {
 }
 
 #[async_trait]
-impl OLClient for RpcOLClient {
+impl OLEpochClient for RpcOLClient {
     async fn chain_status(&self) -> Result<OLChainStatus, OLClientError> {
         retry_with_backoff_async(
             "ol_client_chain_status",
@@ -215,7 +212,10 @@ impl OLClient for RpcOLClient {
         .await
     }
 
-    async fn epoch_summary(&self, epoch: Epoch) -> Result<SnarkAccountEpochSummary, OLClientError> {
+    async fn account_epoch_summary(
+        &self,
+        epoch: Epoch,
+    ) -> Result<AccountEpochSummary, OLClientError> {
         retry_with_backoff_async(
             "ol_client_epoch_summary",
             DEFAULT_ENGINE_CALL_MAX_RETRIES,
@@ -224,7 +224,7 @@ impl OLClient for RpcOLClient {
                 let epoch_summary =
                     call_read_rpc!(self, get_acct_epoch_summary(self.account_id, epoch))?;
 
-                let updates: Vec<SnarkAccountUpdateInfo> = epoch_summary
+                let updates: Vec<AccountUpdate> = epoch_summary
                     .update_inputs()
                     .iter()
                     .map(|u| {
@@ -235,7 +235,7 @@ impl OLClient for RpcOLClient {
                             .map(MessageEntry::try_from)
                             .collect::<Result<_, _>>()
                             .map_err(|e| OLClientError::rpc(e.to_string()))?;
-                        Ok(SnarkAccountUpdateInfo::new(
+                        Ok(AccountUpdate::new(
                             u.seq_no,
                             u.extra_data.0.clone(),
                             messages,
@@ -245,7 +245,7 @@ impl OLClient for RpcOLClient {
                     })
                     .collect::<Result<_, OLClientError>>()?;
 
-                Ok(SnarkAccountEpochSummary::new(
+                Ok(AccountEpochSummary::new(
                     epoch_summary.epoch_commitment(),
                     epoch_summary.prev_epoch_commitment(),
                     Hash::from(epoch_summary.final_state_root().0),
@@ -264,7 +264,7 @@ impl RpcOLClient {
         &self,
         min_slot: u64,
         max_slot: u64,
-    ) -> Result<Vec<OLBlockData>, OLClientError> {
+    ) -> Result<Vec<AccountBlockSummary>, OLClientError> {
         retry_with_backoff_async(
             "ol_client_get_inbox_messages",
             DEFAULT_ENGINE_CALL_MAX_RETRIES,
@@ -285,7 +285,7 @@ impl RpcOLClient {
                             .collect::<Result<_, _>>()
                             .map_err(|e| OLClientError::rpc(e.to_string()))?;
 
-                        Ok(OLBlockData {
+                        Ok(AccountBlockSummary {
                             commitment: block_summary.block_commitment,
                             inbox_messages,
                             next_inbox_msg_idx: block_summary.next_inbox_msg_idx,
@@ -301,16 +301,12 @@ impl RpcOLClient {
 }
 
 #[async_trait]
-impl SequencerOLClient for RpcOLClient {
-    async fn chain_status(&self) -> Result<OLChainStatus, OLClientError> {
-        <Self as OLClient>::chain_status(self).await
-    }
-
-    async fn get_inbox_messages(
+impl OLBlockClient for RpcOLClient {
+    async fn account_block_summaries(
         &self,
         min_slot: u64,
         max_slot: u64,
-    ) -> Result<Vec<OLBlockData>, OLClientError> {
+    ) -> Result<Vec<AccountBlockSummary>, OLClientError> {
         // Reject inverted ranges explicitly; the windowing below would otherwise
         // return an empty result, masking a caller bug.
         if min_slot > max_slot {
@@ -329,7 +325,7 @@ impl SequencerOLClient for RpcOLClient {
         Ok(blocks)
     }
 
-    async fn get_block_link(&self, slot: u64) -> Result<OLBlockLink, OLClientError> {
+    async fn block_header(&self, slot: u64) -> Result<OLBlockHeader, OLClientError> {
         retry_with_backoff_async(
             "ol_client_get_block_link",
             DEFAULT_ENGINE_CALL_MAX_RETRIES,
@@ -343,7 +339,7 @@ impl SequencerOLClient for RpcOLClient {
                     });
                 };
 
-                Ok(OLBlockLink {
+                Ok(OLBlockHeader {
                     commitment: OLBlockCommitment::new(header.slot(), header.blkid()),
                     parent_blkid: header.parent_blkid(),
                 })
@@ -352,62 +348,26 @@ impl SequencerOLClient for RpcOLClient {
         .await
     }
 
-    /// Retrieves latest account state in the OL Chain for this account.
-    async fn get_latest_account_state(&self) -> Result<OLAccountStateView, OLClientError> {
+    async fn latest_account_state(&self) -> Result<AccountState, OLClientError> {
         let snark_account_state = call_read_rpc!(
             self,
             get_snark_account_state_by_tag(self.account_id, OLBlockTag::Latest)
         )?
         .ok_or_else(|| OLClientError::Rpc("missing latest account state".into()))?;
 
-        Ok(OLAccountStateView {
+        Ok(AccountState {
             seq_no: snark_account_state.seq_no().into(),
             proof_state: ProofState::new(
                 snark_account_state.inner_state().0.into(),
                 snark_account_state.next_inbox_msg_idx(),
             ),
+            update_vk: snark_account_state.update_vk().clone(),
         })
     }
+}
 
-    async fn get_latest_account_update_vk(&self) -> Result<PredicateKey, OLClientError> {
-        retry_with_backoff_async(
-            "ol_client_get_latest_account_update_vk",
-            STARTUP_RPC_MAX_RETRIES,
-            &ExponentialBackoff::default(),
-            || async {
-                let snark_account_state = call_read_rpc!(
-                    self,
-                    get_snark_account_state_by_tag(self.account_id, OLBlockTag::Latest)
-                )?
-                .ok_or_else(|| OLClientError::Rpc("missing latest account state".into()))?;
-
-                Ok(snark_account_state.update_vk().clone())
-            },
-        )
-        .await
-    }
-
-    async fn get_asm_manifest_commitment(
-        &self,
-        l1_height: L1Height,
-    ) -> Result<Hash, OLClientError> {
-        retry_with_backoff_async(
-            "ol_client_get_asm_manifest_commitment",
-            DEFAULT_ENGINE_CALL_MAX_RETRIES,
-            &ExponentialBackoff::default(),
-            || async {
-                let commitment = call_read_rpc!(self, get_asm_manifest_commitment(l1_height))?;
-
-                commitment.map(|h| Hash::from(h.0)).ok_or_else(|| {
-                    OLClientError::rpc(format!(
-                        "missing L1 header commitment for L1 height {l1_height}"
-                    ))
-                })
-            },
-        )
-        .await
-    }
-
+#[async_trait]
+impl OLSubmitClient for RpcOLClient {
     async fn submit_update(&self, update: SnarkAccountUpdate) -> Result<OLTxId, OLClientError> {
         let operation = update.operation();
         let seq_no = operation.seq_no();
@@ -473,8 +433,8 @@ mod tests {
     use strata_identifiers::AccountId;
 
     use super::{
-        bearer_auth_headers, inbox_slot_windows, OLClientError, RpcOLClient, RpcTransportClient,
-        SequencerOLClient, INBOX_FETCH_SLOT_WINDOW,
+        bearer_auth_headers, inbox_slot_windows, OLBlockClient, OLClientError, RpcOLClient,
+        RpcTransportClient, INBOX_FETCH_SLOT_WINDOW,
     };
 
     #[test]
@@ -524,7 +484,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_inbox_messages_rejects_inverted_range() {
+    async fn account_block_summaries_rejects_inverted_range() {
         // Guarded before any network I/O, so a dummy URL is fine.
         let client = RpcOLClient::try_new(
             AccountId::new([0u8; 32]),
@@ -534,7 +494,7 @@ mod tests {
         )
         .unwrap();
         let err = client
-            .get_inbox_messages(21, 20)
+            .account_block_summaries(21, 20)
             .await
             .expect_err("inverted range should be rejected");
         assert!(matches!(

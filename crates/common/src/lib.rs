@@ -10,7 +10,6 @@ mod utils;
 #[cfg(feature = "test-utils")]
 pub use traits::{
     da::MockBatchDaProvider,
-    ol_client::{MockOLClient, MockSequencerOLClient},
     prover::MockBatchProver,
     storage::{
         batch_storage_test_fns, chunk_storage_test_fns, exec_block_storage_test_fns,
@@ -20,10 +19,6 @@ pub use traits::{
 };
 pub use traits::{
     da::{BatchDaProvider, DaStatus, HeaderSummaryProvider},
-    ol_client::{
-        chain_status_checked, get_inbox_messages_checked, OLAccountStateView, OLBlockData,
-        OLBlockLink, OLClient, OLClientError, SequencerOLClient,
-    },
     prover::{BatchProver, ProofGenerationStatus},
     storage::{
         require_best_ee_account_state, require_best_finalized_block, require_genesis_batch,
@@ -40,8 +35,6 @@ pub use types::{
     consensus_heads::ConsensusHeads,
     ee_account_state::EeAccountStateAtEpoch,
     exec_record::{ExecBlockPayload, ExecBlockRecord},
-    ol_account_epoch_summary::{SnarkAccountEpochSummary, SnarkAccountUpdateInfo},
-    ol_chain_status::{OLChainStatus, OLFinalizedStatus},
     prover::{Proof, ProofId},
     prover_task_key::{
         decode_batch_task_key, decode_chunk_task_key, encode_batch_task_key, encode_chunk_task_key,

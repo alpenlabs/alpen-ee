@@ -12,17 +12,22 @@ workspace = true
 alpen-acct-runtime.workspace = true
 alpen-acct-types.workspace = true
 alpen-common.workspace = true
+alpen-ol-api.workspace = true
+strata-acct-types.workspace = true
 strata-identifiers.workspace = true
 strata-service.workspace = true
 strata-snark-acct-runtime.workspace = true
 strata-snark-acct-types.workspace = true
 
 anyhow.workspace = true
+eyre.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+alpen-chain-types.workspace = true
+alpen-params.workspace = true
 alpen-common = { workspace = true, features = ["test-utils"] }
-strata-acct-types.workspace = true
+alpen-ol-api = { workspace = true, features = ["test-utils"] }

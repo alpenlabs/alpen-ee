@@ -2,7 +2,8 @@
 
 use alpen_acct_types::EeAccountState;
 use alpen_chain_types::{ExecBlockCommitment, ExecBlockPackage, ExecInputs, ExecOutputs};
-use alpen_common::{ExecBlockRecord, OLBlockData, OLBlockLink, OLChainStatus};
+use alpen_common::ExecBlockRecord;
+use alpen_ol_api::{AccountBlockSummary, OLBlockHeader, OLChainStatus};
 use alpen_params::AlpenSpecId;
 use strata_acct_types::{AccountId, BitcoinAmount, Hash, MessageEntry, MsgPayload};
 use strata_identifiers::{Buf32, EpochCommitment, OLBlockCommitment, OLBlockId};
@@ -49,22 +50,25 @@ pub(crate) fn make_chain_status(finalized: OLBlockCommitment) -> OLChainStatus {
     }
 }
 
-/// Helper to create OLBlockData for a block with messages.
+/// Helper to create AccountBlockSummary for a block with messages.
 pub(crate) fn make_block_data(
     block: OLBlockCommitment,
     messages: Vec<MessageEntry>,
     next_inbox_msg_idx: u64,
-) -> OLBlockData {
-    OLBlockData {
+) -> AccountBlockSummary {
+    AccountBlockSummary {
         commitment: block,
         inbox_messages: messages,
         next_inbox_msg_idx,
     }
 }
 
-/// Helper to create an OLBlockLink for a block and its parent.
-pub(crate) fn make_block_link(block: OLBlockCommitment, parent: OLBlockCommitment) -> OLBlockLink {
-    OLBlockLink {
+/// Helper to create an OLBlockHeader for a block and its parent.
+pub(crate) fn make_block_header(
+    block: OLBlockCommitment,
+    parent: OLBlockCommitment,
+) -> OLBlockHeader {
+    OLBlockHeader {
         commitment: block,
         parent_blkid: *parent.blkid(),
     }
@@ -83,12 +87,12 @@ pub(crate) fn create_ol_block_chain(base_slot: u64, count: usize) -> Vec<OLBlock
         .collect()
 }
 
-/// Creates OLBlockData for each block in the chain.
+/// Creates AccountBlockSummary for each block in the chain.
 /// Each block gets one message with value = slot * 100.
 pub(crate) fn create_block_data_chain(
     blocks: &[OLBlockCommitment],
     next_inbox_msg_idx: u64,
-) -> Vec<OLBlockData> {
+) -> Vec<AccountBlockSummary> {
     blocks
         .iter()
         .enumerate()

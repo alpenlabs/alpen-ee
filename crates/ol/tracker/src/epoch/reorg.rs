@@ -1,7 +1,8 @@
-use alpen_common::{chain_status_checked, EeAccountStateAtEpoch, OLChainStatus, OLClient, Storage};
+use alpen_common::{EeAccountStateAtEpoch, Storage};
+use alpen_ol_api::{chain_status_checked, OLChainStatus, OLEpochClient};
 use tracing::{debug, error, info, warn};
 
-use crate::{
+use crate::epoch::{
     error::{OLTrackerError, Result},
     state::{build_tracker_state, OLTrackerState},
 };
@@ -15,7 +16,7 @@ pub(crate) async fn find_fork_point<TStorage, TOLClient>(
 ) -> Result<Option<EeAccountStateAtEpoch>>
 where
     TStorage: Storage,
-    TOLClient: OLClient,
+    TOLClient: OLEpochClient,
 {
     if genesis_epoch > latest_confirmed_epoch {
         warn!(
@@ -30,7 +31,7 @@ where
         debug!(%current_epoch, "checking epoch for fork point");
 
         // Fetch the epoch summary to get the terminal block ID
-        let epoch_summary = ol_client.epoch_summary(current_epoch).await?;
+        let epoch_summary = ol_client.account_epoch_summary(current_epoch).await?;
         let terminal_blkid = epoch_summary.epoch().last_blkid();
 
         // Check if we have this epoch's terminal block in our storage
@@ -80,7 +81,7 @@ pub(crate) async fn handle_reorg<TStorage, TOLClient>(
 ) -> Result<()>
 where
     TStorage: Storage,
-    TOLClient: OLClient,
+    TOLClient: OLEpochClient,
 {
     let ol_status = chain_status_checked(ol_client).await?;
 
@@ -115,10 +116,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use alpen_common::{MockOLClient, MockStorage, OLBlockOrEpoch, OLClientError, StorageError};
+    use alpen_common::{MockStorage, OLBlockOrEpoch, StorageError};
+    use alpen_ol_api::{MockOLEpochClient, OLClientError};
 
     use super::*;
-    use crate::test_utils::*;
+    use crate::epoch::test_utils::*;
 
     mod find_fork_point_tests {
 
@@ -134,7 +136,7 @@ mod tests {
             let remote_chain = create_epochs(&[10, 11, 12, 99, 98, 99]);
 
             let mut mock_storage = MockStorage::new();
-            let mut mock_client = MockOLClient::new();
+            let mut mock_client = MockOLEpochClient::new();
 
             setup_mock_client_with_chain(&mut mock_client, remote_chain);
             setup_mock_storage_with_chain(&mut mock_storage, local_chain);
@@ -159,7 +161,7 @@ mod tests {
             let remote_chain = create_epochs(&[100, 101, 102, 103, 104, 105]);
 
             let mut mock_storage = MockStorage::new();
-            let mut mock_client = MockOLClient::new();
+            let mut mock_client = MockOLEpochClient::new();
 
             setup_mock_client_with_chain(&mut mock_client, remote_chain);
             setup_mock_storage_with_chain(&mut mock_storage, local_chain);
@@ -186,7 +188,7 @@ mod tests {
                 create_epochs(&[100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110]);
 
             let mut mock_storage = MockStorage::new();
-            let mut mock_client = MockOLClient::new();
+            let mut mock_client = MockOLEpochClient::new();
 
             setup_mock_storage_with_chain(&mut mock_storage, local_chain);
             setup_mock_client_with_chain(&mut mock_client, remote_chain);
@@ -211,7 +213,7 @@ mod tests {
             let remote_chain = create_epochs(&[100, 101, 102, 103, 104, 105]);
 
             let mut mock_storage = MockStorage::new();
-            let mut mock_client = MockOLClient::new();
+            let mut mock_client = MockOLEpochClient::new();
 
             setup_mock_storage_with_chain(&mut mock_storage, local_chain);
             setup_mock_client_with_chain(&mut mock_client, remote_chain);
@@ -226,16 +228,16 @@ mod tests {
         #[tokio::test]
         async fn test_propagates_client_error() {
             let mock_storage = MockStorage::new();
-            let mut mock_client = MockOLClient::new();
+            let mut mock_client = MockOLEpochClient::new();
 
             mock_client
-                .expect_epoch_summary()
+                .expect_account_epoch_summary()
                 .times(1)
                 .returning(|_| Err(OLClientError::network("test error")));
 
             let result = find_fork_point(&mock_storage, &mock_client, 100, 110).await;
 
-            assert!(matches!(result, Err(OLTrackerError::OLClient(_))));
+            assert!(matches!(result, Err(OLTrackerError::OLEpochClient(_))));
         }
 
         #[tokio::test]
@@ -244,7 +246,7 @@ mod tests {
                 create_epochs(&[100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110]);
 
             let mut mock_storage = MockStorage::new();
-            let mut mock_client = MockOLClient::new();
+            let mut mock_client = MockOLEpochClient::new();
 
             setup_mock_client_with_chain(&mut mock_client, remote_chain);
 
@@ -269,7 +271,7 @@ mod tests {
             let remote_chain = create_epochs(&[100]);
 
             let mut mock_storage = MockStorage::new();
-            let mut mock_client = MockOLClient::new();
+            let mut mock_client = MockOLEpochClient::new();
 
             setup_mock_client_with_chain(&mut mock_client, remote_chain);
             setup_mock_storage_with_chain(&mut mock_storage, local_chain);
@@ -287,7 +289,7 @@ mod tests {
             // Scenario: genesis_epoch > latest_confirmed_epoch (invalid/empty range)
             // This triggers the early return with warning log
             let mock_storage = MockStorage::new();
-            let mock_client = MockOLClient::new();
+            let mock_client = MockOLEpochClient::new();
 
             // No expectations needed - should return early
 
@@ -347,7 +349,7 @@ mod tests {
             // Expected:       Error propagated from OL client
 
             let mock_storage = MockStorage::new();
-            let mut mock_client = MockOLClient::new();
+            let mut mock_client = MockOLEpochClient::new();
 
             mock_client
                 .expect_chain_status()
@@ -377,7 +379,7 @@ mod tests {
             let chain = create_epochs(&[100, 101, 102, 103, 104, 105, 106, 107]);
 
             let mut mock_storage = MockStorage::new();
-            let mut mock_client = MockOLClient::new();
+            let mut mock_client = MockOLEpochClient::new();
 
             mock_client.expect_chain_status().times(1).returning(|| {
                 Ok(OLChainStatus {
@@ -451,7 +453,7 @@ mod tests {
             let remote_chain = create_epochs(&[100, 101, 112, 113, 114]);
 
             let mut mock_storage = MockStorage::new();
-            let mut mock_client = MockOLClient::new();
+            let mut mock_client = MockOLEpochClient::new();
 
             mock_client.expect_chain_status().times(1).returning(|| {
                 Ok(OLChainStatus {

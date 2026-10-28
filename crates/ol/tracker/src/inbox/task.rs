@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use alpen_common::{ExecBlockStorage, OLBlockData, OLFinalizedStatus, SequencerOLClient};
+use alpen_common::ExecBlockStorage;
+use alpen_ol_api::{AccountBlockSummary, OLBlockClient};
 use eyre::eyre;
 use strata_identifiers::OLBlockCommitment;
 use tokio::{
@@ -13,7 +14,7 @@ use super::{
     fetch::{fetch_blocks_after, Extension},
     state::OLChainTrackerState,
 };
-use crate::ol_chain_tracker::state::InboxMessages;
+use crate::{inbox::state::InboxMessages, OLFinalizedStatus};
 
 pub(crate) enum OLChainTrackerQuery {
     GetFinalizedBlock(oneshot::Sender<OLBlockCommitment>),
@@ -24,10 +25,7 @@ pub(crate) enum OLChainTrackerQuery {
     },
 }
 
-pub(crate) async fn ol_chain_tracker_task<
-    TClient: SequencerOLClient,
-    TStorage: ExecBlockStorage,
->(
+pub(crate) async fn ol_chain_tracker_task<TClient: OLBlockClient, TStorage: ExecBlockStorage>(
     mut chainstatus_rx: watch::Receiver<OLFinalizedStatus>,
     mut query_rx: mpsc::Receiver<OLChainTrackerQuery>,
     mut state: OLChainTrackerState,
@@ -74,14 +72,14 @@ fn handle_chain_query(state: &OLChainTrackerState, query: OLChainTrackerQuery) {
 async fn handle_chain_update(
     ol_finalized_status: OLFinalizedStatus,
     state: &mut OLChainTrackerState,
-    client: &impl SequencerOLClient,
+    client: &impl OLBlockClient,
     storage: &impl ExecBlockStorage,
 ) {
     // compare latest finalized block with local chain segment using db. get extend, revert info
     match track_ol_state(state, ol_finalized_status, client).await {
         Ok(TrackAction::Extend(ol_blocks)) => {
             // update tracker state with new blocks
-            for OLBlockData {
+            for AccountBlockSummary {
                 commitment,
                 inbox_messages,
                 next_inbox_msg_idx,
@@ -120,14 +118,14 @@ async fn handle_chain_update(
 
 #[derive(Debug)]
 enum TrackAction {
-    Extend(Vec<OLBlockData>),
+    Extend(Vec<AccountBlockSummary>),
     Reorg(OLBlockCommitment),
 }
 
 async fn track_ol_state(
     state: &OLChainTrackerState,
     ol_finalized_status: OLFinalizedStatus,
-    ol_client: &impl SequencerOLClient,
+    ol_client: &impl OLBlockClient,
 ) -> eyre::Result<TrackAction> {
     let best_ol_block = state.best_block();
     // We only care about finalized ol blocks to use as inputs to block assembly.
@@ -190,12 +188,13 @@ async fn handle_state_pruning(
 
 #[cfg(test)]
 mod tests {
-    use alpen_common::{MockExecBlockStorage, MockSequencerOLClient, OLClientError};
+    use alpen_common::MockExecBlockStorage;
+    use alpen_ol_api::{MockOLBlockClient, OLClientError};
 
     use super::*;
-    use crate::ol_chain_tracker::test_utils::{
+    use crate::inbox::test_utils::{
         create_block_data_chain, create_mock_exec_record, create_ol_block_chain, make_block,
-        make_block_link, make_block_with_id,
+        make_block_header, make_block_with_id,
     };
 
     mod track_ol_state_tests {
@@ -221,7 +220,7 @@ mod tests {
             let state = OLChainTrackerState::new_empty(block, 0);
             let ol_status = make_finalized_status(block);
 
-            let mock_client = MockSequencerOLClient::new();
+            let mock_client = MockOLBlockClient::new();
 
             let result = track_ol_state(&state, ol_status, &mock_client)
                 .await
@@ -248,7 +247,7 @@ mod tests {
             let state = OLChainTrackerState::new_empty(local_block, 0);
             let ol_status = make_finalized_status(remote_block);
 
-            let mock_client = MockSequencerOLClient::new();
+            let mock_client = MockOLBlockClient::new();
 
             let result = track_ol_state(&state, ol_status, &mock_client)
                 .await
@@ -275,7 +274,7 @@ mod tests {
             let state = OLChainTrackerState::new_empty(local_block, 0);
             let ol_status = make_finalized_status(remote_block);
 
-            let mock_client = MockSequencerOLClient::new();
+            let mock_client = MockOLBlockClient::new();
 
             let result = track_ol_state(&state, ol_status, &mock_client)
                 .await
@@ -308,15 +307,15 @@ mod tests {
             let ol_blocks = create_ol_block_chain(11, 3); // slots 11, 12, 13
             let block_data = create_block_data_chain(&ol_blocks, 0);
 
-            let mut mock_client = MockSequencerOLClient::new();
+            let mut mock_client = MockOLBlockClient::new();
             mock_client
-                .expect_get_block_link()
+                .expect_block_header()
                 .withf(|slot| *slot == 11)
                 .times(1)
-                .returning(move |_| Ok(make_block_link(make_block(11), local_block)));
+                .returning(move |_| Ok(make_block_header(make_block(11), local_block)));
             // The local block itself is not fetched again.
             mock_client
-                .expect_get_inbox_messages()
+                .expect_account_block_summaries()
                 .withf(|min, max| *min == 11 && *max == 13)
                 .times(1)
                 .returning(move |_, _| Ok(block_data.clone()));
@@ -355,11 +354,11 @@ mod tests {
             // Remote block at slot 11 builds on a different block at slot 10
             let remote_block_at_10 = make_block_with_id(10, 0xBB);
 
-            let mut mock_client = MockSequencerOLClient::new();
+            let mut mock_client = MockOLBlockClient::new();
             mock_client
-                .expect_get_block_link()
+                .expect_block_header()
                 .times(1)
-                .returning(move |_| Ok(make_block_link(make_block(11), remote_block_at_10)));
+                .returning(move |_| Ok(make_block_header(make_block(11), remote_block_at_10)));
 
             let result = track_ol_state(&state, ol_status, &mock_client)
                 .await
@@ -389,13 +388,13 @@ mod tests {
             let state = OLChainTrackerState::new_empty(local_block, 0);
             let ol_status = make_finalized_status(remote_block);
 
-            let mut mock_client = MockSequencerOLClient::new();
+            let mut mock_client = MockOLBlockClient::new();
             mock_client
-                .expect_get_block_link()
+                .expect_block_header()
                 .times(1)
-                .returning(move |_| Ok(make_block_link(make_block(11), local_block)));
+                .returning(move |_| Ok(make_block_header(make_block(11), local_block)));
             mock_client
-                .expect_get_inbox_messages()
+                .expect_account_block_summaries()
                 .times(1)
                 .returning(|_, _| Err(OLClientError::network("connection refused")));
 

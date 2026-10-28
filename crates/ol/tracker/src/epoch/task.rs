@@ -1,15 +1,13 @@
 use alpen_acct_runtime::process_update_unconditionally;
 use alpen_acct_types::EeAccountState;
-use alpen_common::{
-    chain_status_checked, EeAccountStateAtEpoch, OLChainStatus, OLClient, SnarkAccountUpdateInfo,
-    Storage,
-};
+use alpen_common::{EeAccountStateAtEpoch, Storage};
+use alpen_ol_api::{chain_status_checked, AccountUpdate, OLChainStatus, OLEpochClient};
 use strata_identifiers::{EpochCommitment, Hash};
 use strata_snark_acct_runtime::IInnerState;
 use strata_snark_acct_types::UpdateManifest;
 use tracing::{debug, error, info, warn};
 
-use crate::{
+use crate::epoch::{
     error::{OLTrackerError, Result},
     service::EpochTrackingMode,
     state::{build_tracker_state, OLTrackerState},
@@ -19,7 +17,7 @@ use crate::{
 pub(crate) struct OLEpochUpdates {
     pub epoch: EpochCommitment,
     pub final_state_root: Hash,
-    pub updates: Vec<SnarkAccountUpdateInfo>,
+    pub updates: Vec<AccountUpdate>,
 }
 
 #[derive(Debug)]
@@ -37,7 +35,7 @@ pub(crate) enum TrackOLAction {
 
 pub(crate) async fn track_ol_state(
     state: &OLTrackerState,
-    ol_client: &impl OLClient,
+    ol_client: &impl OLEpochClient,
     max_epochs_fetch: u32,
     tracking_mode: EpochTrackingMode,
 ) -> Result<TrackOLAction> {
@@ -113,7 +111,7 @@ pub(crate) async fn track_ol_state(
 
         for count in 1..=fetch_epochs_count {
             let epoch_num = best_local_epoch + count;
-            let epoch_summary = ol_client.epoch_summary(epoch_num).await?;
+            let epoch_summary = ol_client.account_epoch_summary(epoch_num).await?;
 
             // Verify chain continuity
             if epoch_summary.prev_epoch() != &expected_prev {
@@ -162,7 +160,7 @@ pub(crate) async fn track_ol_state(
 
 pub(crate) fn apply_epoch_operations(
     state: &mut EeAccountState,
-    epoch_operations: &[SnarkAccountUpdateInfo],
+    epoch_operations: &[AccountUpdate],
     final_state_root: Hash,
 ) -> Result<()> {
     for op in epoch_operations {
@@ -264,10 +262,10 @@ pub(crate) async fn handle_extend_ee_state<TStorage: Storage>(
 
 #[cfg(test)]
 mod tests {
-    use alpen_common::{MockOLClient, OLChainStatus, SnarkAccountEpochSummary};
+    use alpen_ol_api::{AccountEpochSummary, MockOLEpochClient, OLChainStatus};
 
     use super::*;
-    use crate::test_utils::*;
+    use crate::epoch::test_utils::*;
 
     mod track_ol_state_tests {
         use strata_acct_types::Hash;
@@ -284,7 +282,7 @@ mod tests {
             let chain = create_epochs(&[100, 101, 102, 103, 104, 105]);
             let state = OLTrackerState::new(chain[5].clone(), chain[0].clone());
 
-            let mut mock_client = MockOLClient::new();
+            let mut mock_client = MockOLEpochClient::new();
 
             mock_client.expect_chain_status().times(1).returning(|| {
                 Ok(OLChainStatus {
@@ -312,7 +310,7 @@ mod tests {
             let chain = create_epochs(&[100, 101, 102, 103]);
             let state = OLTrackerState::new(chain[3].clone(), chain[0].clone());
 
-            let mut mock_client = MockOLClient::new();
+            let mut mock_client = MockOLEpochClient::new();
 
             mock_client.expect_chain_status().times(1).returning(|| {
                 Ok(OLChainStatus {
@@ -340,7 +338,7 @@ mod tests {
             let chain = create_epochs(&[100, 101, 102, 103]);
             let state = OLTrackerState::new(chain[3].clone(), chain[0].clone());
 
-            let mut mock_client = MockOLClient::new();
+            let mut mock_client = MockOLEpochClient::new();
 
             mock_client.expect_chain_status().times(1).returning(|| {
                 Ok(OLChainStatus {
@@ -377,7 +375,7 @@ mod tests {
             let chain = create_epochs(&[100, 101, 102, 103]);
             let state = OLTrackerState::new(chain[3].clone(), chain[0].clone());
 
-            let mut mock_client = MockOLClient::new();
+            let mut mock_client = MockOLEpochClient::new();
 
             mock_client.expect_chain_status().times(1).returning(|| {
                 Ok(OLChainStatus {
@@ -409,7 +407,7 @@ mod tests {
 
             let state = OLTrackerState::new(local_chain[3].clone(), local_chain[0].clone());
 
-            let mut mock_client = MockOLClient::new();
+            let mut mock_client = MockOLEpochClient::new();
 
             mock_client.expect_chain_status().times(1).returning(|| {
                 Ok(OLChainStatus {
@@ -442,7 +440,7 @@ mod tests {
 
             let state = OLTrackerState::new(local_chain[2].clone(), local_chain[0].clone());
 
-            let mut mock_client = MockOLClient::new();
+            let mut mock_client = MockOLEpochClient::new();
 
             mock_client.expect_chain_status().times(1).returning(|| {
                 Ok(OLChainStatus {
@@ -482,7 +480,7 @@ mod tests {
 
             let state = OLTrackerState::new(local_chain[0].clone(), local_chain[0].clone());
 
-            let mut mock_client = MockOLClient::new();
+            let mut mock_client = MockOLEpochClient::new();
 
             mock_client.expect_chain_status().times(1).returning(|| {
                 Ok(OLChainStatus {
@@ -527,7 +525,7 @@ mod tests {
 
             let state = OLTrackerState::new(local_chain[0].clone(), local_chain[0].clone());
 
-            let mut mock_client = MockOLClient::new();
+            let mut mock_client = MockOLEpochClient::new();
 
             mock_client.expect_chain_status().times(1).returning(|| {
                 Ok(OLChainStatus {
@@ -570,7 +568,7 @@ mod tests {
             let local_chain = create_epochs(&[100, 101, 102]);
             let state = OLTrackerState::new(local_chain[2].clone(), local_chain[0].clone());
 
-            let mut mock_client = MockOLClient::new();
+            let mut mock_client = MockOLEpochClient::new();
 
             mock_client.expect_chain_status().times(1).returning(|| {
                 Ok(OLChainStatus {
@@ -582,10 +580,10 @@ mod tests {
             });
 
             mock_client
-                .expect_epoch_summary()
+                .expect_account_epoch_summary()
                 .withf(|epoch| *epoch == 3)
                 .returning(|_| {
-                    Ok(SnarkAccountEpochSummary::new(
+                    Ok(AccountEpochSummary::new(
                         make_epoch_commitment(3, 30, 103),
                         make_epoch_commitment(2, 20, 102),
                         Hash::default(),
@@ -594,10 +592,10 @@ mod tests {
                 });
 
             mock_client
-                .expect_epoch_summary()
+                .expect_account_epoch_summary()
                 .withf(|epoch| *epoch == 4)
                 .returning(|_| {
-                    Ok(SnarkAccountEpochSummary::new(
+                    Ok(AccountEpochSummary::new(
                         make_epoch_commitment(4, 40, 104),
                         make_epoch_commitment(3, 30, 103),
                         Hash::default(),
@@ -606,10 +604,10 @@ mod tests {
                 });
 
             mock_client
-                .expect_epoch_summary()
+                .expect_account_epoch_summary()
                 .withf(|epoch| *epoch == 5)
                 .returning(|_| {
-                    Ok(SnarkAccountEpochSummary::new(
+                    Ok(AccountEpochSummary::new(
                         make_epoch_commitment(5, 50, 105),
                         make_epoch_commitment(4, 40, 199), /* Discontinuity: prev doesn't match
                                                             * epoch 4 */
@@ -640,12 +638,12 @@ mod tests {
             let chain = create_epochs(&[100, 101, 102]);
             let state = OLTrackerState::new(chain[2].clone(), chain[0].clone());
 
-            let mut mock_client = MockOLClient::new();
+            let mut mock_client = MockOLEpochClient::new();
 
             mock_client
                 .expect_chain_status()
                 .times(1)
-                .returning(|| Err(alpen_common::OLClientError::network("network error")));
+                .returning(|| Err(alpen_ol_api::OLClientError::network("network error")));
 
             let result =
                 track_ol_state(&state, &mock_client, 10, EpochTrackingMode::Confirmed).await;
