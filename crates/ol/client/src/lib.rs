@@ -1,28 +1,25 @@
-//! OL client wrapper that supports both real RPC and dummy implementations.
+//! The EE's clients for the OL chain: a JSON-RPC client and a dummy for testing without an OL node.
 
 mod dummy;
 mod rpc;
 
-#[cfg(feature = "sequencer")]
-use alpen_ol_api::{OLAccountStateView, OLBlockData, OLBlockLink, SequencerOLClient};
-use alpen_ol_api::{OLChainStatus, OLClient, OLClientError, SnarkAccountEpochSummary};
+use alpen_ol_api::{
+    OLAccountStateView, OLBlockData, OLBlockLink, OLChainStatus, OLClient, OLClientError,
+    SequencerOLClient, SnarkAccountEpochSummary,
+};
 use async_trait::async_trait;
-use strata_identifiers::{Epoch, EpochCommitment};
-#[cfg(feature = "sequencer")]
-use strata_identifiers::{Hash, L1Height, OLTxId};
-#[cfg(feature = "sequencer")]
+use strata_identifiers::{Epoch, EpochCommitment, Hash, L1Height, OLTxId};
 use strata_predicate::PredicateKey;
-#[cfg(feature = "sequencer")]
 use strata_snark_acct_types::SnarkAccountUpdate;
 
-pub(crate) use self::{dummy::DummyOLClient, rpc::RpcOLClient};
+pub use self::{dummy::DummyOLClient, rpc::RpcOLClient};
 
 /// Enum wrapper that can hold either a real RPC client or a dummy client.
 ///
 /// This allows runtime selection between the two client types while maintaining
 /// the required trait bounds for use with the EE components.
 #[derive(Debug)]
-pub(crate) enum OLClientKind {
+pub enum OLClientKind {
     /// Real RPC client connecting to an OL node.
     Rpc(RpcOLClient),
     /// Dummy client for testing without an OL node.
@@ -53,8 +50,6 @@ impl OLClient for OLClientKind {
     }
 }
 
-// Gated because the dummy arm is: only the sequencer path calls this trait.
-#[cfg(feature = "sequencer")]
 #[async_trait]
 impl SequencerOLClient for OLClientKind {
     async fn chain_status(&self) -> Result<OLChainStatus, OLClientError> {

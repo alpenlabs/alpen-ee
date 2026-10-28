@@ -4,20 +4,15 @@
 //! minimal valid responses. It's useful for testing EE-specific functionality
 //! in isolation without needing to run a full OL node.
 
-#[cfg(feature = "sequencer")]
-use alpen_ol_api::{OLAccountStateView, OLBlockData, OLBlockLink, SequencerOLClient};
-use alpen_ol_api::{OLChainStatus, OLClient, OLClientError, SnarkAccountEpochSummary};
-#[cfg(feature = "sequencer")]
-use alpen_proof_acct::EeAcctProgram;
+use alpen_ol_api::{
+    OLAccountStateView, OLBlockData, OLBlockLink, OLChainStatus, OLClient, OLClientError,
+    SequencerOLClient, SnarkAccountEpochSummary,
+};
 use async_trait::async_trait;
 use strata_acct_types::Hash;
-use strata_identifiers::{Buf32, Epoch, OLBlockCommitment};
-#[cfg(feature = "sequencer")]
-use strata_identifiers::{L1Height, OLTxId};
-#[cfg(feature = "sequencer")]
+use strata_identifiers::{Buf32, Epoch, L1Height, OLBlockCommitment, OLTxId};
 use strata_predicate::PredicateKey;
 use strata_primitives::EpochCommitment;
-#[cfg(feature = "sequencer")]
 use strata_snark_acct_types::{ProofState, Seqno, SnarkAccountUpdate};
 
 /// A dummy OL client that returns mock responses for testing.
@@ -25,11 +20,23 @@ use strata_snark_acct_types::{ProofState, Seqno, SnarkAccountUpdate};
 /// This client does not communicate with any real OL node. Instead, it returns
 /// minimal valid responses that allow the EE to function in isolation.
 #[derive(Debug)]
-pub(crate) struct DummyOLClient {
-    pub(crate) genesis_epoch: EpochCommitment,
+pub struct DummyOLClient {
+    genesis_epoch: EpochCommitment,
+    update_vk: Option<PredicateKey>,
 }
 
 impl DummyOLClient {
+    /// Creates a dummy client whose chain sits at `genesis_epoch`.
+    ///
+    /// `update_vk` is the account-update predicate key it reports. Only the
+    /// sequencer path reads it, so a full node passes `None`.
+    pub fn new(genesis_epoch: EpochCommitment, update_vk: Option<PredicateKey>) -> Self {
+        Self {
+            genesis_epoch,
+            update_vk,
+        }
+    }
+
     fn slot_to_block_commitment(&self, slot: u64) -> OLBlockCommitment {
         if slot == self.genesis_epoch.last_slot() {
             self.genesis_epoch.to_block_commitment()
@@ -81,10 +88,6 @@ impl OLClient for DummyOLClient {
     }
 }
 
-// Only the sequencer path drives this trait, and answering
-// `get_latest_account_update_vk` needs the account proof program. Gating the
-// impl keeps that proving dependency out of a full-node-only build.
-#[cfg(feature = "sequencer")]
 #[async_trait]
 impl SequencerOLClient for DummyOLClient {
     async fn chain_status(&self) -> Result<OLChainStatus, OLClientError> {
@@ -128,7 +131,9 @@ impl SequencerOLClient for DummyOLClient {
     }
 
     async fn get_latest_account_update_vk(&self) -> Result<PredicateKey, OLClientError> {
-        Ok(EeAcctProgram::test_predicate_key())
+        self.update_vk
+            .clone()
+            .ok_or_else(|| OLClientError::rpc("dummy OL client has no account update key"))
     }
 
     async fn get_asm_manifest_commitment(

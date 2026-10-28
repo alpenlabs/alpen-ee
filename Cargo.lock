@@ -1270,6 +1270,7 @@ dependencies = [
  "alpen-exex",
  "alpen-genesis",
  "alpen-ol-api",
+ "alpen-ol-client",
  "alpen-ol-tracker",
  "alpen-params",
  "alpen-primitives",
@@ -1286,11 +1287,9 @@ dependencies = [
  "bitcoind-async-client",
  "clap",
  "eyre",
- "http 1.5.0",
  "jsonrpsee",
  "k256",
  "metrics",
- "proptest",
  "reth-chainspec",
  "reth-cli",
  "reth-cli-commands",
@@ -1317,8 +1316,6 @@ dependencies = [
  "strata-db-types",
  "strata-identifiers",
  "strata-logging",
- "strata-ol-rpc-api",
- "strata-ol-rpc-types",
  "strata-paas",
  "strata-predicate",
  "strata-primitives",
@@ -1680,6 +1677,28 @@ dependencies = [
  "strata-predicate",
  "strata-snark-acct-types",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "alpen-ol-client"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "alpen-ol-api",
+ "async-trait",
+ "http 1.5.0",
+ "jsonrpsee",
+ "proptest",
+ "ssz",
+ "strata-acct-types",
+ "strata-common",
+ "strata-identifiers",
+ "strata-ol-rpc-api",
+ "strata-ol-rpc-types",
+ "strata-predicate",
+ "strata-primitives",
+ "strata-snark-acct-types",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

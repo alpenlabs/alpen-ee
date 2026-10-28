@@ -35,7 +35,6 @@ mod config;
 mod full_node;
 mod gossip;
 mod node;
-mod ol;
 #[cfg(feature = "sequencer")]
 mod sequencer;
 mod service_executor;

@@ -25,6 +25,7 @@ use alpen_exec_chain::{init_exec_chain_state_from_storage, ExecChainState};
 use alpen_exex::{AccessedStateGenerator, StateDiffGenerator};
 use alpen_genesis::{ensure_batch_genesis, ensure_finalized_exec_chain_genesis};
 use alpen_ol_api::SequencerOLClient;
+use alpen_ol_client::OLClientKind;
 use alpen_reth_node::{
     AlpenEngineTypes, AlpenEthereumNode, AlpenGossipProtocolHandler, AlpenGossipState,
     AlpenNodeMode,
@@ -70,7 +71,6 @@ use crate::{
     config::SequencerMode,
     gossip::GossipConfig,
     node::{LaunchedNode, NodeBootstrap},
-    ol::OLClientKind,
     sequencer::sealing_policy::da_size::{DaBatchSizePolicy, DaSizeProvider, MaxDaSizeSealing},
     service_executor::ServiceExecutor,
 };

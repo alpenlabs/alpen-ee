@@ -69,6 +69,10 @@ sequencer = [
   "dep:thiserror",
   "dep:zkaleido",
   "dep:zkaleido-native-adapter",
+  "dep:async-trait",
+  "dep:strata-snark-acct-types",
+  "dep:strata-predicate",
+  "dep:ssz",
 ]
 # SP1 remote proving for the EE chunk + acct provers. Required for
 # production; native-only test builds can drop this feature. Only
@@ -106,6 +110,7 @@ alpen-exec-chain = { workspace = true, optional = true }
 alpen-exex = { workspace = true, optional = true }
 alpen-genesis.workspace = true
 alpen-ol-api.workspace = true
+alpen-ol-client.workspace = true
 alpen-ol-tracker.workspace = true
 alpen-params.workspace = true
 alpen-primitives = { workspace = true, optional = true }
@@ -120,7 +125,7 @@ alpen-witness = { workspace = true, optional = true }
 bitcoind-async-client = { workspace = true, optional = true }
 k256 = { workspace = true, optional = true }
 metrics = { workspace = true, optional = true }
-ssz.workspace = true
+ssz = { workspace = true, optional = true }
 strata-acct-types.workspace = true
 strata-btcio = { workspace = true, optional = true }
 strata-codec = { workspace = true, optional = true }
@@ -129,14 +134,12 @@ strata-config.workspace = true
 strata-db-types = { workspace = true, optional = true }
 strata-identifiers.workspace = true
 strata-logging.workspace = true
-strata-ol-rpc-api = { workspace = true, features = ["client"] }
-strata-ol-rpc-types.workspace = true
 strata-paas = { workspace = true, optional = true }
-strata-predicate.workspace = true
+strata-predicate = { workspace = true, optional = true }
 strata-primitives.workspace = true
 strata-service.workspace = true
 strata-snark-acct-runtime = { workspace = true, optional = true }
-strata-snark-acct-types.workspace = true
+strata-snark-acct-types = { workspace = true, optional = true }
 zkaleido = { workspace = true, optional = true }
 zkaleido-native-adapter = { workspace = true, optional = true }
 zkaleido-sp1-host = { workspace = true, optional = true }
@@ -145,10 +148,9 @@ zkaleido-sp1-host = { workspace = true, optional = true }
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 anyhow.workspace = true
-async-trait.workspace = true
+async-trait = { workspace = true, optional = true }
 clap.workspace = true
 eyre.workspace = true
-http.workspace = true
 jsonrpsee = { workspace = true, features = ["http-client", "server", "macros"] }
 reth-chainspec.workspace = true
 reth-cli.workspace = true
@@ -174,5 +176,4 @@ tracing.workspace = true
 zkaleido-sp1-groth16-verifier = { workspace = true, optional = true }
 
 [dev-dependencies]
-proptest.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

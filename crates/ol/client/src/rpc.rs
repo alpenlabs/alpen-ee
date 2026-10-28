@@ -60,7 +60,7 @@ fn inbox_slot_windows(min_slot: u64, max_slot: u64) -> Vec<(u64, u64)> {
 
 /// RPC-based OL client that communicates with an OL node via JSON-RPC.
 #[derive(Debug)]
-pub(crate) struct RpcOLClient {
+pub struct RpcOLClient {
     /// Own account id
     account_id: AccountId,
     /// RPC client used for read-only OL calls.
@@ -71,7 +71,7 @@ pub(crate) struct RpcOLClient {
 
 impl RpcOLClient {
     /// Creates a new [`RpcOLClient`] with the given account ID and RPC URL.
-    pub(crate) fn try_new(
+    pub fn try_new(
         account_id: AccountId,
         ol_rpc_url: impl Into<String>,
         ol_submit_url: Option<&str>,
