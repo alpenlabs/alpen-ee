@@ -18,12 +18,11 @@ use strata_ol_rpc_api::{OLClientRpcClient, OLFullNodeRpcClient, OLSubmitRpcClien
 use strata_ol_rpc_types::{
     OLBlockTag, RpcOLTransaction, RpcSnarkAccountUpdate, RpcTransactionPayload, RpcTxConstraints,
 };
-use strata_predicate::PredicateKey;
 use strata_snark_acct_types::{ProofState, SnarkAccountUpdate};
 use tracing::info;
 
 /// Max retries for startup RPC calls where the OL node may still be booting.
-const STARTUP_RPC_MAX_RETRIES: u16 = 10;
+pub const STARTUP_RPC_MAX_RETRIES: u16 = 10;
 
 /// Number of OL slots to advance per `get_blocks_summaries` request.
 ///
@@ -350,8 +349,7 @@ impl SequencerOLClient for RpcOLClient {
         .await
     }
 
-    /// Retrieves latest account state in the OL Chain for this account.
-    async fn get_latest_account_state(&self) -> Result<AccountState, OLClientError> {
+    async fn latest_account_state(&self) -> Result<AccountState, OLClientError> {
         let snark_account_state = call_read_rpc!(
             self,
             get_snark_account_state_by_tag(self.account_id, OLBlockTag::Latest)
@@ -364,25 +362,8 @@ impl SequencerOLClient for RpcOLClient {
                 snark_account_state.inner_state().0.into(),
                 snark_account_state.next_inbox_msg_idx(),
             ),
+            update_vk: snark_account_state.update_vk().clone(),
         })
-    }
-
-    async fn get_latest_account_update_vk(&self) -> Result<PredicateKey, OLClientError> {
-        retry_with_backoff_async(
-            "ol_client_get_latest_account_update_vk",
-            STARTUP_RPC_MAX_RETRIES,
-            &ExponentialBackoff::default(),
-            || async {
-                let snark_account_state = call_read_rpc!(
-                    self,
-                    get_snark_account_state_by_tag(self.account_id, OLBlockTag::Latest)
-                )?
-                .ok_or_else(|| OLClientError::Rpc("missing latest account state".into()))?;
-
-                Ok(snark_account_state.update_vk().clone())
-            },
-        )
-        .await
     }
 
     async fn submit_update(&self, update: SnarkAccountUpdate) -> Result<OLTxId, OLClientError> {

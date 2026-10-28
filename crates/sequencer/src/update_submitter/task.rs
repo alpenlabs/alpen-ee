@@ -135,7 +135,7 @@ async fn process_ready_batches(
     update_cache: &mut UpdateCache,
 ) -> Result<()> {
     // Get latest account state from OL to determine next expected seq_no
-    let account_state = ol_client.get_latest_account_state().await?;
+    let account_state = ol_client.latest_account_state().await?;
     debug!(?account_state, "Latest account state");
     let next_sequence_no = *account_state.seq_no.inner();
     // NOTE: ensure batch 0 (genesis batch) is never sent in an update.

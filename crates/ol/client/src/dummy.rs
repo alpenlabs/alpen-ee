@@ -121,19 +121,18 @@ impl SequencerOLClient for DummyOLClient {
         })
     }
 
-    async fn get_latest_account_state(&self) -> Result<AccountState, OLClientError> {
+    async fn latest_account_state(&self) -> Result<AccountState, OLClientError> {
         let proof_state = ProofState::new(Hash::zero(), 0);
         let seq_no = Seqno::zero();
+        let update_vk = self
+            .update_vk
+            .clone()
+            .ok_or_else(|| OLClientError::rpc("dummy OL client has no account update key"))?;
         Ok(AccountState {
             seq_no,
             proof_state,
+            update_vk,
         })
-    }
-
-    async fn get_latest_account_update_vk(&self) -> Result<PredicateKey, OLClientError> {
-        self.update_vk
-            .clone()
-            .ok_or_else(|| OLClientError::rpc("dummy OL client has no account update key"))
     }
 
     async fn submit_update(&self, _update: SnarkAccountUpdate) -> Result<OLTxId, OLClientError> {

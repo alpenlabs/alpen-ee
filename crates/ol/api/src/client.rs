@@ -68,6 +68,8 @@ pub struct AccountState {
     pub seq_no: Seqno,
     /// State stored in Account in OL.
     pub proof_state: ProofState,
+    /// Predicate key that the account's next update must satisfy.
+    pub update_vk: PredicateKey,
 }
 
 /// Client interface for sequencer-specific OL chain interactions.
@@ -98,11 +100,8 @@ pub trait SequencerOLClient {
     /// block bodies at or below the parent's slot.
     async fn get_block_link(&self, slot: u64) -> Result<OLBlockHeader, OLClientError>;
 
-    /// Retrieves latest account state in the OL Chain for this account.
-    async fn get_latest_account_state(&self) -> Result<AccountState, OLClientError>;
-
-    /// Retrieves the latest account-update predicate key committed in OL.
-    async fn get_latest_account_update_vk(&self) -> Result<PredicateKey, OLClientError>;
+    /// Retrieves this account's state at the OL chain's `Latest` block.
+    async fn latest_account_state(&self) -> Result<AccountState, OLClientError>;
 
     /// Submits an account update with proof to the OL chain sequencer.
     ///

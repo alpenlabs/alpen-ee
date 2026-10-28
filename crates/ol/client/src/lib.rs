@@ -9,10 +9,12 @@ use alpen_ol_api::{
 };
 use async_trait::async_trait;
 use strata_identifiers::{Epoch, EpochCommitment, OLTxId};
-use strata_predicate::PredicateKey;
 use strata_snark_acct_types::SnarkAccountUpdate;
 
-pub use self::{dummy::DummyOLClient, rpc::RpcOLClient};
+pub use self::{
+    dummy::DummyOLClient,
+    rpc::{RpcOLClient, STARTUP_RPC_MAX_RETRIES},
+};
 
 /// Enum wrapper that can hold either a real RPC client or a dummy client.
 ///
@@ -77,17 +79,10 @@ impl SequencerOLClient for OLClientKind {
         }
     }
 
-    async fn get_latest_account_state(&self) -> Result<AccountState, OLClientError> {
+    async fn latest_account_state(&self) -> Result<AccountState, OLClientError> {
         match self {
-            Self::Rpc(client) => client.get_latest_account_state().await,
-            Self::Dummy(client) => client.get_latest_account_state().await,
-        }
-    }
-
-    async fn get_latest_account_update_vk(&self) -> Result<PredicateKey, OLClientError> {
-        match self {
-            Self::Rpc(client) => client.get_latest_account_update_vk().await,
-            Self::Dummy(client) => client.get_latest_account_update_vk().await,
+            Self::Rpc(client) => client.latest_account_state().await,
+            Self::Dummy(client) => client.latest_account_state().await,
         }
     }
 
