@@ -8,7 +8,7 @@ use alpen_ol_api::{
     SequencerOLClient, SnarkAccountEpochSummary,
 };
 use async_trait::async_trait;
-use strata_identifiers::{Epoch, EpochCommitment, Hash, L1Height, OLTxId};
+use strata_identifiers::{Epoch, EpochCommitment, OLTxId};
 use strata_predicate::PredicateKey;
 use strata_snark_acct_types::SnarkAccountUpdate;
 
@@ -88,16 +88,6 @@ impl SequencerOLClient for OLClientKind {
         match self {
             Self::Rpc(client) => client.get_latest_account_update_vk().await,
             Self::Dummy(client) => client.get_latest_account_update_vk().await,
-        }
-    }
-
-    async fn get_asm_manifest_commitment(
-        &self,
-        l1_height: L1Height,
-    ) -> Result<Hash, OLClientError> {
-        match self {
-            Self::Rpc(client) => client.get_asm_manifest_commitment(l1_height).await,
-            Self::Dummy(client) => client.get_asm_manifest_commitment(l1_height).await,
         }
     }
 

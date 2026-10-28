@@ -10,7 +10,7 @@ use alpen_ol_api::{
 };
 use async_trait::async_trait;
 use strata_acct_types::Hash;
-use strata_identifiers::{Buf32, Epoch, L1Height, OLBlockCommitment, OLTxId};
+use strata_identifiers::{Buf32, Epoch, OLBlockCommitment, OLTxId};
 use strata_predicate::PredicateKey;
 use strata_primitives::EpochCommitment;
 use strata_snark_acct_types::{ProofState, Seqno, SnarkAccountUpdate};
@@ -134,13 +134,6 @@ impl SequencerOLClient for DummyOLClient {
         self.update_vk
             .clone()
             .ok_or_else(|| OLClientError::rpc("dummy OL client has no account update key"))
-    }
-
-    async fn get_asm_manifest_commitment(
-        &self,
-        l1_height: L1Height,
-    ) -> Result<Hash, OLClientError> {
-        Ok(Hash::from(u64_to_256(l1_height as u64)))
     }
 
     async fn submit_update(&self, _update: SnarkAccountUpdate) -> Result<OLTxId, OLClientError> {

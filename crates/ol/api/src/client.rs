@@ -1,8 +1,6 @@
 use async_trait::async_trait;
 use strata_acct_types::MessageEntry;
-use strata_identifiers::{
-    Epoch, EpochCommitment, Hash, L1Height, OLBlockCommitment, OLBlockId, OLTxId,
-};
+use strata_identifiers::{Epoch, EpochCommitment, OLBlockCommitment, OLBlockId, OLTxId};
 use strata_predicate::PredicateKey;
 use strata_snark_acct_types::{ProofState, Seqno, SnarkAccountUpdate};
 use thiserror::Error;
@@ -104,12 +102,6 @@ pub trait SequencerOLClient {
 
     /// Retrieves the latest account-update predicate key committed in OL.
     async fn get_latest_account_update_vk(&self) -> Result<PredicateKey, OLClientError>;
-
-    /// Retrieves the canonical ASM manifest commitment for an L1 block height.
-    ///
-    /// The returned hash is the exact MMR leaf value used by OL ledger-ref verification.
-    async fn get_asm_manifest_commitment(&self, l1_height: L1Height)
-        -> Result<Hash, OLClientError>;
 
     /// Submits an account update with proof to the OL chain sequencer.
     ///

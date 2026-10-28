@@ -13,9 +13,7 @@ use strata_common::{
     },
     ws_client::{ManagedWsClient, WsClientConfig},
 };
-use strata_identifiers::{
-    AccountId, Epoch, EpochCommitment, Hash, L1Height, OLBlockCommitment, OLTxId,
-};
+use strata_identifiers::{AccountId, Epoch, EpochCommitment, Hash, OLBlockCommitment, OLTxId};
 use strata_ol_rpc_api::{OLClientRpcClient, OLFullNodeRpcClient, OLSubmitRpcClient};
 use strata_ol_rpc_types::{
     OLBlockTag, RpcOLTransaction, RpcSnarkAccountUpdate, RpcTransactionPayload, RpcTxConstraints,
@@ -382,27 +380,6 @@ impl SequencerOLClient for RpcOLClient {
                 .ok_or_else(|| OLClientError::Rpc("missing latest account state".into()))?;
 
                 Ok(snark_account_state.update_vk().clone())
-            },
-        )
-        .await
-    }
-
-    async fn get_asm_manifest_commitment(
-        &self,
-        l1_height: L1Height,
-    ) -> Result<Hash, OLClientError> {
-        retry_with_backoff_async(
-            "ol_client_get_asm_manifest_commitment",
-            DEFAULT_ENGINE_CALL_MAX_RETRIES,
-            &ExponentialBackoff::default(),
-            || async {
-                let commitment = call_read_rpc!(self, get_asm_manifest_commitment(l1_height))?;
-
-                commitment.map(|h| Hash::from(h.0)).ok_or_else(|| {
-                    OLClientError::rpc(format!(
-                        "missing L1 header commitment for L1 height {l1_height}"
-                    ))
-                })
             },
         )
         .await
