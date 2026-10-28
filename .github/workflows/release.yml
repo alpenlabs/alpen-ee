@@ -2,6 +2,10 @@
 # dev, attaches them to the tag's GitHub Release and then copies them to S3.
 # dev is only for local runs and CI, so it gets no released guests.
 #
+# Every tag comes from its release line's branch: v0.4.0-rc.1, v0.4.0 and
+# v0.4.1 all point at commits on releases/v0.4.x, and main is never tagged.
+# docs/releasing.md has the full process.
+#
 # Releases are immutable once published, so the release is created as a draft,
 # every network attaches its files, and it is only published once it holds
 # exactly those files and the tag still points at the commit they were built
@@ -33,7 +37,17 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: params
+          sparse-checkout: |
+            params
+            .github/scripts
+
+      # Before the draft exists, so a tag off its line's branch publishes nothing.
+      - name: Check tag is on its release branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: python3 .github/scripts/guest_publish.py branch
 
       - name: List networks
         id: networks
