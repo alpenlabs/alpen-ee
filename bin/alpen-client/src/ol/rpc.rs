@@ -7,12 +7,7 @@ use http::{header::AUTHORIZATION, HeaderMap, HeaderValue};
 use jsonrpsee::http_client::{HttpClient, HttpClientBuilder};
 use ssz::Encode;
 use strata_acct_types::MessageEntry;
-use strata_common::{
-    retry::{
-        policies::ExponentialBackoff, retry_with_backoff_async, DEFAULT_ENGINE_CALL_MAX_RETRIES,
-    },
-    ws_client::{ManagedWsClient, WsClientConfig},
-};
+use strata_common::ws_client::{ManagedWsClient, WsClientConfig};
 use strata_identifiers::{
     AccountId, Epoch, EpochCommitment, Hash, L1Height, OLBlockCommitment, OLTxId,
 };
@@ -21,11 +16,20 @@ use strata_ol_rpc_types::{
     OLBlockTag, RpcOLTransaction, RpcSnarkAccountUpdate, RpcTransactionPayload, RpcTxConstraints,
 };
 use strata_predicate::PredicateKey;
+use strata_retry::{retry_with_backoff_async, ExponentialBackoff};
 use strata_snark_acct_types::{ProofState, SnarkAccountUpdate};
 use tracing::info;
 
+/// Max retries for OL RPC calls.
+const RPC_MAX_RETRIES: u16 = 4;
+
 /// Max retries for startup RPC calls where the OL node may still be booting.
 const STARTUP_RPC_MAX_RETRIES: u16 = 10;
+
+/// Returns the backoff for OL RPC calls: 1.5 s at first, then 1.5x per retry.
+fn rpc_backoff() -> ExponentialBackoff {
+    ExponentialBackoff::new(1_500, 15, 10, None)
+}
 
 /// Number of OL slots to advance per `get_blocks_summaries` request.
 ///
@@ -187,8 +191,8 @@ impl OLClient for RpcOLClient {
     async fn chain_status(&self) -> Result<OLChainStatus, OLClientError> {
         retry_with_backoff_async(
             "ol_client_chain_status",
-            DEFAULT_ENGINE_CALL_MAX_RETRIES,
-            &ExponentialBackoff::default(),
+            RPC_MAX_RETRIES,
+            &rpc_backoff(),
             || async {
                 let status = call_read_rpc!(self, chain_status())?;
 
@@ -207,7 +211,7 @@ impl OLClient for RpcOLClient {
         retry_with_backoff_async(
             "ol_client_account_genesis_epoch",
             STARTUP_RPC_MAX_RETRIES,
-            &ExponentialBackoff::default(),
+            &rpc_backoff(),
             || async {
                 call_read_rpc!(self, get_account_genesis_epoch_commitment(self.account_id))
             },
@@ -218,8 +222,8 @@ impl OLClient for RpcOLClient {
     async fn epoch_summary(&self, epoch: Epoch) -> Result<SnarkAccountEpochSummary, OLClientError> {
         retry_with_backoff_async(
             "ol_client_epoch_summary",
-            DEFAULT_ENGINE_CALL_MAX_RETRIES,
-            &ExponentialBackoff::default(),
+            RPC_MAX_RETRIES,
+            &rpc_backoff(),
             || async {
                 let epoch_summary =
                     call_read_rpc!(self, get_acct_epoch_summary(self.account_id, epoch))?;
@@ -267,8 +271,8 @@ impl RpcOLClient {
     ) -> Result<Vec<OLBlockData>, OLClientError> {
         retry_with_backoff_async(
             "ol_client_get_inbox_messages",
-            DEFAULT_ENGINE_CALL_MAX_RETRIES,
-            &ExponentialBackoff::default(),
+            RPC_MAX_RETRIES,
+            &rpc_backoff(),
             || async {
                 let block_summaries = call_read_rpc!(
                     self,
@@ -332,8 +336,8 @@ impl SequencerOLClient for RpcOLClient {
     async fn get_block_link(&self, slot: u64) -> Result<OLBlockLink, OLClientError> {
         retry_with_backoff_async(
             "ol_client_get_block_link",
-            DEFAULT_ENGINE_CALL_MAX_RETRIES,
-            &ExponentialBackoff::default(),
+            RPC_MAX_RETRIES,
+            &rpc_backoff(),
             || async {
                 let headers = call_read_rpc!(self, get_headers_in_range(slot, slot))?;
                 let [header] = headers.as_slice() else {
@@ -373,7 +377,7 @@ impl SequencerOLClient for RpcOLClient {
         retry_with_backoff_async(
             "ol_client_get_latest_account_update_vk",
             STARTUP_RPC_MAX_RETRIES,
-            &ExponentialBackoff::default(),
+            &rpc_backoff(),
             || async {
                 let snark_account_state = call_read_rpc!(
                     self,
@@ -393,8 +397,8 @@ impl SequencerOLClient for RpcOLClient {
     ) -> Result<Hash, OLClientError> {
         retry_with_backoff_async(
             "ol_client_get_asm_manifest_commitment",
-            DEFAULT_ENGINE_CALL_MAX_RETRIES,
-            &ExponentialBackoff::default(),
+            RPC_MAX_RETRIES,
+            &rpc_backoff(),
             || async {
                 let commitment = call_read_rpc!(self, get_asm_manifest_commitment(l1_height))?;
 
@@ -442,8 +446,8 @@ impl SequencerOLClient for RpcOLClient {
 
         let txid = retry_with_backoff_async(
             "ol_client_submit_update",
-            DEFAULT_ENGINE_CALL_MAX_RETRIES,
-            &ExponentialBackoff::default(),
+            RPC_MAX_RETRIES,
+            &rpc_backoff(),
             || async { call_submit_rpc!(self, submit_transaction(tx.clone())) },
         )
         .await?;
