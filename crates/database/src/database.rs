@@ -3,11 +3,12 @@ use alpen_common::{
     AccessedStateRecord, Batch, BatchId, BatchStatus, Chunk, ChunkId, ChunkStatus,
     EeAccountStateAtEpoch, ExecBlockRecord,
 };
+use alpen_da_l1_extraction::RecoveredDaBlob;
 use strata_acct_types::Hash;
 use strata_db_macros::gen_proxy;
-use strata_identifiers::{EpochCommitment, OLBlockId};
+use strata_identifiers::{EpochCommitment, L1Height, OLBlockId};
 
-use crate::{DbError, DbResult};
+use crate::error::{DbError, DbResult, RecoveredDaDbError, RecoveredDaDbResult};
 
 /// Database interface for EE node account state management.
 #[gen_proxy(error = DbError, tracing_component = "storage:ee_node")]
@@ -155,4 +156,39 @@ pub(crate) trait NodeDb: Send + Sync + 'static {
 
 pub(crate) mod ops {
     pub(crate) use super::NodeDbProxy as NodeOps;
+}
+
+/// Database operations for recovered EE DA blobs.
+#[gen_proxy(
+    error = RecoveredDaDbError,
+    tracing_component = "storage:ee_recovered_da"
+)]
+pub trait RecoveredDaDatabase: Send + Sync + 'static {
+    /// Stores recovered blobs atomically.
+    ///
+    /// Inputs have already been authenticated and decoded by L1 extraction.
+    /// The database canonically encodes each blob for persistence. Repeating an
+    /// identical blob is a no-op; changing a blob under the same sequence and
+    /// commit transaction ID is an error.
+    fn put(&self, recovered_blobs: Vec<RecoveredDaBlob>) -> RecoveredDaDbResult<()>;
+
+    /// Returns the contiguous recovered-blob prefix beginning at `first_update_seq_no`.
+    ///
+    /// Only blobs completed at or below `recovered_l1_frontier` are eligible.
+    /// Ordering is by update sequence number, then commit transaction ID, and
+    /// duplicate candidates for an eligible sequence are preserved. The read
+    /// stops at the first sequence with no eligible candidate.
+    fn get_contiguous_from(
+        &self,
+        first_update_seq_no: u64,
+        recovered_l1_frontier: L1Height,
+    ) -> RecoveredDaDbResult<Vec<RecoveredDaBlob>>;
+
+    /// Removes recovered blobs with sequence numbers below `update_seq_no`.
+    ///
+    /// The boundary is exclusive.
+    fn prune_before(&self, update_seq_no: u64) -> RecoveredDaDbResult<()>;
+
+    /// Removes every recovered blob.
+    fn clear(&self) -> RecoveredDaDbResult<()>;
 }

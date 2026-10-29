@@ -13,11 +13,13 @@ mod storage;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_db;
 
-pub use error::{DbError, DbResult};
+pub use database::RecoveredDaDatabase;
+pub use error::{DbError, DbResult, RecoveredDaDbError, RecoveredDaDbResult};
 #[cfg(feature = "test-utils")]
 pub use init::open_da_ops;
 pub use init::{
-    create_ee_envs, open_stores, BroadcastDbOps, ChunkedEnvelopeOps, SequencerDatabases, Stores,
+    create_ee_envs, open_recovered_da_db, open_stores, BroadcastDbOps, ChunkedEnvelopeOps,
+    RecoveredDaDbOps, SequencerDatabases, Stores,
 };
 pub use mdbxdb::{DaContextDbMdbx, NodeDbMdbx, ProverDbMdbx, ProverTaskKey, WitnessDbMdbx};
 pub use serialization_types::{BatchTaskKey, ChunkTaskKey};
