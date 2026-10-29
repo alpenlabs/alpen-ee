@@ -82,7 +82,8 @@ pub async fn build_next_exec_block<E: PayloadBuilderEngine>(
         account_state.pending_inputs(),
         max_deposits_per_block,
         next_deposit_idx,
-    );
+    )
+    .context("build_next_exec_block: failed to extract consumed inputs")?;
     let processed = consumed.processed();
     let ConsumedInputs {
         deposits,

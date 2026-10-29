@@ -5,7 +5,7 @@
 
 use alloy_consensus::BlockBody;
 use alpen_chain_types::ExecInputs;
-use alpen_primitives::{sats_to_gwei, subject_to_address};
+use alpen_primitives::DepositMint;
 use reth_ethereum_primitives::{Block, TransactionSigned};
 use reth_primitives_traits::RecoveredBlock;
 
@@ -31,9 +31,9 @@ pub(crate) fn recover_block(block: EvmBlock) -> Result<RecoveredBlock<Block>, Ev
 /// Any reordering will cause validation to fail.
 ///
 /// # Mapping
-/// - `Withdrawal.address` ← last 20 bytes of `SubjectDepositData.dest` (SubjectId)
-/// - `Withdrawal.amount` ← `SubjectDepositData.value` in Gwei
-/// - `Withdrawal.index` and `Withdrawal.validator_index` are ignored (not meaningful for deposits)
+/// Each withdrawal's address and amount must equal the [`DepositMint`] of the deposit at
+/// the same position. `Withdrawal.index` and `Withdrawal.validator_index` are ignored, as
+/// they are not meaningful for deposits.
 pub(crate) fn validate_deposits_against_block(
     body: &BlockBody<TransactionSigned>,
     inputs: &ExecInputs,
@@ -61,16 +61,10 @@ pub(crate) fn validate_deposits_against_block(
         .zip(subject_deposits.iter())
         .enumerate()
     {
-        // Convert SubjectId to Address - returns None if first 12 bytes aren't zero
-        let expected_address = subject_to_address(&deposit.dest())
-            .ok_or_else(|| EvmEnvError::InvalidDepositAddress(deposit.dest()))?;
-
-        // Convert satoshis to gwei (1 sat = 10 gwei, per 1 BTC = 10^8 sats = 10^9 gwei)
-        let expected_amount = sats_to_gwei(deposit.value().to_sat())
+        let expected = DepositMint::from_deposit(&deposit.dest(), deposit.value())
             .ok_or(EvmEnvError::DepositAmountOverflow { index })?;
 
-        // Validate address and amount match
-        if withdrawal.address != expected_address || withdrawal.amount != expected_amount {
+        if withdrawal.address != expected.address() || withdrawal.amount != expected.amount_gwei() {
             return Err(EvmEnvError::DepositMismatch { index });
         }
 
@@ -85,6 +79,7 @@ pub(crate) fn validate_deposits_against_block(
 mod tests {
     use alloy_eips::eip4895::Withdrawal;
     use alpen_chain_types::{ExecInputs, SubjectDepositData};
+    use alpen_primitives::subject_to_address_unchecked;
     use revm_primitives::Address;
     use strata_acct_types::{BitcoinAmount, SubjectId};
 
@@ -96,7 +91,7 @@ mod tests {
         let mut subject_bytes = [0u8; 32];
         subject_bytes[31] = 0x42; // Last byte of address
         let subject_id = SubjectId::new(subject_bytes);
-        let expected_address = subject_to_address(&subject_id).expect("valid subject ID");
+        let expected_address = subject_to_address_unchecked(&subject_id);
 
         // Create a block body with matching withdrawal
         let body = BlockBody {
@@ -159,8 +154,8 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_deposits_invalid_subject_id() {
-        // Invalid subject ID with non-zero padding in first 12 bytes
+    fn test_validate_deposits_non_zero_padding_truncates() {
+        // Verification truncates non-zero padding, the same as block assembly.
         let subject_id = SubjectId::new([0xff; 32]);
 
         // Create a block body
@@ -178,14 +173,12 @@ mod tests {
             ),
         };
 
-        // Create deposit with invalid subject ID
         let mut inputs = ExecInputs::new_empty();
         let deposit = SubjectDepositData::new(subject_id, BitcoinAmount::try_from(10).unwrap());
         inputs.add_subject_deposit(deposit);
 
-        // Should fail - invalid subject ID
         let result = validate_deposits_against_block(&body, &inputs);
-        assert!(matches!(result, Err(EvmEnvError::InvalidDepositAddress(_))));
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -193,7 +186,7 @@ mod tests {
         let mut subject_bytes = [0u8; 32];
         subject_bytes[31] = 0x42;
         let subject_id = SubjectId::new(subject_bytes);
-        let expected_address = subject_to_address(&subject_id).expect("valid subject ID");
+        let expected_address = subject_to_address_unchecked(&subject_id);
 
         // Create a block body with wrong amount
         let body = BlockBody {

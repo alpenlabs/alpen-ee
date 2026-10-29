@@ -4,10 +4,11 @@ use alloy_primitives::B256;
 use alpen_acct_types::{PendingInputEntry, UpdateExtraData};
 use alpen_engine_api::{DepositInfo, EnginePayload, PayloadBuildAttributes, PayloadBuilderEngine};
 use alpen_params::AlpenSpecId;
-use alpen_primitives::subject_to_address_unchecked;
+use alpen_primitives::{subject_to_address, DepositMint};
+use eyre::eyre;
 use strata_acct_types::Hash;
 use strata_predicate::PredicateKey;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// Entries the next block drains from the account's pending-input queue.
 pub(crate) struct ConsumedInputs {
@@ -33,11 +34,13 @@ impl ConsumedInputs {
 ///
 /// Deposits are taken up to `max_deposits`. A `PredicateRotation` is drained
 /// too but ends the block, so nothing queued after it is taken.
+///
+/// Fails if a deposit's amount overflows gwei.
 pub(crate) fn extract_consumed_inputs(
     pending_inputs: &[PendingInputEntry],
     max_deposits: NonZero<u8>,
     next_deposit_idx: u64,
-) -> ConsumedInputs {
+) -> eyre::Result<ConsumedInputs> {
     let mut deposits = Vec::new();
     let mut new_predicate = None;
 
@@ -47,11 +50,20 @@ pub(crate) fn extract_consumed_inputs(
         }
         match entry {
             PendingInputEntry::Deposit(data) => {
-                deposits.push(DepositInfo::new(
-                    next_deposit_idx + deposits.len() as u64,
-                    subject_to_address_unchecked(&data.dest()),
-                    data.value(),
-                ));
+                let deposit_idx = next_deposit_idx + deposits.len() as u64;
+                let dest = data.dest();
+                let amount = data.value();
+                let mint = DepositMint::from_deposit(&dest, amount)
+                    .ok_or_else(|| eyre!("deposit {deposit_idx} of {amount:?} overflows gwei"))?;
+                if subject_to_address(&dest).is_none() {
+                    warn!(
+                        deposit_idx,
+                        ?dest,
+                        address = %mint.address(),
+                        "deposit subject has non-zero padding, minting to its last 20 bytes"
+                    );
+                }
+                deposits.push(DepositInfo::new(deposit_idx, mint));
             }
             PendingInputEntry::PredicateRotation(key) => {
                 new_predicate = Some(key.clone());
@@ -60,10 +72,10 @@ pub(crate) fn extract_consumed_inputs(
         }
     }
 
-    ConsumedInputs {
+    Ok(ConsumedInputs {
         deposits,
         new_predicate,
-    }
+    })
 }
 
 /// Builds the block payload.
@@ -91,7 +103,7 @@ pub(crate) async fn build_exec_payload<E: PayloadBuilderEngine>(
             %parent,
             deposit_index,
             address = %deposit.address(),
-            amount_sat = deposit.amount().to_sat(),
+            amount_gwei = deposit.amount_gwei(),
             "selected deposit for EE payload",
         );
     }
@@ -152,13 +164,27 @@ mod tests {
 
         let inputs = vec![make_deposit(subject_bytes, 1000)];
         let consumed =
-            extract_consumed_inputs(&inputs, NonZero::new(10).unwrap(), next_deposit_idx);
+            extract_consumed_inputs(&inputs, NonZero::new(10).unwrap(), next_deposit_idx)
+                .expect("amounts fit in gwei");
         let deposits = &consumed.deposits;
 
         assert_eq!(deposits.len(), 1);
         assert_eq!(consumed.processed(), 1);
         assert_eq!(deposits[0].address(), Address::from([0xaa; 20]));
         assert_eq!(deposits[0].idx(), 5);
+    }
+
+    #[test]
+    fn extract_consumed_inputs_truncates_non_zero_padding() {
+        let mut subject_bytes = [0xff; 32];
+        subject_bytes[12..32].copy_from_slice(&[0xaa; 20]);
+
+        let inputs = vec![make_deposit(subject_bytes, 1000)];
+        let consumed = extract_consumed_inputs(&inputs, NonZero::new(10).unwrap(), 0)
+            .expect("amounts fit in gwei");
+
+        assert_eq!(consumed.processed(), 1);
+        assert_eq!(consumed.deposits[0].address(), Address::from([0xaa; 20]));
     }
 
     #[test]
@@ -185,17 +211,18 @@ mod tests {
         let max = NonZero::new(3).unwrap();
         let next_deposit_idx = 9;
 
-        let consumed = extract_consumed_inputs(&inputs, max, next_deposit_idx);
+        let consumed =
+            extract_consumed_inputs(&inputs, max, next_deposit_idx).expect("amounts fit in gwei");
         let deposits = &consumed.deposits;
 
         assert_eq!(deposits.len(), 3);
         assert_eq!(consumed.processed(), 3);
         // Verify order is preserved (first 3)
-        assert_eq!(deposits[0].amount(), BitcoinAmount::try_from(1000).unwrap());
+        assert_eq!(deposits[0].amount_gwei(), 10_000);
         assert_eq!(deposits[0].idx(), 9);
-        assert_eq!(deposits[1].amount(), BitcoinAmount::try_from(2000).unwrap());
+        assert_eq!(deposits[1].amount_gwei(), 20_000);
         assert_eq!(deposits[1].idx(), 10);
-        assert_eq!(deposits[2].amount(), BitcoinAmount::try_from(3000).unwrap());
+        assert_eq!(deposits[2].amount_gwei(), 30_000);
         assert_eq!(deposits[2].idx(), 11);
     }
 
@@ -211,14 +238,12 @@ mod tests {
             make_deposit([0x02; 32], 2000),
         ];
 
-        let consumed = extract_consumed_inputs(&inputs, NonZero::new(10).unwrap(), 0);
+        let consumed = extract_consumed_inputs(&inputs, NonZero::new(10).unwrap(), 0)
+            .expect("amounts fit in gwei");
 
         // The deposit after the rotation is never extracted in this block.
         assert_eq!(consumed.deposits.len(), 1);
-        assert_eq!(
-            consumed.deposits[0].amount(),
-            BitcoinAmount::try_from(1000).unwrap()
-        );
+        assert_eq!(consumed.deposits[0].amount_gwei(), 10_000);
         // But the rotation itself is drained alongside the deposit before it.
         assert_eq!(consumed.processed(), 2);
         assert_eq!(consumed.new_predicate, Some(PredicateKey::always_accept()));
@@ -233,7 +258,8 @@ mod tests {
             make_rotation(),
         ];
 
-        let consumed = extract_consumed_inputs(&inputs, NonZero::new(2).unwrap(), 0);
+        let consumed = extract_consumed_inputs(&inputs, NonZero::new(2).unwrap(), 0)
+            .expect("amounts fit in gwei");
 
         assert_eq!(consumed.deposits.len(), 2);
         assert_eq!(consumed.processed(), 2);
@@ -241,7 +267,8 @@ mod tests {
         assert_eq!(consumed.new_predicate, None);
 
         // With room to spare the same queue does reach it.
-        let consumed = extract_consumed_inputs(&inputs, NonZero::new(3).unwrap(), 0);
+        let consumed = extract_consumed_inputs(&inputs, NonZero::new(3).unwrap(), 0)
+            .expect("amounts fit in gwei");
         assert_eq!(consumed.new_predicate, Some(PredicateKey::always_accept()));
     }
 }

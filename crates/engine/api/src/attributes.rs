@@ -1,6 +1,6 @@
 use alloy_primitives::{Address, B256};
 use alpen_params::AlpenSpecId;
-use strata_acct_types::BitcoinAmount;
+use alpen_primitives::DepositMint;
 
 /// Inputs to control evm block builder.
 #[derive(Debug, Clone)]
@@ -52,19 +52,13 @@ impl PayloadBuildAttributes {
 pub struct DepositInfo {
     /// Unique index for this deposit.
     idx: u64,
-    /// Address inside evm chain where the deposit should be minted to.
-    address: Address,
-    /// Amount that has been deposited.
-    amount: BitcoinAmount,
+    /// What the deposit mints in the EVM.
+    mint: DepositMint,
 }
 
 impl DepositInfo {
-    pub fn new(idx: u64, address: Address, amount: BitcoinAmount) -> Self {
-        Self {
-            idx,
-            address,
-            amount,
-        }
+    pub fn new(idx: u64, mint: DepositMint) -> Self {
+        Self { idx, mint }
     }
 
     pub fn idx(&self) -> u64 {
@@ -72,10 +66,10 @@ impl DepositInfo {
     }
 
     pub fn address(&self) -> Address {
-        self.address
+        self.mint.address()
     }
 
-    pub fn amount(&self) -> BitcoinAmount {
-        self.amount
+    pub fn amount_gwei(&self) -> u64 {
+        self.mint.amount_gwei()
     }
 }

@@ -12,7 +12,6 @@ use alpen_engine_api::{
     EnginePayload, ExecutionEngine, ExecutionEngineError, PayloadBuildAttributes,
     PayloadBuilderEngine,
 };
-use alpen_primitives::sats_to_gwei;
 use alpen_reth_node::{AlpenBuiltPayload, AlpenEngineTypes, AlpenPayloadAttributes};
 use async_trait::async_trait;
 use eyre::{eyre, Context};
@@ -111,18 +110,15 @@ impl AlpenRethPayloadEngine {
         let withdrawals = build_attrs
             .deposits()
             .iter()
-            .map(|deposit| {
-                Ok::<Withdrawal, eyre::Error>(Withdrawal {
-                    // Alpen uses the Withdrawal type to transfer deposits into the EVM state, not
-                    // for validator withdrawals.
-                    index: deposit.idx(),
-                    validator_index: 0,
-                    address: deposit.address(),
-                    amount: sats_to_gwei(deposit.amount().to_sat())
-                        .ok_or(eyre!("invalid deposit amount"))?,
-                })
+            .map(|deposit| Withdrawal {
+                // Alpen uses the Withdrawal type to transfer deposits into the EVM state, not
+                // for validator withdrawals.
+                index: deposit.idx(),
+                validator_index: 0,
+                address: deposit.address(),
+                amount: deposit.amount_gwei(),
             })
-            .collect::<Result<Vec<Withdrawal>, _>>()?;
+            .collect::<Vec<Withdrawal>>();
         for (deposit_index, withdrawal) in withdrawals.iter().enumerate() {
             info!(
                 deposit_index,

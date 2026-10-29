@@ -30,8 +30,10 @@ pub fn subject_to_address(subject: &SubjectId) -> Option<Address> {
 /// Extracts the last 20 bytes of the 32-byte [`SubjectId`] as an EVM address,
 /// without checking if the first 12 bytes are zero.
 ///
-/// Use this only when you are certain the [`SubjectId`] represents a valid EVM address,
-/// or when you explicitly want to ignore non-zero padding bytes.
+/// [`DepositMint`] uses this to pick the address a deposit mints to. A deposit with
+/// non-zero padding still mints to the last 20 bytes.
+///
+/// [`DepositMint`]: crate::DepositMint
 ///
 /// See also [`subject_to_address`] for a validating version.
 pub fn subject_to_address_unchecked(subject: &SubjectId) -> Address {

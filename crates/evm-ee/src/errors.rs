@@ -6,7 +6,6 @@ use alpen_primitives::WithdrawalIntentExtractionError;
 use reth_consensus::ConsensusError;
 use reth_evm::execute::BlockExecutionError;
 use revm_primitives::B256;
-use strata_acct_types::SubjectId;
 use thiserror::Error;
 
 /// Why an EVM block failed one of the environment's checks or its execution.
@@ -51,10 +50,6 @@ pub enum EvmEnvError {
     /// The block's deposit withdrawals and the input deposits differ in count.
     #[error("block has {withdrawals} deposit withdrawals, inputs have {deposits} deposits")]
     DepositCountMismatch { deposits: usize, withdrawals: usize },
-
-    /// A deposit's destination is not an EVM address.
-    #[error("deposit destination {0:?} is not an EVM address")]
-    InvalidDepositAddress(SubjectId),
 
     /// A deposit's amount does not fit in gwei.
     #[error("deposit {index} amount overflows gwei")]
