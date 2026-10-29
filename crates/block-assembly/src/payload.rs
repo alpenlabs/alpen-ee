@@ -53,7 +53,7 @@ pub(crate) fn extract_consumed_inputs(
                 let deposit_idx = next_deposit_idx + deposits.len() as u64;
                 let dest = data.dest();
                 let amount = data.value();
-                let mint = DepositMint::new(&dest, amount)
+                let mint = DepositMint::from_deposit(&dest, amount)
                     .ok_or_else(|| eyre!("deposit {deposit_idx} of {amount:?} overflows gwei"))?;
                 if subject_to_address(&dest).is_none() {
                     warn!(

@@ -61,7 +61,7 @@ pub(crate) fn validate_deposits_against_block(
         .zip(subject_deposits.iter())
         .enumerate()
     {
-        let expected = DepositMint::new(&deposit.dest(), deposit.value())
+        let expected = DepositMint::from_deposit(&deposit.dest(), deposit.value())
             .ok_or(EvmEnvError::DepositAmountOverflow { index })?;
 
         if withdrawal.address != expected.address() || withdrawal.amount != expected.amount_gwei() {

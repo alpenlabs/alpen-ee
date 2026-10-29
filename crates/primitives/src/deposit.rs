@@ -22,7 +22,7 @@ impl DepositMint {
     /// zero. See [`subject_to_address_unchecked`] for why.
     ///
     /// Returns [`None`] if `amount` overflows gwei.
-    pub fn new(dest: &SubjectId, amount: BitcoinAmount) -> Option<Self> {
+    pub fn from_deposit(dest: &SubjectId, amount: BitcoinAmount) -> Option<Self> {
         Some(Self {
             address: subject_to_address_unchecked(dest),
             amount_gwei: sats_to_gwei(amount.to_sat())?,
@@ -52,7 +52,8 @@ mod tests {
         subject_bytes[12..].copy_from_slice(&[0xaa; 20]);
 
         let amount = BitcoinAmount::try_from(10).expect("within the money supply");
-        let mint = DepositMint::new(&SubjectId::new(subject_bytes), amount).expect("fits in gwei");
+        let mint = DepositMint::from_deposit(&SubjectId::new(subject_bytes), amount)
+            .expect("fits in gwei");
 
         assert_eq!(mint.address(), Address::from([0xaa; 20]));
         assert_eq!(mint.amount_gwei(), 100);
@@ -63,6 +64,9 @@ mod tests {
         // `From<Amount>` skips the money-supply check, so this is the only way to get
         // an amount large enough to overflow.
         let amount = BitcoinAmount::from(Amount::from_sat(u64::MAX));
-        assert_eq!(DepositMint::new(&SubjectId::new([0; 32]), amount), None);
+        assert_eq!(
+            DepositMint::from_deposit(&SubjectId::new([0; 32]), amount),
+            None
+        );
     }
 }
