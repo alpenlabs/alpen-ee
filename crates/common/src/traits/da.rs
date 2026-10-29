@@ -1,5 +1,6 @@
 //! Data availability provider trait for batch lifecycle management.
 
+use alloy_primitives::{Address, Bytes, B256};
 use alpen_da_types::EvmHeaderSummary;
 use alpen_params::AlpenSpecId;
 use async_trait::async_trait;
@@ -73,4 +74,20 @@ pub trait HeaderSummaryProvider: Send + Sync {
         block_num: u64,
         spec_version: AlpenSpecId,
     ) -> eyre::Result<EvmHeaderSummary>;
+}
+
+/// Reads contract code from the EVM state.
+///
+/// Used during DA blob construction to decide which bytecodes the blob must
+/// carry: a bytecode may be left out only when an account already holds it in
+/// the batch's pre-state. The binary crate supplies the concrete
+/// implementation backed by its state store.
+pub trait EvmCodeProvider: Send + Sync {
+    /// Returns the code hash of `address` in the state after block
+    /// `block_hash`, or `None` if the account does not exist there.
+    fn code_hash_at(&self, block_hash: B256, address: Address) -> eyre::Result<Option<B256>>;
+
+    /// Returns the bytecode whose hash is `code_hash`, if the state store has
+    /// it.
+    fn bytecode(&self, code_hash: B256) -> eyre::Result<Option<Bytes>>;
 }

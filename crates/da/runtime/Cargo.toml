@@ -29,6 +29,7 @@ alpen-reth-statediff.workspace = true
 alpen-test-utils-evm-workload = { workspace = true, optional = true }
 
 alloy-primitives.workspace = true
+alloy-trie.workspace = true
 alpen-acct-runtime.workspace = true
 alpen-chain-types.workspace = true
 alpen-evm-ee.workspace = true
@@ -50,4 +51,6 @@ thiserror.workspace = true
 rkyv.workspace = true
 rsp-mpt.workspace = true
 sha2.workspace = true
+strata-db-types.workspace = true
 strata-l1-envelope-fmt = { workspace = true, features = ["test-utils"] }
+tokio.workspace = true

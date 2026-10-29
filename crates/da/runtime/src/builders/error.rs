@@ -5,7 +5,7 @@ use crate::DaBlobRecoveryError;
 /// Error raised while building a [`DaWitness`](alpen_da_types::DaWitness).
 ///
 /// Spans both layers of the build — L1 inclusion (block fetch, wtxid roots,
-/// blob reassembly) and EVM dedup resolution (state-diff/bytecode lookups) —
+/// blob reassembly) and EVM dedup resolution (code holder lookups) —
 /// and carries enough categorization for the prover to map onto its own
 /// retry semantics: provider/store read failures vs. genuinely missing data
 /// vs. structurally inconsistent inputs.
@@ -40,16 +40,10 @@ pub enum DaWitnessBuildError {
     /// Recovering the EE DA blob from its L1 transactions failed.
     #[error("recover DA blob ({0})")]
     DaBlobRecovery(#[from] DaBlobRecoveryError),
-    /// The state-diff provider failed to read a block's diff.
-    #[error("state-diff read failed for block {block} ({error})")]
-    StateDiffProvider { block: String, error: String },
-    /// A batch block has no state diff available.
-    #[error("state diff missing for block {0} while building DA witness")]
-    StateDiffMissing(String),
-    /// The bytecode store failed to read a code hash.
-    #[error("bytecode read failed for {hash} ({error})")]
-    BytecodeStore { hash: String, error: String },
-    /// A deduped bytecode preimage could not be found in any source.
-    #[error("missing deduped bytecode {0} while building DA witness")]
-    BytecodeMissing(String),
+    /// The DA filter failed to look up a code hash's holder.
+    #[error("code holder read failed for {hash} ({error})")]
+    CodeHolderStore { hash: String, error: String },
+    /// The DA filter knows no holder for a code hash the blob omits.
+    #[error("no holder for deduped code hash {0} while building DA witness")]
+    CodeHolderMissing(String),
 }

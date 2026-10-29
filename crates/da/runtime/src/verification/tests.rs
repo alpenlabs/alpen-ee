@@ -1,12 +1,11 @@
 use std::collections::BTreeMap;
 
-use alloy_primitives::{keccak256, Address, Bytes, U256};
+use alloy_primitives::{keccak256, Address, B256, U256};
 use alpen_acct_runtime::{ArchivedEePrivateInput, ChunkInput, EePrivateInput};
 use alpen_chain_types::{ChunkTransition, ExecHeaderSummary, ExecInputs, ExecOutputs};
 use alpen_da_types::{
-    da_blob_version, ArchivedDaWitness, BitcoinMerkleProof, BytecodePreimage, DaBlob,
-    DaBlockWitness, DaTxWitness, DaWitness, DedupWitness, EvmHeaderSummary, L1DaBlockInclusion,
-    EE_DA_MAGIC_BYTES,
+    da_blob_version, ArchivedDaWitness, BitcoinMerkleProof, DaBlob, DaBlockWitness, DaTxWitness,
+    DaWitness, DedupWitness, EvmHeaderSummary, L1DaBlockInclusion, EE_DA_MAGIC_BYTES,
 };
 use alpen_evm_ee::EvmPartialState;
 use alpen_params::{AlpenSpecId, HeaderExtra};
@@ -184,8 +183,14 @@ fn valid_fixture_for(
     (ee_input, da_witness, pub_params, pre_root)
 }
 
-#[test]
-fn verify_da_witness_accepts_deduped_bytecode_from_private_witness() {
+/// Builds a batch whose blob creates an account with `code_hash` but leaves the
+/// bytecode out. The pre-state holds `pre_state_accounts` (address and code
+/// hash), and the dedup witness names `holder_keys`.
+fn deduped_code_fixture(
+    code_hash: B256,
+    pre_state_accounts: &[(Address, B256)],
+    holder_keys: Vec<[u8; 32]>,
+) -> (EePrivateInput, DaWitness, UpdateProofPubParams, [u8; 32]) {
     let header = EvmHeaderSummary {
         block_num: 10,
         timestamp: 1_700_000_000,
@@ -202,11 +207,18 @@ fn verify_da_witness_accepts_deduped_bytecode_from_private_witness() {
         BTreeMap::new(),
         Vec::new(),
     );
+    let mut pre_state_diff = BatchStateDiff::new();
+    for (address, holder_code_hash) in pre_state_accounts {
+        pre_state_diff.accounts.insert(
+            *address,
+            AccountChange::Created(AccountDiff::new_created(U256::ZERO, 1, *holder_code_hash)),
+        );
+    }
+    apply_batch_state_diff_to_ethereum_state(pre_state.ethereum_state_mut(), &pre_state_diff)
+        .unwrap();
     let pre_root = pre_state.ethereum_state().state_root().0;
     let raw_pre_state = encode_to_vec(&pre_state).unwrap();
 
-    let bytecode = Bytes::from_static(&[0x60, 0x80, 0x60, 0x40, 0x52]);
-    let code_hash = keccak256(bytecode.as_ref());
     let mut state_diff = BatchStateDiff::new();
     state_diff.accounts.insert(
         Address::from([0x11; 20]),
@@ -227,22 +239,8 @@ fn verify_da_witness_accepts_deduped_bytecode_from_private_witness() {
     let wtxids_root = hash_pair(commit_wtxid, reveal_wtxid);
     let block_hash = [0x44; 32];
     let height = 42;
-    let ledger_ref_hash = l1_block_record_leaf_hash(&block_hash, &wtxids_root);
-    let ledger_refs = LedgerRefs::new(vec![AccumulatorClaim::new(height as u64, ledger_ref_hash)]);
 
-    let transition = ChunkTransition::new(
-        Hash::from([1; 32]),
-        Hash::from([2; 32]),
-        Hash::from(post_root),
-        ExecHeaderSummary::from_vec(header.encode_to_vec(SPEC_VERSION).unwrap()).unwrap(),
-        ExecInputs::new_empty(),
-        ExecOutputs::new_empty(),
-    );
-    let ee_input = EePrivateInput::new(
-        Vec::new(),
-        raw_pre_state,
-        vec![ChunkInput::new(transition, Vec::new())],
-    );
+    let ee_input = rebuild_ee_input(&raw_pre_state, post_root, header, SPEC_VERSION);
     let da_witness = DaWitness::new(
         vec![DaBlockWitness::new(
             L1DaBlockInclusion::new(height, block_hash, wtxids_root),
@@ -257,29 +255,57 @@ fn verify_da_witness_accepts_deduped_bytecode_from_private_witness() {
                 ),
             ],
         )],
-        DedupWitness::new(vec![BytecodePreimage::new(bytecode.to_vec())]),
+        DedupWitness::new(holder_keys),
     );
-    let pub_params = UpdateProofPubParams::new(
-        Seqno::new(blob.update_seq_no),
-        ProofState::new(Hash::zero(), 0),
-        ProofState::new(Hash::zero(), 0),
-        Vec::new(),
-        ledger_refs,
-        UpdateOutputs::new_empty(),
-        Vec::new(),
-    );
-    let (ee_bytes, da_bytes) = archive_inputs(&ee_input, &da_witness);
-    let archived_ee = rkyv::access::<ArchivedEePrivateInput, RkyvError>(&ee_bytes).unwrap();
-    let archived_da = rkyv::access::<ArchivedDaWitness, RkyvError>(&da_bytes).unwrap();
+    let pub_params = rebuild_pub_params(blob.update_seq_no, height, block_hash, wtxids_root);
 
-    verify_da_witness(
-        archived_ee,
-        archived_da,
-        &pub_params,
-        pre_root,
-        SPEC_VERSION,
-    )
-    .expect("private witness bytecode should satisfy deduped code hash");
+    (ee_input, da_witness, pub_params, pre_root)
+}
+
+#[test]
+fn verify_da_witness_accepts_deduped_bytecode_held_in_pre_state() {
+    let code_hash = keccak256([0x60, 0x80, 0x60, 0x40, 0x52]);
+    let holder = Address::from([0x22; 20]);
+    let (ee_input, da_witness, pub_params, pre_root) =
+        deduped_code_fixture(code_hash, &[(holder, code_hash)], vec![keccak256(holder).0]);
+
+    run_verify_da_witness(&ee_input, &da_witness, &pub_params, pre_root)
+        .expect("a pre-state holder should satisfy the deduped code hash");
+}
+
+/// The fix for SECFND-513: a holder the pre-state does not have cannot vouch
+/// for an omitted bytecode, whatever the prover claims.
+#[test]
+fn verify_da_witness_rejects_holder_absent_from_pre_state() {
+    let code_hash = keccak256([0x60, 0x80, 0x60, 0x40, 0x52]);
+    let holder = Address::from([0x22; 20]);
+    let (ee_input, da_witness, pub_params, pre_root) =
+        deduped_code_fixture(code_hash, &[], vec![keccak256(holder).0]);
+
+    let err = run_verify_da_witness(&ee_input, &da_witness, &pub_params, pre_root)
+        .expect_err("a holder missing from the pre-state must not vouch for code");
+
+    assert!(matches!(err, DaVerificationError::CodeHolderAbsent(_)));
+}
+
+#[test]
+fn verify_da_witness_rejects_holder_with_other_code() {
+    let code_hash = keccak256([0x60, 0x80, 0x60, 0x40, 0x52]);
+    let other_code_hash = keccak256([0x60, 0x00]);
+    let holder = Address::from([0x22; 20]);
+    let (ee_input, da_witness, pub_params, pre_root) = deduped_code_fixture(
+        code_hash,
+        &[(holder, other_code_hash)],
+        vec![keccak256(holder).0],
+    );
+
+    let err = run_verify_da_witness(&ee_input, &da_witness, &pub_params, pre_root)
+        .expect_err("a holder of other code must not vouch for the omitted code");
+
+    assert!(matches!(
+        err,
+        DaVerificationError::MissingDeployedBytecode(_)
+    ));
 }
 
 #[test]
@@ -293,7 +319,7 @@ fn verify_da_blob_metadata_rejects_missing_deployed_bytecode() {
         da_rate: Some(2_500_000_000),
     };
     // An account references a code hash that is neither published in the blob nor
-    // supplied as a preimage, so verification must reject it.
+    // held by a pre-state account, so verification must reject it.
     let code_hash = keccak256([0x60, 0x80]);
     let mut state_diff = BatchStateDiff::new();
     state_diff.accounts.insert(
@@ -326,11 +352,20 @@ fn verify_da_blob_metadata_rejects_missing_deployed_bytecode() {
     let witness = DaWitness::new(Vec::new(), DedupWitness::empty());
     let da_bytes = rkyv::to_bytes::<RkyvError>(&witness).unwrap();
     let archived_da = rkyv::access::<ArchivedDaWitness, RkyvError>(&da_bytes).unwrap();
+    let pre_state = EvmPartialState::new(
+        EthereumState {
+            state_trie: Default::default(),
+            storage_tries: Default::default(),
+        },
+        BTreeMap::new(),
+        Vec::new(),
+    );
 
     let err = super::verify_da_blob_metadata(
         &blob,
         &transition,
         &pub_params,
+        &pre_state,
         archived_da.dedup_da_witness(),
     )
     .expect_err("account code hash with no published or witnessed bytecode must fail");
