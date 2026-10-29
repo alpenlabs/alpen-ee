@@ -1412,11 +1412,13 @@ dependencies = [
  "strata-acct-types",
  "strata-codec",
  "strata-codec-utils 0.1.0 (git+https://github.com/alpenlabs/strata-common?tag=v0.4.0)",
+ "strata-db-types",
  "strata-identifiers",
  "strata-l1-envelope-fmt",
  "strata-primitives",
  "strata-snark-acct-types",
  "thiserror 2.0.20",
+ "tokio",
 ]
 
 [[package]]

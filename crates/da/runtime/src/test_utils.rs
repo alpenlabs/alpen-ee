@@ -9,12 +9,14 @@
 use std::collections::BTreeSet;
 
 use alloy_primitives::{keccak256, B256};
+use alloy_trie::TrieAccount;
 use alpen_chain_types::ChunkTransition;
 use alpen_da_types::{
     compute_bitcoin_inclusion_proof, compute_bitcoin_merkle_root_from_leaves, da_blob_version,
     BitcoinMerkleProof, DaBlob, DaBlockWitness, DaTxWitness, DaWitness, DedupWitness,
     EvmHeaderSummary, L1DaBlockInclusion, EE_DA_MAGIC_BYTES,
 };
+use alpen_evm_ee::EvmPartialState;
 use alpen_params::AlpenSpecId;
 use alpen_reth_statediff::BatchStateDiff;
 use alpen_test_utils_evm_workload::Workload;
@@ -35,7 +37,7 @@ use strata_codec::decode_buf_exact;
 use strata_l1_envelope_fmt::{EnvelopeScriptBuilder, MAX_ENVELOPE_PAYLOAD_SIZE};
 use strata_snark_acct_types::{AccumulatorClaim, LedgerRefs};
 
-use crate::builders::bytecode_preimages_from_batch_diff;
+use crate::builders::deduped_account_code_hashes;
 
 /// Height of the L1 block carrying the batch's DA.
 const L1_BLOCK_HEIGHT: u32 = 900_000;
@@ -91,12 +93,15 @@ pub fn build_batch_da(
         .expect("decode tip header summary"),
         state_diff,
     };
-    let (preimages, unresolved) = bytecode_preimages_from_batch_diff(&blob, &full_diff);
-    assert!(
-        unresolved.is_empty(),
-        "every deduped bytecode is deployed in the batch"
+    let range_pre_state: EvmPartialState =
+        decode_buf_exact(&workload.range_pre_state).expect("decode range pre-state");
+    let dedup = DedupWitness::new(
+        Vec::new(),
+        deduped_account_code_hashes(&blob)
+            .iter()
+            .map(|code_hash| code_holder_key(&range_pre_state, code_hash))
+            .collect(),
     );
-    let dedup = DedupWitness::new(preimages, Vec::new());
 
     let encoded_blob = blob.encode_to_vec().expect("encode DA blob");
     let (commit, reveals) = envelope_txs(&encoded_blob, spec_version);
@@ -138,6 +143,26 @@ pub fn build_batch_da(
             l1_block_record_leaf_hash(&L1_BLOCK_HASH, &wtxids_root),
         )]),
     }
+}
+
+/// Returns the state trie key of an account in `pre_state` that holds the code
+/// with hash `code_hash`, as the dedup witness names it.
+///
+/// The workload's range pre-state holds every account the range touches, and
+/// the range uses the contracts whose code it redeploys, so a holder is there.
+fn code_holder_key(pre_state: &EvmPartialState, code_hash: &B256) -> [u8; 32] {
+    let state_trie = &pre_state.ethereum_state().state_trie;
+    let mut keys = Vec::new();
+    state_trie.for_each_leaves(|key, _| keys.push(key.to_vec()));
+    keys.into_iter()
+        .find(|key| {
+            state_trie
+                .get_rlp::<TrieAccount>(key)
+                .expect("read account leaf")
+                .is_some_and(|account| account.code_hash == *code_hash)
+        })
+        .map(|key| key.try_into().expect("account keys are 32 bytes"))
+        .unwrap_or_else(|| panic!("no range pre-state account holds code hash {code_hash}"))
 }
 
 /// The commit transaction and one reveal per chunk of `blob`, as SPS-51 lays

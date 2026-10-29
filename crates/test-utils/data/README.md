@@ -35,7 +35,7 @@ The workload the prover-perf guests run on. Setup blocks first fund 10,000 EOAs,
 | ERC-20 approve, then `transferFrom` of the whole allowance in the next block | 5% |
 | Pool swap | 10% |
 
-On top of those, on a fixed schedule: a bridge-out every 10 blocks, a deposit every 10 blocks, a Schnorr precompile call every 5 blocks, and two token deploys. One deploy has new code, which the DA blob publishes. The other deploys code an earlier batch already published, so the blob leaves it out and the DA witness supplies it through dedup.
+On top of those, on a fixed schedule: a bridge-out every 10 blocks, a deposit every 10 blocks, a Schnorr precompile call every 5 blocks, and two token deploys. One deploy has new code, which the DA blob publishes. The other deploys code an earlier batch already published, and a token in the range's pre-state still holds it. So the blob leaves it out, and the DA witness names that token as the holder.
 
 Regenerate it with:
 

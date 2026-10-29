@@ -1,105 +1,86 @@
 //! EVM bytecode-dedup layer of the DA witness: determining which account
-//! bytecodes the published blob omits (because a prior batch published them),
-//! resolving their preimages, and the [`DedupWitnessResolver`] seam that turns a
+//! bytecodes the published blob omits (because a pre-state account holds them),
+//! naming a holder for each, and the [`DedupWitnessResolver`] seam that turns a
 //! published blob into a [`DedupWitness`].
 
 use std::collections::BTreeSet;
 
-use alloy_primitives::{keccak256, B256};
-use alpen_common::{AccessedStateStore, StateDiffProvider};
-use alpen_da_types::{BytecodePreimage, DaBlob, DedupWitness};
-use alpen_reth_statediff::{AccountChange, BatchBuilder, BatchStateDiff};
+use alloy_primitives::{keccak256, Address, B256, KECCAK256_EMPTY};
+use alpen_common::DaContext;
+use alpen_da_types::{DaBlob, DedupWitness};
+use alpen_reth_statediff::AccountChange;
 use async_trait::async_trait;
-use strata_acct_types::Hash;
 
 use super::DaWitnessBuildError;
 
 /// Resolves the supplementary [`DedupWitness`] the guest needs to verify a
 /// published DA blob whose references aren't all carried inline.
 ///
-/// Implemented host-side by a type holding the providers (state-diff provider +
-/// bytecode store). Today only bytecode preimages are resolved; future DA-dedup
-/// optimizations (e.g. account/storage serials) add per-kind resolution here,
-/// each returning the resolved value plus a membership proof.
+/// Today only bytecode holders are resolved; future DA-dedup optimizations
+/// (e.g. account/storage serials) add per-kind resolution here.
 #[async_trait]
 pub trait DedupWitnessResolver {
-    /// Resolves preimages for bytecodes the blob references but omits (DA dedup).
-    async fn resolve_bytecode_preimages(
+    /// Names an account holding, in the batch's pre-state, each bytecode the
+    /// blob references but omits.
+    ///
+    /// The prover adds these accounts to the batch's partial pre-state, so the
+    /// guest can read their code hashes.
+    async fn resolve_code_holders(
         &self,
         blob: &DaBlob,
-        batch_block_hashes: &[B256],
-    ) -> Result<Vec<BytecodePreimage>, DaWitnessBuildError>;
-
-    /// Produces the full [`DedupWitness`] — all resolved supplementary data (and,
-    /// in future, their membership proofs). Future per-kind resolvers extend this.
-    async fn resolve_dedup_witness(
-        &self,
-        blob: &DaBlob,
-        batch_block_hashes: &[B256],
-    ) -> Result<DedupWitness, DaWitnessBuildError> {
-        Ok(DedupWitness::new(
-            self.resolve_bytecode_preimages(blob, batch_block_hashes)
-                .await?,
-            Vec::new(),
-        ))
-    }
+    ) -> Result<Vec<Address>, DaWitnessBuildError>;
 }
 
-/// Host-side [`DedupWitnessResolver`] backed by the node's Reth state-diff
-/// provider and bytecode store.
+/// Host-side [`DedupWitnessResolver`] backed by the sequencer's DA filter.
 ///
-/// The EVM-specific interpretation of the published blob (which bytecodes it
-/// omitted, and where to fetch their preimages) lives here. Generic over the
-/// provider/store types so it carries no concrete node dependency.
+/// The publisher left a bytecode out only after checking that the filter's
+/// holder for it still held it in the batch's pre-state. The filter never
+/// replaces a holder once recorded, so the same lookup here names that same
+/// account.
 #[derive(Debug)]
-pub struct DaDedupResolver<'a, D: ?Sized, B> {
-    state_diff_provider: &'a D,
-    bytecode_store: &'a B,
+pub struct DaDedupResolver<'a, C: ?Sized> {
+    da_ctx: &'a C,
 }
 
-impl<'a, D: ?Sized, B> DaDedupResolver<'a, D, B> {
-    pub fn new(state_diff_provider: &'a D, bytecode_store: &'a B) -> Self {
-        Self {
-            state_diff_provider,
-            bytecode_store,
-        }
+impl<'a, C: ?Sized> DaDedupResolver<'a, C> {
+    pub fn new(da_ctx: &'a C) -> Self {
+        Self { da_ctx }
     }
 }
 
 #[async_trait]
-impl<D, B> DedupWitnessResolver for DaDedupResolver<'_, D, B>
+impl<C> DedupWitnessResolver for DaDedupResolver<'_, C>
 where
-    D: StateDiffProvider + ?Sized,
-    B: AccessedStateStore,
+    C: DaContext + Sync + ?Sized,
 {
-    async fn resolve_bytecode_preimages(
+    async fn resolve_code_holders(
         &self,
         blob: &DaBlob,
-        batch_block_hashes: &[B256],
-    ) -> Result<Vec<BytecodePreimage>, DaWitnessBuildError> {
-        // Primary source: the full batch diff (host data from before the
-        // publication filter ran).
-        let batch_diff = build_batch_state_diff(batch_block_hashes, self.state_diff_provider)?;
-        let (mut preimages, unresolved) = bytecode_preimages_from_batch_diff(blob, &batch_diff);
-
-        // Secondary source: the node bytecode store, for bytecodes deployed in a
-        // prior batch and so absent from this batch's diff.
-        for code_hash in unresolved {
-            let storage_key = Hash::from(code_hash.0);
-            let bytecode = self
-                .bytecode_store
-                .get_bytecode(storage_key)
-                .await
-                .map_err(|e| DaWitnessBuildError::BytecodeStore {
-                    hash: format!("{storage_key:?}"),
-                    error: e.to_string(),
-                })?
-                .ok_or_else(|| DaWitnessBuildError::BytecodeMissing(format!("{storage_key:?}")))?;
-            preimages.push(BytecodePreimage::new(bytecode));
-        }
-
-        Ok(preimages)
+    ) -> Result<Vec<Address>, DaWitnessBuildError> {
+        deduped_account_code_hashes(blob)
+            .into_iter()
+            .map(|code_hash| {
+                self.da_ctx
+                    .code_hash_holder(&code_hash)
+                    .map_err(|e| DaWitnessBuildError::CodeHolderStore {
+                        hash: format!("{code_hash:?}"),
+                        error: e.to_string(),
+                    })?
+                    .ok_or_else(|| DaWitnessBuildError::CodeHolderMissing(format!("{code_hash:?}")))
+            })
+            .collect()
     }
+}
+
+/// Builds the [`DedupWitness`] naming `code_holders` by their state trie keys.
+pub(crate) fn dedup_witness_for_holders(code_holders: &[Address]) -> DedupWitness {
+    DedupWitness::new(
+        Vec::new(),
+        code_holders
+            .iter()
+            .map(|holder| keccak256(holder).0)
+            .collect(),
+    )
 }
 
 /// Returns account code hashes referenced by the blob but absent from the current blob bytecodes.
@@ -107,8 +88,7 @@ where
 /// These are the hashes affected by DA bytecode dedup: the account diff still
 /// advertises a `code_hash`, but the current L1 blob no longer carries the
 /// matching bytecode bytes.
-fn deduped_account_code_hashes(blob: &DaBlob) -> Vec<B256> {
-    let empty_code_hash = keccak256([]);
+pub(crate) fn deduped_account_code_hashes(blob: &DaBlob) -> Vec<B256> {
     let mut missing = BTreeSet::new();
 
     for change in blob.state_diff.accounts.values() {
@@ -119,7 +99,7 @@ fn deduped_account_code_hashes(blob: &DaBlob) -> Vec<B256> {
         let Some(code_hash) = account_diff.code_hash.new_value().map(|hash| hash.0) else {
             continue;
         };
-        if code_hash == empty_code_hash
+        if code_hash == KECCAK256_EMPTY
             || blob.state_diff.deployed_bytecodes.contains_key(&code_hash)
         {
             continue;
@@ -130,91 +110,53 @@ fn deduped_account_code_hashes(blob: &DaBlob) -> Vec<B256> {
     missing.into_iter().collect()
 }
 
-/// Resolves deduped-bytecode preimages from the batch state diff.
-///
-/// The DA blob handed to the guest has already passed the publication filter, so
-/// bytecodes published by earlier batches can be missing from
-/// `blob.state_diff.deployed_bytecodes`. The batch's full per-block state diff is
-/// the host's local copy of the same executed batch *before* that filter ran, and
-/// still carries deployment bytecodes the blob omitted — so it is the primary
-/// source for those preimages. Using it avoids depending on the accessed-state
-/// cache, which only holds bytecode loaded via `code_by_hash` and can miss a
-/// contract that was deployed but never read again.
-///
-/// Returns the preimages resolved from `batch_state_diff`, plus the code hashes
-/// *not* found there, which the caller must resolve from a secondary source
-/// (e.g. the node bytecode store).
-///
-/// NOTE: these preimages prove bytecode identity, not prior L1 publication.
-/// TODO(STR-1907): replace with an authenticated prior-publication proof.
-pub(crate) fn bytecode_preimages_from_batch_diff(
-    blob: &DaBlob,
-    batch_state_diff: &BatchStateDiff,
-) -> (Vec<BytecodePreimage>, Vec<B256>) {
-    let mut preimages = Vec::new();
-    let mut unresolved = Vec::new();
-
-    for code_hash in deduped_account_code_hashes(blob) {
-        match batch_state_diff.deployed_bytecodes.get(&code_hash) {
-            Some(bytecode) => preimages.push(BytecodePreimage::new(bytecode.to_vec())),
-            None => unresolved.push(code_hash),
-        }
-    }
-
-    (preimages, unresolved)
-}
-
-/// Aggregates the per-block state diffs for a batch into one [`BatchStateDiff`].
-///
-/// This is the host's full pre-publication-filter view: the DA blob handed to the
-/// guest has already had DA dedup applied, but these per-block diffs still carry
-/// the bytecodes it omitted. No persisted batch diff exists, so it is rebuilt
-/// block by block — the same way the publish path aggregates it.
-fn build_batch_state_diff(
-    block_hashes: &[B256],
-    state_diff_provider: &(impl StateDiffProvider + ?Sized),
-) -> Result<BatchStateDiff, DaWitnessBuildError> {
-    let mut builder = BatchBuilder::new();
-
-    for b256 in block_hashes {
-        let block_diff = state_diff_provider
-            .get_state_diff_by_hash(*b256)
-            .map_err(|e| DaWitnessBuildError::StateDiffProvider {
-                block: format!("{b256:?}"),
-                error: e.to_string(),
-            })?
-            .ok_or_else(|| DaWitnessBuildError::StateDiffMissing(format!("{b256:?}")))?;
-        builder.apply_block(&block_diff);
-    }
-
-    Ok(builder.build())
-}
-
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::{Address, Bytes, U256};
+    use std::collections::BTreeMap;
+
+    use alloy_primitives::{Bytes, U256};
     use alpen_da_types::EvmHeaderSummary;
     use alpen_params::AlpenSpecId;
-    use alpen_reth_statediff::AccountDiff;
+    use alpen_reth_statediff::{AccountDiff, BatchStateDiff};
+    use strata_db_types::DbResult;
 
     use super::*;
 
-    #[test]
-    fn bytecode_preimages_from_batch_diff_recovers_deduped_deployment_bytecode() {
-        let bytecode = Bytes::from_static(&[0x60, 0x80, 0x60, 0x40, 0x52]);
-        let code_hash = keccak256(bytecode.as_ref());
-        let address = Address::from([0x11; 20]);
+    /// DA filter stub answering holder lookups from a fixed map.
+    struct Holders(BTreeMap<B256, Address>);
 
-        let mut filtered_diff = BatchStateDiff::new();
-        filtered_diff.accounts.insert(
-            address,
-            AccountChange::Created(AccountDiff::new_created(U256::ZERO, 1, code_hash)),
+    impl DaContext for Holders {
+        fn code_hash_holder(&self, code_hash: &B256) -> DbResult<Option<Address>> {
+            Ok(self.0.get(code_hash).copied())
+        }
+
+        fn mark_code_hashes_published(&self, _holders: &[(B256, Address)]) -> DbResult<()> {
+            unimplemented!("read-only stub")
+        }
+
+        fn update_da_filter(&self, _block_hashes: &[B256]) -> DbResult<()> {
+            unimplemented!("read-only stub")
+        }
+    }
+
+    /// A blob with two contracts: one whose bytecode it carries, one whose
+    /// bytecode it leaves out.
+    fn blob_with_one_deduped_code() -> (DaBlob, B256) {
+        let inline = Bytes::from_static(&[0x60, 0x01]);
+        let deduped_code_hash = keccak256([0x60, 0x02]);
+
+        let mut state_diff = BatchStateDiff::new();
+        state_diff.accounts.insert(
+            Address::from([0x11; 20]),
+            AccountChange::Created(AccountDiff::new_created(U256::ZERO, 1, keccak256(&inline))),
         );
-
-        let mut batch_diff = filtered_diff.clone();
-        batch_diff
+        state_diff.accounts.insert(
+            Address::from([0x22; 20]),
+            AccountChange::Created(AccountDiff::new_created(U256::ZERO, 1, deduped_code_hash)),
+        );
+        state_diff
             .deployed_bytecodes
-            .insert(code_hash, bytecode.clone());
+            .insert(keccak256(&inline), inline);
 
         let blob = DaBlob {
             spec_version: AlpenSpecId::V1,
@@ -227,13 +169,39 @@ mod tests {
                 gas_limit: 36_000_000,
                 da_rate: Some(2_500_000_000),
             },
-            state_diff: filtered_diff,
+            state_diff,
         };
+        (blob, deduped_code_hash)
+    }
 
-        let (preimages, unresolved) = bytecode_preimages_from_batch_diff(&blob, &batch_diff);
+    #[tokio::test]
+    async fn resolver_names_the_holder_of_each_deduped_code_hash() {
+        let (blob, deduped_code_hash) = blob_with_one_deduped_code();
+        let holder = Address::from([0x33; 20]);
+        let holders = Holders(BTreeMap::from([(deduped_code_hash, holder)]));
 
-        assert!(unresolved.is_empty());
-        assert_eq!(preimages.len(), 1);
-        assert_eq!(preimages[0].bytecode(), bytecode.as_ref());
+        let resolved = DaDedupResolver::new(&holders)
+            .resolve_code_holders(&blob)
+            .await
+            .unwrap();
+
+        assert_eq!(resolved, vec![holder]);
+        assert_eq!(
+            dedup_witness_for_holders(&resolved).code_holder_keys(),
+            &[keccak256(holder).0]
+        );
+    }
+
+    #[tokio::test]
+    async fn resolver_fails_when_a_deduped_code_hash_has_no_holder() {
+        let (blob, _) = blob_with_one_deduped_code();
+        let holders = Holders(BTreeMap::new());
+
+        let err = DaDedupResolver::new(&holders)
+            .resolve_code_holders(&blob)
+            .await
+            .expect_err("an omitted code hash with no holder must fail");
+
+        assert!(matches!(err, DaWitnessBuildError::CodeHolderMissing(_)));
     }
 }

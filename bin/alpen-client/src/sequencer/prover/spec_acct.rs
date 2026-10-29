@@ -12,16 +12,18 @@
 
 use std::{fmt, sync::Arc};
 
-use alloy_primitives::B256;
+use alloy_primitives::{Address, B256};
 use alpen_acct_runtime::{ChunkInput, EePrivateInput};
 use alpen_acct_types::UpdateExtraData;
 use alpen_chain_types::ChunkTransition;
 use alpen_common::{
     build_ledger_refs_from_da, decode_batch_task_key, encode_batch_task_key, BatchId, BatchStatus,
-    BatchStorage, ChunkStorage, ExecBlockStorage, L1DaBlockRef, ProverTaskKeyDecodeError,
-    StateDiffProvider, Storage,
+    BatchStorage, ChunkStorage, DaContext, ExecBlockStorage, L1DaBlockRef,
+    ProverTaskKeyDecodeError, Storage,
 };
-use alpen_da_runtime::builders::{build_da_witness, DaDedupResolver, DaWitnessBuildError};
+use alpen_da_runtime::builders::{
+    build_da_witness, BatchDaWitness, DaDedupResolver, DaWitnessBuildError,
+};
 use alpen_database::NodeStorage;
 use alpen_proof_acct::{EeAcctProgram, EeAcctProofInput};
 use alpen_witness::RangeWitnessData;
@@ -41,8 +43,10 @@ use tokio::task;
 
 use super::ChunkTask;
 
+/// Extracts the range witness for `[first_block, last_block]`, with the given
+/// extra accounts in the partial pre-state.
 pub(crate) type AcctRangeWitnessFn =
-    dyn Fn(B256, B256) -> eyre::Result<RangeWitnessData> + Send + Sync;
+    dyn Fn(B256, B256, Vec<Address>) -> eyre::Result<RangeWitnessData> + Send + Sync;
 
 /// Batch-id-shaped task identifier for paas. Newtype over [`BatchId`]
 /// for the same reasons [`super::ChunkTask`] wraps `ChunkId`.
@@ -123,7 +127,7 @@ pub(crate) struct AcctSpec {
     chunk_storage: Arc<dyn ChunkStorage>,
     storage: Arc<NodeStorage>,
     btc_client: Arc<BtcClient>,
-    state_diff_provider: Arc<dyn StateDiffProvider>,
+    da_ctx: Arc<dyn DaContext + Send + Sync>,
     range_witness_fn: Arc<AcctRangeWitnessFn>,
 }
 
@@ -134,7 +138,7 @@ impl AcctSpec {
         chunk_storage: Arc<dyn ChunkStorage>,
         storage: Arc<NodeStorage>,
         btc_client: Arc<BtcClient>,
-        state_diff_provider: Arc<dyn StateDiffProvider>,
+        da_ctx: Arc<dyn DaContext + Send + Sync>,
         range_witness_fn: Arc<AcctRangeWitnessFn>,
     ) -> Self {
         Self {
@@ -143,7 +147,7 @@ impl AcctSpec {
             chunk_storage,
             storage,
             btc_client,
-            state_diff_provider,
+            da_ctx,
             range_witness_fn,
         }
     }
@@ -253,11 +257,27 @@ impl AcctSpec {
             }
         };
 
-        // 4. ee_acct private input.
+        // 4. DA witness, built from the blob as published on L1. Its dedup part names the pre-state
+        //    accounts that hold the bytecodes the blob omits.
+        let da_dedup_resolver = DaDedupResolver::new(&*self.da_ctx);
+        let BatchDaWitness {
+            witness: da_witness,
+            code_holders,
+        } = build_da_witness(
+            &da_refs,
+            batch.spec_version(),
+            &*self.btc_client,
+            &da_dedup_resolver,
+        )
+        .await
+        .map_err(map_witness_build_err)?;
+
+        // 5. ee_acct private input.
         //
         //    The acct guest uses this sparse pre-state to apply the DA blob's
         //    batch state diff and compare the result with the final chunk's
-        //    tip state root. This spans the full batch, not just one chunk.
+        //    tip state root. This spans the full batch, not just one chunk,
+        //    plus the code holders the DA witness names.
         let batch_block_hashes: Vec<Hash> = batch.blocks_iter().collect();
         let first_batch_block = batch_block_hashes.first().copied().ok_or_else(|| {
             PaasError::permanent(format!("batch {batch_id} has no execution blocks"))
@@ -265,16 +285,17 @@ impl AcctSpec {
         let first_block_hash = B256::from(first_batch_block.0);
         let last_block_hash = B256::from(batch.last_block().0);
         let range_witness_fn = self.range_witness_fn.clone();
-        let range_data =
-            task::spawn_blocking(move || (range_witness_fn)(first_block_hash, last_block_hash))
-                .await
-                .map_err(|e| PaasError::transient(format!("batch witness extraction join: {e}")))?
-                .map_err(|e| PaasError::transient(format!("batch witness extraction: {e}")))?;
+        let range_data = task::spawn_blocking(move || {
+            (range_witness_fn)(first_block_hash, last_block_hash, code_holders)
+        })
+        .await
+        .map_err(|e| PaasError::transient(format!("batch witness extraction join: {e}")))?
+        .map_err(|e| PaasError::transient(format!("batch witness extraction: {e}")))?;
 
         let ee_private_input =
             EePrivateInput::new(Vec::new(), range_data.raw_partial_pre_state, chunks.clone());
 
-        // 5. Build UpdateProofPubParams from ExecBlockRecords.
+        // 6. Build UpdateProofPubParams from ExecBlockRecords.
         //
         //    Mirrors the submission-side `update_builder.rs` construction:
         //    read each block's ExecBlockRecord to derive processed_inputs,
@@ -389,16 +410,6 @@ impl AcctSpec {
 
         let snark_acct_private_input =
             UpdatePrivateInput::new(pub_params, pre_ee_state.as_ssz_bytes(), coinputs);
-        let da_dedup_resolver = DaDedupResolver::new(&*self.state_diff_provider, &*self.storage);
-        let da_witness = build_da_witness(
-            &da_refs,
-            &batch_block_hashes,
-            batch.spec_version(),
-            &*self.btc_client,
-            &da_dedup_resolver,
-        )
-        .await
-        .map_err(map_witness_build_err)?;
 
         Ok(EeAcctProofInput {
             ee_private_input,
@@ -437,15 +448,15 @@ fn map_witness_build_err(err: DaWitnessBuildError) -> PaasError {
     use DaWitnessBuildError as E;
     let message = err.to_string();
     match err {
-        E::GetBlock { .. } | E::StateDiffProvider { .. } | E::BytecodeStore { .. } => {
-            PaasError::Storage(message)
-        }
-        E::StateDiffMissing(_) | E::BytecodeMissing(_) => PaasError::transient(message),
+        E::GetBlock { .. } | E::CodeHolderStore { .. } => PaasError::Storage(message),
+        // The publisher omits a bytecode only once the DA filter names a
+        // holder, and the filter never drops one, so retrying cannot help.
         E::EmptyDaRefs
         | E::BlockHasNoTransactions(_)
         | E::WtxidsRootMismatch { .. }
         | E::DaTxNotFound { .. }
-        | E::DaBlobRecovery(_) => PaasError::permanent(message),
+        | E::DaBlobRecovery(_)
+        | E::CodeHolderMissing(_) => PaasError::permanent(message),
     }
 }
 
