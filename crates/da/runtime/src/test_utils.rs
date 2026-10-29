@@ -96,7 +96,6 @@ pub fn build_batch_da(
     let range_pre_state: EvmPartialState =
         decode_buf_exact(&workload.range_pre_state).expect("decode range pre-state");
     let dedup = DedupWitness::new(
-        Vec::new(),
         deduped_account_code_hashes(&blob)
             .iter()
             .map(|code_hash| code_holder_key(&range_pre_state, code_hash))

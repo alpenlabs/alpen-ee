@@ -1,12 +1,11 @@
 use std::collections::BTreeMap;
 
-use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
+use alloy_primitives::{keccak256, Address, B256, U256};
 use alpen_acct_runtime::{ArchivedEePrivateInput, ChunkInput, EePrivateInput};
 use alpen_chain_types::{ChunkTransition, ExecHeaderSummary, ExecInputs, ExecOutputs};
 use alpen_da_types::{
-    da_blob_version, ArchivedDaWitness, BitcoinMerkleProof, BytecodePreimage, DaBlob,
-    DaBlockWitness, DaTxWitness, DaWitness, DedupWitness, EvmHeaderSummary, L1DaBlockInclusion,
-    EE_DA_MAGIC_BYTES,
+    da_blob_version, ArchivedDaWitness, BitcoinMerkleProof, DaBlob, DaBlockWitness, DaTxWitness,
+    DaWitness, DedupWitness, EvmHeaderSummary, L1DaBlockInclusion, EE_DA_MAGIC_BYTES,
 };
 use alpen_evm_ee::EvmPartialState;
 use alpen_params::{AlpenSpecId, HeaderExtra};
@@ -256,7 +255,7 @@ fn deduped_code_fixture(
                 ),
             ],
         )],
-        DedupWitness::new(Vec::new(), holder_keys),
+        DedupWitness::new(holder_keys),
     );
     let pub_params = rebuild_pub_params(blob.update_seq_no, height, block_hash, wtxids_root);
 
@@ -307,104 +306,6 @@ fn verify_da_witness_rejects_holder_with_other_code() {
         err,
         DaVerificationError::MissingDeployedBytecode(_)
     ));
-}
-
-#[test]
-fn verify_da_witness_accepts_deduped_bytecode_from_private_witness() {
-    let header = EvmHeaderSummary {
-        block_num: 10,
-        timestamp: 1_700_000_000,
-        base_fee: 100,
-        gas_used: 21_000,
-        gas_limit: 36_000_000,
-        da_rate: Some(2_500_000_000),
-    };
-    let mut pre_state = EvmPartialState::new(
-        EthereumState {
-            state_trie: Default::default(),
-            storage_tries: Default::default(),
-        },
-        BTreeMap::new(),
-        Vec::new(),
-    );
-    let pre_root = pre_state.ethereum_state().state_root().0;
-    let raw_pre_state = encode_to_vec(&pre_state).unwrap();
-
-    let bytecode = Bytes::from_static(&[0x60, 0x80, 0x60, 0x40, 0x52]);
-    let code_hash = keccak256(bytecode.as_ref());
-    let mut state_diff = BatchStateDiff::new();
-    state_diff.accounts.insert(
-        Address::from([0x11; 20]),
-        AccountChange::Created(AccountDiff::new_created(U256::ZERO, 1, code_hash)),
-    );
-    apply_batch_state_diff_to_ethereum_state(pre_state.ethereum_state_mut(), &state_diff).unwrap();
-    let post_root = pre_state.ethereum_state().state_root().0;
-
-    let blob = DaBlob {
-        spec_version: SPEC_VERSION,
-        update_seq_no: 7,
-        evm_header: header,
-        state_diff,
-    };
-    let (commit, reveal) = build_da_transactions(&blob);
-    let commit_wtxid = commit.compute_wtxid().to_byte_array();
-    let reveal_wtxid = reveal.compute_wtxid().to_byte_array();
-    let wtxids_root = hash_pair(commit_wtxid, reveal_wtxid);
-    let block_hash = [0x44; 32];
-    let height = 42;
-    let ledger_ref_hash = l1_block_record_leaf_hash(&block_hash, &wtxids_root);
-    let ledger_refs = LedgerRefs::new(vec![AccumulatorClaim::new(height as u64, ledger_ref_hash)]);
-
-    let transition = ChunkTransition::new(
-        Hash::from([1; 32]),
-        Hash::from([2; 32]),
-        Hash::from(post_root),
-        ExecHeaderSummary::from_vec(header.encode_to_vec(SPEC_VERSION).unwrap()).unwrap(),
-        ExecInputs::new_empty(),
-        ExecOutputs::new_empty(),
-    );
-    let ee_input = EePrivateInput::new(
-        Vec::new(),
-        raw_pre_state,
-        vec![ChunkInput::new(transition, Vec::new())],
-    );
-    let da_witness = DaWitness::new(
-        vec![DaBlockWitness::new(
-            L1DaBlockInclusion::new(height, block_hash, wtxids_root),
-            vec![
-                DaTxWitness::new(
-                    serialize(&commit),
-                    BitcoinMerkleProof::new(vec![reveal_wtxid], 0),
-                ),
-                DaTxWitness::new(
-                    serialize(&reveal),
-                    BitcoinMerkleProof::new(vec![commit_wtxid], 1),
-                ),
-            ],
-        )],
-        DedupWitness::new(vec![BytecodePreimage::new(bytecode.to_vec())], Vec::new()),
-    );
-    let pub_params = UpdateProofPubParams::new(
-        Seqno::new(blob.update_seq_no),
-        ProofState::new(Hash::zero(), 0),
-        ProofState::new(Hash::zero(), 0),
-        Vec::new(),
-        ledger_refs,
-        UpdateOutputs::new_empty(),
-        Vec::new(),
-    );
-    let (ee_bytes, da_bytes) = archive_inputs(&ee_input, &da_witness);
-    let archived_ee = rkyv::access::<ArchivedEePrivateInput, RkyvError>(&ee_bytes).unwrap();
-    let archived_da = rkyv::access::<ArchivedDaWitness, RkyvError>(&da_bytes).unwrap();
-
-    verify_da_witness(
-        archived_ee,
-        archived_da,
-        &pub_params,
-        pre_root,
-        SPEC_VERSION,
-    )
-    .expect("private witness bytecode should satisfy deduped code hash");
 }
 
 #[test]

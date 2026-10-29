@@ -211,7 +211,6 @@ mod tests {
     use rkyv::rancor::Error as RkyvError;
 
     use super::*;
-    use crate::dedup_witness::BytecodePreimage;
 
     #[test]
     fn da_witness_empty_roundtrips_through_rkyv() {
@@ -221,10 +220,7 @@ mod tests {
         let archived = rkyv::access::<ArchivedDaWitness, RkyvError>(&bytes).unwrap();
 
         assert!(archived.blocks().is_empty());
-        assert!(archived
-            .dedup_da_witness()
-            .deduped_bytecode_preimages()
-            .is_empty());
+        assert!(archived.dedup_da_witness().code_holder_keys().is_empty());
     }
 
     #[test]
@@ -251,16 +247,16 @@ mod tests {
     }
 
     #[test]
-    fn da_witness_with_known_bytecode_roundtrips_through_rkyv() {
-        let preimage = BytecodePreimage::new(vec![0x60, 0x80]);
-        let witness = DaWitness::new(Vec::new(), DedupWitness::new(vec![preimage], Vec::new()));
+    fn da_witness_with_code_holder_roundtrips_through_rkyv() {
+        let witness = DaWitness::new(Vec::new(), DedupWitness::new(vec![[0x66; 32]]));
 
         let bytes = rkyv::to_bytes::<RkyvError>(&witness).unwrap();
         let archived = rkyv::access::<ArchivedDaWitness, RkyvError>(&bytes).unwrap();
 
         assert!(archived.blocks().is_empty());
-        let preimages = archived.dedup_da_witness().deduped_bytecode_preimages();
-        assert_eq!(preimages.len(), 1);
-        assert_eq!(preimages[0].bytecode(), &[0x60, 0x80]);
+        assert_eq!(
+            archived.dedup_da_witness().code_holder_keys(),
+            &[[0x66; 32]]
+        );
     }
 }

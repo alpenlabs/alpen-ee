@@ -12,7 +12,8 @@ use strata_db_types::DbResult;
 ///
 /// A bytecode is tracked by an account that took on that code. A later batch
 /// may leave the bytecode out only if that account still holds it in the
-/// batch's pre-state.
+/// batch's pre-state: the account proof guest checks the account against the
+/// pre-state root, which is what makes the omission sound.
 pub trait DaContext {
     /// Returns an account that held the bytecode identified by `code_hash` in
     /// a previously confirmed batch, if one is known.

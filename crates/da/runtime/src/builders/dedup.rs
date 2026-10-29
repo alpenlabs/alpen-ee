@@ -75,7 +75,6 @@ where
 /// Builds the [`DedupWitness`] naming `code_holders` by their state trie keys.
 pub(crate) fn dedup_witness_for_holders(code_holders: &[Address]) -> DedupWitness {
     DedupWitness::new(
-        Vec::new(),
         code_holders
             .iter()
             .map(|holder| keccak256(holder).0)

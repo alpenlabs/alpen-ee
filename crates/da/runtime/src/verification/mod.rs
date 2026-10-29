@@ -208,31 +208,25 @@ fn verify_da_blob_metadata(
 /// took on that code in an earlier batch, whose blob was checked the same way,
 /// so by induction from genesis the bytes are on L1. Future dedup kinds
 /// (account/storage serials) extend this with their own contributions.
-///
-/// NOTE: bytecode preimages are still accepted too. A preimage proves identity
-/// (the bytes hash to the referenced code hash), not that the bytes were
-/// published on L1 before.
-/// TODO(SECFND-513): stop accepting preimages once the prover sends holders.
 fn dedup_witness_code_hashes(
     pre_state: &EvmPartialState,
     dedup_da_witness: &ArchivedDedupWitness,
 ) -> DaVerificationResult<BTreeSet<B256>> {
-    let preimage_code_hashes = dedup_da_witness
-        .deduped_bytecode_preimages()
-        .iter()
-        .map(|preimage| Ok(keccak256(preimage.bytecode())));
     let state_trie = &pre_state.ethereum_state().state_trie;
-    let holder_code_hashes = dedup_da_witness.code_holder_keys().iter().map(|key| {
-        let holder = state_trie
-            .get_rlp::<TrieAccount>(key)
-            .map_err(|e| DaVerificationError::CodeHolderLookup {
-                key: *key,
-                error: e.to_string(),
-            })?
-            .ok_or(DaVerificationError::CodeHolderAbsent(*key))?;
-        Ok(holder.code_hash)
-    });
-    preimage_code_hashes.chain(holder_code_hashes).collect()
+    dedup_da_witness
+        .code_holder_keys()
+        .iter()
+        .map(|key| {
+            let holder = state_trie
+                .get_rlp::<TrieAccount>(key)
+                .map_err(|e| DaVerificationError::CodeHolderLookup {
+                    key: *key,
+                    error: e.to_string(),
+                })?
+                .ok_or(DaVerificationError::CodeHolderAbsent(*key))?;
+            Ok(holder.code_hash)
+        })
+        .collect()
 }
 
 fn verify_deployed_bytecodes(
