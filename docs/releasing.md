@@ -96,9 +96,12 @@ and `manifest.json` lists the networks.
    `ALPEN_GUESTS_S3_BUCKET` or `ALPEN_GUESTS_S3_ROLE_ARN` repo variable is not
    set.
 
-The workflow that runs for a tag is the copy at the tagged commit. So a
-release branch only gets the branch check once it holds this version of
-`release.yml`.
+The workflow that runs for a tag is the copy at the tagged commit. So the
+"Check tag is on its release branch" step only runs for a tag on a commit that
+has it. `releases/v0.4.x` doesn't have it yet. It sits at `v0.4.0-rc.3`, and
+`v0.4.0` goes on that same commit (step 4 above). So no v0.4 tag is checked
+until the step is cherry-picked onto the branch, and neither is a tag on any
+older commit.
 
 ## Building guests outside a release
 
