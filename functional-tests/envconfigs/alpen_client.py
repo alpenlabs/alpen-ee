@@ -55,6 +55,7 @@ class AlpenClientEnvParams:
     da_fee_rate: AlpenDaFeeRateConfig | None = None
     forward_tx: bool = True
     base_fee_floor: dict[str, int] = field(default_factory=lambda: dict(DEFAULT_BASE_FEE_FLOOR))
+    sequencer_metrics: bool = False
 
 
 class AlpenClientEnv(flexitest.EnvConfig):
@@ -194,6 +195,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
             l1_fee_policy=envparams.l1_fee_policy,
             da_fee_rate=envparams.da_fee_rate,
             base_fee_floor=envparams.base_fee_floor,
+            enable_metrics=envparams.sequencer_metrics,
         )
         sequencer.wait_for_ready(timeout=60)
         seq_enode = sequencer.get_enode()

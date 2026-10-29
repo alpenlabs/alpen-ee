@@ -92,6 +92,7 @@ class AlpenClientFactory(flexitest.Factory):
         da_fee_rate: AlpenDaFeeRateConfig | None = None,
         base_fee_floor: dict[str, int] = DEFAULT_BASE_FEE_FLOOR,
         prover: ProverBackend = NATIVE_BACKEND,
+        enable_metrics: bool = False,
         **kwargs,
     ) -> AlpenClientService:
         """
@@ -235,6 +236,11 @@ class AlpenClientFactory(flexitest.Factory):
             # Disable all discovery - peers connect via admin_addPeer or --trusted-peers
             cmd.append("-d")
 
+        metrics_port = self.next_port() if enable_metrics else None
+        if metrics_port is not None:
+            # Reth's Prometheus endpoint, serving the node's and Alpen's metrics.
+            cmd.extend(["--metrics", f"127.0.0.1:{metrics_port}"])
+
         http_url = f"http://127.0.0.1:{http_port}"
 
         props: AlpenClientProps = {
@@ -247,6 +253,8 @@ class AlpenClientFactory(flexitest.Factory):
             "mode": "sequencer",
             "enode": None,  # Will be populated after start
         }
+        if metrics_port is not None:
+            props["metrics_url"] = f"http://127.0.0.1:{metrics_port}/metrics"
 
         # Set environment variable for sequencer private key
         env = os.environ.copy()

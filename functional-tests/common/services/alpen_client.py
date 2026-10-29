@@ -12,7 +12,7 @@ import logging
 import subprocess
 import time
 from pathlib import Path
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from common.config.constants import (
     DEFAULT_BLOCK_WAIT_SLACK_SECONDS,
@@ -64,6 +64,7 @@ class AlpenClientProps(TypedDict):
     datadir: str
     mode: str  # "sequencer" or "fullnode"
     enode: str | None
+    metrics_url: NotRequired[str]
 
 
 class AlpenClientService(RpcService):
