@@ -12,6 +12,7 @@ workspace = true
 alpen-common.workspace = true
 alpen-da-types.workspace = true
 alpen-reth-statediff.workspace = true
+alpen-storage-api.workspace = true
 
 alloy-primitives.workspace = true
 async-trait.workspace = true
@@ -28,6 +29,6 @@ strata-l1-txfmt.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-alpen-database = { workspace = true, features = ["test-utils"] }
+alpen-storage-store = { workspace = true, features = ["test-utils"] }
 alpen-params.workspace = true
 tokio.workspace = true

@@ -26,9 +26,8 @@ use serde::{Deserialize, Serialize};
 pub struct AccessedStateRecord {
     /// Accounts the block read (and the storage slots, if any).
     pub accounts: Vec<AccessedAccount>,
-    /// Code hashes referenced during execution. Resolve via
-    /// [`crate::AccessedStateStore`] bytecode lookups (see
-    /// `AccessedStateStore::get_bytecode`).
+    /// Code hashes referenced during execution. Resolve via the
+    /// `AccessedStateStore::get_bytecode` lookup in `alpen-storage-api`.
     pub bytecode_hashes: Vec<[u8; 32]>,
     /// Ancestor block numbers queried via the EVM `BLOCKHASH` opcode.
     pub ancestor_block_numbers: Vec<u64>,

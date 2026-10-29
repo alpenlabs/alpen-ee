@@ -2,8 +2,9 @@
 
 use std::{future::Future, marker::PhantomData, sync::Arc};
 
-use alpen_common::{BatchId, BatchStorage, BlockNumHash, ExecBlockStorage};
+use alpen_common::{BatchId, BlockNumHash};
 use alpen_exec_chain::ExecChainHandle;
+use alpen_storage_api::{BatchStorage, ExecBlockStorage};
 use tokio::sync::{mpsc, watch};
 
 use super::{

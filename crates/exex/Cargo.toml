@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 alpen-common.workspace = true
 alpen-reth-statediff.workspace = true
+alpen-storage-api.workspace = true
 alpen-witness.workspace = true
 strata-acct-types.workspace = true
 

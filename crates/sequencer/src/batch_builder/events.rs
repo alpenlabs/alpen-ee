@@ -35,7 +35,7 @@ pub enum BatchBuilderEvent {
     /// this is self-describing regardless of what comes before or after
     /// it in the event stream. The chunk builder must force-seal its
     /// current chunk at this boundary and call
-    /// [`ChunkStorage::set_batch_chunks`](alpen_common::ChunkStorage::set_batch_chunks).
+    /// [`ChunkStorage::set_batch_chunks`](alpen_storage_api::ChunkStorage::set_batch_chunks).
     BatchSealed {
         /// The batch that was just sealed.
         batch_id: BatchId,

@@ -17,8 +17,8 @@ use alloy_primitives::{
     map::{B256Set, DefaultHashBuilder, HashMap},
     Address, B256, U256,
 };
-use alpen_common::AccessedStateStore;
 use alpen_evm_ee::EvmPartialState;
+use alpen_storage_api::AccessedStateStore;
 use eyre::{eyre, Result};
 use reth_ethereum_primitives::Block;
 use reth_provider::{BlockReader, StateProvider, StateProviderFactory};

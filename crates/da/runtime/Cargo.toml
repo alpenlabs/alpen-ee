@@ -14,6 +14,7 @@ workspace = true
 default = []
 builders = [
   "dep:alpen-common",
+  "dep:alpen-storage-api",
   "dep:async-trait",
   "dep:bitcoind-async-client",
   "dep:strata-primitives",
@@ -26,6 +27,7 @@ alpen-common = { workspace = true, optional = true }
 alpen-da-types.workspace = true
 alpen-params.workspace = true
 alpen-reth-statediff.workspace = true
+alpen-storage-api = { workspace = true, optional = true }
 alpen-test-utils-evm-workload = { workspace = true, optional = true }
 
 alloy-primitives.workspace = true

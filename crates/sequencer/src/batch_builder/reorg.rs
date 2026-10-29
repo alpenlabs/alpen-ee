@@ -1,6 +1,7 @@
 //! Batch builder reorg related logic.
 
-use alpen_common::{Batch, BatchId, BatchStorage, BlockNumHash};
+use alpen_common::{Batch, BatchId, BlockNumHash};
+use alpen_storage_api::BatchStorage;
 use eyre::{eyre, Result};
 use tracing::{error, warn};
 
@@ -117,8 +118,9 @@ pub(crate) async fn check_and_handle_reorg<P: AccumulationPolicy>(
 
 #[cfg(test)]
 mod tests {
-    use alpen_common::{Batch, BatchStatus, MockBatchStorage};
+    use alpen_common::{Batch, BatchStatus};
     use alpen_params::AlpenSpecId;
+    use alpen_storage_api::MockBatchStorage;
 
     use super::*;
     use crate::{

@@ -6,7 +6,8 @@ use std::{
     sync::Arc,
 };
 
-use alpen_common::{ConsensusHeads, OLClient, OLFinalizedStatus, Storage};
+use alpen_common::{ConsensusHeads, OLClient, OLFinalizedStatus};
+use alpen_storage_api::Storage;
 use serde::{Deserialize, Serialize};
 use strata_service::{AsyncService, Response, Service, ServiceState};
 use tokio::sync::watch;

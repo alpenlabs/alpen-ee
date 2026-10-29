@@ -1,6 +1,7 @@
 use std::{future::Future, sync::Arc};
 
-use alpen_common::{ExecBlockStorage, OLFinalizedStatus, SequencerOLClient};
+use alpen_common::{OLFinalizedStatus, SequencerOLClient};
+use alpen_storage_api::ExecBlockStorage;
 use strata_identifiers::OLBlockCommitment;
 use tokio::sync::{mpsc, oneshot, watch};
 

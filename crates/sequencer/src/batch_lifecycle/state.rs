@@ -1,6 +1,7 @@
 //! Batch lifecycle state management.
 
-use alpen_common::{require_genesis_batch, BatchId, BatchStatus, BatchStorage, StorageError};
+use alpen_common::{BatchId, BatchStatus};
+use alpen_storage_api::{require_genesis_batch, BatchStorage, StorageError};
 
 /// A frontier tracks the latest batch that has reached a particular status.
 ///
@@ -256,7 +257,7 @@ pub(crate) async fn recover_from_storage(
 
 #[cfg(test)]
 mod tests {
-    use alpen_common::InMemoryStorage;
+    use alpen_storage_api::testing::InMemoryStorage;
 
     use super::*;
     use crate::batch_lifecycle::test_utils::{

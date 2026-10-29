@@ -1,4 +1,5 @@
-use alpen_common::{ExecBlockRecord, ExecBlockStorage, SequencerOLClient};
+use alpen_common::{ExecBlockRecord, SequencerOLClient};
+use alpen_storage_api::ExecBlockStorage;
 use eyre::eyre;
 use strata_identifiers::OLBlockCommitment;
 use tracing::error;
@@ -113,9 +114,8 @@ mod tests {
     use super::*;
 
     mod init_ol_chain_tracker_state_tests {
-        use alpen_common::{
-            MockExecBlockStorage, MockSequencerOLClient, OLChainStatus, OLClientError,
-        };
+        use alpen_common::{MockSequencerOLClient, OLChainStatus, OLClientError};
+        use alpen_storage_api::MockExecBlockStorage;
 
         use super::*;
         use crate::ol_chain_tracker::test_utils::{

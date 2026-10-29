@@ -7,11 +7,11 @@
 
 use std::sync::Arc;
 
-use alpen_common::StateDiffProvider;
 use alpen_reth_statediff::{estimate_da_size, BatchBuilder, BlockStateChanges};
 use alpen_sequencer::sealing_policy::{
     AccumulationPolicy, BlockDataProvider, SealReason, SealingPolicy,
 };
+use alpen_storage_api::StateDiffProvider;
 use async_trait::async_trait;
 use strata_acct_types::Hash;
 

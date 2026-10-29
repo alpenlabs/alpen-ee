@@ -1,0 +1,34 @@
+[package]
+edition.workspace = true
+name = "alpen-storage-api"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+test-utils = ["dep:alpen-chain-types", "dep:alpen-params", "dep:mockall"]
+
+[dependencies]
+alpen-acct-types.workspace = true
+alpen-chain-types = { workspace = true, optional = true }
+alpen-common.workspace = true
+alpen-params = { workspace = true, optional = true }
+alpen-reth-statediff.workspace = true
+strata-acct-types.workspace = true
+strata-db-types.workspace = true
+strata-identifiers.workspace = true
+
+alloy-primitives.workspace = true
+async-trait.workspace = true
+eyre.workspace = true
+mockall = { workspace = true, optional = true }
+thiserror.workspace = true
+
+[dev-dependencies]
+alpen-chain-types.workspace = true
+alpen-params.workspace = true
+tokio.workspace = true

@@ -129,7 +129,7 @@ The services that make up the EE node, each a workspace crate at the top level.
 | Crate | Description |
 |-------|-------------|
 | `params` | Consolidated Alpen chain parameters, spec version schedule |
-| `common` | Shared EE types and the trait families (storage, DA, OL client, prover) |
+| `common` | Shared EE types and the trait families (DA, OL client, prover) |
 | `exec-chain` | In-memory view of the canonical execution chain, orphan tracking |
 | `ol-tracker` | Follows the paired OL node: epochs, checkpoints, finalization, inbox messages |
 | `genesis` | Deterministic EE genesis state |
@@ -138,15 +138,16 @@ The services that make up the EE node, each a workspace crate at the top level.
 | `witness` | Block range witness extraction for EVM proof generation |
 | `exex` | Reth execution extensions: per-block state-diff persistence and accessed-state capture |
 
-### Storage (`crates/`)
+### Storage (`crates/storage/`)
 
-The engine is generic infrastructure; the store and the console core are the EE's.
+The MDBX engine is generic infrastructure; the traits, the store and the console core are the EE's.
 
 | Crate | Description |
 |-------|-------------|
-| `mdbx` | Generic MDBX typed table store: environments, codecs, versioned values; knows nothing of the EE |
-| `database` | The EE store: node, prover, witness and DA-pipeline tables, the trait impls and store opening; its `schema` and `records` modules publish the on-disk model for tooling |
-| `dbconsole-core` | Operator console core: table registry, row reflection through the production codecs, staged writes, the sled migration rules; `bin/dbconsole` is its shell |
+| `storage/api` | Storage traits the node services read and write through, and `StorageError`; its `test-utils` feature adds the trait mocks, `InMemoryStorage`, the batch and chunk suites every store must pass, and exec block fixtures |
+| `storage/mdbx` | Generic MDBX typed table store: environments, codecs, versioned values; knows nothing of the EE |
+| `storage/store` | The EE store: node, prover, witness and DA-pipeline tables, the trait impls and store opening; its `schema` and `records` modules publish the on-disk model for tooling |
+| `storage/console` | Operator console core: table registry, row reflection through the production codecs, staged writes, the sled migration rules; `bin/dbconsole` is its shell |
 
 ### Protocol Types and Runtimes (`crates/`)
 

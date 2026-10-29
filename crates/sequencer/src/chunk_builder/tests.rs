@@ -3,11 +3,12 @@ use std::sync::{
     Arc, Mutex,
 };
 
-use alpen_common::{
-    exec_block_storage_test_fns::create_exec_block, Batch, BatchId, BatchStorage, BlockNumHash,
-    Chunk, ChunkStorage, InMemoryStorage, MockChunkStorage, MockExecBlockStorage, StorageError,
-};
+use alpen_common::{Batch, BatchId, BlockNumHash, Chunk};
 use alpen_params::AlpenSpecId;
+use alpen_storage_api::{
+    testing::{create_exec_block, InMemoryStorage},
+    BatchStorage, ChunkStorage, MockChunkStorage, MockExecBlockStorage, StorageError,
+};
 use strata_acct_types::Hash;
 
 use super::{
@@ -663,7 +664,7 @@ async fn cleanup_reverts_mid_batch_chunks() {
 
 #[tokio::test]
 async fn backfill_enqueues_unchunked_batches() {
-    use alpen_common::{exec_block_storage_test_fns::create_exec_block, MockExecBlockStorage};
+    use alpen_storage_api::MockExecBlockStorage;
 
     let storage = InMemoryStorage::new_empty();
     let genesis = test_block(0);
@@ -726,7 +727,7 @@ async fn backfill_enqueues_unchunked_batches() {
 
 #[tokio::test]
 async fn backfill_noop_when_caught_up() {
-    use alpen_common::MockExecBlockStorage;
+    use alpen_storage_api::MockExecBlockStorage;
 
     let storage = InMemoryStorage::new_empty();
     let genesis = test_block(0);
@@ -929,7 +930,7 @@ async fn repair_linkage_reconstructs_missing_link() {
 
 #[tokio::test]
 async fn full_startup_sequence() {
-    use alpen_common::{exec_block_storage_test_fns::create_exec_block, MockExecBlockStorage};
+    use alpen_storage_api::MockExecBlockStorage;
 
     let storage = InMemoryStorage::new_empty();
     let genesis = test_block(0);
