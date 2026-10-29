@@ -176,8 +176,9 @@ def branch_exists(repo: str, branch: str) -> bool:
 
 def on_branch(repo: str, branch: str, commit: str) -> bool:
     """Returns whether `commit` is the tip of `branch` or one of its ancestors."""
+    # The full ref, as in tag_commit, keeps a tag with the same name from matching.
     status = gh(
-        "api", f"repos/{repo}/compare/{branch}...{commit}", "--jq", ".status"
+        "api", f"repos/{repo}/compare/refs/heads/{branch}...{commit}", "--jq", ".status"
     ).strip()
     return status in ("identical", "behind")
 
