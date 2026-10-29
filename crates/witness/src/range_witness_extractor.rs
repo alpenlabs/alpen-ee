@@ -90,6 +90,21 @@ where
         start_block_hash: B256,
         end_block_hash: B256,
     ) -> Result<RangeWitnessData> {
+        self.extract_range_witness_with_accounts(start_block_hash, end_block_hash, &[])
+    }
+
+    /// Extracts witness for the block range `[start_block_hash, end_block_hash]`
+    /// (inclusive), with `extra_accounts` in the partial pre-state on top of
+    /// the accounts the range touches.
+    ///
+    /// The extra accounts let a guest read state the range never touched,
+    /// such as an account that holds code the batch's DA blob leaves out.
+    pub fn extract_range_witness_with_accounts(
+        &self,
+        start_block_hash: B256,
+        end_block_hash: B256,
+        extra_accounts: &[Address],
+    ) -> Result<RangeWitnessData> {
         // Resolve hashes to blocks
         let start_block = self
             .provider_factory
@@ -123,8 +138,11 @@ where
         let start_state_root = prev_block.header.state_root;
 
         // 1. Execute all blocks to discover accessed state
-        let (accessed, blocks) =
+        let (mut accessed, blocks) =
             self.read_blocks_and_accessed_state(start_block_num, end_block_num)?;
+        for address in extra_accounts {
+            accessed.accounts.entry(*address).or_default();
+        }
 
         // 2. Get providers for pre-range and post-range states
         let pre_state_provider = self
