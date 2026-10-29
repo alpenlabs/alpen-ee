@@ -108,6 +108,8 @@ fn validate_ancestors_against_block(
 impl EvmExecutionEnvironment {
     /// Creates the environment that executes blocks under `spec_version`, with
     /// the rules `params` gives that version.
+    ///
+    /// It rejects any block whose `extra_data` stamp names another version.
     pub fn new(params: &AlpenParams, spec_version: AlpenSpecId) -> Self {
         let evm_config = AlpenEvmConfig::new(params, spec_version);
         let consensus = FlooredConsensus::new(
@@ -571,6 +573,24 @@ mod tests {
                     if matches!(**err, ConsensusError::BlockTooLarge { .. })
             ),
             "{result:?}"
+        );
+    }
+
+    /// The proof guests build the environment for one version. A block stamped
+    /// for another version passes the checks on the block body, so execution
+    /// itself has to reject it, not only `verify_header`.
+    #[test]
+    fn execute_block_rejects_a_block_stamped_for_another_version() {
+        let fixture = fixture();
+        let env = EvmExecutionEnvironment::new(&dev_params(), AlpenSpecId::V0);
+        let block = fixture.evm_block();
+
+        env.verify_block_pre_execution(&block, &fixture.inputs)
+            .expect("the body checks do not look at the stamp");
+        let result = env.execute_block(&fixture.pre_state, block);
+        assert!(
+            matches!(result, Err(EvmEnvError::Execution(_))),
+            "a V1-stamped block must not execute under V0: {result:?}"
         );
     }
 
