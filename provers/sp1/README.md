@@ -18,10 +18,14 @@ member of the root workspace.
   `secp256k1-sys` need to build for the guest:
 
   ```sh
-  curl -fsSL https://sp1.succinct.xyz | bash
-  sp1up -v v6.8.1 -c
+  curl -fsSL --proto '=https' --tlsv1.2 https://sp1.succinct.xyz | bash
+  "$HOME/.sp1/bin/sp1up" -v v6.8.1 -c
+  export PATH="$HOME/.sp1/bin:$PATH"
   cargo prove --version
   ```
+
+  The installer adds `~/.sp1/bin` to your shell profile, so new shells find
+  `sp1up` and `cargo prove` without the `export`.
 
 - **Docker**, for a [reproducible build](#reproducible-builds). Releases build
   this way, so you need Docker to reproduce a released ELF. The Docker daemon
