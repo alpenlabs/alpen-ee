@@ -5,7 +5,7 @@
 
 use alloy_consensus::BlockBody;
 use alpen_chain_types::ExecInputs;
-use alpen_primitives::{sats_to_gwei, subject_to_address_unchecked};
+use alpen_primitives::DepositMint;
 use reth_ethereum_primitives::{Block, TransactionSigned};
 use reth_primitives_traits::RecoveredBlock;
 
@@ -31,9 +31,9 @@ pub(crate) fn recover_block(block: EvmBlock) -> Result<RecoveredBlock<Block>, Ev
 /// Any reordering will cause validation to fail.
 ///
 /// # Mapping
-/// - `Withdrawal.address` ← last 20 bytes of `SubjectDepositData.dest` (SubjectId)
-/// - `Withdrawal.amount` ← `SubjectDepositData.value` in Gwei
-/// - `Withdrawal.index` and `Withdrawal.validator_index` are ignored (not meaningful for deposits)
+/// Each withdrawal's address and amount must equal the [`DepositMint`] of the deposit at
+/// the same position. `Withdrawal.index` and `Withdrawal.validator_index` are ignored, as
+/// they are not meaningful for deposits.
 pub(crate) fn validate_deposits_against_block(
     body: &BlockBody<TransactionSigned>,
     inputs: &ExecInputs,
@@ -61,14 +61,10 @@ pub(crate) fn validate_deposits_against_block(
         .zip(subject_deposits.iter())
         .enumerate()
     {
-        let expected_address = subject_to_address_unchecked(&deposit.dest());
-
-        // Convert satoshis to gwei (1 sat = 10 gwei, per 1 BTC = 10^8 sats = 10^9 gwei)
-        let expected_amount = sats_to_gwei(deposit.value().to_sat())
+        let expected = DepositMint::new(&deposit.dest(), deposit.value())
             .ok_or(EvmEnvError::DepositAmountOverflow { index })?;
 
-        // Validate address and amount match
-        if withdrawal.address != expected_address || withdrawal.amount != expected_amount {
+        if withdrawal.address != expected.address() || withdrawal.amount != expected.amount_gwei() {
             return Err(EvmEnvError::DepositMismatch { index });
         }
 
@@ -83,6 +79,7 @@ pub(crate) fn validate_deposits_against_block(
 mod tests {
     use alloy_eips::eip4895::Withdrawal;
     use alpen_chain_types::{ExecInputs, SubjectDepositData};
+    use alpen_primitives::subject_to_address_unchecked;
     use revm_primitives::Address;
     use strata_acct_types::{BitcoinAmount, SubjectId};
 

@@ -11,7 +11,6 @@ workspace = true
 [dependencies]
 alpen-common.workspace = true
 alpen-engine-api.workspace = true
-alpen-primitives.workspace = true
 alpen-reth-node.workspace = true
 strata-acct-types.workspace = true
 strata-retry.workspace = true
@@ -31,6 +30,7 @@ tracing.workspace = true
 [dev-dependencies]
 alpen-common = { workspace = true, features = ["test-utils"] }
 alpen-params.workspace = true
+alpen-primitives.workspace = true
 strata-acct-types.workspace = true
 alpen-acct-types.workspace = true
 alpen-chain-types.workspace = true

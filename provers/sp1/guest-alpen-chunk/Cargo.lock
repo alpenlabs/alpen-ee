@@ -611,6 +611,7 @@ dependencies = [
  "alloy-sol-types",
  "serde",
  "strata-bridge-params",
+ "strata-btc-types",
  "strata-identifiers",
  "strata-ol-bridge-types",
  "strata-primitives",

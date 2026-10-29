@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 strata-bridge-params.workspace = true
+strata-btc-types.workspace = true
 strata-identifiers.workspace = true
 strata-ol-bridge-types.workspace = true
 strata-primitives.workspace = true
@@ -21,4 +22,5 @@ serde.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+bitcoin.workspace = true
 proptest.workspace = true
