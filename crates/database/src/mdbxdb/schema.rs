@@ -18,13 +18,13 @@
 //! encoded witness — has framing owned by whatever produced it rather than by
 //! this store.
 
-use alloy_primitives::B256;
+use alloy_primitives::{Address, B256};
 use alpen_common::{AccessedStateRecord, BatchId, ChunkId};
 use alpen_mdbx::{
     define_table, define_table_be_key, define_table_bincode_be_key, define_table_borsh,
     define_table_versioned, define_table_versioned_be_key, impl_be_key_codec,
     impl_unit_value_codec, impl_versioned_value_codec, tables, CodecError, KeyCodec, Schema,
-    TableSpec,
+    TableSpec, UpgradeCtx, ValueCodec,
 };
 use alpen_reth_statediff::BlockStateChanges;
 use strata_acct_types::Hash;
@@ -310,14 +310,32 @@ define_table_bincode_be_key! {
 }
 
 define_table! {
-    /// Set of contract code hashes already published to DA.
+    /// Contract code hashes already published to DA, each with an account that
+    /// held the code.
     ///
-    /// Membership is the whole record, so the value is `()` and occupies no
-    /// bytes: the key says everything the table has to say.
-    (pub PublishedCodeHashSchema) B256 => ()
+    /// A bare address, so nothing to version. The value is empty for rows
+    /// written before the holder was recorded; those read as no known holder,
+    /// and the bytecode is published again.
+    (pub PublishedCodeHashSchema) B256 => Option<Address>
 }
 impl_be_key_codec!(PublishedCodeHashSchema, B256);
-impl_unit_value_codec!(PublishedCodeHashSchema);
+
+impl ValueCodec<PublishedCodeHashSchema> for Option<Address> {
+    fn encode_value(&self) -> Result<Vec<u8>, CodecError> {
+        Ok(self.map(|holder| holder.to_vec()).unwrap_or_default())
+    }
+
+    fn decode_value(bytes: &[u8], _ctx: &UpgradeCtx<'_>) -> Result<Self, CodecError> {
+        match bytes.len() {
+            0 => Ok(None),
+            20 => Ok(Some(Address::from_slice(bytes))),
+            len => Err(CodecError::decode(
+                PublishedCodeHashSchema::NAME,
+                format!("expected an empty value or a 20-byte holder address, got {len} bytes"),
+            )),
+        }
+    }
+}
 
 /// The full set of tables backing the EE node database, for
 /// [`MdbxEnv::open`](alpen_mdbx::MdbxEnv::open).

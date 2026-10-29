@@ -57,8 +57,8 @@ impl<S, D, H> StateDiffBlobProvider<S, D, H> {
     /// On DB errors the bytecode is conservatively kept — duplicates are safe,
     /// missing data is not.
     fn bytecode_needs_publish(&self, code_hash: &B256) -> bool {
-        match self.da_ctx.is_code_hash_published(code_hash) {
-            Ok(published) => !published,
+        match self.da_ctx.code_hash_holder(code_hash) {
+            Ok(holder) => holder.is_none(),
             Err(e) => {
                 warn!(?code_hash, error = %e, "failed to check published status, keeping bytecode");
                 true

@@ -17,7 +17,7 @@ use std::{
     },
 };
 
-use alloy_primitives::B256;
+use alloy_primitives::{Address, B256};
 use alpen_acct_types::EeAccountState;
 use alpen_common::{
     exec_block_storage_test_fns::create_exec_block, AccessedAccount, AccessedStateRecord, Batch,
@@ -205,7 +205,7 @@ pub fn seed_witness(datadir: &Path) {
         .put_state_diff(B256::from([6u8; 32]), 6, &BlockStateChanges::default())
         .unwrap();
     DaContextDbMdbx::new(env, witness)
-        .mark_code_hashes_published(&[B256::from([7u8; 32])])
+        .mark_code_hashes_published(&[(B256::from([7u8; 32]), Address::from([8u8; 20]))])
         .unwrap();
 }
 
