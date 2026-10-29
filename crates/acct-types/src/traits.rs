@@ -2,33 +2,23 @@
 // crate?  so that chunk-runtime doesn't have to depend on this crate?  maybe
 // do this after repo restructure
 
-use alpen_chain_types::{ExecHeaderSummary, ExecInputs};
+use std::error::Error;
+
+use alpen_chain_types::{ExecHeaderSummary, ExecInputs, ExecOutputs};
 use strata_codec::Codec;
 use strata_identifiers::Hash;
 
-use crate::{errors::EnvResult, inputs::ExecPayload, outputs::ExecBlockOutput};
+use crate::outputs::ExecBlockOutput;
 
 /// Represents a partially-loaded state, including any information we would need
 /// to manipulate it and compute state roots.
 pub trait ExecPartialState: Codec + Clone + Sized {
     /// Computes the state root of a partial state.
-    fn compute_state_root(&self) -> EnvResult<Hash>;
+    fn compute_state_root(&self) -> Hash;
 }
 
 /// Represents an execution block header.
 pub trait ExecHeader: Codec + Clone + Sized {
-    /// Data intrinsic to a block header, like the timestamp and parent block.
-    ///
-    /// This doesn't include data that's a commitment to external data, like
-    /// the body or anything that's computed as a result of execution.
-    ///
-    /// In practice, this MAY be the same structure as a header, but with some
-    /// fields stubbed out with dummy/zero values.
-    type Intrinsics: Clone;
-
-    /// Gets the header's intrinsics we can execute the block with.
-    fn get_intrinsics(&self) -> Self::Intrinsics;
-
     /// Gets the parent exec blkid field.
     fn get_parent_id(&self) -> Hash;
 
@@ -42,32 +32,14 @@ pub trait ExecHeader: Codec + Clone + Sized {
     fn compute_block_id(&self) -> Hash;
 }
 
-/// Represents the body of an execution block, without the header.
-///
-/// This is the executable content of a block (transactions, operations, etc.)
-/// that can be processed to produce state changes.
-pub trait ExecBlockBody: Codec + Sized {}
-
 /// Represents a full execution block, with whatever information needed to
 /// execute it on top of a pre-state.
 pub trait ExecBlock: Codec + Sized {
     /// The block's header type.
     type Header: ExecHeader;
 
-    /// The block's body type.
-    type Body: ExecBlockBody;
-
-    /// Constructs a block from a header and body.
-    fn from_parts(header: Self::Header, body: Self::Body) -> Self;
-
-    /// Checks if a header matches a body.
-    fn check_header_matches_body(header: &Self::Header, body: &Self::Body) -> bool;
-
     /// Gets a reference to the block's header.
     fn get_header(&self) -> &Self::Header;
-
-    /// Gets a reference to the block's body.
-    fn get_body(&self) -> &Self::Body;
 }
 
 /// Execution environment.
@@ -86,65 +58,80 @@ pub trait ExecutionEnvironment: Sized + 'static {
     /// Execution-derived block output that is neither a state write nor OL-facing output.
     ///
     /// This carries execution-environment-specific commitments needed to verify
-    /// or complete a block header.
+    /// a block header.
     type BlockOutput: Sized;
 
-    /// Executes a block payload on top of a pre-state, returning the execution
-    /// output.
+    /// Why one of this environment's checks or its execution failed.
     ///
-    /// This should still be checked against a header when verifying a block, or
-    /// can be used to construct the final block header when assembling a block.
-    fn execute_block_body(
+    /// Each environment names its own failures, so a rejected block says
+    /// which rule it broke.
+    type Error: Error + Send + Sync + 'static;
+
+    /// Checks a block header on its own and against its parent's header.
+    ///
+    /// This must check that `header` builds on `parent`, meaning its parent
+    /// ID is `parent`'s block ID. Callers rely on that to treat a run of
+    /// blocks as one chain. It also checks every other rule the environment
+    /// puts on a header, such as its number, timestamp and fee fields.
+    fn verify_header(
+        &self,
+        parent: &<Self::Block as ExecBlock>::Header,
+        header: &<Self::Block as ExecBlock>::Header,
+    ) -> Result<(), Self::Error>;
+
+    /// Checks a block's body against its header and the inputs claimed for
+    /// it, before executing it.
+    ///
+    /// This must check that the header commits to the body. It also checks
+    /// every other rule the environment puts on a block that needs the body
+    /// but not the execution result, such as a limit on the block's size.
+    ///
+    /// Execution reads the block, not the inputs, so the claimed inputs must
+    /// be checked against the block itself, for example against a deposit
+    /// list in the body.
+    fn verify_block_pre_execution(
+        &self,
+        block: &Self::Block,
+        claimed_inputs: &ExecInputs,
+    ) -> Result<(), Self::Error>;
+
+    /// Executes a block on top of a pre-state, returning the execution output.
+    ///
+    /// Execution alone does not verify the block: the caller must also check
+    /// the header with [`Self::verify_header`], the body and claimed inputs
+    /// with [`Self::verify_block_pre_execution`] and the output and claimed
+    /// outputs with [`Self::verify_block_post_execution`].
+    ///
+    /// It takes the block so an environment can hand it to its executor
+    /// without copying it. A caller that still needs the header afterwards
+    /// clones it first.
+    fn execute_block(
         &self,
         pre_state: &Self::PartialState,
-        exec_payload: &ExecPayload<'_, Self::Block>,
-        inputs: &ExecInputs,
-    ) -> EnvResult<ExecBlockOutput<Self>>;
+        block: Self::Block,
+    ) -> Result<ExecBlockOutput<Self>, Self::Error>;
 
-    /// Performs any additional checks needed from the block outputs against the
-    /// header.
-    fn verify_outputs_against_header(
+    /// Checks a block's execution output against its header and the outputs
+    /// claimed for it.
+    ///
+    /// This must check every commitment the header makes to execution, such
+    /// as the receipts and the gas used. It must also check the claimed
+    /// outputs with [`ExecOutputs::matches_executed`]. The state root is left
+    /// to the caller, since it only exists once the writes are merged.
+    fn verify_block_post_execution(
         &self,
         header: &<Self::Block as ExecBlock>::Header,
-        outputs: &ExecBlockOutput<Self>,
-    ) -> EnvResult<()>;
+        exec_output: &ExecBlockOutput<Self>,
+        claimed_outputs: &ExecOutputs,
+    ) -> Result<(), Self::Error>;
 
-    /// Applies a pending write batch into the partial state.
+    /// Applies a block's write batch to the partial state.
+    ///
+    /// Besides the state changes, this must record whatever later blocks in
+    /// the chunk need from this one, such as its hash.
     fn merge_write_into_state(
         &self,
         state: &mut Self::PartialState,
         wb: &Self::WriteBatch,
-    ) -> EnvResult<()>;
-
-    /// Updates partial state with data derived from a successfully executed block.
-    ///
-    /// Execution environments that expose per-block lookups to later blocks in
-    /// the same chunk must override this method. The default no-op is only safe
-    /// when no post-block metadata, such as block hashes, is needed by subsequent
-    /// executions.
-    fn update_partial_state_after_block(
-        &self,
-        _state: &mut Self::PartialState,
-        _header: &<Self::Block as ExecBlock>::Header,
-    ) -> EnvResult<()> {
-        Ok(())
-    }
-}
-
-/// Block assembly trait for constructing complete headers from execution outputs.
-///
-/// This trait is separate from ExecutionEnvironment because header completion
-/// is only needed when building new blocks, not when verifying existing blocks.
-/// The ExecutionEnvironment trait focuses on proof-related operations.
-pub trait BlockAssembler: ExecutionEnvironment {
-    /// Constructs a complete header from header intrinsics and execution outputs.
-    ///
-    /// This combines the header intrinsics (parent hash, timestamp, etc.) with
-    /// the computed commitments from execution (state root, logs bloom, etc.)
-    /// to produce a complete block header.
-    fn complete_header(
-        &self,
-        exec_payload: &ExecPayload<'_, Self::Block>,
-        output: &ExecBlockOutput<Self>,
-    ) -> EnvResult<<Self::Block as ExecBlock>::Header>;
+    ) -> Result<(), Self::Error>;
 }

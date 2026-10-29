@@ -40,16 +40,14 @@ jemalloc-prof = ["reth-cli-util/jemalloc-prof"]
 
 sequencer = [
   "dep:alloy-consensus",
-  "dep:alloy-eips",
   "dep:alloy-rlp",
-  "dep:alloy-rpc-types-engine",
   "dep:alpen-da-provider",
   "dep:alpen-da-runtime",
   "dep:alpen-da-types",
   "dep:alpen-exec-chain",
   "dep:alpen-sequencer",
   "dep:alpen-exex",
-  "dep:alpen-reth-evm",
+  "dep:alpen-primitives",
   "dep:alpen-reth-statediff",
   "dep:alpen-witness",
   "dep:bitcoind-async-client",
@@ -102,16 +100,16 @@ alpen-da-runtime = { workspace = true, optional = true, features = [
 ] }
 alpen-da-types = { workspace = true, optional = true }
 alpen-database.workspace = true
-alpen-engine.workspace = true
+alpen-engine-reth.workspace = true
 alpen-evm-ee = { workspace = true, optional = true }
 alpen-exec-chain = { workspace = true, optional = true }
 alpen-exex = { workspace = true, optional = true }
 alpen-genesis.workspace = true
 alpen-ol-tracker.workspace = true
 alpen-params.workspace = true
+alpen-primitives = { workspace = true, optional = true }
 alpen-proof-acct = { workspace = true, optional = true }
 alpen-proof-chunk = { workspace = true, optional = true }
-alpen-reth-evm = { workspace = true, optional = true }
 alpen-reth-node.workspace = true
 alpen-reth-rpc.workspace = true
 alpen-reth-statediff = { workspace = true, optional = true }
@@ -125,7 +123,7 @@ ssz.workspace = true
 strata-acct-types.workspace = true
 strata-btcio = { workspace = true, optional = true }
 strata-codec = { workspace = true, optional = true }
-strata-common = { workspace = true, features = ["async"] }
+strata-common.workspace = true
 strata-config.workspace = true
 strata-db-types = { workspace = true, optional = true }
 strata-identifiers.workspace = true
@@ -135,6 +133,7 @@ strata-ol-rpc-types.workspace = true
 strata-paas = { workspace = true, optional = true }
 strata-predicate.workspace = true
 strata-primitives.workspace = true
+strata-retry.workspace = true
 strata-service.workspace = true
 strata-snark-acct-runtime = { workspace = true, optional = true }
 strata-snark-acct-types.workspace = true
@@ -143,10 +142,8 @@ zkaleido-native-adapter = { workspace = true, optional = true }
 zkaleido-sp1-host = { workspace = true, optional = true }
 
 
-alloy-eips = { workspace = true, optional = true }
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
-alloy-rpc-types-engine = { workspace = true, optional = true }
 anyhow.workspace = true
 async-trait.workspace = true
 clap.workspace = true

@@ -3,53 +3,20 @@
 //! This module contains utility functions used during block execution that don't
 //! belong to any specific type.
 
-use alloy_consensus::Block as AlloyBlock;
-use alpen_acct_types::{EnvError, EnvResult, ExecPayload};
+use alloy_consensus::BlockBody;
 use alpen_chain_types::ExecInputs;
-use alpen_reth_evm::subject_to_address;
-use reth_ethereum_primitives::{Receipt as EthereumReceipt, TransactionSigned};
-use reth_evm::execute::BlockExecutionOutput;
-use reth_primitives_traits::{Block, RecoveredBlock};
-use reth_trie::{HashedPostState, KeccakKeyHasher};
+use alpen_primitives::DepositMint;
+use reth_ethereum_primitives::{Block, TransactionSigned};
+use reth_primitives_traits::RecoveredBlock;
 
-use crate::types::{EvmBlock, EvmHeaderIntrinsics};
+use crate::{errors::EvmEnvError, types::EvmBlock};
 
-/// Builds an Alloy block from exec payload and recovers transaction senders.
-///
-/// This constructs an AlloyBlock from the header and body in the exec payload,
-/// then recovers the sender addresses from transaction signatures.
-pub(crate) fn build_and_recover_block(
-    exec_payload: &ExecPayload<'_, EvmBlock>,
-) -> EnvResult<RecoveredBlock<AlloyBlock<TransactionSigned>>> {
-    let header: EvmHeaderIntrinsics = exec_payload.header_intrinsics().clone();
-    let body = exec_payload.body().body().clone();
-    let header = header.build_execution_header(&body);
-
-    // Build block using alloy_consensus types
-    let alloy_block = AlloyBlock { header, body };
-
-    // Recover transaction senders from signatures
-    alloy_block
-        .try_into_recovered()
-        .map_err(|_| EnvError::InvalidBlock)
-}
-
-/// Converts execution output to HashedPostState for state updates.
-pub(crate) fn compute_hashed_post_state(
-    execution_output: BlockExecutionOutput<EthereumReceipt>,
-    _block_number: u64,
-) -> HashedPostState {
-    HashedPostState::from_bundle_state::<KeccakKeyHasher>(&execution_output.state.state)
-}
-
-/// Converts satoshis to gwei for EVM compatibility.
-///
-/// In Alpen: 1 BTC = 10^8 sats = 10^9 gwei
-/// Therefore: 1 sat = 10 gwei
-///
-/// Per EIP-4895, withdrawal amounts are stored in Gwei (not Wei).
-fn sats_to_gwei(sats: u64) -> Option<u64> {
-    sats.checked_mul(10)
+/// Recovers the transaction senders of an EVM block.
+pub(crate) fn recover_block(block: EvmBlock) -> Result<RecoveredBlock<Block>, EvmEnvError> {
+    block
+        .into_sealed()
+        .try_recover()
+        .map_err(|_| EvmEnvError::SenderRecovery)
 }
 
 /// Validates that deposits from ExecInputs match the withdrawals field in the block.
@@ -64,22 +31,15 @@ fn sats_to_gwei(sats: u64) -> Option<u64> {
 /// Any reordering will cause validation to fail.
 ///
 /// # Mapping
-/// - `Withdrawal.address` ← last 20 bytes of `SubjectDepositData.dest` (SubjectId)
-/// - `Withdrawal.amount` ← `SubjectDepositData.value` in Gwei
-/// - `Withdrawal.index` and `Withdrawal.validator_index` are ignored (not meaningful for deposits)
-///
-/// # Returns
-/// - `Ok(())` if deposits match
-/// - `Err(EnvError::InvalidBlock)` if there's a mismatch in count, address, or amount
+/// Each withdrawal's address and amount must equal the [`DepositMint`] of the deposit at
+/// the same position. `Withdrawal.index` and `Withdrawal.validator_index` are ignored, as
+/// they are not meaningful for deposits.
 pub(crate) fn validate_deposits_against_block(
-    block: &RecoveredBlock<AlloyBlock<TransactionSigned>>,
+    body: &BlockBody<TransactionSigned>,
     inputs: &ExecInputs,
-) -> EnvResult<()> {
+) -> Result<(), EvmEnvError> {
     // Get withdrawals from the block body (this is where deposits are stored)
-    // Access the sealed block's body withdrawals through the nested structure
-    let block_withdrawals = block
-        .sealed_block()
-        .body()
+    let block_withdrawals = body
         .withdrawals
         .as_ref()
         .map(|w| w.as_slice())
@@ -89,22 +49,23 @@ pub(crate) fn validate_deposits_against_block(
 
     // Check counts match
     if block_withdrawals.len() != subject_deposits.len() {
-        return Err(EnvError::InvalidBlock);
+        return Err(EvmEnvError::DepositCountMismatch {
+            deposits: subject_deposits.len(),
+            withdrawals: block_withdrawals.len(),
+        });
     }
 
     // Validate each deposit matches the corresponding withdrawal
-    for (withdrawal, deposit) in block_withdrawals.iter().zip(subject_deposits.iter()) {
-        // Convert SubjectId to Address - returns None if first 12 bytes aren't zero
-        let expected_address = subject_to_address(&deposit.dest())
-            .ok_or_else(|| EnvError::InvalidDepositAddress(deposit.dest()))?;
+    for (index, (withdrawal, deposit)) in block_withdrawals
+        .iter()
+        .zip(subject_deposits.iter())
+        .enumerate()
+    {
+        let expected = DepositMint::from_deposit(&deposit.dest(), deposit.value())
+            .ok_or(EvmEnvError::DepositAmountOverflow { index })?;
 
-        // Convert satoshis to gwei (1 sat = 10 gwei, per 1 BTC = 10^8 sats = 10^9 gwei)
-        let expected_amount =
-            sats_to_gwei(deposit.value().to_sat()).ok_or(EnvError::InvalidBlock)?;
-
-        // Validate address and amount match
-        if withdrawal.address != expected_address || withdrawal.amount != expected_amount {
-            return Err(EnvError::InvalidBlock);
+        if withdrawal.address != expected.address() || withdrawal.amount != expected.amount_gwei() {
+            return Err(EvmEnvError::DepositMismatch { index });
         }
 
         // Note: withdrawal.index and withdrawal.validator_index are not validated
@@ -116,10 +77,9 @@ pub(crate) fn validate_deposits_against_block(
 
 #[cfg(test)]
 mod tests {
-    use alloy_consensus::{BlockBody, Header};
     use alloy_eips::eip4895::Withdrawal;
     use alpen_chain_types::{ExecInputs, SubjectDepositData};
-    use reth_primitives_traits::RecoveredBlock;
+    use alpen_primitives::subject_to_address_unchecked;
     use revm_primitives::Address;
     use strata_acct_types::{BitcoinAmount, SubjectId};
 
@@ -131,10 +91,9 @@ mod tests {
         let mut subject_bytes = [0u8; 32];
         subject_bytes[31] = 0x42; // Last byte of address
         let subject_id = SubjectId::new(subject_bytes);
-        let expected_address = subject_to_address(&subject_id).expect("valid subject ID");
+        let expected_address = subject_to_address_unchecked(&subject_id);
 
-        // Create a block with matching withdrawal
-        let header = Header::default();
+        // Create a block body with matching withdrawal
         let body = BlockBody {
             transactions: vec![],
             ommers: vec![],
@@ -148,9 +107,6 @@ mod tests {
                 .into(),
             ),
         };
-        let block = AlloyBlock { header, body };
-        let recovered_block: RecoveredBlock<AlloyBlock<TransactionSigned>> =
-            block.try_into_recovered().unwrap();
 
         // Create matching deposit input
         let mut inputs = ExecInputs::new_empty();
@@ -158,7 +114,7 @@ mod tests {
         inputs.add_subject_deposit(deposit);
 
         // Should succeed - perfect match
-        let result = validate_deposits_against_block(&recovered_block, &inputs);
+        let result = validate_deposits_against_block(&body, &inputs);
         assert!(result.is_ok());
     }
 
@@ -169,8 +125,7 @@ mod tests {
         subject_bytes[31] = 0xff; // Different address
         let subject_id = SubjectId::new(subject_bytes);
 
-        // Create a block with different address
-        let header = Header::default();
+        // Create a block body with different address
         let body = BlockBody {
             transactions: vec![],
             ommers: vec![],
@@ -184,9 +139,6 @@ mod tests {
                 .into(),
             ),
         };
-        let block = AlloyBlock { header, body };
-        let recovered_block: RecoveredBlock<AlloyBlock<TransactionSigned>> =
-            block.try_into_recovered().unwrap();
 
         // Create deposit with different address
         let mut inputs = ExecInputs::new_empty();
@@ -194,17 +146,19 @@ mod tests {
         inputs.add_subject_deposit(deposit);
 
         // Should fail - address mismatch
-        let result = validate_deposits_against_block(&recovered_block, &inputs);
-        assert!(result.is_err());
+        let result = validate_deposits_against_block(&body, &inputs);
+        assert!(matches!(
+            result,
+            Err(EvmEnvError::DepositMismatch { index: 0 })
+        ));
     }
 
     #[test]
-    fn test_validate_deposits_invalid_subject_id() {
-        // Invalid subject ID with non-zero padding in first 12 bytes
+    fn test_validate_deposits_non_zero_padding_truncates() {
+        // Verification truncates non-zero padding, the same as block assembly.
         let subject_id = SubjectId::new([0xff; 32]);
 
-        // Create a block
-        let header = Header::default();
+        // Create a block body
         let body = BlockBody {
             transactions: vec![],
             ommers: vec![],
@@ -218,18 +172,13 @@ mod tests {
                 .into(),
             ),
         };
-        let block = AlloyBlock { header, body };
-        let recovered_block: RecoveredBlock<AlloyBlock<TransactionSigned>> =
-            block.try_into_recovered().unwrap();
 
-        // Create deposit with invalid subject ID
         let mut inputs = ExecInputs::new_empty();
         let deposit = SubjectDepositData::new(subject_id, BitcoinAmount::try_from(10).unwrap());
         inputs.add_subject_deposit(deposit);
 
-        // Should fail - invalid subject ID
-        let result = validate_deposits_against_block(&recovered_block, &inputs);
-        assert!(result.is_err());
+        let result = validate_deposits_against_block(&body, &inputs);
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -237,10 +186,9 @@ mod tests {
         let mut subject_bytes = [0u8; 32];
         subject_bytes[31] = 0x42;
         let subject_id = SubjectId::new(subject_bytes);
-        let expected_address = subject_to_address(&subject_id).expect("valid subject ID");
+        let expected_address = subject_to_address_unchecked(&subject_id);
 
-        // Create a block with wrong amount
-        let header = Header::default();
+        // Create a block body with wrong amount
         let body = BlockBody {
             transactions: vec![],
             ommers: vec![],
@@ -254,9 +202,6 @@ mod tests {
                 .into(),
             ),
         };
-        let block = AlloyBlock { header, body };
-        let recovered_block: RecoveredBlock<AlloyBlock<TransactionSigned>> =
-            block.try_into_recovered().unwrap();
 
         // Create deposit with different amount
         let mut inputs = ExecInputs::new_empty();
@@ -264,7 +209,10 @@ mod tests {
         inputs.add_subject_deposit(deposit);
 
         // Should fail - amount mismatch
-        let result = validate_deposits_against_block(&recovered_block, &inputs);
-        assert!(result.is_err());
+        let result = validate_deposits_against_block(&body, &inputs);
+        assert!(matches!(
+            result,
+            Err(EvmEnvError::DepositMismatch { index: 0 })
+        ));
     }
 }

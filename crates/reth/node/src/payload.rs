@@ -8,7 +8,7 @@ use alloy_rpc_types::{
     Withdrawal,
 };
 use alpen_params::{AlpenSpecId, HeaderExtraError};
-use alpen_reth_primitives::WithdrawalIntent;
+use alpen_primitives::WithdrawalIntent;
 use reth_ethereum_engine_primitives::BuiltPayloadConversionError;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_node_api::{BuiltPayload, PayloadAttributes};

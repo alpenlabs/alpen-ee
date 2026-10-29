@@ -305,7 +305,7 @@ pub fn sled_trees() -> Vec<SledTree> {
         copy("AcctProofIdIndexSchema", "prover/AcctProofIdIndexSchema"),
         // witness: the diff is bincode on both sides and versioned now; the
         // hash-by-number value was the 32 raw bytes; the published code hash
-        // marker was already empty.
+        // marker was empty, which still reads as a row with no known holder.
         tag("BlockStateChangesSchema", "witness/BlockStateChangesSchema"),
         recode(
             "BlockHashByNumber",

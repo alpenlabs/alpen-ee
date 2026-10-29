@@ -11,8 +11,16 @@
 //! - [`builders`] (feature `builders`, off by default). host-side helpers that construct the
 //!   [`DaWitness`](alpen_da_types::DaWitness) the verifier checks. Enabled by the prover; left out
 //!   of guest builds.
+//! - [`test_utils`] (feature `test-utils`). Builds a batch's DA from the generated EVM workloads,
+//!   for tests and prover-perf.
+
+mod payload;
 
 pub mod verification;
 
 #[cfg(feature = "builders")]
 pub mod builders;
+#[cfg(feature = "test-utils")]
+pub mod test_utils;
+
+pub use payload::DaBlobRecoveryError;

@@ -1,0 +1,39 @@
+[package]
+edition.workspace = true
+name = "alpen-engine-reth"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+alpen-common.workspace = true
+alpen-engine-api.workspace = true
+alpen-reth-node.workspace = true
+strata-acct-types.workspace = true
+strata-retry.workspace = true
+
+alloy-eips.workspace = true
+alloy-primitives.workspace = true
+alloy-rpc-types-engine.workspace = true
+async-trait.workspace = true
+eyre.workspace = true
+reth-node-builder.workspace = true
+reth-payload-builder.workspace = true
+reth-provider.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+alpen-common = { workspace = true, features = ["test-utils"] }
+alpen-params.workspace = true
+alpen-primitives.workspace = true
+strata-acct-types.workspace = true
+alpen-acct-types.workspace = true
+alpen-chain-types.workspace = true
+strata-identifiers.workspace = true
+
+mockall.workspace = true

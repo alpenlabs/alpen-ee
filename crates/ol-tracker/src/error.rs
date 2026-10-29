@@ -1,6 +1,6 @@
 use std::result;
 
-use alpen_acct_types::EnvError;
+use alpen_acct_runtime::AcctRuntimeError;
 use alpen_common::{OLClientError, StorageError};
 use strata_identifiers::Hash;
 use strata_snark_acct_runtime::ProgramError;
@@ -47,7 +47,7 @@ pub enum OLTrackerError {
 
     /// Failure applying a snark-account update during epoch replay.
     #[error("process update: {0}")]
-    ProcessUpdate(#[from] ProgramError<EnvError>),
+    ProcessUpdate(#[from] ProgramError<AcctRuntimeError>),
 
     /// Generic error for unexpected conditions (may be recoverable depending on cause)
     #[error("{0}")]

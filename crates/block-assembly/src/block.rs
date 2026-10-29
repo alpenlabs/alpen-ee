@@ -3,7 +3,7 @@ use std::num::NonZero;
 use alpen_acct_runtime::apply_input_messages;
 use alpen_acct_types::EeAccountState;
 use alpen_chain_types::ExecBlockPackage;
-use alpen_common::{EnginePayload, ExecBlockPayload, PayloadBuilderEngine};
+use alpen_engine_api::PayloadBuilderEngine;
 use alpen_params::AlpenSpecId;
 use eyre::Context;
 use strata_acct_types::{AccountId, Hash, MessageEntry};
@@ -37,11 +37,11 @@ pub struct BlockAssemblyInputs<'a> {
 
 /// Outputs from block assembly
 #[derive(Debug)]
-pub struct BlockAssemblyOutputs {
+pub struct BlockAssemblyOutputs<P> {
     /// Block package representing the OL inputs and outputs for this block.
     pub package: ExecBlockPackage,
     /// Block payload including full exec block body.
-    pub payload: ExecBlockPayload,
+    pub payload: P,
     /// EeAccountState after applying the new block.
     pub account_state: EeAccountState,
     /// Monotonically incrementing index for next deposit to use.
@@ -57,7 +57,7 @@ pub struct BlockAssemblyOutputs {
 pub async fn build_next_exec_block<E: PayloadBuilderEngine>(
     inputs: BlockAssemblyInputs<'_>,
     payload_builder: &E,
-) -> eyre::Result<BlockAssemblyOutputs> {
+) -> eyre::Result<BlockAssemblyOutputs<E::TEnginePayload>> {
     let BlockAssemblyInputs {
         mut account_state,
         inbox_messages,
@@ -82,7 +82,8 @@ pub async fn build_next_exec_block<E: PayloadBuilderEngine>(
         account_state.pending_inputs(),
         max_deposits_per_block,
         next_deposit_idx,
-    );
+    )
+    .context("build_next_exec_block: failed to extract consumed inputs")?;
     let processed = consumed.processed();
     let ConsumedInputs {
         deposits,
@@ -137,11 +138,7 @@ pub async fn build_next_exec_block<E: PayloadBuilderEngine>(
 
     Ok(BlockAssemblyOutputs {
         package,
-        payload: ExecBlockPayload::from_bytes(
-            payload
-                .to_bytes()
-                .context("build_next_exec_block: failed to serialized payload")?,
-        ),
+        payload,
         account_state,
         next_deposit_idx,
         next_spec_version,
@@ -153,16 +150,17 @@ mod tests {
     use std::convert::Infallible;
 
     use alpen_acct_types::PendingInputEntry;
-    use alpen_common::{
-        ExecutionEngine, ExecutionEngineError, ForkchoiceState, PayloadBuildAttributes,
+    use alpen_engine_api::{
+        EnginePayload, ExecutionEngine, ExecutionEngineError, ForkchoiceState,
+        PayloadBuildAttributes,
     };
-    use alpen_reth_primitives::WithdrawalIntent;
+    use alpen_primitives::WithdrawalIntent;
     use async_trait::async_trait;
     use strata_predicate::PredicateKey;
 
     use super::*;
 
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     struct StubPayload;
 
     impl EnginePayload for StubPayload {

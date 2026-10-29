@@ -129,8 +129,7 @@ The services that make up the EE node, each a workspace crate at the top level.
 | Crate | Description |
 |-------|-------------|
 | `params` | Consolidated Alpen chain parameters, spec version schedule |
-| `common` | Shared EE types and the trait families (engine, storage, DA, OL client, prover) |
-| `engine` | Execution engine control: drives the reth engine API |
+| `common` | Shared EE types and the trait families (storage, DA, OL client, prover) |
 | `exec-chain` | In-memory view of the canonical execution chain, orphan tracking |
 | `ol-tracker` | Follows the paired OL node: epochs, checkpoints, finalization, inbox messages |
 | `genesis` | Deterministic EE genesis state |
@@ -151,7 +150,7 @@ The engine is generic infrastructure; the store and the console core are the EE'
 
 ### Protocol Types and Runtimes (`crates/`)
 
-The EE account and chain types shared with the specs, and the runtimes the proofs wrap.
+The EE types shared with the specs and the proofs, and the runtimes the proofs wrap.
 
 | Crate | Description |
 |-------|-------------|
@@ -160,6 +159,7 @@ The EE account and chain types shared with the specs, and the runtimes the proof
 | `chain-types` | EE chain types: blocks, chunks, inputs and outputs (SSZ) |
 | `chunk-runtime` | Chunk proof runtime for generic execution environments |
 | `evm-ee` | The EVM implementation of the `ExecutionEnvironment` trait |
+| `primitives` | Unit constants and conversions, subject to EVM address mapping, and the bridge-out withdrawal format |
 
 ### Data Availability (`crates/da/`)
 
@@ -177,16 +177,22 @@ The EE account and chain types shared with the specs, and the runtimes the proof
 | `rpc/types` | Alpen EE RPC wire types |
 | `rpc/server` | Alpen EE RPC server implementation |
 
+### Engine (`crates/engine/`)
+
+| Crate | Description |
+|-------|-------------|
+| `engine/api` | Execution engine traits: block submission, forkchoice, payload building and its inputs |
+| `engine/reth` | The reth-backed execution engine: payload building, block submission, forkchoice control and the startup chainstate sync |
+
 ### Reth Integration (`crates/reth/`)
 
 Alpen's configuration of reth. These sit below `common` in the dependency graph.
 
 | Crate | Description |
 |-------|-------------|
-| `reth/primitives` | Reth primitive type bindings |
 | `reth/evm` | Custom EVM with the Alpen precompiles |
 | `reth/rpc` | Custom reth RPC endpoints |
-| `reth/node` | Alpen Reth node implementation and gossip |
+| `reth/node` | Alpen Reth node implementation, gossip, and the built payload's stored encoding |
 | `reth/statediff` | State diff generation |
 
 ### Proofs (`crates/proof/`, `provers/sp1/`)
@@ -206,7 +212,8 @@ The SP1 guest packages are local manifests with their own lockfiles, used by the
 | Path | Description |
 |-------|-------------|
 | `test-utils/simple-ee` | A minimal `ExecutionEnvironment` for the runtime tests and Miri |
-| `test-utils/data/` | JSON fixtures (no crate) read by the `evm-ee` and `proof/chunk` tests |
+| `test-utils/evm-workload` | Realistic multi-block EVM workloads: the stored format, and a generator (`generator` feature) that builds them on a throwaway reth database |
+| `test-utils/data/` | Fixtures (no crate): the RSP block witness the `evm-ee` codec and partial state tests read, and the workloads the `evm-ee` execution tests, the `proof/chunk` tests and `prover-perf` run on |
 
 ### Network Params
 

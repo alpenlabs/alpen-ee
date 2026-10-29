@@ -1,0 +1,25 @@
+{
+  "seed": 0,
+  "eoas": 10000,
+  "holders": 5000,
+  "traders": 300,
+  "setup_blocks": 27,
+  "first_block": 28,
+  "last_block": 127,
+  "transactions": {
+    "bridge_out": 10,
+    "legacy_transfer": 101,
+    "native_to_fresh_address": 212,
+    "native_transfer": 708,
+    "schnorr_verify": 20,
+    "swap": 170,
+    "token_approve": 106,
+    "token_deploy": 2,
+    "token_to_new_holder": 207,
+    "token_transfer": 502,
+    "token_transfer_from": 106
+  },
+  "deposits": 10,
+  "gas_used": 72561895,
+  "da_rate_wei_per_byte": 5000000000
+}

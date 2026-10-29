@@ -82,11 +82,11 @@ where
         Arc::new(RangeWitnessExtractor::new(node_provider, storage.clone()));
     let acct_range_witness_fn: Arc<AcctRangeWitnessFn> = {
         let extractor = range_witness_extractor.clone();
-        Arc::new(move |first_block, last_block| {
-            extractor.extract_range_witness(first_block, last_block)
+        Arc::new(move |first_block, last_block, extra_accounts| {
+            extractor.extract_range_witness_with_accounts(first_block, last_block, &extra_accounts)
         })
     };
-    let witness_db = dbs.witness_db();
+    let da_ctx = dbs.da_context_db();
 
     // A `ProverBuilder` is single-use (`.native(host)`/`.remote(host)`
     // consume it), but every resident prover program needs its own, so these
@@ -117,7 +117,7 @@ where
         let chunk_storage_dyn = chunk_storage_dyn.clone();
         let storage = storage.clone();
         let btc_client = btc_client.clone();
-        let witness_db = witness_db.clone();
+        let da_ctx = da_ctx.clone();
         let acct_range_witness_fn = acct_range_witness_fn.clone();
         let prover_db = prover_db.clone();
         let batch_proofs = batch_proofs.clone();
@@ -128,7 +128,7 @@ where
                 chunk_storage_dyn.clone(),
                 storage.clone(),
                 btc_client.clone(),
-                witness_db.clone(),
+                da_ctx.clone(),
                 acct_range_witness_fn.clone(),
             ))
             .task_store(EeAcctTaskStore::new(prover_db.clone(), spec_version))

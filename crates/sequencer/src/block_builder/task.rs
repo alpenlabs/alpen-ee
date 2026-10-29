@@ -3,10 +3,8 @@ use std::sync::Arc;
 use alpen_acct_types::EeAccountState;
 use alpen_block_assembly::{build_next_exec_block, BlockAssemblyInputs, BlockAssemblyOutputs};
 use alpen_chain_types::ExecBlockPackage;
-use alpen_common::{
-    Clock, EnginePayload, ExecBlockPayload, ExecBlockRecord, ExecBlockStorage,
-    PayloadBuilderEngine, SystemClock,
-};
+use alpen_common::{Clock, ExecBlockPayload, ExecBlockRecord, ExecBlockStorage, SystemClock};
+use alpen_engine_api::{EnginePayload, PayloadBuilderEngine};
 use alpen_exec_chain::ExecChainHandle;
 use alpen_params::AlpenSpecId;
 use eyre::Context;
@@ -220,13 +218,17 @@ async fn block_builder_task_inner<TEngine: PayloadBuilderEngine>(
     )
     .await?;
 
+    // encode the payload for storage first, since submitting it takes it
+    let payload_bytes = ExecBlockPayload::from_bytes(
+        payload
+            .to_bytes()
+            .context("block_builder: serialize payload")?,
+    );
+
     // submit the built payload back to engine so reth knows the block (inserts
     // it into the engine tree as VALID, not yet canonical)
     payload_builder
-        .submit_payload(
-            <TEngine::TEnginePayload as EnginePayload>::from_bytes(payload.as_bytes())
-                .context("block_builder: deserialize payload")?,
-        )
+        .submit_payload(payload)
         .await
         .context("block_builder: submit payload to engine")?;
 
@@ -235,7 +237,7 @@ async fn block_builder_task_inner<TEngine: PayloadBuilderEngine>(
 
     // save block outputs to Alpen storage (the source of truth)
     storage
-        .save_exec_block(block, payload)
+        .save_exec_block(block, payload_bytes)
         .await
         .context("block_builder: save exec block to storage")?;
 
@@ -265,14 +267,14 @@ struct BlockTarget {
     timestamp_ms: u64,
 }
 
-async fn build_next_block(
+async fn build_next_block<TEngine: PayloadBuilderEngine>(
     expected_block_target: &BlockTarget,
     config: &BlockBuilderConfig,
     exec_chain_handle: &ExecChainHandle,
     ol_chain_handle: &OLChainTrackerHandle,
-    payload_builder: &impl PayloadBuilderEngine,
+    payload_builder: &TEngine,
     clock: &impl Clock,
-) -> Result<(ExecBlockRecord, ExecBlockPayload, Hash), BlockBuilderError> {
+) -> Result<(ExecBlockRecord, TEngine::TEnginePayload, Hash), BlockBuilderError> {
     let last_local_block = exec_chain_handle
         .get_best_block()
         .await

@@ -4,10 +4,8 @@
 //! some messages may be encoded in orchestration layer containers (which are
 //! treated opaquely).
 
-mod commit;
 mod errors;
 mod extra_data;
-mod inputs;
 mod messages;
 mod outputs;
 mod reexports;
@@ -26,10 +24,8 @@ mod ssz_generated {
     include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 }
 
-pub use commit::*;
 pub use errors::*;
 pub use extra_data::*;
-pub use inputs::*;
 pub use messages::*;
 pub use outputs::*;
 pub use reexports::*;

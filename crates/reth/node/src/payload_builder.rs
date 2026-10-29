@@ -7,13 +7,13 @@ use std::{
 use alloy_consensus::{Header, Transaction};
 use alloy_eips::eip4895::Withdrawals;
 use alpen_params::{FeeSpec, HeaderExtra};
+use alpen_primitives::{
+    extract_withdrawal_intents, WithdrawalIntent, BRIDGEOUT_PRECOMPILE_ADDRESS,
+};
 use alpen_reth_evm::{
     base_fee::next_floored_base_fee,
-    constants::BRIDGEOUT_PRECOMPILE_ADDRESS,
     da_fee::{constrain_next_da_rate, DA_COVERAGE_CAPPED, DA_COVERAGE_UNKNOWN},
-    extract_withdrawal_intents,
 };
-use alpen_reth_primitives::WithdrawalIntent;
 use reth_basic_payload_builder::*;
 use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{BlockExecutionError, BlockValidationError};
@@ -298,8 +298,9 @@ where
     }
 
     let evm = evm_config.evm_with_env(&mut db, evm_env);
-    let block_ctx =
-        evm_config.context_for_next_block_with(&parent_header, next_block_attrs, header_extra);
+    let block_ctx = evm_config
+        .context_for_next_block_with(&parent_header, next_block_attrs, header_extra)
+        .map_err(PayloadBuilderError::other)?;
     let mut builder = evm_config.create_block_builder(evm, &parent_header, block_ctx);
 
     // Shared handle to *this build EVM's* DA-coverage cell: the in-EVM charge writes it per

@@ -8,16 +8,17 @@ repository.workspace = true
 [dependencies]
 alpen-acct-types.workspace = true
 alpen-chain-types.workspace = true
-strata-acct-types.workspace = true
 strata-codec.workspace = true
-strata-predicate.workspace = true
 
 rkyv.workspace = true
 rkyv_impl.workspace = true
 ssz.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 alpen-simple-ee.workspace = true
+strata-acct-types.workspace = true
+strata-predicate.workspace = true
 
 [lints]
 workspace = true

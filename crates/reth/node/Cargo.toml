@@ -9,10 +9,12 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+alpen-engine-api.workspace = true
 alpen-params.workspace = true
+alpen-primitives.workspace = true
 alpen-reth-evm.workspace = true
-alpen-reth-primitives.workspace = true
 alpen-reth-rpc.workspace = true
+strata-acct-types.workspace = true
 strata-primitives.workspace = true
 
 alloy-consensus.workspace = true
@@ -20,13 +22,13 @@ alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types.workspace = true
+bincode.workspace = true
 ciborium.workspace = true
 eyre.workspace = true
 futures.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-chainspec.workspace = true
 reth-consensus.workspace = true
-reth-consensus-common.workspace = true
 reth-errors.workspace = true
 reth-eth-wire.workspace = true
 reth-ethereum-engine-primitives.workspace = true
@@ -48,6 +50,7 @@ reth-trie.workspace = true
 revm.workspace = true
 revm-primitives.workspace = true
 serde.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 tracing.workspace = true
@@ -56,4 +59,5 @@ tracing.workspace = true
 proptest.workspace = true
 reth-storage-api.workspace = true
 serde_json.workspace = true
+strata-ol-bridge-types.workspace = true
 strata-identifiers = { workspace = true, features = ["test-utils"] }

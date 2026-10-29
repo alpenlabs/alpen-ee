@@ -1,12 +1,5 @@
 [advisories]
 ignore = [
-  # RUSTSEC-2026-0285 (rustls 0.23.43)
-  # Fixed in 0.23.45, published 2026-09-14. Nothing in the graph blocks it: the
-  # 14-day min-publish-age cooldown in .cargo/config.toml is the only reason the
-  # resolver will not pick it up. Remove this entry after 2026-09-28 and run
-  # `cargo update -p rustls`.
-  "RUSTSEC-2026-0285",
-
   # RUSTSEC-2025-0055 (tracing-subscriber 0.2.25)
   # Reached through ark-relations 0.5.1. ark-relations 0.6.0 drops the old
   # tracing-subscriber, but getting there means moving the whole arkworks chain:
@@ -21,4 +14,45 @@ ignore = [
   # to move to a release that takes hickory 0.26.
   "RUSTSEC-2026-0118", # NSEC3 unbounded loop; no patched release yet
   "RUSTSEC-2026-0119", # O(n^2) name compression; patched in 0.26.1
+
+  # RUSTSEC-2026-0344 (ruzstd 0.8.3)
+  # Reached through object 0.37, which sp1-core-executor 6.8.1 pins with default
+  # features (and so the `compression` feature). Only object 0.40 takes the
+  # patched ruzstd 0.9, and sp1-core-executor 6.9.0 still pins 0.37. ruzstd only
+  # runs when object decompresses an ELF section. Here that is the SP1 executor
+  # reading our own guest ELFs and backtrace reading the node's own binary, so no
+  # untrusted input reaches it.
+  # Revisit when sp1 moves to object 0.40+.
+  "RUSTSEC-2026-0344",
+
+  # RUSTSEC-2026-0387 (crypto-bigint 0.5.5)
+  # Reached through elliptic-curve 0.13 <- k256 0.13, which alloy-signer 1.x
+  # (via sp1-sdk) and 2.x (via reth v2.2.0) pin. Only crypto-bigint 0.7.6 is
+  # patched, and that needs elliptic-curve 0.14, so no bump clears it.
+  # k256 scalars are crypto-bigint values, so k256 signing is exposed. The
+  # sequencer key signs through libsecp256k1 and is not. The SP1 network key
+  # signs through k256, and it pays for proving, so a leak would let someone
+  # spend on our account. We accept that until a patch is reachable: it only
+  # signs inside our pods and CI runners, and nobody outside can trigger or
+  # time those signatures. The native prover's Schnorr key also signs through
+  # k256, and it is the account update VK, so the native backend must not
+  # secure a real network until this is cleared. Deployed networks use
+  # Sp1Groth16.
+  # Revisit when reth, alloy and sp1 move to elliptic-curve 0.14.
+  "RUSTSEC-2026-0387",
+
+  # zstd 0.13.3, zstd-safe 7.2.4 and zstd-sys 2.0.16
+  # Reached through reth v2.2.0 (reth-zstd-compressors, reth-nippy-jar,
+  # async-compression in reth-downloaders) and sp1-sdk 6.8.1, in the node and
+  # both guest lockfiles. The fixes need zstd 0.14 and zstd-safe 8, but even
+  # reth-zstd-compressors 0.8.2 and sp1-sdk 6.10.0 still pin zstd 0.13, so no
+  # bump clears them. None of the flawed paths is reachable here:
+  "RUSTSEC-2026-0391", # stream `with_context` constructors; nothing calls them
+  "RUSTSEC-2026-0398", # `seekable` feature; not enabled
+  # Legacy-frame errors in `DCtx::decompress_stream`. The only streaming
+  # decoder is async-compression in reth-downloaders, which decodes chain
+  # files the operator imports, not network input.
+  "RUSTSEC-2026-0403",
+  "RUSTSEC-2026-0410", # wasm32 only; we build no wasm targets
+  # Revisit when reth and sp1 move to zstd 0.14.
 ]

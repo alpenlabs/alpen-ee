@@ -1,11 +1,13 @@
 //! [`DaBlobSource`] implementation backed by Reth state diffs.
 
-use std::{fmt, sync::Arc};
+use std::{collections::BTreeSet, fmt, mem, sync::Arc};
 
-use alloy_primitives::B256;
-use alpen_common::{BatchId, BatchStorage, DaContext, HeaderSummaryProvider, StateDiffProvider};
+use alloy_primitives::{Bytes, B256, KECCAK256_EMPTY};
+use alpen_common::{
+    BatchId, BatchStorage, DaContext, EvmCodeProvider, HeaderSummaryProvider, StateDiffProvider,
+};
 use alpen_da_types::DaBlob;
-use alpen_reth_statediff::BatchBuilder;
+use alpen_reth_statediff::{AccountChange, BatchBuilder, BatchStateDiff};
 use async_trait::async_trait;
 use tracing::*;
 
@@ -18,61 +20,121 @@ use crate::DaBlobSource;
 /// 2. Fetches per-block [`BlockStateChanges`](alpen_reth_statediff::BlockStateChanges) from the
 ///    [`StateDiffProvider`].
 /// 3. Aggregates them into a [`BatchStateDiff`](alpen_reth_statediff::BatchStateDiff) via
-///    [`BatchBuilder`].
+///    [`BatchBuilder`], keeping the bytecodes its accounts reference minus those an account already
+///    holds in the batch's pre-state.
 /// 4. Reads the last block's header to build
 ///    [`EvmHeaderSummary`](alpen_da_types::EvmHeaderSummary).
 /// 5. Returns the assembled [`DaBlob`].
-pub struct StateDiffBlobProvider<S, D, H> {
+pub struct StateDiffBlobProvider<S, D, H, C> {
     batch_storage: Arc<S>,
     state_diff_provider: Arc<D>,
     header_summary: Arc<H>,
+    evm_code: Arc<C>,
     da_ctx: Arc<dyn DaContext + Send + Sync>,
 }
 
-impl<S, D, H> fmt::Debug for StateDiffBlobProvider<S, D, H> {
+impl<S, D, H, C> fmt::Debug for StateDiffBlobProvider<S, D, H, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StateDiffBlobProvider")
             .finish_non_exhaustive()
     }
 }
 
-impl<S, D, H> StateDiffBlobProvider<S, D, H> {
+impl<S, D, H, C> StateDiffBlobProvider<S, D, H, C> {
     pub fn new(
         batch_storage: Arc<S>,
         state_diff_provider: Arc<D>,
         header_summary: Arc<H>,
+        evm_code: Arc<C>,
         da_ctx: Arc<dyn DaContext + Send + Sync>,
     ) -> Self {
         Self {
             batch_storage,
             state_diff_provider,
             header_summary,
+            evm_code,
             da_ctx,
         }
     }
+}
 
-    /// Returns `true` if the bytecode has not been published in a prior batch
-    /// and therefore still needs to be included in the DA blob.
+impl<S, D, H, C: EvmCodeProvider> StateDiffBlobProvider<S, D, H, C> {
+    /// Returns `true` if a known holder of the bytecode still holds it in the
+    /// state after `pre_state_block`, so the blob may leave it out.
     ///
-    /// On DB errors the bytecode is conservatively kept — duplicates are safe,
+    /// On errors the bytecode is conservatively kept — duplicates are safe,
     /// missing data is not.
-    fn bytecode_needs_publish(&self, code_hash: &B256) -> bool {
-        match self.da_ctx.is_code_hash_published(code_hash) {
-            Ok(published) => !published,
+    fn held_in_pre_state(&self, pre_state_block: B256, code_hash: &B256) -> bool {
+        let holder = match self.da_ctx.code_hash_holder(code_hash) {
+            Ok(Some(holder)) => holder,
+            Ok(None) => return false,
             Err(e) => {
-                warn!(?code_hash, error = %e, "failed to check published status, keeping bytecode");
-                true
+                warn!(?code_hash, error = %e, "failed to look up code holder, keeping bytecode");
+                return false;
+            }
+        };
+        match self.evm_code.code_hash_at(pre_state_block, holder) {
+            Ok(held) => held == Some(*code_hash),
+            Err(e) => {
+                warn!(?code_hash, %holder, error = %e, "failed to read holder code, keeping bytecode");
+                false
             }
         }
     }
 }
 
+/// Rebuilds `diff`'s bytecodes so the blob carries exactly the code its
+/// accounts reference and no pre-state account already holds. Returns how many
+/// referenced bytecodes were left out.
+///
+/// The account proof guest accepts a referenced code hash only if the blob
+/// carries its bytecode or an account holds it in the pre-state, so the two
+/// sides must apply this same rule. Bytecodes no account references, such as
+/// those of contracts created and destroyed in one transaction, are dropped.
+fn select_published_bytecodes(
+    diff: &mut BatchStateDiff,
+    held_in_pre_state: impl Fn(&B256) -> bool,
+    fetch_bytecode: impl Fn(B256) -> eyre::Result<Option<Bytes>>,
+) -> eyre::Result<usize> {
+    let mut deployed = mem::take(&mut diff.deployed_bytecodes);
+    let mut deduped = 0;
+    for code_hash in referenced_code_hashes(diff) {
+        if held_in_pre_state(&code_hash) {
+            deduped += 1;
+            continue;
+        }
+        let bytecode = match deployed.remove(&code_hash) {
+            Some(bytecode) => bytecode,
+            None => fetch_bytecode(code_hash)?.ok_or_else(|| {
+                eyre::eyre!("no bytecode for code hash {code_hash} referenced by the batch")
+            })?,
+        };
+        diff.deployed_bytecodes.insert(code_hash, bytecode);
+    }
+    Ok(deduped)
+}
+
+/// Returns the non-empty code hashes the diff's accounts take on.
+fn referenced_code_hashes(diff: &BatchStateDiff) -> BTreeSet<B256> {
+    diff.accounts
+        .values()
+        .filter_map(|change| match change {
+            AccountChange::Created(diff) | AccountChange::Updated(diff) => {
+                diff.code_hash.new_value().map(|hash| hash.0)
+            }
+            AccountChange::Deleted => None,
+        })
+        .filter(|code_hash| *code_hash != KECCAK256_EMPTY)
+        .collect()
+}
+
 #[async_trait]
-impl<S, D, H> DaBlobSource for StateDiffBlobProvider<S, D, H>
+impl<S, D, H, C> DaBlobSource for StateDiffBlobProvider<S, D, H, C>
 where
     S: BatchStorage,
     D: StateDiffProvider,
     H: HeaderSummaryProvider,
+    C: EvmCodeProvider,
 {
     async fn get_blob(&self, batch_id: BatchId) -> eyre::Result<DaBlob> {
         // 1. Look up the batch to get its block range.
@@ -113,14 +175,15 @@ where
             "state diff count mismatch for batch {batch_id:?}: got {block_count}, expected {expected_count}"
         );
 
-        // 3. Build the aggregate diff and filter already-published bytecodes.
+        // 3. Build the aggregate diff and leave out the bytecodes an account already holds in the
+        //    batch's pre-state.
         let mut state_diff = builder.build();
-
-        let before = state_diff.deployed_bytecodes.len();
-        state_diff
-            .deployed_bytecodes
-            .retain(|hash, _| self.bytecode_needs_publish(hash));
-        let deduped = before - state_diff.deployed_bytecodes.len();
+        let pre_state_block = B256::from(batch.prev_block().0);
+        let deduped = select_published_bytecodes(
+            &mut state_diff,
+            |code_hash| self.held_in_pre_state(pre_state_block, code_hash),
+            |code_hash| self.evm_code.bytecode(code_hash),
+        )?;
 
         info!(
             ?batch_id,
@@ -188,5 +251,96 @@ where
             .map_err(|e| eyre::eyre!("failed to update DA filter for batch {batch_id:?}: {e}"))?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use alloy_primitives::{keccak256, Address, U256};
+    use alpen_reth_statediff::AccountDiff;
+
+    use super::*;
+
+    fn created_with_code(diff: &mut BatchStateDiff, address: u8, code_hash: B256) {
+        diff.accounts.insert(
+            Address::from([address; 20]),
+            AccountChange::Created(AccountDiff::new_created(U256::ZERO, 1, code_hash)),
+        );
+    }
+
+    fn no_fetch(code_hash: B256) -> eyre::Result<Option<Bytes>> {
+        panic!("unexpected bytecode fetch for {code_hash}")
+    }
+
+    #[test]
+    fn leaves_out_bytecode_a_pre_state_account_holds() {
+        let held = Bytes::from_static(&[0x60, 0x01]);
+        let fresh = Bytes::from_static(&[0x60, 0x02]);
+        let mut diff = BatchStateDiff::new();
+        created_with_code(&mut diff, 1, keccak256(&held));
+        created_with_code(&mut diff, 2, keccak256(&fresh));
+        diff.deployed_bytecodes
+            .insert(keccak256(&held), held.clone());
+        diff.deployed_bytecodes
+            .insert(keccak256(&fresh), fresh.clone());
+
+        let deduped = select_published_bytecodes(
+            &mut diff,
+            |code_hash| *code_hash == keccak256(&held),
+            no_fetch,
+        )
+        .unwrap();
+
+        assert_eq!(deduped, 1);
+        assert_eq!(
+            diff.deployed_bytecodes,
+            BTreeMap::from([(keccak256(&fresh), fresh)])
+        );
+    }
+
+    #[test]
+    fn fetches_referenced_bytecode_no_holder_covers() {
+        let code = Bytes::from_static(&[0x60, 0x03]);
+        let code_hash = keccak256(&code);
+        let mut diff = BatchStateDiff::new();
+        created_with_code(&mut diff, 1, code_hash);
+
+        let deduped = select_published_bytecodes(
+            &mut diff,
+            |_| false,
+            |wanted| Ok((wanted == code_hash).then(|| code.clone())),
+        )
+        .unwrap();
+
+        assert_eq!(deduped, 0);
+        assert_eq!(diff.deployed_bytecodes, BTreeMap::from([(code_hash, code)]));
+    }
+
+    #[test]
+    fn fails_when_referenced_bytecode_is_nowhere() {
+        let mut diff = BatchStateDiff::new();
+        created_with_code(&mut diff, 1, B256::from([0xC0; 32]));
+
+        let err = select_published_bytecodes(&mut diff, |_| false, |_| Ok(None))
+            .expect_err("a referenced code hash without bytes or holder must fail");
+
+        assert!(err.to_string().contains("no bytecode for code hash"));
+    }
+
+    /// Code that no account ends up holding, such as a contract created and
+    /// destroyed in one transaction, is dropped, as is the empty code hash.
+    #[test]
+    fn drops_bytecode_no_account_references() {
+        let orphan = Bytes::from_static(&[0x60, 0x04]);
+        let mut diff = BatchStateDiff::new();
+        created_with_code(&mut diff, 1, KECCAK256_EMPTY);
+        diff.deployed_bytecodes.insert(keccak256(&orphan), orphan);
+
+        let deduped = select_published_bytecodes(&mut diff, |_| false, no_fetch).unwrap();
+
+        assert_eq!(deduped, 0);
+        assert!(diff.deployed_bytecodes.is_empty());
     }
 }

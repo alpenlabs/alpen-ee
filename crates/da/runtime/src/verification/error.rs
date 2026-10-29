@@ -1,8 +1,10 @@
 //! Error types for EE DA proof verification.
 
-use alpen_da_types::{DaParseError, EvmHeaderSummary};
+use alpen_da_types::EvmHeaderSummary;
 use alpen_reth_statediff::ReconstructError;
 use strata_codec::CodecError;
+
+use crate::DaBlobRecoveryError;
 
 /// Result type used throughout DA verification. Defaults the success type to
 /// `()` for the common "verify and return nothing" case; pass a type parameter
@@ -18,8 +20,8 @@ pub enum DaVerificationError {
     NoChunks,
     #[error("last chunk transition decode failed ({0:?})")]
     LastChunkDecode(ssz::DecodeError),
-    #[error("DA blob reassembly failed ({0})")]
-    Reassembly(CodecError),
+    #[error("DA blob recovery failed ({0})")]
+    DaBlobRecovery(#[from] DaBlobRecoveryError),
     #[error("malformed DA tx in witness ({0})")]
     DaTxDecode(String),
     #[error("DA witness block has no DA transactions")]
@@ -33,14 +35,6 @@ pub enum DaVerificationError {
         expected: [u8; 32],
         computed: [u8; 32],
     },
-
-    /// Errors from commit/reveal extraction shared with the host builder.
-    #[error("DA parse failure ({0})")]
-    Parse(#[from] DaParseError),
-    #[error("DA commit OP_RETURN magic mismatch (expected {expected:?}, got {actual:?})")]
-    CommitMagicMismatch { expected: [u8; 4], actual: [u8; 4] },
-    #[error("DA commit OP_RETURN version mismatch (expected {expected}, got {actual})")]
-    CommitVersionMismatch { expected: u32, actual: u32 },
 
     // Pre-state witness. "Partial pre-state" is the `EvmPartialState` sparse-MPT
     // witness: only the trie nodes the batch touches, enough to re-apply the diff
@@ -81,6 +75,14 @@ pub enum DaVerificationError {
     },
     #[error("DA blob missing deployed bytecode for code hash {0:?}")]
     MissingDeployedBytecode([u8; 32]),
+    /// The dedup witness names a code holder the partial pre-state does not
+    /// resolve (a blinded trie node, or a malformed account leaf).
+    #[error("dedup code holder lookup failed for trie key {key:?} ({error})")]
+    CodeHolderLookup { key: [u8; 32], error: String },
+    /// The dedup witness names a code holder that does not exist in the
+    /// pre-state.
+    #[error("dedup code holder absent from the pre-state (trie key {0:?})")]
+    CodeHolderAbsent([u8; 32]),
     #[error("DA blob deployed bytecode hash mismatch (expected {expected:?}, got {computed:?})")]
     DeployedBytecodeHashMismatch {
         expected: [u8; 32],

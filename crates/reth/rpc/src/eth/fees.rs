@@ -14,6 +14,7 @@ use alloy_rpc_types_eth::{
     BlockId,
 };
 use alpen_params::HeaderExtra;
+use alpen_primitives::BPS_DENOMINATOR;
 use alpen_reth_evm::da_fee::{calc_diff_size, constrain_next_da_rate, DA_RATE_SAFETY_MARGIN_BPS};
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
@@ -26,16 +27,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::AlpenEthApi;
 
-/// Basis-points denominator for the DA-fee safety margin.
-const BPS_DENOM: u64 = 10_000;
-
 /// Quotes the DA fee (wei) for a diff of `diff_size` bytes at `da_rate`, including the
 /// safety margin.
 pub(crate) fn quote_da_fee(da_rate: u64, diff_size: u64) -> U256 {
     U256::from(da_rate)
         .saturating_mul(U256::from(diff_size))
-        .saturating_mul(U256::from(BPS_DENOM + DA_RATE_SAFETY_MARGIN_BPS))
-        / U256::from(BPS_DENOM)
+        .saturating_mul(U256::from(BPS_DENOMINATOR + DA_RATE_SAFETY_MARGIN_BPS))
+        / U256::from(BPS_DENOMINATOR)
 }
 
 /// Converts a DA fee (wei) into the gas headroom that covers it at `base_fee`.

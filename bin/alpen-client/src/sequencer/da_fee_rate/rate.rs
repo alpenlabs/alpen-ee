@@ -1,8 +1,7 @@
 //! DA fee-rate values and operator adjustment.
 
+use alpen_primitives::BPS_DENOMINATOR;
 use thiserror::Error;
-
-const BASIS_POINTS_DENOMINATOR: u128 = 10_000;
 
 /// A rate in wei per DA byte returned by a [`super::policy::DaFeeRatePolicy`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -58,7 +57,8 @@ impl AffineAdjustment {
         policy_rate: PolicyRate,
     ) -> Result<AdjustedRate, AffineAdjustmentError> {
         let raw_rate = policy_rate.wei_per_byte() as u128;
-        let adjusted = (raw_rate * self.multiplier_bps as u128).div_ceil(BASIS_POINTS_DENOMINATOR)
+        let adjusted = (raw_rate * self.multiplier_bps as u128)
+            .div_ceil(u128::from(BPS_DENOMINATOR))
             + self.offset_wei_per_byte as u128;
         adjusted
             .try_into()

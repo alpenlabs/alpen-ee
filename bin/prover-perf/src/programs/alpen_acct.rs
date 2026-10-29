@@ -1,88 +1,57 @@
 //! Perf input for the alpen-acct SP1 guest.
 //!
-//! Drives the acct guest with a zero-chunk update. Non-empty chunk inputs now
-//! require a real DA witness, so this benchmark intentionally measures the
-//! minimal account-proof path rather than pretending an empty DA witness is
-//! valid for an executed chunk.
+//! Proves one account update over the checked-in mixed workload. The batch is
+//! the workload's one chunk, its deposits arrive as inbox messages in the same
+//! update, and its DA is posted to L1. The update carries the chunk proof that
+//! `--generate-proof` saved, so under SP1 the guest runs a real Groth16 verify.
+//! The input comes from [`build_workload_update`], the builder the account
+//! proof crate's own native test runs.
 
-use alpen_acct_runtime::EePrivateInput;
-use alpen_acct_types::{EeAccountState, UpdateExtraData};
-use alpen_da_types::DaWitness;
-use alpen_proof_acct::{EeAcctProgram, EeAcctProofInput};
-use ssz::Encode;
-use strata_codec::encode_to_vec;
-use strata_identifiers::Hash;
-use strata_snark_acct_runtime::{IInnerState, PrivateInput as UpdatePrivateInput};
-use strata_snark_acct_types::{LedgerRefs, ProofState, Seqno, UpdateOutputs, UpdateProofPubParams};
+use alpen_chain_types::ChunkTransition;
+use alpen_proof_acct::{test_utils::build_workload_update, EeAcctProgram, EeAcctProofInput};
+use ssz::Decode;
 use tracing::info;
-use zkaleido::{ExecutionSummary, ZkVmHost, ZkVmProgram};
+use zkaleido::{ExecutionSummary, ProofReceiptWithMetadata, ZkVmHost, ZkVmProgram};
 
-fn prepare_input() -> EeAcctProofInput {
-    info!("Preparing input for Alpen Acct (zero chunks)");
+use super::alpen_chunk::{workload, workload_chunk, PERF_SPEC_VERSION};
 
-    let initial_blkid = Hash::zero();
-    let initial_state = EeAccountState::new(initial_blkid, Hash::zero(), Vec::new(), Vec::new());
-    let state_root = initial_state.compute_state_root();
-
-    let extra_data =
-        UpdateExtraData::new(initial_blkid, initial_state.last_exec_state_root(), 0, 0);
-    let extra_data_bytes = encode_to_vec(&extra_data).expect("encode extra data");
-
-    let pub_params = UpdateProofPubParams::new(
-        Seqno::zero(),
-        ProofState::new(state_root, 0),
-        ProofState::new(state_root, 0),
-        vec![],
-        LedgerRefs::new_empty(),
-        UpdateOutputs::new_empty(),
-        extra_data_bytes,
+/// Builds the update over the workload's chunk, carrying `chunk_proof`.
+///
+/// Panics if `chunk_proof` proves a different chunk than the workload's, which
+/// means one of the two was regenerated without the other.
+pub(super) fn prepare_input(chunk_proof: &ProofReceiptWithMetadata) -> EeAcctProofInput {
+    let chunk = workload_chunk();
+    let proven = ChunkTransition::from_ssz_bytes(chunk_proof.receipt().public_values().as_bytes())
+        .expect("chunk proof public values are a chunk transition");
+    assert_eq!(
+        proven, chunk.transition,
+        "the chunk proof is for a different chunk than the workload; regenerate it with \
+         `just prover-proof`"
     );
-
-    let snark_acct_private_input =
-        UpdatePrivateInput::new(pub_params, initial_state.as_ssz_bytes(), Vec::new());
-
-    let ee_private_input = EePrivateInput::new(Vec::new(), Vec::new(), Vec::new());
-
-    EeAcctProofInput {
-        ee_private_input,
-        snark_acct_private_input,
-        da_witness: DaWitness::empty(),
-    }
+    build_workload_update(
+        workload(),
+        &chunk.transition,
+        chunk_proof.receipt().proof().as_bytes().to_vec(),
+        PERF_SPEC_VERSION,
+    )
 }
 
-pub(crate) fn gen_perf_report(host: &impl ZkVmHost) -> (String, ExecutionSummary) {
+pub(crate) fn gen_perf_report(
+    host: &impl ZkVmHost,
+    chunk_proof: &ProofReceiptWithMetadata,
+) -> (String, ExecutionSummary) {
     info!("Generating execution summary for Alpen Acct");
-    let input = prepare_input();
+    let input = prepare_input(chunk_proof);
     let summary =
         <EeAcctProgram as ZkVmProgram>::execute(&input, host).expect("alpen-acct execution");
     (EeAcctProgram::name(), summary)
 }
 
-#[cfg(test)]
-mod tests {
-    use alpen_params::{AlpenParams, AlpenSpecId};
-    use strata_predicate::PredicateKey;
-
-    use super::*;
-
-    #[test]
-    fn test_alpen_acct_native_execution() {
-        let input = prepare_input();
-        // Native execution uses `always_accept` so empty proof bytes
-        // on each `ChunkInput` pass the recursive verifier. SP1 mock
-        // perf substitutes the real predicate at host-init time, so
-        // the cycle count there reflects an honest verify. Not exercised
-        // since this benchmark runs zero chunks, so the default (empty EVM
-        // genesis) params are fine here.
-        let program = EeAcctProgram::new(
-            PredicateKey::always_accept(),
-            AlpenParams::default(),
-            AlpenSpecId::V1,
-        );
-        let result = program.execute(&input).expect("native execution");
-        assert_eq!(
-            result.cur_state().inner_state(),
-            result.new_state().inner_state()
-        );
-    }
+pub(crate) fn gen_proof(
+    host: &impl ZkVmHost,
+    chunk_proof: &ProofReceiptWithMetadata,
+) -> ProofReceiptWithMetadata {
+    info!("Generating proof for Alpen Acct");
+    let input = prepare_input(chunk_proof);
+    <EeAcctProgram as ZkVmProgram>::prove(&input, host).expect("alpen-acct proof")
 }

@@ -10,18 +10,18 @@ workspace = true
 
 [dependencies]
 alpen-params.workspace = true
-alpen-reth-primitives.workspace = true
+alpen-primitives.workspace = true
 strata-bridge-params.workspace = true
 strata-crypto.workspace = true
-strata-identifiers.workspace = true
-strata-ol-bridge-types.workspace = true
 strata-primitives.workspace = true
 
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-rpc-types-engine.workspace = true
-alloy-sol-types.workspace = true
 reth-chainspec.workspace = true
+reth-consensus.workspace = true
+reth-consensus-common.workspace = true
+reth-ethereum-consensus.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-evm.workspace = true
 reth-evm-ethereum.workspace = true
@@ -34,5 +34,5 @@ thiserror.workspace = true
 alpen-params = { workspace = true, features = ["test-utils"] }
 secp256k1.workspace = true
 strata-crypto.workspace = true
-proptest.workspace = true
+strata-ol-bridge-types.workspace = true
 serde_json.workspace = true

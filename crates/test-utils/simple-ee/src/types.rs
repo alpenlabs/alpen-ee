@@ -2,14 +2,16 @@
 
 use std::collections::BTreeMap;
 
-use alpen_acct_types::{
-    EnvError, EnvResult, ExecBlock, ExecBlockBody, ExecHeader, ExecPartialState,
+use alpen_acct_types::{ExecBlock, ExecHeader, ExecPartialState};
+use alpen_chain_types::{
+    ExecHeaderSummary, ExecInputs, ExecOutputs, OutputMessage, SubjectDepositData,
 };
-use alpen_chain_types::{ExecHeaderSummary, ExecOutputs, OutputMessage};
 use digest::Digest;
 use sha2::Sha256;
 use strata_acct_types::{AccountId, BitcoinAmount, Hash, MsgPayload, SubjectId};
 use strata_codec::{Codec, CodecError};
+
+use crate::errors::{SimpleEnvError, SimpleEnvResult};
 
 /// Write batch containing the updated account state.
 #[derive(Clone, Debug)]
@@ -63,7 +65,7 @@ impl SimplePartialState {
 }
 
 impl ExecPartialState for SimplePartialState {
-    fn compute_state_root(&self) -> EnvResult<Hash> {
+    fn compute_state_root(&self) -> Hash {
         // Hash the account state by encoding it as a sorted list
         let mut hasher = Sha256::new();
 
@@ -72,7 +74,7 @@ impl ExecPartialState for SimplePartialState {
             hasher.update(balance.to_le_bytes());
         }
 
-        Ok(<[u8; 32]>::from(hasher.finalize()).into())
+        <[u8; 32]>::from(hasher.finalize()).into()
     }
 }
 
@@ -129,9 +131,7 @@ impl SimpleHeader {
     pub fn genesis() -> Self {
         Self {
             parent_blkid: Hash::new([0; 32]),
-            state_root: SimplePartialState::new_empty()
-                .compute_state_root()
-                .expect("genesis state root"),
+            state_root: SimplePartialState::new_empty().compute_state_root(),
             index: 0,
         }
     }
@@ -142,15 +142,6 @@ impl SimpleHeader {
 }
 
 impl ExecHeader for SimpleHeader {
-    type Intrinsics = SimpleHeaderIntrinsics;
-
-    fn get_intrinsics(&self) -> Self::Intrinsics {
-        SimpleHeaderIntrinsics {
-            parent_blkid: self.parent_blkid,
-            index: self.index,
-        }
-    }
-
     fn get_parent_id(&self) -> Hash {
         self.parent_blkid
     }
@@ -187,26 +178,57 @@ impl Codec for SimpleHeader {
     }
 }
 
-/// Simple block body containing transactions.
+/// Simple block body containing deposits and transactions.
 #[derive(Clone, Debug)]
 pub struct SimpleBlockBody {
+    /// Deposits credited before the transactions run.
+    deposits: Vec<SubjectDepositData>,
     transactions: Vec<SimpleTransaction>,
 }
 
 impl SimpleBlockBody {
+    /// Creates a body with transactions and no deposits.
     pub fn new(transactions: Vec<SimpleTransaction>) -> Self {
-        Self { transactions }
+        Self::with_deposits(Vec::new(), transactions)
+    }
+
+    pub fn with_deposits(
+        deposits: Vec<SubjectDepositData>,
+        transactions: Vec<SimpleTransaction>,
+    ) -> Self {
+        Self {
+            deposits,
+            transactions,
+        }
+    }
+
+    pub fn deposits(&self) -> &[SubjectDepositData] {
+        &self.deposits
     }
 
     pub fn transactions(&self) -> &[SimpleTransaction] {
         &self.transactions
     }
-}
 
-impl ExecBlockBody for SimpleBlockBody {}
+    /// Returns the [`ExecInputs`] this body's deposits stand for.
+    pub fn exec_inputs(&self) -> ExecInputs {
+        let mut inputs = ExecInputs::new_empty();
+        for d in &self.deposits {
+            inputs.add_subject_deposit(d.clone());
+        }
+        inputs
+    }
+}
 
 impl Codec for SimpleBlockBody {
     fn encode(&self, enc: &mut impl strata_codec::Encoder) -> Result<(), CodecError> {
+        (self.deposits.len() as u32).encode(enc)?;
+
+        for d in &self.deposits {
+            d.dest().encode(enc)?;
+            d.value().encode(enc)?;
+        }
+
         (self.transactions.len() as u32).encode(enc)?;
 
         for tx in &self.transactions {
@@ -218,13 +240,25 @@ impl Codec for SimpleBlockBody {
 
     fn decode(dec: &mut impl strata_codec::Decoder) -> Result<Self, CodecError> {
         let len = u32::decode(dec)? as usize;
+        let mut deposits = Vec::with_capacity(len);
+
+        for _ in 0..len {
+            let dest = SubjectId::decode(dec)?;
+            let value = BitcoinAmount::decode(dec)?;
+            deposits.push(SubjectDepositData::new(dest, value));
+        }
+
+        let len = u32::decode(dec)? as usize;
         let mut transactions = Vec::with_capacity(len);
 
         for _ in 0..len {
             transactions.push(SimpleTransaction::decode(dec)?);
         }
 
-        Ok(Self { transactions })
+        Ok(Self {
+            deposits,
+            transactions,
+        })
     }
 }
 
@@ -240,6 +274,10 @@ impl SimpleBlock {
         Self { header, body }
     }
 
+    pub fn body(&self) -> &SimpleBlockBody {
+        &self.body
+    }
+
     pub fn transactions(&self) -> &[SimpleTransaction] {
         self.body.transactions()
     }
@@ -247,23 +285,9 @@ impl SimpleBlock {
 
 impl ExecBlock for SimpleBlock {
     type Header = SimpleHeader;
-    type Body = SimpleBlockBody;
-
-    fn from_parts(header: Self::Header, body: Self::Body) -> Self {
-        Self { header, body }
-    }
-
-    fn check_header_matches_body(_header: &Self::Header, _body: &Self::Body) -> bool {
-        // For the simple implementation, headers always match bodies
-        true
-    }
 
     fn get_header(&self) -> &Self::Header {
         &self.header
-    }
-
-    fn get_body(&self) -> &Self::Body {
-        &self.body
     }
 }
 
@@ -312,30 +336,32 @@ impl SimpleTransaction {
         &self,
         accounts: &mut BTreeMap<SubjectId, u64>,
         outputs: &mut ExecOutputs,
-    ) -> EnvResult<()> {
+    ) -> SimpleEnvResult<()> {
         match self {
             SimpleTransaction::Transfer { from, to, value } => {
                 // Deduct from source
-                let from_bal = accounts.get_mut(from).ok_or(EnvError::InvalidBlockTx)?;
+                let from_bal = accounts.get_mut(from).ok_or(SimpleEnvError::InvalidTx)?;
                 *from_bal = from_bal
                     .checked_sub(*value)
-                    .ok_or(EnvError::InvalidBlockTx)?;
+                    .ok_or(SimpleEnvError::InvalidTx)?;
 
                 // Add to destination
                 let to_bal = accounts.entry(*to).or_insert(0);
-                *to_bal = to_bal.checked_add(*value).ok_or(EnvError::InvalidBlockTx)?;
+                *to_bal = to_bal
+                    .checked_add(*value)
+                    .ok_or(SimpleEnvError::InvalidTx)?;
             }
             SimpleTransaction::EmitTransfer { from, dest, value } => {
                 // Deduct from source
-                let from_bal = accounts.get_mut(from).ok_or(EnvError::InvalidBlockTx)?;
+                let from_bal = accounts.get_mut(from).ok_or(SimpleEnvError::InvalidTx)?;
                 *from_bal = from_bal
                     .checked_sub(*value)
-                    .ok_or(EnvError::InvalidBlockTx)?;
+                    .ok_or(SimpleEnvError::InvalidTx)?;
 
                 // Emit output
                 use alpen_chain_types::OutputTransfer;
                 let value =
-                    BitcoinAmount::try_from(*value).map_err(|_| EnvError::InvalidBlockTx)?;
+                    BitcoinAmount::try_from(*value).map_err(|_| SimpleEnvError::InvalidTx)?;
                 outputs.add_transfer(OutputTransfer::new(*dest, value));
             }
             SimpleTransaction::EmitMessage {
@@ -346,10 +372,10 @@ impl SimpleTransaction {
                 data,
             } => {
                 // Deduct from source
-                let from_bal = accounts.get_mut(from).ok_or(EnvError::InvalidBlockTx)?;
+                let from_bal = accounts.get_mut(from).ok_or(SimpleEnvError::InvalidTx)?;
                 *from_bal = from_bal
                     .checked_sub(*value)
-                    .ok_or(EnvError::InvalidBlockTx)?;
+                    .ok_or(SimpleEnvError::InvalidTx)?;
 
                 // Encode message data: dest_subject + user data
                 let mut msg_data = Vec::new();
@@ -358,9 +384,9 @@ impl SimpleTransaction {
 
                 // Emit message output
                 let value =
-                    BitcoinAmount::try_from(*value).map_err(|_| EnvError::InvalidBlockTx)?;
+                    BitcoinAmount::try_from(*value).map_err(|_| SimpleEnvError::InvalidTx)?;
                 let payload = MsgPayload::from_bytes(value, msg_data)
-                    .map_err(|_| EnvError::InvalidBlockTx)?;
+                    .map_err(|_| SimpleEnvError::InvalidTx)?;
                 let message = OutputMessage::new(*dest_account, payload);
                 outputs.add_message(message);
             }

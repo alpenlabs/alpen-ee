@@ -694,7 +694,7 @@ console_tables! {
         },
         PublishedCodeHashSchema => {
             key: "code hash (32-byte hex)",
-            value: "() — presence only; the key says everything",
+            value: "holder address hex, or null for a row written before holders were recorded",
         },
     }
 }

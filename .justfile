@@ -11,6 +11,7 @@ docker_datadir := ".data"
 prover_perf_eval_dir := "bin/prover-perf"
 prover_proofs_cache_dir := "provers/tests/proofs"
 prover_programs := "alpen-chunk,alpen-acct"
+prover_chunk_proof := "bin/prover-perf/proofs/alpen-chunk_SP1_v6.1.0.proof"
 profile := env("PROFILE", "release")
 cargo_install_extra_flags := env("CARGO_INSTALL_EXTRA_FLAGS", "")
 features := env("FEATURES", "")
@@ -61,7 +62,17 @@ sec: ensure-cargo-audit
 # Generate reports and profiling data for proofs
 [group('prover')]
 prover-eval: prover-clean
-    cd {{prover_perf_eval_dir}} && RUST_LOG=info SP1_PROVER=light ZKVM_MOCK=1 ZKVM_PROFILING=1 SP1_ALPEN_PARAMS_PATH={{justfile_directory()}}/params/dev.json cargo run --release -- --programs {{prover_programs}}
+    cd {{prover_perf_eval_dir}} && RUST_LOG=info SP1_PROVER=light ZKVM_MOCK=1 ZKVM_PROFILING=1 SP1_ALPEN_PARAMS_PATH={{justfile_directory()}}/params/dev.json SP1_ALPEN_CHUNK_PROOF_PATH={{justfile_directory()}}/{{prover_chunk_proof}} cargo run --release -- --programs {{prover_programs}}
+
+# Prove the guests and save the proofs prover-eval reads (see bin/prover-perf/README.md)
+[group('prover')]
+prover-proof programs="alpen-chunk":
+    cd {{prover_perf_eval_dir}} && RUST_LOG=info SP1_ALPEN_PARAMS_PATH={{justfile_directory()}}/params/dev.json cargo run --release -- --generate-proof --programs {{programs}}
+
+# Regenerate the EVM workload the prover-perf guests run on
+[group('prover')]
+prover-workload:
+    RUST_LOG=info cargo run --release -p alpen-test-utils-evm-workload --features generator
 
 # Cleans up proofs and profiling data generated
 [group('prover')]

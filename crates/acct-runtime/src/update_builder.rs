@@ -4,20 +4,16 @@
 //! inputs, allowing the consumer to query available inputs and accept
 //! validated [`ChunkTransition`]s.
 
-use alpen_acct_types::{
-    EeAccountState, EnvError, ExecutionEnvironment, PendingInputEntry, UpdateExtraData,
-};
+use alpen_acct_types::{EeAccountState, PendingInputEntry};
 use alpen_chain_types::ChunkTransition;
 use strata_acct_types::{Hash, MessageEntry};
-use strata_snark_acct_runtime::{PrivateInput, UpdateBuilder as GenericUpdateBuilder};
+use strata_snark_acct_runtime::UpdateBuilder as GenericUpdateBuilder;
 use strata_snark_acct_types::{
-    LedgerRefs, OutputMessage, OutputTransfer, Seqno, SnarkAccountState, UpdateOperationData,
-    UpdateOutputs,
+    LedgerRefs, Seqno, SnarkAccountState, UpdateOperationData, UpdateOutputs,
 };
 
 use crate::{
-    builder_errors::{BuilderError, BuilderResult},
-    ee_program::EeSnarkAccountProgram,
+    builder_errors::BuilderResult, chunk_chain::ChunkChain, ee_program::EeSnarkAccountProgram,
     verification_state::EeVerificationInput,
 };
 
@@ -27,28 +23,23 @@ use crate::{
 /// validates [`ChunkTransition`]s against this state, and accumulates
 /// outputs. The consumer can query [`Self::remaining_pending_inputs`] and
 /// [`Self::cur_tip_blkid`] to construct valid transitions.
-#[expect(missing_debug_implementations, reason = "E may not implement Debug")]
-pub struct UpdateBuilder<'i, E: ExecutionEnvironment> {
-    inner: GenericUpdateBuilder<'i, EeSnarkAccountProgram<E>>,
+#[expect(
+    missing_debug_implementations,
+    reason = "the generic builder does not implement Debug"
+)]
+pub struct UpdateBuilder<'i> {
+    inner: GenericUpdateBuilder<'i, EeSnarkAccountProgram>,
 
-    /// Current chain tip, advanced as chunks are accepted.
-    cur_tip_blkid: Hash,
-
-    /// Current execution state root.
-    cur_tip_state_root: Hash,
+    /// Chunk transitions accepted so far, checked by the same rules the
+    /// verifier runs.
+    chain: ChunkChain,
 
     /// Snapshot of pending inputs after message processing. Not mutated —
     /// used to validate chunks and let the consumer query remaining inputs.
     pending_inputs: Vec<PendingInputEntry>,
-
-    /// How many pending inputs have been consumed by accepted chunks.
-    inputs_consumed: usize,
-
-    /// Number of forced inclusions processed.
-    fincls_processed: usize,
 }
 
-impl<'i, E: ExecutionEnvironment> UpdateBuilder<'i, E> {
+impl<'i> UpdateBuilder<'i> {
     /// Creates a new EE update builder.
     ///
     /// Initializes with an empty message set. Messages are added incrementally
@@ -56,11 +47,10 @@ impl<'i, E: ExecutionEnvironment> UpdateBuilder<'i, E> {
     pub fn new(
         snark_state: SnarkAccountState,
         initial_state: EeAccountState,
-        vinput: EeVerificationInput<'i, E>,
+        vinput: EeVerificationInput<'i>,
     ) -> BuilderResult<Self> {
         let pending_inputs = initial_state.pending_inputs().to_vec();
-        let cur_tip_blkid = initial_state.last_exec_blkid();
-        let cur_tip_state_root = initial_state.last_exec_state_root();
+        let chain = ChunkChain::new(&initial_state);
 
         let program = EeSnarkAccountProgram::new();
 
@@ -75,11 +65,8 @@ impl<'i, E: ExecutionEnvironment> UpdateBuilder<'i, E> {
 
         Ok(Self {
             inner,
-            cur_tip_blkid,
-            cur_tip_state_root,
+            chain,
             pending_inputs,
-            inputs_consumed: 0,
-            fincls_processed: 0,
         })
     }
 
@@ -99,14 +86,14 @@ impl<'i, E: ExecutionEnvironment> UpdateBuilder<'i, E> {
 
     /// Returns the accumulated outputs so far.
     pub fn outputs(&self) -> &UpdateOutputs {
-        self.inner.outputs()
+        self.chain.outputs()
     }
 
     /// Returns the current chain tip block ID.
     ///
     /// A chunk's `parent_exec_blkid` must equal this value.
     pub fn cur_tip_blkid(&self) -> Hash {
-        self.cur_tip_blkid
+        self.chain.tip_blkid()
     }
 
     /// Adds a message and immediately processes it with an empty coinput.
@@ -144,7 +131,7 @@ impl<'i, E: ExecutionEnvironment> UpdateBuilder<'i, E> {
     ///
     /// A chunk's deposits must match these in order.
     pub fn remaining_pending_inputs(&self) -> &[PendingInputEntry] {
-        &self.pending_inputs[self.inputs_consumed..]
+        &self.pending_inputs[self.chain.inputs_consumed()..]
     }
 
     /// Returns the next `count` pending inputs available for consumption.
@@ -158,153 +145,31 @@ impl<'i, E: ExecutionEnvironment> UpdateBuilder<'i, E> {
 
     /// Returns the total number of pending inputs remaining.
     pub fn remaining_input_count(&self) -> usize {
-        self.pending_inputs.len() - self.inputs_consumed
+        self.remaining_pending_inputs().len()
     }
 
     /// Accepts a chunk transition, validating chain linkage and input matching.
     ///
-    /// The transition's `parent_exec_blkid` must equal [`Self::cur_tip_blkid`], and
-    /// its deposits must match the next pending inputs in order.
-    ///
-    /// On success, advances the chain tip, accumulates outputs, and tracks
-    /// consumed input count.
-    ///
-    /// Once a transition consumes a predicate rotation the update is closed,
-    /// so any further transition is rejected.
+    /// Runs the same checks as the verifier (see [`ChunkChain::apply`]), so a
+    /// transition this accepts is one the verifier accepts too.
     pub fn accept_chunk_transition(&mut self, transition: &ChunkTransition) -> BuilderResult<()> {
-        // A consumed rotation ends the update, so refuse to chain anything
-        // onto it. The verifier enforces the same rule
-        // (`EeVerificationState::process_decoded_transition`); failing here
-        // means an honest sequencer finds out while building instead of
-        // producing an update that can never be proven.
-        if self.inner.outputs().new_predicate().is_some() {
-            return Err(BuilderError::Env(EnvError::NonTerminalRotation));
-        }
-
-        // 1. Validate chain linkage.
-        if transition.parent_exec_blkid() != self.cur_tip_blkid {
-            return Err(BuilderError::ChainLinkage {
-                expected: self.cur_tip_blkid,
-                parent: transition.parent_exec_blkid(),
-            });
-        }
-
-        // 2. Validate input matching against pending inputs.
-        let deposits = transition.inputs().subject_deposits();
-        let remaining = self.remaining_pending_inputs();
-
-        if deposits.len() > remaining.len() {
-            return Err(BuilderError::InputMismatch {
-                position: remaining.len(),
-            });
-        }
-
-        for (i, deposit) in deposits.iter().enumerate() {
-            match &remaining[i] {
-                PendingInputEntry::Deposit(expected) if deposit == expected => {}
-                _ => {
-                    return Err(BuilderError::InputMismatch {
-                        position: self.inputs_consumed + i,
-                    });
-                }
-            }
-        }
-
-        // A declared predicate rotation must be the next queued entry after
-        // this transition's deposits.
-        let mut inputs_consumed_by_transition = deposits.len();
-        if let Some(new_key) = transition.outputs().new_predicate() {
-            match remaining.get(deposits.len()) {
-                Some(PendingInputEntry::PredicateRotation(expected)) if new_key == expected => {
-                    inputs_consumed_by_transition += 1;
-                }
-                _ => {
-                    return Err(BuilderError::InputMismatch {
-                        position: self.inputs_consumed + deposits.len(),
-                    });
-                }
-            }
-        }
-
-        // 3. Merge outputs.
-        let outputs = transition.outputs();
-
-        self.inner
-            .outputs_mut()
-            .try_extend_transfers(
-                outputs
-                    .output_transfers()
-                    .iter()
-                    .map(|t| OutputTransfer::new(t.dest(), t.value())),
-            )
-            .map_err(|_| BuilderError::OutputOverflow)?;
-
-        self.inner
-            .outputs_mut()
-            .try_extend_messages(
-                outputs
-                    .output_messages()
-                    .iter()
-                    .map(|m| OutputMessage::new(m.dest(), m.payload().clone())),
-            )
-            .map_err(|_| BuilderError::OutputOverflow)?;
-
-        // The guard at the top means this is the update's only rotation, so
-        // this never overwrites a previously accumulated key.
-        if let Some(new_key) = outputs.new_predicate() {
-            self.inner
-                .outputs_mut()
-                .set_new_predicate(Some(new_key.clone()));
-        }
-
-        // 4. Advance tip data and consumed count.
-        self.cur_tip_blkid = transition.tip_exec_blkid();
-        self.cur_tip_state_root = transition.tip_state_root();
-        self.inputs_consumed += inputs_consumed_by_transition;
-
+        self.chain.apply(transition, &self.pending_inputs)?;
         Ok(())
-    }
-
-    /// Sets the number of forced inclusions processed.
-    pub fn with_processed_fincls(&mut self, count: usize) -> &mut Self {
-        self.fincls_processed = count;
-        self
     }
 
     /// Builds the update, returning operation data and raw coinputs.
     ///
-    /// Sets [`UpdateExtraData`] with the current tip, consumed input count,
-    /// and forced inclusion count, then delegates to the generic builder.
+    /// Sets the update's outputs and extra data from the accepted chunks, then
+    /// delegates to the generic builder.
     ///
     /// Uses the unverified finalization path since the builder has already
     /// validated chunk transitions locally via [`Self::accept_chunk_transition`].
     /// Clones internal state so the builder can be reused.
     pub fn build(&mut self) -> BuilderResult<(UpdateOperationData, Vec<Vec<u8>>)> {
-        let extra_data = UpdateExtraData::new(
-            self.cur_tip_blkid,
-            self.cur_tip_state_root,
-            self.inputs_consumed as u32,
-            self.fincls_processed as u32,
-        );
-
-        let (op, coinputs) = self.inner.build_operation_data_unverified(extra_data)?;
+        *self.inner.outputs_mut() = self.chain.outputs().clone();
+        let (op, coinputs) = self
+            .inner
+            .build_operation_data_unverified(self.chain.extra_data())?;
         Ok((op, coinputs))
-    }
-
-    /// Builds a [`PrivateInput`] for proof generation.
-    ///
-    /// Constructs [`UpdateExtraData`] from the current tip, consumed input
-    /// count, and forced inclusion count, then delegates to the inner builder's
-    /// verified finalization path. Clones internal state so the builder can be
-    /// reused.
-    pub fn build_private_input(&mut self) -> BuilderResult<PrivateInput> {
-        let extra_data = UpdateExtraData::new(
-            self.cur_tip_blkid,
-            self.cur_tip_state_root,
-            self.inputs_consumed as u32,
-            self.fincls_processed as u32,
-        );
-
-        Ok(self.inner.build_private_input(extra_data)?)
     }
 }

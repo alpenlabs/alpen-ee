@@ -19,10 +19,7 @@ pub use traits::{
     },
 };
 pub use traits::{
-    da::{BatchDaProvider, DaStatus, HeaderSummaryProvider},
-    engine::{
-        EnginePayload, ExecutionEngine, ExecutionEngineError, ForkchoiceState, PayloadBuilderEngine,
-    },
+    da::{BatchDaProvider, DaStatus, EvmCodeProvider, HeaderSummaryProvider},
     ol_client::{
         chain_status_checked, get_inbox_messages_checked, OLAccountStateView, OLBlockData,
         OLBlockLink, OLClient, OLClientError, SequencerOLClient,
@@ -43,13 +40,8 @@ pub use types::{
     consensus_heads::ConsensusHeads,
     ee_account_state::EeAccountStateAtEpoch,
     exec_record::{ExecBlockPayload, ExecBlockRecord},
-    fees::{
-        FeeBreakdown, FeeModelConfig, FeeModelError, FeeQuoteInputs, GasEquivalentQuote,
-        L1FeeRateSource, DA_OVERHEAD_MULTIPLIER_SCALE_BPS,
-    },
     ol_account_epoch_summary::{SnarkAccountEpochSummary, SnarkAccountUpdateInfo},
     ol_chain_status::{OLChainStatus, OLFinalizedStatus},
-    payload_builder::{DepositInfo, PayloadBuildAttributes},
     prover::{Proof, ProofId},
     prover_task_key::{
         decode_batch_task_key, decode_chunk_task_key, encode_batch_task_key, encode_chunk_task_key,
@@ -58,6 +50,5 @@ pub use types::{
 };
 pub use utils::{
     clock::{Clock, SystemClock},
-    conversions::sats_to_gwei,
     ledger_refs::build_ledger_refs_from_da,
 };

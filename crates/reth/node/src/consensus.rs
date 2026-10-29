@@ -3,165 +3,29 @@
 //!
 //! Wraps one [`FlooredConsensus`] per known spec version and picks per block,
 //! so one node validates both sides of an upgrade during sync and reorgs.
-//! Beyond dispatch it enforces the shape of the version claim itself:
-//! `validate_header` runs the full [`HeaderExtra`] layout parse (strict — a
-//! malformed or unknown stamp fails the block, and an empty field is
-//! [`AlpenSpecId::V0`]'s layout), and versions never regress along a chain.
-//! Whether the claimed version *equals* the one derived from the inbox
-//! ordering is the Alpen layer's check, where the inbox data lives.
+//! Each unit gets its version's floor from the params' [`FeeSpec`].
 //!
-//! Each per-version unit is a [`FlooredConsensus`]: standard Ethereum
-//! consensus with the fee model's base-fee floor. Only the
-//! base-fee-against-parent check diverges from [`EthBeaconConsensus`] — full
-//! nodes import blocks before the proof exists, so they must accept the
-//! floored base fee `max(base_fee_floor, eip1559_next(parent))` (see
-//! [`alpen_reth_evm::base_fee`]); stock reth recomputes the pure EIP-1559
-//! value and would reject a floored block. Above the floor the two agree.
-//! Each unit gets its version's floor from the params' [`FeeSpec`]. A unit
-//! with a zero floor validates exactly as stock reth would.
+//! The rules themselves live in [`alpen_reth_evm::consensus`], which the chunk
+//! proof runs too. This module only adds the dispatch. Whether the claimed
+//! version *equals* the one derived from the inbox ordering is the Alpen
+//! layer's check, where the inbox data lives.
 
 use std::{iter, sync::Arc};
 
-use alloy_consensus::BlockHeader as _;
-use alpen_params::{
-    header_spec_version, AlpenSpecId, EvmSpec, FeeSpec, HeaderExtra, HeaderExtraError,
+use alpen_params::{header_spec_version, AlpenSpecId, EvmSpec, FeeSpec};
+use alpen_reth_evm::consensus::{
+    validate_header_extra, validate_header_extra_against_parent, FlooredConsensus,
 };
-use alpen_reth_evm::{
-    base_fee::expected_floored_base_fee, da_fee::validate_da_rate_against_parent,
-};
-use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
+use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, FullConsensus, HeaderValidator, ReceiptRootBloom};
-use reth_consensus_common::validation::{
-    validate_against_parent_4844, validate_against_parent_gas_limit,
-    validate_against_parent_hash_number, validate_against_parent_timestamp,
-};
 use reth_errors::ConsensusError;
 use reth_ethereum_primitives::{Block, BlockBody, EthPrimitives, Receipt};
 use reth_evm::block::BlockExecutionResult;
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{components::ConsensusBuilder, BuilderContext};
-use reth_node_ethereum::consensus::EthBeaconConsensus;
-use reth_primitives_traits::{GotExpected, Header, RecoveredBlock, SealedBlock, SealedHeader};
+use reth_primitives_traits::{Header, RecoveredBlock, SealedBlock, SealedHeader};
 
 use crate::evm_config::version_indexed;
-
-fn consensus_error(err: HeaderExtraError) -> ConsensusError {
-    ConsensusError::other(err)
-}
-
-/// Consensus rules of one spec version: standard Ethereum consensus, with the
-/// base-fee-against-parent check replaced by the fee model's floored rule.
-#[derive(Debug, Clone)]
-pub(crate) struct FlooredConsensus {
-    inner: EthBeaconConsensus<ChainSpec>,
-    chain_spec: Arc<ChainSpec>,
-    base_fee_floor: u64,
-}
-
-impl FlooredConsensus {
-    /// Creates a [`FlooredConsensus`] for the given chain spec.
-    pub(crate) fn new(chain_spec: Arc<ChainSpec>, base_fee_floor: u64) -> Self {
-        Self {
-            inner: EthBeaconConsensus::new(chain_spec.clone()),
-            chain_spec,
-            base_fee_floor,
-        }
-    }
-}
-
-/// Floored variant of reth's `validate_against_parent_eip1559_base_fee`: the expected base
-/// fee is `max(base_fee_floor, eip1559_next(parent))` — identical to stock except for the
-/// [`apply_base_fee_floor`] clamp.
-fn validate_against_parent_base_fee_floored(
-    header: &Header,
-    parent: &Header,
-    chain_spec: &ChainSpec,
-    base_fee_floor: u64,
-) -> Result<(), ConsensusError> {
-    if chain_spec.is_london_active_at_block(header.number()) {
-        let base_fee = header
-            .base_fee_per_gas()
-            .ok_or(ConsensusError::BaseFeeMissing)?;
-
-        let expected_base_fee =
-            expected_floored_base_fee(header, parent, chain_spec, base_fee_floor)
-                .ok_or(ConsensusError::BaseFeeMissing)?;
-
-        if expected_base_fee != base_fee {
-            return Err(ConsensusError::BaseFeeDiff(GotExpected {
-                expected: expected_base_fee,
-                got: base_fee,
-            }));
-        }
-    }
-
-    Ok(())
-}
-
-impl HeaderValidator for FlooredConsensus {
-    fn validate_header(&self, header: &SealedHeader) -> Result<(), ConsensusError> {
-        self.inner.validate_header(header)
-    }
-
-    fn validate_header_against_parent(
-        &self,
-        header: &SealedHeader,
-        parent: &SealedHeader,
-    ) -> Result<(), ConsensusError> {
-        // Mirrors `EthBeaconConsensus::validate_header_against_parent`, but floors the
-        // base-fee-against-parent check.
-        validate_against_parent_hash_number(header.header(), parent)?;
-        validate_against_parent_timestamp(header.header(), parent.header())?;
-        validate_against_parent_gas_limit(header, parent, &self.chain_spec)?;
-        validate_against_parent_base_fee_floored(
-            header.header(),
-            parent.header(),
-            self.chain_spec.as_ref(),
-            self.base_fee_floor,
-        )?;
-        if let Some(blob_params) = self.chain_spec.blob_params_at_timestamp(header.timestamp()) {
-            validate_against_parent_4844(header.header(), parent.header(), blob_params)?;
-        }
-        Ok(())
-    }
-}
-
-impl Consensus<Block> for FlooredConsensus {
-    fn validate_body_against_header(
-        &self,
-        body: &BlockBody,
-        header: &SealedHeader,
-    ) -> Result<(), ConsensusError> {
-        <EthBeaconConsensus<ChainSpec> as Consensus<Block>>::validate_body_against_header(
-            &self.inner,
-            body,
-            header,
-        )
-    }
-
-    fn validate_block_pre_execution(
-        &self,
-        block: &SealedBlock<Block>,
-    ) -> Result<(), ConsensusError> {
-        self.inner.validate_block_pre_execution(block)
-    }
-}
-
-impl FullConsensus<EthPrimitives> for FlooredConsensus {
-    fn validate_block_post_execution(
-        &self,
-        block: &RecoveredBlock<Block>,
-        result: &BlockExecutionResult<Receipt>,
-        receipt_root_bloom: Option<ReceiptRootBloom>,
-    ) -> Result<(), ConsensusError> {
-        <EthBeaconConsensus<ChainSpec> as FullConsensus<EthPrimitives>>::validate_block_post_execution(
-            &self.inner,
-            block,
-            result,
-            receipt_root_bloom,
-        )
-    }
-}
 
 /// Version-aware consensus over the per-version chain spec table.
 #[derive(Debug, Clone)]
@@ -190,7 +54,7 @@ impl AlpenConsensus {
     /// Returns the consensus rules governing `header`, erring on a stamp
     /// that does not resolve to a version.
     fn inner_for(&self, header: &Header) -> Result<&FlooredConsensus, ConsensusError> {
-        let spec_version = header_spec_version(header).map_err(consensus_error)?;
+        let spec_version = header_spec_version(header).map_err(ConsensusError::other)?;
         Ok(version_indexed(&self.inners, spec_version))
     }
 }
@@ -201,9 +65,7 @@ impl HeaderValidator for AlpenConsensus {
         // the version prefix, so this parse is what rejects `extra_data`
         // that violates its version's layout. Genesis is exempt — its
         // `extra_data` is the operator-authored genesis document's.
-        let spec_version = HeaderExtra::of_header(header.header())
-            .map_err(consensus_error)?
-            .spec_version();
+        let spec_version = validate_header_extra(header.header())?.spec_version();
         version_indexed(&self.inners, spec_version).validate_header(header)
     }
 
@@ -212,22 +74,8 @@ impl HeaderValidator for AlpenConsensus {
         header: &SealedHeader,
         parent: &SealedHeader,
     ) -> Result<(), ConsensusError> {
-        let header_extra = HeaderExtra::of_header(header.header()).map_err(consensus_error)?;
-        let parent_extra = HeaderExtra::of_header(parent.header()).map_err(consensus_error)?;
-        // Upgrades only ever move forward: a chain whose version regresses
-        // is structurally invalid regardless of what the inbox ordering
-        // would derive.
-        let version = header_extra.spec_version();
-        let parent_version = parent_extra.spec_version();
-        if version < parent_version {
-            return Err(ConsensusError::msg(format!(
-                "alpen spec version regressed from {parent_version:?} to {version:?}"
-            )));
-        }
-        if let Some(next_rate) = header_extra.da_rate() {
-            validate_da_rate_against_parent(parent_extra.da_rate(), next_rate)
-                .map_err(ConsensusError::other)?;
-        }
+        let version =
+            validate_header_extra_against_parent(header.header(), parent.header())?.spec_version();
         version_indexed(&self.inners, version).validate_header_against_parent(header, parent)
     }
 }
