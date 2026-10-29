@@ -47,6 +47,7 @@ class EeOLEnv(flexitest.EnvConfig):
         chunk_sealing_block_count: int | None = None,
         base_fee_floor: dict[str, int] = DEFAULT_BASE_FEE_FLOOR,
         sequencer_metrics: bool = False,
+        sequencer_blocktime_ms: int | None = None,
     ):
         epoch_seal_config = (
             EpochSealingConfig.new_fixed_slot(seal_epoch_slots)
@@ -65,6 +66,7 @@ class EeOLEnv(flexitest.EnvConfig):
             epoch_tracking_mode=epoch_tracking_mode,
             base_fee_floor=base_fee_floor,
             sequencer_metrics=sequencer_metrics,
+            sequencer_blocktime_ms=sequencer_blocktime_ms,
         )
         self.strata_config = StrataEnvConfig(
             pre_generate_blocks=pre_generate_blocks,
