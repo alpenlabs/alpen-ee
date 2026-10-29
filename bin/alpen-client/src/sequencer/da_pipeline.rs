@@ -11,7 +11,7 @@ use bitcoind_async_client::{
     traits::{Reader, Wallet as _},
     Auth, Client as BtcClient,
 };
-use reth_provider::HeaderProvider;
+use reth_provider::{HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskExecutor;
 use strata_btcio::{
     broadcaster::BroadcasterBuilder, writer::chunked_envelope::create_chunked_envelope_task,
@@ -25,7 +25,7 @@ use strata_primitives::L1Height;
 use tokio::runtime::Handle;
 use tracing::{info, info_span, Instrument};
 
-use super::header_summary::RethHeaderSummaryProvider;
+use super::{evm_code::RethEvmCodeProvider, header_summary::RethHeaderSummaryProvider};
 use crate::service_executor::ServiceExecutor;
 
 // Mirrors bitcoind-async-client's upstream defaults, applied when
@@ -100,7 +100,12 @@ pub(crate) async fn start<P>(
     inputs: DaPipelineInputs<'_, P>,
 ) -> eyre::Result<DaPipeline>
 where
-    P: HeaderProvider<Header = reth_primitives_traits::Header> + Send + Sync + 'static,
+    P: HeaderProvider<Header = reth_primitives_traits::Header>
+        + StateProviderFactory
+        + Clone
+        + Send
+        + Sync
+        + 'static,
 {
     let DaPipelineInputs {
         btc_client,
@@ -155,12 +160,14 @@ where
     )
     .map_err(|e| eyre::eyre!("creating chunked envelope task: {e}"))?;
 
-    let header_summary = Arc::new(RethHeaderSummaryProvider::new(node_provider));
+    let header_summary = Arc::new(RethHeaderSummaryProvider::new(node_provider.clone()));
+    let evm_code = Arc::new(RethEvmCodeProvider::new(node_provider));
 
     let blob_provider: Arc<dyn DaBlobSource> = Arc::new(StateDiffBlobProvider::new(
         storage,
         dbs.witness_db(),
         header_summary,
+        evm_code,
         dbs.da_context_db(),
     ));
 

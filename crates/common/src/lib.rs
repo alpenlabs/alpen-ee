@@ -19,7 +19,7 @@ pub use traits::{
     },
 };
 pub use traits::{
-    da::{BatchDaProvider, DaStatus, HeaderSummaryProvider},
+    da::{BatchDaProvider, DaStatus, EvmCodeProvider, HeaderSummaryProvider},
     ol_client::{
         chain_status_checked, get_inbox_messages_checked, OLAccountStateView, OLBlockData,
         OLBlockLink, OLClient, OLClientError, SequencerOLClient,

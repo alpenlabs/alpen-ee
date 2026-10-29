@@ -10,6 +10,7 @@
 
 pub(crate) mod da_fee_rate;
 mod da_pipeline;
+mod evm_code;
 mod header_summary;
 mod prover;
 mod provers;

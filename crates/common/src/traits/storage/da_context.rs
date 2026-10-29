@@ -10,7 +10,9 @@ use strata_db_types::DbResult;
 /// batches can omit them. Currently tracks deployed contract bytecodes;
 /// extensible for address dedup and other filtering logic.
 ///
-/// A bytecode is tracked by an account that took on that code.
+/// A bytecode is tracked by an account that took on that code. A later batch
+/// may leave the bytecode out only if that account still holds it in the
+/// batch's pre-state.
 pub trait DaContext {
     /// Returns an account that held the bytecode identified by `code_hash` in
     /// a previously confirmed batch, if one is known.
