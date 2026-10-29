@@ -4,10 +4,10 @@ use alloy_primitives::B256;
 use alpen_acct_types::{PendingInputEntry, UpdateExtraData};
 use alpen_engine_api::{DepositInfo, EnginePayload, PayloadBuildAttributes, PayloadBuilderEngine};
 use alpen_params::AlpenSpecId;
-use alpen_primitives::subject_to_address_unchecked;
+use alpen_primitives::{subject_to_address, subject_to_address_unchecked};
 use strata_acct_types::Hash;
 use strata_predicate::PredicateKey;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// Entries the next block drains from the account's pending-input queue.
 pub(crate) struct ConsumedInputs {
@@ -47,11 +47,18 @@ pub(crate) fn extract_consumed_inputs(
         }
         match entry {
             PendingInputEntry::Deposit(data) => {
-                deposits.push(DepositInfo::new(
-                    next_deposit_idx + deposits.len() as u64,
-                    subject_to_address_unchecked(&data.dest()),
-                    data.value(),
-                ));
+                let deposit_idx = next_deposit_idx + deposits.len() as u64;
+                let dest = data.dest();
+                let address = subject_to_address_unchecked(&dest);
+                if subject_to_address(&dest).is_none() {
+                    warn!(
+                        deposit_idx,
+                        ?dest,
+                        %address,
+                        "deposit subject has non-zero padding, minting to its last 20 bytes"
+                    );
+                }
+                deposits.push(DepositInfo::new(deposit_idx, address, data.value()));
             }
             PendingInputEntry::PredicateRotation(key) => {
                 new_predicate = Some(key.clone());
@@ -159,6 +166,18 @@ mod tests {
         assert_eq!(consumed.processed(), 1);
         assert_eq!(deposits[0].address(), Address::from([0xaa; 20]));
         assert_eq!(deposits[0].idx(), 5);
+    }
+
+    #[test]
+    fn extract_consumed_inputs_truncates_non_zero_padding() {
+        let mut subject_bytes = [0xff; 32];
+        subject_bytes[12..32].copy_from_slice(&[0xaa; 20]);
+
+        let inputs = vec![make_deposit(subject_bytes, 1000)];
+        let consumed = extract_consumed_inputs(&inputs, NonZero::new(10).unwrap(), 0);
+
+        assert_eq!(consumed.processed(), 1);
+        assert_eq!(consumed.deposits[0].address(), Address::from([0xaa; 20]));
     }
 
     #[test]
