@@ -83,7 +83,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.tag }}
           OUTPUT_DIR: ${{ runner.temp }}/alpen-guests
-        run: python3 .github/scripts/guest_publish.py fetch
+        run: python3 .github/scripts/release.py fetch
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
@@ -95,4 +95,4 @@ jobs:
         env:
           OUTPUT_DIR: ${{ runner.temp }}/alpen-guests
           S3_BUCKET: ${{ vars.ALPEN_GUESTS_S3_BUCKET }}
-        run: python3 .github/scripts/guest_publish.py upload
+        run: python3 .github/scripts/release.py upload

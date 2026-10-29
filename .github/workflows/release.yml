@@ -47,7 +47,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
           SOURCE_SHA: ${{ github.sha }}
-        run: python3 .github/scripts/guest_publish.py branch
+        run: python3 .github/scripts/release.py branch
 
       - name: List networks
         id: networks
@@ -121,7 +121,7 @@ jobs:
           TAG: ${{ github.ref_name }}
           WORK_DIR: ${{ runner.temp }}/notes
           PROGRAM_IDS_DIR: ${{ runner.temp }}/program-ids
-        run: python3 .github/scripts/guest_publish.py notes
+        run: python3 .github/scripts/release.py notes
 
       - name: Check files and publish release
         env:
@@ -129,7 +129,7 @@ jobs:
           TAG: ${{ github.ref_name }}
           NETWORKS: ${{ needs.prepare.outputs.networks }}
           SOURCE_SHA: ${{ github.sha }}
-        run: python3 .github/scripts/guest_publish.py publish
+        run: python3 .github/scripts/release.py publish
 
   s3:
     name: Guests to S3

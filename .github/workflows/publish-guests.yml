@@ -92,7 +92,7 @@ jobs:
           INPUT_PARAMS_URL: ${{ inputs.params_url }}
           INPUT_REF: ${{ inputs.ref }}
           INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
-        run: python3 .github/scripts/guest_publish.py validate
+        run: python3 .github/scripts/release.py validate
 
       # Fail before the long build rather than after it.
       - name: Check release is a draft
@@ -115,7 +115,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.release_tag }}
           SOURCE_SHA: ${{ steps.resolve-sha.outputs.sha }}
-        run: python3 .github/scripts/guest_publish.py tagged
+        run: python3 .github/scripts/release.py tagged
 
       - name: Fetch params
         id: params
@@ -123,7 +123,7 @@ jobs:
           NETWORK: ${{ inputs.network }}
           PARAMS_URL: ${{ inputs.params_url }}
           OUTPUT_PATH: ${{ runner.temp }}/alpen-params.json
-        run: python3 .github/scripts/guest_publish.py params
+        run: python3 .github/scripts/release.py params
 
       - name: Install Rust toolchain
         run: |
@@ -166,7 +166,7 @@ jobs:
           SOURCE_SHA: ${{ steps.resolve-sha.outputs.sha }}
           DIST_DIR: dist
           PROGRAM_IDS_DIR: program-ids
-        run: python3 .github/scripts/guest_publish.py stage
+        run: python3 .github/scripts/release.py stage
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

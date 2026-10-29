@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""guest_publish.py — Helpers for the SP1 guest publish workflows.
+"""release.py — Helpers for release.yml and the SP1 guest workflows it calls.
 
 Pure stdlib, so it runs on any GitHub-hosted runner without an install step.
 
@@ -680,7 +680,7 @@ COMMANDS = {
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Helpers for the SP1 guest publish workflows."
+        description="Helpers for release.yml and the SP1 guest workflows it calls."
     )
     parser.add_argument("command", choices=sorted(COMMANDS))
     COMMANDS[parser.parse_args().command]()
