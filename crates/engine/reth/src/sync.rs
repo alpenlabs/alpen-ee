@@ -12,12 +12,13 @@ use reth_provider::{
     BlockNumReader,
 };
 use strata_acct_types::Hash;
-use strata_common::retry::{
-    policies::ExponentialBackoff, retry_with_backoff_async, DEFAULT_ENGINE_CALL_MAX_RETRIES,
-};
+use strata_retry::retry_with_backoff_async;
 use tracing::{debug, info};
 
-use crate::SyncError;
+use crate::{
+    retry::{engine_call_backoff, ENGINE_CALL_MAX_RETRIES},
+    SyncError,
+};
 
 /// Interface for checking if blocks exist in the execution layer.
 ///
@@ -58,8 +59,8 @@ where
 {
     retry_with_backoff_async(
         "reth_provider_block_exists",
-        DEFAULT_ENGINE_CALL_MAX_RETRIES,
-        &ExponentialBackoff::default(),
+        ENGINE_CALL_MAX_RETRIES,
+        &engine_call_backoff(),
         || async { checker.block_exists(blockhash) },
     )
     .await
@@ -960,7 +961,7 @@ mod tests {
             assert!(matches!(result, Err(SyncError::EmptyFinalizedChain)));
             assert_eq!(
                 *attempts.lock().unwrap(),
-                usize::from(DEFAULT_ENGINE_CALL_MAX_RETRIES) + 1
+                usize::from(ENGINE_CALL_MAX_RETRIES) + 1
             );
         }
 

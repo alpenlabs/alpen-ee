@@ -5,6 +5,7 @@ mod control;
 mod engine;
 mod errors;
 mod payload_builder;
+mod retry;
 mod sync;
 
 pub use control::create_engine_control_task;

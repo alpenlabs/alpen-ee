@@ -4,10 +4,10 @@ use alpen_engine_api::{ExecutionEngine, ExecutionEngineError};
 use alpen_reth_node::{AlpenBuiltPayload, AlpenEngineTypes};
 use async_trait::async_trait;
 use reth_node_builder::{BuiltPayload, ConsensusEngineHandle, PayloadTypes};
-use strata_common::retry::{
-    policies::ExponentialBackoff, retry_with_backoff_async, DEFAULT_ENGINE_CALL_MAX_RETRIES,
-};
+use strata_retry::retry_with_backoff_async;
 use tracing::{debug, info, warn};
+
+use crate::retry::{engine_call_backoff, ENGINE_CALL_MAX_RETRIES};
 
 /// Logs a forkchoice update that reth did not apply.
 ///
@@ -66,8 +66,8 @@ impl ExecutionEngine for AlpenRethExecEngine {
     async fn submit_payload(&self, payload: AlpenBuiltPayload) -> Result<(), ExecutionEngineError> {
         retry_with_backoff_async(
             "exec_engine_submit_payload",
-            DEFAULT_ENGINE_CALL_MAX_RETRIES,
-            &ExponentialBackoff::default(),
+            ENGINE_CALL_MAX_RETRIES,
+            &engine_call_backoff(),
             || async {
                 let block = payload.block();
                 let payload_status = self
@@ -88,8 +88,8 @@ impl ExecutionEngine for AlpenRethExecEngine {
     ) -> Result<(), ExecutionEngineError> {
         retry_with_backoff_async(
             "exec_engine_update_consensus_state",
-            DEFAULT_ENGINE_CALL_MAX_RETRIES,
-            &ExponentialBackoff::default(),
+            ENGINE_CALL_MAX_RETRIES,
+            &engine_call_backoff(),
             || async {
                 debug!(?state, "Sending fork choice state to beacon");
                 let updated = self

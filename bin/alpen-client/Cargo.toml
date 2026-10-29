@@ -123,7 +123,7 @@ ssz.workspace = true
 strata-acct-types.workspace = true
 strata-btcio = { workspace = true, optional = true }
 strata-codec = { workspace = true, optional = true }
-strata-common = { workspace = true, features = ["async"] }
+strata-common.workspace = true
 strata-config.workspace = true
 strata-db-types = { workspace = true, optional = true }
 strata-identifiers.workspace = true
@@ -133,6 +133,7 @@ strata-ol-rpc-types.workspace = true
 strata-paas = { workspace = true, optional = true }
 strata-predicate.workspace = true
 strata-primitives.workspace = true
+strata-retry.workspace = true
 strata-service.workspace = true
 strata-snark-acct-runtime = { workspace = true, optional = true }
 strata-snark-acct-types.workspace = true

@@ -14,7 +14,7 @@ alpen-engine-api.workspace = true
 alpen-primitives.workspace = true
 alpen-reth-node.workspace = true
 strata-acct-types.workspace = true
-strata-common = { workspace = true, features = ["async"] }
+strata-retry.workspace = true
 
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
