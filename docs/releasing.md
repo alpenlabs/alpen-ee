@@ -8,12 +8,15 @@ them in a GitHub Release and copies them to S3.
 ## Branches and tags
 
 Development happens on `main`. Each release line gets its own branch, named
-`releases/vX.Y.x`, for example `releases/v0.4.x`. Every tag of the line comes
-from that branch: its rcs, `vX.Y.0` and the patch releases `vX.Y.1` and up.
-`main` is never tagged. To use code from `main` in another repo, pin a commit.
+`releases/vX.Y.x`, for example `releases/v0.4.x`.
 
-Changes reach a release branch only by cherry-picking them from `main` through
-a PR.
+A line's first rcs are tagged on `main`. The branch is cut later, at an rc's
+commit. From then on, every tag of the line comes from the branch: later rcs,
+`vX.Y.0` and the patch releases `vX.Y.1` and up. `vX.Y.0` and the patch
+releases always need the branch, because the line is maintained there.
+
+Once the branch exists, changes reach it only by cherry-picking them from
+`main` through a PR.
 
 ## What a line keeps fixed
 
@@ -36,14 +39,20 @@ program ID in the two releases' notes.
 
 ## Cutting a release
 
-1. Cut `releases/vX.Y.x` from `main` when the line is ready for its first rc.
-2. Tag `vX.Y.0-rc.1` on the branch and push the tag.
-3. Land fixes on `main` first. Then cherry-pick them onto the branch through
-   a PR, and tag the next rc from the branch.
-4. Once testnet or mainnet runs an rc, tag `vX.Y.0` at that same commit, so
+1. Tag `vX.Y.0-rc.1` on `main` and push the tag. Fixes land on `main` and go
+   out in the next rc.
+2. Cut `releases/vX.Y.x` at the commit of the rc you want to ship. Cut it
+   earlier if `main` starts taking work for the next line while the line
+   still needs rcs. After that, land fixes on `main` first, cherry-pick them
+   onto the branch through a PR, and tag the next rc from the branch.
+3. Once testnet or mainnet runs an rc, tag `vX.Y.0` at that same commit, so
    the final release names the build that network runs.
-5. Tag patch releases from the branch. They must not change full node
+4. Tag patch releases from the branch. They must not change full node
    behavior.
+
+Each rc tagged on `main` takes everything merged since the last one. So while
+a line takes rcs from `main`, keep work for the next line out of `main`, or
+cut the branch.
 
 Staging takes the rcs first. If a later rc only changes the guests' keys,
 staging keeps proving with the guests it has. If it changes full node
@@ -79,8 +88,10 @@ and `manifest.json` lists the networks.
 ## What `release.yml` does
 
 1. It checks that the tag is `vMAJOR.MINOR.PATCH`, optionally with a
-   `-suffix`, and that it points at a commit on `releases/vMAJOR.MINOR.x`. If
-   either check fails, nothing is published.
+   `-suffix`, and that it points at a commit on `releases/vMAJOR.MINOR.x`.
+   Until that branch exists, a `vMAJOR.MINOR.0` tag with a `-suffix` must
+   point at a commit on `main` instead. If either check fails, nothing is
+   published.
 2. It creates a draft GitHub Release. A tag with a `-suffix` makes a
    prerelease.
 3. It runs `.github/workflows/publish-guests.yml` once per network. Each run
@@ -97,11 +108,11 @@ and `manifest.json` lists the networks.
    set.
 
 The workflow that runs for a tag is the copy at the tagged commit. So the
-"Check tag is on its release branch" step only runs for a tag on a commit that
-has it. `releases/v0.4.x` doesn't have it yet. It sits at `v0.4.0-rc.3`, and
-`v0.4.0` goes on that same commit (step 4 above). So no v0.4 tag is checked
-until the step is cherry-picked onto the branch, and neither is a tag on any
-older commit.
+"Check tag's branch" step only runs for a tag on a commit that has it.
+`releases/v0.4.x` doesn't have it yet. It sits at `v0.4.0-rc.3`, and `v0.4.0`
+goes on that same commit (step 3 of "Cutting a release"). So no v0.4 tag is
+checked until the step is cherry-picked onto the branch, and neither is a tag
+on any older commit.
 
 ## Building guests outside a release
 
