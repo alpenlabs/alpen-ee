@@ -5,6 +5,9 @@ Pure stdlib, so it runs on any GitHub-hosted runner without an install step.
 
 Subcommands:
     validate    Check the workflow inputs before any network or build work.
+    branch      Check the tag points at a commit on its release line's branch.
+    tagged      Check the checked-out commit is the one the release tag points
+                at, before files are built for that release.
     params      Fetch the network's params JSON from a URL, or copy it from
                 params/<network>.json in the repo, to $OUTPUT_PATH.
     stage       Copy the built guests, predicate and params into $DIST_DIR, and
@@ -46,6 +49,8 @@ REF_RE = re.compile(r"^[A-Za-z0-9._/@:-]+$")
 TAG_RE = re.compile(r"^[A-Za-z0-9._-]{1,200}$")
 SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
 VERSION_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{8}$")
+# vMAJOR.MINOR.PATCH with an optional pre-release suffix, e.g. v0.5.0-rc.1.
+RELEASE_TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.\d+(?:-[0-9A-Za-z.-]+)?$")
 # github.com /blob/ URLs serve an HTML page, not the raw JSON.
 BLOB_URL_RE = re.compile(r"^https://github\.com/[^/]+/[^/]+/blob/")
 
@@ -149,6 +154,37 @@ def guest_version(commit: str, params_digest: str) -> str:
     return f"{commit[:8]}-{params_digest[:8]}"
 
 
+def parse_release_tag(tag: str) -> tuple[int, int]:
+    """Returns a release tag's major and minor numbers, which name its line."""
+    match = RELEASE_TAG_RE.fullmatch(tag)
+    if not match:
+        fail(f"tag {tag!r} is not vMAJOR.MINOR.PATCH with an optional -suffix")
+    major, minor = (int(part) for part in match.groups())
+    return major, minor
+
+
+def release_branch(major: int, minor: int) -> str:
+    """Names the branch a release line is tagged from, e.g. releases/v0.4.x."""
+    return f"releases/v{major}.{minor}.x"
+
+
+def branch_exists(repo: str, branch: str) -> bool:
+    # matching-refs matches by prefix, so look for the exact ref.
+    refs = gh(
+        "api", f"repos/{repo}/git/matching-refs/heads/{branch}", "--jq", ".[].ref"
+    )
+    return f"refs/heads/{branch}" in refs.splitlines()
+
+
+def on_branch(repo: str, branch: str, commit: str) -> bool:
+    """Returns whether `commit` is the tip of `branch` or one of its ancestors."""
+    # The full ref, as in tag_commit, keeps a tag with the same name from matching.
+    status = gh(
+        "api", f"repos/{repo}/compare/refs/heads/{branch}...{commit}", "--jq", ".status"
+    ).strip()
+    return status in ("identical", "behind")
+
+
 # ---- validate --------------------------------------------------------------
 
 
@@ -174,6 +210,56 @@ def cmd_validate() -> None:
     release_tag = os.environ.get("INPUT_RELEASE_TAG", "")
     if release_tag and not TAG_RE.fullmatch(release_tag):
         fail("release_tag contains unsupported characters (allowed: [A-Za-z0-9._-])")
+    # A release's guests are built with the params in the repo at its tag.
+    if release_tag and params_url:
+        fail("params_url can't be used with release_tag")
+
+
+# ---- branch ----------------------------------------------------------------
+
+
+def cmd_branch() -> None:
+    """Env: TAG, SOURCE_SHA, GH_TOKEN, GITHUB_REPOSITORY.
+
+    Every tag of a release line, rc tags included, must point at a commit on
+    the line's branch. A tag cut from main carries everything main changed
+    since the line started, including changes to full node behavior, which a
+    line must not take.
+    """
+    tag = os.environ["TAG"]
+    repo = os.environ["GITHUB_REPOSITORY"]
+    source_sha = os.environ["SOURCE_SHA"]
+    if not SHA1_RE.fullmatch(source_sha):
+        fail(f"SOURCE_SHA is not a commit sha: {source_sha!r}")
+
+    major, minor = parse_release_tag(tag)
+    branch = release_branch(major, minor)
+    if not branch_exists(repo, branch):
+        fail(f"{branch} does not exist; cut it from main before tagging {tag}")
+    if not on_branch(repo, branch, source_sha):
+        fail(f"tag {tag} points at {source_sha}, which is not on {branch}")
+    print(f"{tag} points at {source_sha}, which is on {branch}")
+
+
+# ---- tagged ----------------------------------------------------------------
+
+
+def cmd_tagged() -> None:
+    """Env: TAG, SOURCE_SHA, GH_TOKEN, GITHUB_REPOSITORY.
+
+    A run by hand can set release_tag but build another ref, usually main.
+    Its files would then replace the draft's, and publish only checks their
+    names, so they must come from the commit the tag points at.
+    """
+    tag = os.environ["TAG"]
+    repo = os.environ["GITHUB_REPOSITORY"]
+    source_sha = os.environ["SOURCE_SHA"]
+    if not SHA1_RE.fullmatch(source_sha):
+        fail(f"SOURCE_SHA is not a commit sha: {source_sha!r}")
+
+    commit = tag_commit(repo, tag)
+    if commit != source_sha:
+        fail(f"tag {tag} points at {commit}, but this run checked out {source_sha}")
 
 
 # ---- params ----------------------------------------------------------------
@@ -573,6 +659,8 @@ def cmd_upload() -> None:
 
 COMMANDS = {
     "validate": cmd_validate,
+    "branch": cmd_branch,
+    "tagged": cmd_tagged,
     "params": cmd_params,
     "stage": cmd_stage,
     "notes": cmd_notes,

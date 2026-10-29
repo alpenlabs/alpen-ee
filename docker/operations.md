@@ -72,10 +72,18 @@ volumes:
 
 The image does not ship the SP1 guest ELFs. Each network's guests bake in its
 params, so one set of ELFs cannot serve every network. A sequencer with
-`sequencer.prover.backend = "sp1"` takes them from the network's GitHub
-Release (see [`provers/sp1/README.md`](../provers/sp1/README.md#publishing))
-and mounts them at the paths its `[sequencer.prover.programs.<version>]`
-entries name.
+`sequencer.prover.backend = "sp1"` takes them from a GitHub Release (see
+[`docs/releasing.md`](../docs/releasing.md#what-a-release-publishes)) and
+mounts them at the paths its `[sequencer.prover.programs.<version>]` entries
+name.
+
+Take the guests from the release the network was rolled out with, not from the
+release the node now runs. A later release of the same line can change the
+guests' keys (see
+[What a line keeps fixed](../docs/releasing.md#what-a-line-keeps-fixed)), and
+the OL rejects account proofs from guests whose key it doesn't hold. Before you
+mount them, check that the release's `<network>-alpen-acct.predicate` matches
+the account's `update_vk` on the OL.
 
 Environment variables the entrypoint reads:
 
