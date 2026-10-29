@@ -108,8 +108,10 @@ in the `alpen-acct-program-id-<network>` artifact.
 
 - To build `dev`, which releases skip, run it with `network` set to `dev`.
 - To build with params that are not in the repo yet, pass `params_url`.
-- To attach the files to a release, pass `release_tag`. This only works while
-  that release is still a draft.
+- To attach the files to a release, pass `release_tag`, and set `ref` to that
+  tag. The release must still be a draft. The run fails before it builds if
+  the checked-out commit is not the tag's commit, or if `params_url` is set,
+  because a release's guests are built with the params in the repo.
 
 To copy an older release to S3, run `publish-guests-s3.yml` by hand with a
 `v*` tag selected as the ref and that release's tag as `tag`.
