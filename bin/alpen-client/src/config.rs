@@ -12,7 +12,7 @@ use std::time::Duration;
 use std::{
     collections::BTreeMap,
     net::{IpAddr, Ipv4Addr},
-    num::{NonZeroU64, NonZeroUsize},
+    num::{NonZeroU32, NonZeroU64, NonZeroUsize},
     path::{Path, PathBuf},
 };
 
@@ -23,7 +23,7 @@ use alpen_params::AlpenParams;
 use alpen_params::AlpenSpecId;
 use serde::{de::Error as DeError, Deserialize, Deserializer, Serialize};
 #[cfg(feature = "sequencer")]
-use strata_config::btcio::FeePolicy;
+use strata_config::btcio::{FeeBumpingConfig, FeePolicy};
 use strata_config::{
     btcio::{BroadcasterConfig, L1FeePolicyConfig},
     BitcoindConfig,
@@ -302,6 +302,9 @@ pub(crate) enum NodeMode {
 #[derive(Debug)]
 pub(crate) struct SequencerMode {
     pub(crate) config: SequencerConfig,
+    /// The btcio writer's fee-bumping policy, resolved from
+    /// `[sequencer.fee_bumping]` and `[sequencer.broadcaster]`.
+    pub(crate) fee_bumping: FeeBumpingConfig,
     pub(crate) l1_reorg_safe_depth: u32,
     pub(crate) genesis_l1_height: L1Height,
 }
@@ -528,6 +531,76 @@ const fn default_da_fee_rate_multiplier_bps() -> u64 {
     10_000
 }
 
+/// Contents of `[sequencer.fee_bumping]`: overrides for how the btcio writer
+/// replaces (RBF) the DA transactions it published once they sit unconfirmed.
+///
+/// The keys are those of the OL node's `[btcio.writer.fee_bumping]` table.
+/// An omitted key keeps the [`FeeBumpingConfig`] default, except
+/// `max_fee_rate_sat_vb`, which follows `sequencer.broadcaster.max_fee_rate_sat_vb`
+/// so the writer never builds a replacement the broadcaster would refuse.
+///
+/// That one exception is why this is a local overlay rather than
+/// [`FeeBumpingConfig`] itself: its serde defaults fill every omitted key, so
+/// once parsed it can't tell an omitted ceiling from one set to the default.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct FeeBumpingOverrides {
+    /// Minimum time between replacement passes, in ms.
+    check_interval_ms: Option<NonZeroU64>,
+    /// L1 blocks a published transaction may stay unconfirmed before it is
+    /// replaced.
+    min_age_blocks: Option<NonZeroU32>,
+    /// Maximum broadcast attempts for one replacement chain.
+    max_attempts: Option<NonZeroU32>,
+    /// Minimum multiplicative fee increase per replacement, in basis points.
+    multiplier_bps: Option<u32>,
+    /// Minimum additive fee-rate increase per replacement, in sat/vB.
+    min_fee_rate_delta_sat_vb: Option<NonZeroU64>,
+    /// Highest fee rate a replacement may use, in sat/vB.
+    max_fee_rate_sat_vb: Option<NonZeroU64>,
+    /// Maximum absolute fee headroom funded into each reveal, in sats.
+    max_reveal_fee_headroom_sats: Option<NonZeroU64>,
+}
+
+#[cfg(feature = "sequencer")]
+impl FeeBumpingOverrides {
+    /// Resolves the writer's fee-bumping policy against the broadcaster's.
+    ///
+    /// Applies the checks the OL node applies to its own table:
+    /// [`FeeBumpingConfig::validate`], and a replacement ceiling no higher
+    /// than the broadcast one.
+    fn resolve(&self, broadcaster: &BroadcasterConfig) -> eyre::Result<FeeBumpingConfig> {
+        let defaults = FeeBumpingConfig::default();
+        // No `..defaults`: a knob a future `strata_config` adds should fail
+        // to compile here until someone decides whether to expose it.
+        let resolved = FeeBumpingConfig {
+            check_interval_ms: self.check_interval_ms.unwrap_or(defaults.check_interval_ms),
+            min_age_blocks: self.min_age_blocks.unwrap_or(defaults.min_age_blocks),
+            max_attempts: self.max_attempts.unwrap_or(defaults.max_attempts),
+            multiplier_bps: self.multiplier_bps.unwrap_or(defaults.multiplier_bps),
+            min_fee_rate_delta_sat_vb: self
+                .min_fee_rate_delta_sat_vb
+                .unwrap_or(defaults.min_fee_rate_delta_sat_vb),
+            max_fee_rate_sat_vb: self
+                .max_fee_rate_sat_vb
+                .unwrap_or(broadcaster.max_fee_rate_sat_vb),
+            max_reveal_fee_headroom_sats: self
+                .max_reveal_fee_headroom_sats
+                .unwrap_or(defaults.max_reveal_fee_headroom_sats),
+        };
+
+        resolved
+            .validate()
+            .map_err(|error| eyre::eyre!("invalid sequencer.fee_bumping config: {error}"))?;
+        eyre::ensure!(
+            resolved.max_fee_rate_sat_vb <= broadcaster.max_fee_rate_sat_vb,
+            "sequencer.fee_bumping.max_fee_rate_sat_vb must not exceed \
+             sequencer.broadcaster.max_fee_rate_sat_vb"
+        );
+
+        Ok(resolved)
+    }
+}
+
 // The `sequencer` feature gate sits on `SequencerMode`, not on this struct or its fields.
 // The definition stays unconditional because `AlpenClientConfigFile` names it in every build,
 // the same way it names `BitcoindConfig` and `L1FeePolicyConfig`. A slim build can therefore
@@ -579,6 +652,11 @@ pub(crate) struct SequencerConfig {
     /// `[sequencer.broadcaster]` — L1 transaction broadcast policy.
     #[serde(default)]
     pub(crate) broadcaster: BroadcasterConfig,
+    /// `[sequencer.fee_bumping]` — overrides for the btcio writer's RBF
+    /// policy. Private so nothing reads the raw overrides: the writer runs on
+    /// the policy resolved into [`SequencerMode::fee_bumping`].
+    #[serde(default)]
+    fee_bumping: FeeBumpingOverrides,
     /// `[sequencer.da_fee_rate]` — policy selection and service timing.
     pub(crate) da_fee_rate: DaFeeRateConfig,
 }
@@ -677,9 +755,13 @@ impl TryFrom<AlpenClientConfigFile> for AlpenClientConfig {
                     })?;
                     seq.prover.validate()?;
                     seq.validate_l1_fee_config()?;
+                    // After the broadcaster check: the fee-bumping ceiling
+                    // defaults to the broadcaster's.
+                    let fee_bumping = seq.fee_bumping.resolve(&seq.broadcaster)?;
                     seq.da_fee_rate.validate()?;
                     NodeMode::Sequencer(SequencerMode {
                         config: seq,
+                        fee_bumping,
                         l1_reorg_safe_depth: raw.l1_reorg_safe_depth,
                         genesis_l1_height: raw.genesis_l1_height,
                     })
@@ -979,6 +1061,7 @@ mod tests {
             DEFAULT_BATCH_SEALING_DA_SIZE_BYTES
         );
         assert_eq!(seq.config.broadcaster.max_fee_rate_sat_vb.get(), 1_000);
+        assert_eq!(seq.fee_bumping, default_fee_bumping(1_000));
         let DaFeeRateConfig::WriterBacked {
             config: da_fee_rate,
         } = seq.config.da_fee_rate
@@ -1028,6 +1111,163 @@ mod tests {
 
         AlpenClientConfig::from_toml_str(&toml)
             .expect("fixed fee rate at the broadcast guardrail should be accepted");
+    }
+
+    /// The fixture with its broadcast ceiling set to `broadcaster_max_fee_rate_sat_vb`
+    /// and its `[sequencer.fee_bumping]` table replaced by `fee_bumping`, or
+    /// dropped when that is `None`.
+    #[cfg(feature = "sequencer")]
+    fn sequencer_toml_with_fee_bumping(
+        broadcaster_max_fee_rate_sat_vb: u64,
+        fee_bumping: Option<&str>,
+    ) -> String {
+        let toml = SEQUENCER_TOML.replace(
+            "max_fee_rate_sat_vb = 1000",
+            &format!("max_fee_rate_sat_vb = {broadcaster_max_fee_rate_sat_vb}"),
+        );
+        let (prefix, rest) = toml
+            .split_once("[sequencer.fee_bumping]")
+            .expect("fixture contains fee-bumping config");
+        let suffix = rest
+            .split_once("[sequencer.da_fee_rate]")
+            .expect("fixture puts DA fee-rate config after fee bumping")
+            .1;
+        let table = fee_bumping
+            .map(|table| format!("[sequencer.fee_bumping]\n{table}\n"))
+            .unwrap_or_default();
+        format!("{prefix}{table}[sequencer.da_fee_rate]{suffix}")
+    }
+
+    #[cfg(feature = "sequencer")]
+    fn resolve_fee_bumping(
+        broadcaster_max_fee_rate_sat_vb: u64,
+        fee_bumping: Option<&str>,
+    ) -> eyre::Result<FeeBumpingConfig> {
+        let toml = sequencer_toml_with_fee_bumping(broadcaster_max_fee_rate_sat_vb, fee_bumping);
+        let NodeMode::Sequencer(seq) = AlpenClientConfig::from_toml_str(&toml)?.mode else {
+            panic!("expected sequencer mode");
+        };
+        Ok(seq.fee_bumping)
+    }
+
+    /// What the writer ran with before `[sequencer.fee_bumping]` existed: the
+    /// btcio defaults, with the replacement ceiling copied from the broadcaster.
+    #[cfg(feature = "sequencer")]
+    fn default_fee_bumping(broadcaster_max_fee_rate_sat_vb: u64) -> FeeBumpingConfig {
+        FeeBumpingConfig {
+            max_fee_rate_sat_vb: NonZeroU64::new(broadcaster_max_fee_rate_sat_vb).unwrap(),
+            ..FeeBumpingConfig::default()
+        }
+    }
+
+    #[cfg(feature = "sequencer")]
+    #[test]
+    fn fee_bumping_defaults_are_unchanged_without_table() {
+        for broadcaster_max in [1_000, 250] {
+            assert_eq!(
+                resolve_fee_bumping(broadcaster_max, None).unwrap(),
+                default_fee_bumping(broadcaster_max),
+                "broadcaster max {broadcaster_max}"
+            );
+        }
+        assert_eq!(
+            resolve_fee_bumping(250, Some("")).unwrap(),
+            default_fee_bumping(250),
+            "an empty table is the same as none"
+        );
+    }
+
+    #[cfg(feature = "sequencer")]
+    #[test]
+    fn fee_bumping_overrides_parse() {
+        assert_eq!(
+            resolve_fee_bumping(1_000, Some("min_age_blocks = 5")).unwrap(),
+            FeeBumpingConfig {
+                min_age_blocks: NonZeroU32::new(5).unwrap(),
+                ..default_fee_bumping(1_000)
+            }
+        );
+
+        let every_key = r#"
+            check_interval_ms = 60000
+            min_age_blocks = 5
+            max_attempts = 10
+            multiplier_bps = 15000
+            min_fee_rate_delta_sat_vb = 2
+            max_fee_rate_sat_vb = 500
+            max_reveal_fee_headroom_sats = 5000000
+        "#;
+        assert_eq!(
+            resolve_fee_bumping(1_000, Some(every_key)).unwrap(),
+            FeeBumpingConfig {
+                check_interval_ms: NonZeroU64::new(60_000).unwrap(),
+                min_age_blocks: NonZeroU32::new(5).unwrap(),
+                max_attempts: NonZeroU32::new(10).unwrap(),
+                multiplier_bps: 15_000,
+                min_fee_rate_delta_sat_vb: NonZeroU64::new(2).unwrap(),
+                max_fee_rate_sat_vb: NonZeroU64::new(500).unwrap(),
+                max_reveal_fee_headroom_sats: NonZeroU64::new(5_000_000).unwrap(),
+            }
+        );
+    }
+
+    /// The replacement ceiling follows the broadcaster's only when omitted. A
+    /// ceiling the operator sets is kept as is, and must fit under the
+    /// broadcaster's.
+    #[cfg(feature = "sequencer")]
+    #[test]
+    fn fee_bumping_ceiling_follows_broadcaster_unless_set() {
+        let inherited = resolve_fee_bumping(250, Some("min_age_blocks = 5")).unwrap();
+        assert_eq!(inherited.max_fee_rate_sat_vb.get(), 250);
+
+        let below = resolve_fee_bumping(1_000, Some("max_fee_rate_sat_vb = 300")).unwrap();
+        assert_eq!(below.max_fee_rate_sat_vb.get(), 300);
+
+        let at = resolve_fee_bumping(1_000, Some("max_fee_rate_sat_vb = 1000")).unwrap();
+        assert_eq!(at.max_fee_rate_sat_vb.get(), 1_000);
+
+        // 1000 is also the btcio default ceiling. Set explicitly, it is checked
+        // against the broadcaster's rather than mistaken for an omitted key.
+        for (broadcaster_max, fee_bumping) in [
+            (1_000, "max_fee_rate_sat_vb = 1001"),
+            (250, "max_fee_rate_sat_vb = 1000"),
+        ] {
+            let error = resolve_fee_bumping(broadcaster_max, Some(fee_bumping)).unwrap_err();
+            assert!(
+                error.to_string().contains(
+                    "sequencer.fee_bumping.max_fee_rate_sat_vb must not exceed \
+                     sequencer.broadcaster.max_fee_rate_sat_vb"
+                ),
+                "{fee_bumping} under broadcaster max {broadcaster_max}: {error}"
+            );
+        }
+    }
+
+    #[cfg(feature = "sequencer")]
+    #[test]
+    fn fee_bumping_invalid_values_are_rejected() {
+        for (fee_bumping, expected) in [
+            // serde rejects zero for the `NonZero*` keys and names the key.
+            ("min_age_blocks = 0", "sequencer.fee_bumping.min_age_blocks"),
+            ("max_attempts = 0", "sequencer.fee_bumping.max_attempts"),
+            ("max_attempts = 65", "max_attempts must be at most 64"),
+            (
+                "multiplier_bps = 9999",
+                "multiplier_bps must be at least 10_000",
+            ),
+            // The inherited ceiling (250) is checked like a configured one.
+            (
+                "min_fee_rate_delta_sat_vb = 300",
+                "max_fee_rate_sat_vb must be at least min_fee_rate_delta_sat_vb",
+            ),
+            ("min_age_block = 5", "sequencer.fee_bumping.min_age_block"),
+        ] {
+            let error = resolve_fee_bumping(250, Some(fee_bumping)).unwrap_err();
+            assert!(
+                error.to_string().contains(expected),
+                "{fee_bumping}: {error}"
+            );
+        }
     }
 
     #[test]

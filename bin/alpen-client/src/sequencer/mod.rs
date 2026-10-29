@@ -165,6 +165,20 @@ fn log_writer_config(cfg: &WriterConfig) {
             );
         }
     }
+
+    let fee_bumping = &cfg.fee_bumping;
+    info!(
+        target: "alpen-client",
+        component = "alpen",
+        check_interval_ms = fee_bumping.check_interval_ms.get(),
+        min_age_blocks = fee_bumping.min_age_blocks.get(),
+        max_attempts = fee_bumping.max_attempts.get(),
+        multiplier_bps = fee_bumping.multiplier_bps,
+        min_fee_rate_delta_sat_vb = fee_bumping.min_fee_rate_delta_sat_vb.get(),
+        max_fee_rate_sat_vb = fee_bumping.max_fee_rate_sat_vb.get(),
+        max_reveal_fee_headroom_sats = fee_bumping.max_reveal_fee_headroom_sats.get(),
+        "btcio writer fee bumping configured",
+    );
 }
 
 fn sequencer_bitcoin_keypair(privkey: &Buf32) -> eyre::Result<Keypair> {
@@ -259,13 +273,11 @@ pub(crate) async fn run(
     let initial_preconf_head = initial_preconf_head(common.storage.as_ref()).await?;
 
     let sequencer_config = &mode.config;
-    let mut writer_config = WriterConfig {
+    let writer_config = Arc::new(WriterConfig {
         l1_fee_policy_config: sequencer_config.l1_fee_policy.clone(),
+        fee_bumping: mode.fee_bumping,
         ..Default::default()
-    };
-    writer_config.fee_bumping.max_fee_rate_sat_vb =
-        sequencer_config.broadcaster.max_fee_rate_sat_vb;
-    let writer_config = Arc::new(writer_config);
+    });
     log_writer_config(&writer_config);
     let btc_client = da_pipeline::connect_bitcoin(&sequencer_config.bitcoind).await?;
     let da_fee_rate_runtime = da_fee_rate::start(
