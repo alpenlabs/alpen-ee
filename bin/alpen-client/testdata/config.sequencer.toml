@@ -41,6 +41,16 @@ fixed_fee_rate = 1.0
 poll_interval_ms = 5000
 max_fee_rate_sat_vb = 1000
 
+# Every key is optional. max_fee_rate_sat_vb is left out so the replacement
+# ceiling follows sequencer.broadcaster.max_fee_rate_sat_vb.
+[sequencer.fee_bumping]
+check_interval_ms = 30000
+min_age_blocks = 2
+max_attempts = 5
+multiplier_bps = 12500
+min_fee_rate_delta_sat_vb = 1
+max_reveal_fee_headroom_sats = 10000000
+
 [sequencer.da_fee_rate]
 policy = "writer_backed"
 refresh_interval_seconds = 60
