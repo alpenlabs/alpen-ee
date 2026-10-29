@@ -549,6 +549,7 @@ name = "alpen-da-runtime"
 version = "0.3.0-alpha.1"
 dependencies = [
  "alloy-primitives",
+ "alloy-trie",
  "alpen-acct-runtime",
  "alpen-chain-types",
  "alpen-da-types",

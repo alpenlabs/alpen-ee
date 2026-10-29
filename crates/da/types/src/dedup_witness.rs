@@ -23,12 +23,21 @@ pub struct DedupWitness {
     /// published in a prior batch, supplied so the guest can verify account
     /// diffs that still reference them.
     deduped_bytecode_preimages: Vec<BytecodePreimage>,
+
+    /// State trie keys (`keccak256(address)`) of accounts that hold, in the
+    /// batch's pre-state, the code the blob omits. The guest reads each
+    /// holder's code hash from the authenticated pre-state.
+    code_holder_keys: Vec<[u8; 32]>,
 }
 
 impl DedupWitness {
-    pub fn new(deduped_bytecode_preimages: Vec<BytecodePreimage>) -> Self {
+    pub fn new(
+        deduped_bytecode_preimages: Vec<BytecodePreimage>,
+        code_holder_keys: Vec<[u8; 32]>,
+    ) -> Self {
         Self {
             deduped_bytecode_preimages,
+            code_holder_keys,
         }
     }
 
@@ -38,6 +47,13 @@ impl DedupWitness {
 
     pub fn deduped_bytecode_preimages(&self) -> &[BytecodePreimage] {
         &self.deduped_bytecode_preimages
+    }
+}
+
+#[archive_impl]
+impl DedupWitness {
+    pub fn code_holder_keys(&self) -> &[[u8; 32]] {
+        &self.code_holder_keys
     }
 }
 
@@ -84,7 +100,7 @@ mod tests {
 
     #[test]
     fn dedup_witness_with_bytecode_preimage_roundtrips_through_rkyv() {
-        let witness = DedupWitness::new(vec![BytecodePreimage::new(vec![0x60, 0x80])]);
+        let witness = DedupWitness::new(vec![BytecodePreimage::new(vec![0x60, 0x80])], Vec::new());
 
         let bytes = rkyv::to_bytes::<RkyvError>(&witness).unwrap();
         let archived = rkyv::access::<ArchivedDedupWitness, RkyvError>(&bytes).unwrap();
@@ -92,5 +108,15 @@ mod tests {
         let preimages = archived.deduped_bytecode_preimages();
         assert_eq!(preimages.len(), 1);
         assert_eq!(preimages[0].bytecode(), &[0x60, 0x80]);
+    }
+
+    #[test]
+    fn dedup_witness_with_code_holder_roundtrips_through_rkyv() {
+        let witness = DedupWitness::new(Vec::new(), vec![[0x11; 32]]);
+
+        let bytes = rkyv::to_bytes::<RkyvError>(&witness).unwrap();
+        let archived = rkyv::access::<ArchivedDedupWitness, RkyvError>(&bytes).unwrap();
+
+        assert_eq!(archived.code_holder_keys(), &[[0x11; 32]]);
     }
 }

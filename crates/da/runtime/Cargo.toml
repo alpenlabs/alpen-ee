@@ -29,6 +29,7 @@ alpen-reth-statediff.workspace = true
 alpen-test-utils-evm-workload = { workspace = true, optional = true }
 
 alloy-primitives.workspace = true
+alloy-trie.workspace = true
 alpen-acct-runtime.workspace = true
 alpen-chain-types.workspace = true
 alpen-evm-ee.workspace = true

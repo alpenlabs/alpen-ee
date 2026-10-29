@@ -96,7 +96,7 @@ pub fn build_batch_da(
         unresolved.is_empty(),
         "every deduped bytecode is deployed in the batch"
     );
-    let dedup = DedupWitness::new(preimages);
+    let dedup = DedupWitness::new(preimages, Vec::new());
 
     let encoded_blob = blob.encode_to_vec().expect("encode DA blob");
     let (commit, reveals) = envelope_txs(&encoded_blob, spec_version);

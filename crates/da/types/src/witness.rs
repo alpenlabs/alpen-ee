@@ -253,7 +253,7 @@ mod tests {
     #[test]
     fn da_witness_with_known_bytecode_roundtrips_through_rkyv() {
         let preimage = BytecodePreimage::new(vec![0x60, 0x80]);
-        let witness = DaWitness::new(Vec::new(), DedupWitness::new(vec![preimage]));
+        let witness = DaWitness::new(Vec::new(), DedupWitness::new(vec![preimage], Vec::new()));
 
         let bytes = rkyv::to_bytes::<RkyvError>(&witness).unwrap();
         let archived = rkyv::access::<ArchivedDaWitness, RkyvError>(&bytes).unwrap();

@@ -40,6 +40,7 @@ pub trait DedupWitnessResolver {
         Ok(DedupWitness::new(
             self.resolve_bytecode_preimages(blob, batch_block_hashes)
                 .await?,
+            Vec::new(),
         ))
     }
 }

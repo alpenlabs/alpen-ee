@@ -2,9 +2,11 @@
 //!
 //! Reassembles the DA blob from witnessed commit/reveal transactions,
 //! verifies the commit marker matches the active proof's magic/version,
-//! ties the parsed `EvmHeaderSummary` and bytecodes to chunk public values,
-//! and applies the state diff to the partial pre-state to confirm it
-//! reproduces the last chunk's `tip_state_root`.
+//! ties the parsed `EvmHeaderSummary` to chunk public values, checks that
+//! every code hash the diff references is either carried in the blob or held
+//! by an account in the partial pre-state, and applies the state diff to the
+//! partial pre-state to confirm it reproduces the last chunk's
+//! `tip_state_root`.
 
 mod error;
 #[cfg(test)]
@@ -13,6 +15,7 @@ mod tests;
 use std::collections::BTreeSet;
 
 use alloy_primitives::{keccak256, B256};
+use alloy_trie::TrieAccount;
 use alpen_acct_runtime::ArchivedEePrivateInput;
 use alpen_chain_types::ChunkTransition;
 use alpen_da_types::{
@@ -86,6 +89,7 @@ pub fn verify_da_witness(
         &blob,
         &last_chunk,
         pub_params,
+        &pre_state,
         da_witness.dedup_da_witness(),
     )?;
     verify_state_diff_against_chunks(pre_state, &blob, &last_chunk)?;
@@ -169,6 +173,7 @@ fn verify_da_blob_metadata(
     blob: &DaBlob,
     last_chunk: &ChunkTransition,
     pub_params: &UpdateProofPubParams,
+    pre_state: &EvmPartialState,
     dedup_da_witness: &ArchivedDedupWitness,
 ) -> DaVerificationResult {
     let expected_seq_no = *pub_params.seq_no().inner();
@@ -191,31 +196,48 @@ fn verify_da_blob_metadata(
         });
     }
 
-    verify_deployed_bytecodes(&blob.state_diff, dedup_da_witness)
+    verify_deployed_bytecodes(&blob.state_diff, pre_state, dedup_da_witness)
 }
 
 /// Collects the code hashes the dedup witness vouches for.
 ///
-/// DA dedup lets the published blob omit data an earlier batch already carried;
-/// the dedup witness resupplies it so the guest can still check account diffs
-/// that reference it. Today that is bytecode preimages — each contributes
-/// `keccak256(bytes)`. Future dedup kinds (account/storage serials) extend this
-/// with their own membership-checked contributions.
+/// DA dedup lets the published blob omit bytecode an account already holds in
+/// the batch's pre-state. The dedup witness names each holder by its state
+/// trie key, and the holder's code hash is read from the pre-state, whose root
+/// was checked against the EE account's previous execution root. The holder
+/// took on that code in an earlier batch, whose blob was checked the same way,
+/// so by induction from genesis the bytes are on L1. Future dedup kinds
+/// (account/storage serials) extend this with their own contributions.
 ///
-/// NOTE: a bytecode preimage proves identity (the bytes hash to the referenced
-/// code hash), not that the bytes were published on L1 before.
-/// TODO(STR-1907): verify prior publication via a membership proof against an
-/// authenticated published-bytecode set.
-fn dedup_witness_code_hashes(dedup_da_witness: &ArchivedDedupWitness) -> BTreeSet<B256> {
-    dedup_da_witness
+/// NOTE: bytecode preimages are still accepted too. A preimage proves identity
+/// (the bytes hash to the referenced code hash), not that the bytes were
+/// published on L1 before.
+/// TODO(SECFND-513): stop accepting preimages once the prover sends holders.
+fn dedup_witness_code_hashes(
+    pre_state: &EvmPartialState,
+    dedup_da_witness: &ArchivedDedupWitness,
+) -> DaVerificationResult<BTreeSet<B256>> {
+    let preimage_code_hashes = dedup_da_witness
         .deduped_bytecode_preimages()
         .iter()
-        .map(|preimage| keccak256(preimage.bytecode()))
-        .collect()
+        .map(|preimage| Ok(keccak256(preimage.bytecode())));
+    let state_trie = &pre_state.ethereum_state().state_trie;
+    let holder_code_hashes = dedup_da_witness.code_holder_keys().iter().map(|key| {
+        let holder = state_trie
+            .get_rlp::<TrieAccount>(key)
+            .map_err(|e| DaVerificationError::CodeHolderLookup {
+                key: *key,
+                error: e.to_string(),
+            })?
+            .ok_or(DaVerificationError::CodeHolderAbsent(*key))?;
+        Ok(holder.code_hash)
+    });
+    preimage_code_hashes.chain(holder_code_hashes).collect()
 }
 
 fn verify_deployed_bytecodes(
     diff: &BatchStateDiff,
+    pre_state: &EvmPartialState,
     dedup_da_witness: &ArchivedDedupWitness,
 ) -> DaVerificationResult {
     let mut available_code_hashes = BTreeSet::new();
@@ -232,9 +254,9 @@ fn verify_deployed_bytecodes(
         available_code_hashes.insert(*code_hash);
     }
 
-    // Bytecodes the blob deduped against earlier batches: vouched for by the
-    // dedup witness.
-    available_code_hashes.extend(dedup_witness_code_hashes(dedup_da_witness));
+    // Bytecodes the blob deduped: held by a pre-state account the dedup
+    // witness names.
+    available_code_hashes.extend(dedup_witness_code_hashes(pre_state, dedup_da_witness)?);
 
     for change in diff.accounts.values() {
         let account_diff = match change {

@@ -75,6 +75,14 @@ pub enum DaVerificationError {
     },
     #[error("DA blob missing deployed bytecode for code hash {0:?}")]
     MissingDeployedBytecode([u8; 32]),
+    /// The dedup witness names a code holder the partial pre-state does not
+    /// resolve (a blinded trie node, or a malformed account leaf).
+    #[error("dedup code holder lookup failed for trie key {key:?} ({error})")]
+    CodeHolderLookup { key: [u8; 32], error: String },
+    /// The dedup witness names a code holder that does not exist in the
+    /// pre-state.
+    #[error("dedup code holder absent from the pre-state (trie key {0:?})")]
+    CodeHolderAbsent([u8; 32]),
     #[error("DA blob deployed bytecode hash mismatch (expected {expected:?}, got {computed:?})")]
     DeployedBytecodeHashMismatch {
         expected: [u8; 32],
