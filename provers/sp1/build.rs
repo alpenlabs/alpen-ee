@@ -2,7 +2,7 @@
 //!
 //! Guests are built sequentially in dependency order: the account guest verifies chunk
 //! proofs, so the chunk guest's Groth16 predicate condition bytes are code-generated
-//! between the two builds. Both guests also embed the `AlpenParams` (genesis,
+//! between the two builds. The chunk guest also embeds the `AlpenParams` (genesis,
 //! bridge params) baked in from an external JSON file — see below. All generated
 //! artifacts (ELFs, `predicates.rs`, `alpen_params.rs`, the account predicate and the
 //! account program ID) are emitted to `<crate>/generated/`.
@@ -27,11 +27,11 @@
 //! - **`SP1_SKIP_PROGRAM_BUILD`** — when set to `true`, skip guest compilation entirely (the same
 //!   variable sp1-build honors internally). Takes precedence over `SP1_ALPEN_PARAMS_PATH`.
 //! - **`SP1_ALPEN_PARAMS_PATH`** — absolute path to an `AlpenParams` JSON artifact (the same format
-//!   `alpen-client --alpen-params` loads) to bake into both guest ELFs. Required to actually build
-//!   the guests; unset means "skip" — any ELF already in `generated/` from an earlier build is left
-//!   in place, the same as `SP1_SKIP_PROGRAM_BUILD`. Must be absolute: build scripts run with CWD
-//!   set to this crate's own directory, not the invocation directory, so a relative path would
-//!   resolve against the wrong base.
+//!   `alpen-client --alpen-params` loads) to bake into the chunk guest ELF. Required to actually
+//!   build the guests; unset means "skip" — any ELF already in `generated/` from an earlier build
+//!   is left in place, the same as `SP1_SKIP_PROGRAM_BUILD`. Must be absolute: build scripts run
+//!   with CWD set to this crate's own directory, not the invocation directory, so a relative path
+//!   would resolve against the wrong base.
 //! - **`SP1_ALPEN_CHUNK_PROOF_PATH`** — absolute path to a saved alpen-chunk proof. When set, the
 //!   account guest accepts proofs from the chunk program that made this proof, instead of from the
 //!   chunk guest built alongside it. Cycle counts do not change, since only the baked program ID
