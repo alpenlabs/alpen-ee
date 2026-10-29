@@ -2,9 +2,9 @@
 # dev, attaches them to the tag's GitHub Release and then copies them to S3.
 # dev is only for local runs and CI, so it gets no released guests.
 #
-# Every tag comes from its release line's branch: v0.4.0-rc.1, v0.4.0 and
-# v0.4.1 all point at commits on releases/v0.4.x, and main is never tagged.
-# docs/releasing.md has the full process.
+# A line's first rcs, like v0.4.0-rc.1, are tagged on main. Once
+# releases/v0.4.x is cut, every tag of the line comes from it: later rcs,
+# v0.4.0 and v0.4.1. docs/releasing.md has the full process.
 #
 # Releases are immutable once published, so the release is created as a draft,
 # every network attaches its files, and it is only published once it holds
@@ -41,8 +41,8 @@ jobs:
             params
             .github/scripts
 
-      # Before the draft exists, so a tag off its line's branch publishes nothing.
-      - name: Check tag is on its release branch
+      # Before the draft exists, so a tag on the wrong branch publishes nothing.
+      - name: Check tag's branch
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
