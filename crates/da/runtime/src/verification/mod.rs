@@ -40,7 +40,7 @@ use crate::payload::{recover_ee_da_blob, L1DaTransactions};
 /// empty-update no-op; any other combination of emptiness is an error. The
 /// reassembled blob is verified against the chunk public values internally
 /// (header summary, deployed bytecodes, state-diff applied to the partial
-/// pre-state matches the last chunk's `tip_state_root`). there is no
+/// pre-state matches the last chunk's `tip_state_root`). There is no
 /// downstream consumer for the blob itself, so nothing is returned.
 ///
 /// `spec_version` is the version governing the batch. It selects the layout
@@ -75,18 +75,20 @@ pub fn verify_da_witness(
 
     let blob = recover_ee_da_blob(included_blocks, spec_version)?;
     let last_chunk = decode_last_chunk_transition(ee_input)?;
+
+    let raw_pre_state = ee_input.raw_partial_pre_state();
+    if raw_pre_state.is_empty() {
+        return Err(DaVerificationError::MissingPartialPreState);
+    }
+    let pre_state = decode_partial_pre_state(raw_pre_state, expected_pre_state_root)?;
+
     verify_da_blob_metadata(
         &blob,
         &last_chunk,
         pub_params,
         da_witness.dedup_da_witness(),
     )?;
-
-    let raw_pre_state = ee_input.raw_partial_pre_state();
-    if raw_pre_state.is_empty() {
-        return Err(DaVerificationError::MissingPartialPreState);
-    }
-    verify_state_diff_against_chunks(raw_pre_state, expected_pre_state_root, &blob, &last_chunk)?;
+    verify_state_diff_against_chunks(pre_state, &blob, &last_chunk)?;
 
     Ok(())
 }
@@ -253,18 +255,13 @@ fn verify_deployed_bytecodes(
     Ok(())
 }
 
-/// Applies the DA blob state diff to the partial pre-state witness.
-///
-/// The input pre-state must match the EE account state's previous execution
-/// root, and the post-apply root must match the last chunk transition's
-/// public `tip_state_root`.
-fn verify_state_diff_against_chunks(
+/// Decodes the partial pre-state witness and checks it against the EE account
+/// state's previous execution root.
+fn decode_partial_pre_state(
     raw_pre_state: &[u8],
     expected_pre_state_root: [u8; 32],
-    blob: &DaBlob,
-    last_chunk: &ChunkTransition,
-) -> DaVerificationResult {
-    let mut pre_state: EvmPartialState =
+) -> DaVerificationResult<EvmPartialState> {
+    let pre_state: EvmPartialState =
         decode_buf_exact(raw_pre_state).map_err(DaVerificationError::PartialPreStateDecode)?;
     let actual_pre_state_root = pre_state.ethereum_state().state_root().0;
     if actual_pre_state_root != expected_pre_state_root {
@@ -273,7 +270,18 @@ fn verify_state_diff_against_chunks(
             actual: actual_pre_state_root,
         });
     }
+    Ok(pre_state)
+}
 
+/// Applies the DA blob state diff to the partial pre-state witness.
+///
+/// The post-apply root must match the last chunk transition's public
+/// `tip_state_root`.
+fn verify_state_diff_against_chunks(
+    mut pre_state: EvmPartialState,
+    blob: &DaBlob,
+    last_chunk: &ChunkTransition,
+) -> DaVerificationResult {
     apply_batch_state_diff_to_ethereum_state(pre_state.ethereum_state_mut(), &blob.state_diff)?;
 
     let computed: [u8; 32] = pre_state.ethereum_state().state_root().0;
