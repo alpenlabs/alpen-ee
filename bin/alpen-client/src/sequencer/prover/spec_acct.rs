@@ -277,7 +277,9 @@ impl AcctSpec {
 
         // 4. DA witness, built from the blob as published on L1. Its dedup part names the pre-state
         //    accounts that hold the bytecodes the blob omits. The V1 guest takes those bytecodes'
-        //    bytes instead.
+        //    bytes instead, so no holders are resolved for it. A blob v0.4.0 published has none
+        //    recorded.
+        let reads_code_holders = EeAcctProofInput::reads_code_holders(self.spec_version);
         let da_dedup_resolver = DaDedupResolver::new(&*self.da_ctx);
         let BatchDaWitness {
             witness: da_witness,
@@ -287,7 +289,7 @@ impl AcctSpec {
             &da_refs,
             batch.spec_version(),
             &*self.btc_client,
-            &da_dedup_resolver,
+            reads_code_holders.then_some(&da_dedup_resolver),
         )
         .await
         .map_err(map_witness_build_err)?;
@@ -308,12 +310,11 @@ impl AcctSpec {
         let spec_version = self.spec_version;
         let state_reader = self.state_reader.clone();
         let (range_data, omitted_bytecodes) = task::spawn_blocking(move || {
-            let (extra_accounts, omitted_bytecodes) =
-                if EeAcctProofInput::reads_code_holders(spec_version) {
-                    (code_holders, Vec::new())
-                } else {
-                    (Vec::new(), state_reader.bytecodes(&omitted_code_hashes)?)
-                };
+            let (extra_accounts, omitted_bytecodes) = if reads_code_holders {
+                (code_holders, Vec::new())
+            } else {
+                (Vec::new(), state_reader.bytecodes(&omitted_code_hashes)?)
+            };
             let range_data =
                 state_reader.range_witness(first_block_hash, last_block_hash, &extra_accounts)?;
             eyre::Ok((range_data, omitted_bytecodes))
