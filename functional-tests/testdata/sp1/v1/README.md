@@ -7,10 +7,11 @@ Prebuilt `guest-alpen-chunk` / `guest-alpen-acct` ELFs for spec version `v1`,
 used as test data by the functional tests that cross a predicate rotation
 under `EE_PROVER_BACKEND=sp1`.
 
-Those tests need two prover programs resident at once. Most of them launch on
-`v1` and rotate to `v2`, which `run_tests.sh` builds from this workspace's
-current source on every run. The Osaka fork test launches on `v0` and rotates
-to `v1`, so it uses the committed `v0` pair and this one.
+Those tests need two prover programs resident at once. They launch on `v1` and
+rotate to `v2`, which `run_tests.sh` builds from this workspace's current
+source on every run. Proving only has to cross from the deployed version to
+the next one, so this is the only committed pair. The Osaka fork test crosses
+from `v0` to `v1`, so it always runs on the native backend.
 
 ## Why these come from v0.4.0
 

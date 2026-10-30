@@ -21,7 +21,7 @@ from common.base_test import BaseTest
 from common.config.constants import ALPEN_ACCOUNT_ID, DEV_CHAIN_ID, DEV_PRIVATE_KEY, ServiceType
 from common.evm import DEV_ACCOUNT_ADDRESS, sign_deploy
 from common.evm_utils import wait_for_receipt
-from common.prover_backend import OSAKA_ROTATION_SPEC_VERSIONS, resolve_prover_backend
+from common.prover_backend import OSAKA_ROTATION_SPEC_VERSIONS, NativeBackend
 from common.rpc import RpcError
 from common.services.alpen_client import AlpenClientService
 from common.services.bitcoin import BitcoinService
@@ -37,13 +37,13 @@ POST_ADMIN_UPDATE_L1_BLOCKS = 5
 BATCH_SEALING_BLOCK_COUNT = 3
 PROBE_CALL_GAS = 100_000
 
-# Resolved from EE_PROVER_BACKEND: crossing the boundary needs a program
-# resident for the version on each side of it, and either backend can serve
-# that -- native signs with a per-version key, sp1 pairs the committed v0 and
-# v1 ELFs. Osaka arrives with v1, so the chain launches on v0. `PROVER` owns
-# the predicate the v1 program proves under, so the rotation target below
-# cannot drift from it.
-PROVER = resolve_prover_backend(OSAKA_ROTATION_SPEC_VERSIONS)
+# Crossing the boundary needs a program resident for the version on each side
+# of it. Osaka arrives with v1, so the chain launches on v0. This test checks
+# that fullnodes enforce the fork, not that a real v0 guest can prove, so it
+# always runs native, which signs with a per-version key. sp1 has no v0 pair.
+# `PROVER` owns the predicate the v1 program proves under, so the rotation
+# target below cannot drift from it.
+PROVER = NativeBackend(spec_versions=OSAKA_ROTATION_SPEC_VERSIONS)
 ROTATION_PREDICATE = PROVER.rotation_target_predicate
 
 # Both settle behind a proof, so they scale with the backend.

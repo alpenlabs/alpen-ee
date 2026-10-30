@@ -21,9 +21,11 @@ business, not the test's, so the spec schedule the chain launches on, the
 predicate OL registers at genesis, and the predicate a rotation targets always
 agree with the programs actually configured.
 
-Both backends serve every set. sp1 gets its v2 pair from the build and its v0
-and v1 pairs from ``functional-tests/testdata``, since a build only ever
-produces the version current source names.
+native serves every set. sp1 serves v1 and v2 only. It gets its v2 pair from
+the build and its v1 pair from ``functional-tests/testdata``, since a build
+only ever produces the version current source names. Proving only ever has to
+cross from the deployed version to the next one, so no v0 pair is kept. The
+Osaka test runs native for that reason.
 
 The sp1 artifact paths are fixed by where ``provers/sp1/build.rs`` and
 ``scripts/gen_sp1_guest_params.py`` write them, so they are derived here
@@ -49,15 +51,11 @@ ACCT_ELF = _GENERATED_DIR / "guest-alpen-acct.elf"
 ACCT_PREDICATE = _GENERATED_DIR / "alpen-acct.predicate"
 SP1_PROOF_DEADLINE_ENV = "ALPEN_SP1_PROOF_DEADLINE_SECS"
 
-# The v0 and v1 pairs, committed rather than built. A build only ever produces
-# one version -- the guests bake in the version they prove under, and current
-# source names v2 -- so the older pairs have to come from the tree. See each
+# The v1 pair, committed rather than built. A build only ever produces one
+# version -- the guests bake in the version they prove under, and current
+# source names v2 -- so the older pair has to come from the tree. See the
 # directory's README for how it was produced.
 _SP1_TESTDATA_DIR = _REPO_ROOT / "functional-tests" / "testdata" / "sp1"
-_V0_TESTDATA_DIR = _SP1_TESTDATA_DIR / "v0"
-V0_CHUNK_ELF = _V0_TESTDATA_DIR / "guest-alpen-chunk.elf"
-V0_ACCT_ELF = _V0_TESTDATA_DIR / "guest-alpen-acct.elf"
-V0_ACCT_PREDICATE = _V0_TESTDATA_DIR / "alpen-acct.predicate"
 _V1_TESTDATA_DIR = _SP1_TESTDATA_DIR / "v1"
 V1_CHUNK_ELF = _V1_TESTDATA_DIR / "guest-alpen-chunk.elf"
 V1_ACCT_ELF = _V1_TESTDATA_DIR / "guest-alpen-acct.elf"
@@ -242,9 +240,8 @@ class Sp1Backend(ProverBackend):
     """The real compiled guest pairs.
 
     The pair built from current source is the v2 program -- that is the version
-    its guests bake in. The v0 and v1 pairs are committed test data: v1 is the
-    v0.4.0 release's guest code, and v0 is older source with that constant set
-    to v0. Holding two at once is what a rotation under sp1 needs, and it is
+    its guests bake in. The v1 pair is committed test data: the v0.4.0
+    release's guest code. Holding two at once is what a rotation under sp1 needs, and it is
     the production shape: an already-deployed binary at genesis handing off to
     a new one.
     """
@@ -309,9 +306,8 @@ def _require_built(path: Path) -> Path:
 
 
 #: Where each spec version's (chunk ELF, acct ELF, acct predicate) comes from.
-#: v2 is built by ``run_tests.sh``; v0 and v1 are committed test data.
+#: v2 is built by ``run_tests.sh``; v1 is committed test data.
 _SP1_ARTIFACTS: dict[str, tuple[Path, Path, Path]] = {
-    "v0": (V0_CHUNK_ELF, V0_ACCT_ELF, V0_ACCT_PREDICATE),
     "v1": (V1_CHUNK_ELF, V1_ACCT_ELF, V1_ACCT_PREDICATE),
     "v2": (CHUNK_ELF, ACCT_ELF, ACCT_PREDICATE),
 }
