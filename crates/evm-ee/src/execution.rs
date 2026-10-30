@@ -256,13 +256,15 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
 
 #[cfg(test)]
 mod tests {
+    use std::iter;
+
     use alloy_consensus::{
         BlockBody, Header, Sealable, TxLegacy, proofs::calculate_transaction_root,
     };
     use alloy_rlp::decode_exact;
     use alpen_acct_types::{ExecBlock, ExecPartialState};
     use alpen_chain_types::{OutputTransfer, SubjectDepositData};
-    use alpen_params::DEV_PARAMS_JSON;
+    use alpen_params::{DEV_PARAMS_JSON, HeaderExtra};
     use alpen_test_utils_evm_workload::{MIXED_WORKLOAD, Workload, workload_dir};
     use reth_consensus::ConsensusError;
     use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
@@ -498,20 +500,49 @@ mod tests {
         }
     }
 
+    /// Every pair of an environment's version and a neighboring stamp: each
+    /// version against its successor, and each successor against it.
+    fn neighboring_versions() -> Vec<(AlpenSpecId, AlpenSpecId)> {
+        iter::successors(Some(AlpenSpecId::V0), |version| version.successor().ok())
+            .filter_map(|older| Some((older, older.successor().ok()?)))
+            .flat_map(|(older, newer)| [(older, newer), (newer, older)])
+            .collect()
+    }
+
+    /// `header` with its stamp replaced by one naming `version`, keeping its
+    /// DA rate where that version's layout has one.
+    fn restamped(mut header: Header, version: AlpenSpecId) -> Header {
+        let da_rate = HeaderExtra::of_header(&header)
+            .expect("the fixture stamp decodes")
+            .da_rate()
+            .unwrap_or_default();
+        header.extra_data = HeaderExtra::new(version, da_rate).encode().into();
+        header
+    }
+
     /// The node picks a header's rules from its stamp, so a header stamped
     /// with another version must not pass under this environment's rules.
     #[test]
     fn verify_header_rejects_a_header_stamped_with_another_version() {
         let Fixture { parent, block, .. } = fixture();
-        let env = EvmExecutionEnvironment::new(&dev_params(), AlpenSpecId::V0);
 
-        assert!(matches!(
-            env.verify_header(&EvmHeader::new(parent), &EvmHeader::new(block.header)),
-            Err(EvmEnvError::SpecVersionMismatch {
-                expected: AlpenSpecId::V0,
-                got: FIXTURE_SPEC_VERSION,
-            })
-        ));
+        for (env_version, stamped) in neighboring_versions() {
+            let env = EvmExecutionEnvironment::new(&dev_params(), env_version);
+            // The parent carries the same stamp, so the header is not rejected
+            // first for regressing the version.
+            let parent = restamped(parent.clone(), stamped);
+            let header = restamped(block.header.clone(), stamped);
+
+            let result = env.verify_header(&EvmHeader::new(parent), &EvmHeader::new(header));
+            assert!(
+                matches!(
+                    result,
+                    Err(EvmEnvError::SpecVersionMismatch { expected, got })
+                        if expected == env_version && got == stamped
+                ),
+                "a {stamped:?}-stamped header must not pass under {env_version:?}: {result:?}"
+            );
+        }
     }
 
     fn verify_fixture_block(
@@ -548,7 +579,7 @@ mod tests {
         );
     }
 
-    /// V1 runs Osaka, so EIP-7934 caps a block's RLP size. The node refuses a
+    /// V1 and later run Osaka, so EIP-7934 caps a block's RLP size. The node refuses a
     /// larger block before executing it, and so must the proof.
     #[test]
     fn verify_block_pre_execution_rejects_an_oversized_block() {
@@ -582,16 +613,21 @@ mod tests {
     #[test]
     fn execute_block_rejects_a_block_stamped_for_another_version() {
         let fixture = fixture();
-        let env = EvmExecutionEnvironment::new(&dev_params(), AlpenSpecId::V0);
-        let block = fixture.evm_block();
 
-        env.verify_block_pre_execution(&block, &fixture.inputs)
-            .expect("the body checks do not look at the stamp");
-        let result = env.execute_block(&fixture.pre_state, block);
-        assert!(
-            matches!(result, Err(EvmEnvError::Execution(_))),
-            "a V2-stamped block must not execute under V0: {result:?}"
-        );
+        for (env_version, stamped) in neighboring_versions() {
+            let env = EvmExecutionEnvironment::new(&dev_params(), env_version);
+            let mut block = fixture.block.clone();
+            block.header = restamped(block.header, stamped);
+            let block = EvmBlock::new(block);
+
+            env.verify_block_pre_execution(&block, &fixture.inputs)
+                .expect("the body checks do not look at the stamp");
+            let result = env.execute_block(&fixture.pre_state, block);
+            assert!(
+                matches!(&result, Err(EvmEnvError::Execution(err)) if err.to_string().contains("is stamped")),
+                "a {stamped:?}-stamped block must not execute under {env_version:?}: {result:?}"
+            );
+        }
     }
 
     /// Runs a real block through every step the chunk proof takes and checks
