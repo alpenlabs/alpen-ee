@@ -176,7 +176,7 @@ mod tests {
         // Construct private inputs.
         let snark_acct_private_input =
             UpdatePrivateInput::new(pub_params, initial_state.as_ssz_bytes(), vec![]);
-        let ee_private_input = EePrivateInput::new(vec![], vec![], vec![]);
+        let ee_private_input = EePrivateInput::new(vec![], vec![]);
 
         let proof_input = EeAcctProofInput {
             ee_private_input,

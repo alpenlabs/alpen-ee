@@ -114,7 +114,6 @@ fn rebuild_ee_input(
         ExecOutputs::new_empty(),
     );
     EePrivateInput::new(
-        Vec::new(),
         raw_partial_pre_state.to_vec(),
         vec![ChunkInput::new(transition, Vec::new())],
     )
@@ -386,11 +385,7 @@ fn verify_da_witness_rejects_empty_witness_for_non_empty_batch() {
         ExecInputs::new_empty(),
         ExecOutputs::new_empty(),
     );
-    let ee_input = EePrivateInput::new(
-        Vec::new(),
-        Vec::new(),
-        vec![ChunkInput::new(transition, Vec::new())],
-    );
+    let ee_input = EePrivateInput::new(Vec::new(), vec![ChunkInput::new(transition, Vec::new())]);
     let da_witness = DaWitness::empty();
     let pub_params = UpdateProofPubParams::new(
         Seqno::new(1),
