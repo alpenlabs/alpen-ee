@@ -1,6 +1,6 @@
 //! Builds a workload on a throwaway reth database.
 //!
-//! Blocks are built with the sequencer's EVM config and stamped V1. Each
+//! Blocks are built with the sequencer's EVM config and stamped V2. Each
 //! block's witness, state changes and accessed-state record come from the same
 //! functions the node uses, and the range witness comes from the production
 //! extractor.

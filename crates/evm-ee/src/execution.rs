@@ -285,7 +285,7 @@ mod tests {
     use crate::types::{EvmBlock, EvmHeader, EvmPartialState};
 
     /// The spec version the workload's blocks are stamped with.
-    const FIXTURE_SPEC_VERSION: AlpenSpecId = AlpenSpecId::V1;
+    const FIXTURE_SPEC_VERSION: AlpenSpecId = AlpenSpecId::V2;
 
     /// The dev network's params, whose genesis the workload was built on.
     fn dev_params() -> AlpenParams {
@@ -509,7 +509,7 @@ mod tests {
             env.verify_header(&EvmHeader::new(parent), &EvmHeader::new(block.header)),
             Err(EvmEnvError::SpecVersionMismatch {
                 expected: AlpenSpecId::V0,
-                got: AlpenSpecId::V1,
+                got: FIXTURE_SPEC_VERSION,
             })
         ));
     }
@@ -590,7 +590,7 @@ mod tests {
         let result = env.execute_block(&fixture.pre_state, block);
         assert!(
             matches!(result, Err(EvmEnvError::Execution(_))),
-            "a V1-stamped block must not execute under V0: {result:?}"
+            "a V2-stamped block must not execute under V0: {result:?}"
         );
     }
 

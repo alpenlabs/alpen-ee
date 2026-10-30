@@ -119,9 +119,9 @@ mod tests {
         let workload = Workload::load(&workload_dir(MIXED_WORKLOAD)).expect("load workload");
         let params: AlpenParams =
             serde_json::from_str(DEV_PARAMS_JSON).expect("dev params should parse");
-        let chunk = build_workload_chunk(&workload, &params, AlpenSpecId::V1);
+        let chunk = build_workload_chunk(&workload, &params, AlpenSpecId::V2);
 
-        let output = EeChunkProgram::new(params, AlpenSpecId::V1)
+        let output = EeChunkProgram::new(params, AlpenSpecId::V2)
             .execute(&chunk.input)
             .expect("native execution should succeed");
 

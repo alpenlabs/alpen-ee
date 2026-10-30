@@ -209,11 +209,11 @@ mod tests {
         let workload = Workload::load(&workload_dir(MIXED_WORKLOAD)).expect("load workload");
         let params: AlpenParams =
             serde_json::from_str(DEV_PARAMS_JSON).expect("dev params should parse");
-        let chunk = build_workload_chunk(&workload, &params, AlpenSpecId::V1);
+        let chunk = build_workload_chunk(&workload, &params, AlpenSpecId::V2);
 
         // Natively the chunk proof is a Schnorr signature over the transition,
         // checked against the chunk program's test key.
-        let chunk_program = EeChunkProgram::new(params, AlpenSpecId::V1);
+        let chunk_program = EeChunkProgram::new(params, AlpenSpecId::V2);
         let chunk_proof =
             <EeChunkProgram as ZkVmProgram>::prove(&chunk.input, &chunk_program.native_host())
                 .expect("native chunk proof");
@@ -221,10 +221,10 @@ mod tests {
             &workload,
             &chunk.transition,
             chunk_proof.receipt().proof().as_bytes().to_vec(),
-            AlpenSpecId::V1,
+            AlpenSpecId::V2,
         );
 
-        let output = EeAcctProgram::new(EeChunkProgram::test_predicate_key(), AlpenSpecId::V1)
+        let output = EeAcctProgram::new(EeChunkProgram::test_predicate_key(), AlpenSpecId::V2)
             .execute(&input)
             .expect("native execution should succeed");
 

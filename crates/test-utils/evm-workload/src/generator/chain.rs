@@ -41,7 +41,7 @@ use super::{accounts::SignedTx, store::MemAccessedStateStore};
 
 /// The spec version every generated block is built and stamped under. It
 /// matches the version the SP1 guests prove under.
-pub(crate) const SPEC_VERSION: AlpenSpecId = AlpenSpecId::V1;
+pub(crate) const SPEC_VERSION: AlpenSpecId = AlpenSpecId::V2;
 
 /// DA rate stamped into every block, in wei per DA byte. About what a 2 sat/vB
 /// L1 fee rate gives, so the in-EVM DA charge runs with a realistic value.

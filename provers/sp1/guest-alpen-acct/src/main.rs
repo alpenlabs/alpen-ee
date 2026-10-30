@@ -30,7 +30,7 @@ fn chunk_predicate_key() -> PredicateKey {
 /// input: it is what binds the version into this program's verifying key, so
 /// a prover cannot pick which rules its update is checked under. One guest
 /// package per version.
-const SPEC_VERSION: AlpenSpecId = AlpenSpecId::V1;
+const SPEC_VERSION: AlpenSpecId = AlpenSpecId::V2;
 
 fn main() {
     let key = chunk_predicate_key();
