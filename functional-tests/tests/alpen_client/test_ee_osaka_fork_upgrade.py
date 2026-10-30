@@ -1,13 +1,14 @@
-"""EE live fork upgrade functional test.
+"""EE Osaka fork upgrade functional test.
 
 Rotates the Alpen EE account's `update_vk` via an Admin subprotocol
 transaction (the only on-chain trigger for a spec-version bump -- there is
 no separate "activate hardfork" action) and verifies that doing so activates
-the Osaka hardfork at the resulting boundary: an OP_CLZ (EIP-7939) probe
-transaction must fail before the boundary and succeed after it. Every
-assertion is read from independent EE fullnodes, not the sequencer, so the
-test also proves fullnodes derive and enforce the boundary on their own
-rather than trusting the sequencer's word for it.
+the Osaka hardfork at the resulting boundary. Osaka arrives with spec version
+v1, so the chain launches on v0 and the rotation moves it to v1. An OP_CLZ
+(EIP-7939) probe transaction must fail before the boundary and succeed after
+it. Every assertion is read from independent EE fullnodes, not the
+sequencer, so the test also proves fullnodes derive and enforce the boundary
+on their own rather than trusting the sequencer's word for it.
 """
 
 import logging
@@ -21,7 +22,7 @@ from common.base_test import BaseTest
 from common.config.constants import ALPEN_ACCOUNT_ID, DEV_CHAIN_ID, DEV_PRIVATE_KEY, ServiceType
 from common.evm import DEV_ACCOUNT_ADDRESS, sign_deploy
 from common.evm_utils import wait_for_receipt
-from common.prover_backend import ROTATION_SPEC_VERSIONS, resolve_prover_backend
+from common.prover_backend import OSAKA_ROTATION_SPEC_VERSIONS, NativeBackend
 from common.rpc import RpcError
 from common.services.alpen_client import AlpenClientService
 from common.services.bitcoin import BitcoinService
@@ -37,12 +38,13 @@ POST_ADMIN_UPDATE_L1_BLOCKS = 5
 BATCH_SEALING_BLOCK_COUNT = 3
 PROBE_CALL_GAS = 100_000
 
-# Resolved from EE_PROVER_BACKEND: crossing the boundary needs a program
-# resident for the version on each side of it, and either backend can serve
-# that -- native signs with a per-version key, sp1 pairs the committed v0 ELFs
-# with the v1 build. `PROVER` owns the predicate the v1 program proves under,
-# so the rotation target below cannot drift from it.
-PROVER = resolve_prover_backend(ROTATION_SPEC_VERSIONS)
+# Crossing the boundary needs a program resident for the version on each side
+# of it. Osaka arrives with v1, so the chain launches on v0. This test checks
+# that fullnodes enforce the fork, not that a real v0 guest can prove, so it
+# always runs native, which signs with a per-version key. sp1 has no v0 pair.
+# `PROVER` owns the predicate the v1 program proves under, so the rotation
+# target below cannot drift from it.
+PROVER = NativeBackend(spec_versions=OSAKA_ROTATION_SPEC_VERSIONS)
 ROTATION_PREDICATE = PROVER.rotation_target_predicate
 
 # Both settle behind a proof, so they scale with the backend.
@@ -136,7 +138,7 @@ def _status_ok(receipt: dict) -> bool:
 
 
 @flexitest.register
-class TestEeLiveForkUpgrade(BaseTest):
+class TestEeOsakaForkUpgrade(BaseTest):
     """VK rotation activates Osaka; CLZ fails before, succeeds after -- per fullnodes."""
 
     def __init__(self, ctx: flexitest.InitContext):

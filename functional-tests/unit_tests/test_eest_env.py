@@ -29,7 +29,7 @@ class EestEnvironmentTests(unittest.TestCase):
             patch.dict(
                 prover_backend._SP1_ARTIFACTS,
                 {
-                    "v1": (
+                    "v2": (
                         prover_backend.CHUNK_ELF,
                         prover_backend.ACCT_ELF,
                         prover_backend.ACCT_PREDICATE,
@@ -44,7 +44,7 @@ class EestEnvironmentTests(unittest.TestCase):
         self.assertEqual(env.alpen_env_params.prover, prover_backend.NATIVE_BACKEND)
         self.assertIs(env.strata_config.prover, env.alpen_env_params.prover)
         self.assertEqual(env.alpen_env_params.base_fee_floor, {"v0": 0})
-        self.assertEqual(env.alpen_env_params.prover.spec_versions, ("v1",))
+        self.assertEqual(env.alpen_env_params.prover.spec_versions, ("v2",))
         self.assertEqual(env.alpen_env_params.fullnode_count, 0)
         self.assertEqual(env.strata_config.pre_generate_blocks, 110)
 
@@ -63,10 +63,10 @@ class EestEnvironmentTests(unittest.TestCase):
         self.assertEqual(prover.genesis_predicate, "Sp1Groth16:test-predicate")
         config = prover.prover_config(self.artifacts)
         self.assertEqual(config.deadline_secs, 14400)
-        self.assertEqual(set(config.programs), {"v1"})
-        self.assertEqual(config.programs["v1"].chunk_path, str(prover_backend.CHUNK_ELF))
-        self.assertEqual(config.programs["v1"].acct_path, str(prover_backend.ACCT_ELF))
-        self.assertEqual(prover.genesis_spec_schedule, {"v0": 0, "v1": 0})
+        self.assertEqual(set(config.programs), {"v2"})
+        self.assertEqual(config.programs["v2"].chunk_path, str(prover_backend.CHUNK_ELF))
+        self.assertEqual(config.programs["v2"].acct_path, str(prover_backend.ACCT_ELF))
+        self.assertEqual(prover.genesis_spec_schedule, {"v0": 0, "v1": 0, "v2": 0})
 
     def test_sp1_without_deadline_preserves_client_default(self):
         os.environ["EE_PROVER_BACKEND"] = "sp1"
@@ -89,20 +89,20 @@ class EestEnvironmentTests(unittest.TestCase):
 
     def test_rotation_program_mapping_and_deadline_are_preserved(self):
         os.environ.update(EE_PROVER_BACKEND="sp1", ALPEN_SP1_PROOF_DEADLINE_SECS="14400")
-        v0_predicate = self.artifacts / "v0-predicate"
-        v0_predicate.write_text("Sp1Groth16:v0")
+        v1_predicate = self.artifacts / "v1-predicate"
+        v1_predicate.write_text("Sp1Groth16:v1")
         with patch.dict(
             prover_backend._SP1_ARTIFACTS,
             {
-                "v0": (prover_backend.CHUNK_ELF, prover_backend.ACCT_ELF, v0_predicate),
+                "v1": (prover_backend.CHUNK_ELF, prover_backend.ACCT_ELF, v1_predicate),
             },
         ):
             prover = prover_backend.resolve_prover_backend(prover_backend.ROTATION_SPEC_VERSIONS)
-        self.assertEqual(prover.genesis_spec_schedule, {"v0": 0})
-        self.assertEqual(prover.genesis_predicate, "Sp1Groth16:v0")
+        self.assertEqual(prover.genesis_spec_schedule, {"v0": 0, "v1": 0})
+        self.assertEqual(prover.genesis_predicate, "Sp1Groth16:v1")
         self.assertEqual(prover.rotation_target_predicate, "Sp1Groth16:test-predicate")
         config = prover.prover_config(self.artifacts)
-        self.assertEqual(set(config.programs), {"v0", "v1"})
+        self.assertEqual(set(config.programs), {"v1", "v2"})
         self.assertEqual(config.deadline_secs, 14400)
 
     def test_eest_guest_params_match_live_params(self):

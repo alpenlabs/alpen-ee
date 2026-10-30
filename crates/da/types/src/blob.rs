@@ -81,7 +81,7 @@ impl DaBlob {
 /// where the chain continues.
 ///
 /// The layout depends on the spec version governing the block. V0 carries
-/// every field but `da_rate`, and V1 appends it.
+/// every field but `da_rate`, and V1 and V2 append it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EvmHeaderSummary {
     /// Block number of the last EVM block in this batch.
@@ -96,7 +96,7 @@ pub struct EvmHeaderSummary {
     pub gas_limit: u64,
     /// DA rate (wei per byte) committed in the last EVM block's header.
     ///
-    /// `None` under V0, whose headers have no rate. Under V1 a zero is a
+    /// `None` under V0, whose headers have no rate. From V1 on a zero is a
     /// real rate, so the missing V0 rate is not written as `0`.
     pub da_rate: Option<u64>,
 }
@@ -105,7 +105,7 @@ impl EvmHeaderSummary {
     /// Encodes the summary under the layout `spec_version` defines.
     ///
     /// Errs if `da_rate` doesn't fit the layout: V0 has no rate field, and V1
-    /// requires one.
+    /// and V2 require one.
     pub fn encode(
         &self,
         spec_version: AlpenSpecId,
@@ -118,8 +118,8 @@ impl EvmHeaderSummary {
         self.gas_limit.encode(enc)?;
         match (spec_version, self.da_rate) {
             (AlpenSpecId::V0, None) => Ok(()),
-            (AlpenSpecId::V1, Some(da_rate)) => da_rate.encode(enc),
-            (AlpenSpecId::V0, Some(_)) | (AlpenSpecId::V1, None) => {
+            (AlpenSpecId::V1 | AlpenSpecId::V2, Some(da_rate)) => da_rate.encode(enc),
+            (AlpenSpecId::V0, Some(_)) | (AlpenSpecId::V1 | AlpenSpecId::V2, None) => {
                 Err(CodecError::MalformedField("EvmHeaderSummary.da_rate"))
             }
         }
@@ -143,7 +143,7 @@ impl EvmHeaderSummary {
         let gas_limit = u64::decode(dec)?;
         let da_rate = match spec_version {
             AlpenSpecId::V0 => None,
-            AlpenSpecId::V1 => Some(u64::decode(dec)?),
+            AlpenSpecId::V1 | AlpenSpecId::V2 => Some(u64::decode(dec)?),
         };
         Ok(Self {
             block_num,
@@ -182,7 +182,7 @@ mod tests {
 
     use super::*;
 
-    const VERSIONS: [AlpenSpecId; 2] = [AlpenSpecId::V0, AlpenSpecId::V1];
+    const VERSIONS: [AlpenSpecId; 3] = [AlpenSpecId::V0, AlpenSpecId::V1, AlpenSpecId::V2];
 
     /// A summary of a header governed by `spec_version`, so it carries the
     /// rate only where that version's header has one.

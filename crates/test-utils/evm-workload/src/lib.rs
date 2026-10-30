@@ -1,6 +1,6 @@
 //! Generated EVM workloads for measuring the EE proofs.
 //!
-//! A workload is a run of consecutive V1 blocks with real signed transactions,
+//! A workload is a run of consecutive V2 blocks with real signed transactions,
 //! stored as the host-side data the provers build their inputs from: the blocks
 //! and their deposits, the chunk prover's pre-state, and the account prover's
 //! range witness and batch state diff. Proof inputs are rebuilt from these by

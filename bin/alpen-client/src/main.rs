@@ -70,13 +70,19 @@ fn main() {
 
     let mut command = NodeCommand::<AlpenChainSpecParser, AdditionalConfig>::parse();
 
-    // use the EVM chain spec embedded in the Alpen params artifact
-    // The boot spec pins v0; the fork-sensitive components (executor,
-    // consensus, engine validator, payload builder) resolve the governing
-    // version per block from the header-stamped spec version instead.
-    // TODO(STR-4158): pool tx validation (tip policy) is still
-    // version-blind, resolving against the pinned v0 spec.
-    command.chain = command.ext.alpen_params.chain_spec(AlpenSpecId::V0).clone();
+    // Reth takes one static chain spec at boot. The executor, consensus,
+    // engine validator and payload builder ignore it. They pick each block's
+    // spec from the version stamped in its header. Everything else reads this
+    // one, most notably the tx pool's fork flags and its next base fee guess.
+    //
+    // We pin V1 because the live chain runs V1's EVM rules (Osaka). V2
+    // enables no new fork, so the pin stays right after the V2 upgrade.
+    //
+    // TODO(STR-4158): make the tx pool follow the tip's version. Until then,
+    // move this pin forward when a new version enables a fork that changes
+    // which txs are valid. The pool also guesses the next base fee without
+    // the floor, so a tx priced just under it can sit in the pending subpool.
+    command.chain = command.ext.alpen_params.chain_spec(AlpenSpecId::V1).clone();
     // enable engine api v4
     command.engine.accept_execution_requests_hash = true;
     // allow chain fork blocks to be created

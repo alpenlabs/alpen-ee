@@ -23,7 +23,7 @@ fn embedded_alpen_params() -> AlpenParams {
 /// input: it is what binds the version into this program's verifying key, so
 /// a prover cannot pick which rules its chunk is checked under. One guest
 /// package per version.
-const SPEC_VERSION: AlpenSpecId = AlpenSpecId::V1;
+const SPEC_VERSION: AlpenSpecId = AlpenSpecId::V2;
 
 fn main() {
     let params = embedded_alpen_params();

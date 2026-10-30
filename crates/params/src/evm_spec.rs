@@ -128,6 +128,8 @@ fn apply_evm_delta(version: AlpenSpecId, chain_spec: &mut ChainSpec) {
                 .hardforks
                 .insert(EthereumHardfork::Osaka, ForkCondition::Timestamp(0));
         }
+        // V2 enables no new fork.
+        AlpenSpecId::V2 => {}
     }
 }
 

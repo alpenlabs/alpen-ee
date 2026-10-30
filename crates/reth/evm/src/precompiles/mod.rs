@@ -157,8 +157,9 @@ mod tests {
                 },
                 // Osaka: EIP-7883 raises the modexp floor, EIP-7823 caps its inputs, and
                 // EIP-7951 adds P256VERIFY. P256VERIFY needs the chunk guest's SP1 patch for
-                // `p256`, or a call costs far more to prove than its gas suggests.
-                AlpenSpecId::V1 => VersionPrecompiles {
+                // `p256`, or a call costs far more to prove than its gas suggests. V2 stays on
+                // Osaka.
+                AlpenSpecId::V1 | AlpenSpecId::V2 => VersionPrecompiles {
                     modexp_floor: 500,
                     caps_modexp_input: true,
                     has_p256verify: true,

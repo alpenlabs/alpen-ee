@@ -56,6 +56,10 @@ pub enum AlpenSpecId {
     /// First protocol upgrade; placeholder name until that upgrade is
     /// defined.
     V1 = 1,
+
+    /// Second protocol upgrade. It keeps V1's EVM rules and layouts, and marks
+    /// the proof program that adds the guest fixes made since V1 shipped.
+    V2 = 2,
 }
 
 impl AlpenSpecId {
@@ -88,6 +92,7 @@ impl fmt::Display for AlpenSpecId {
         match self {
             Self::V0 => f.write_str("v0"),
             Self::V1 => f.write_str("v1"),
+            Self::V2 => f.write_str("v2"),
         }
     }
 }
@@ -323,15 +328,18 @@ mod tests {
         assert_eq!(u16::from(AlpenSpecId::V0), 0);
         assert_eq!(u16::from(AlpenSpecId::V1), 1);
         assert_eq!(AlpenSpecId::try_from(0u16).unwrap(), AlpenSpecId::V0);
+        assert_eq!(u16::from(AlpenSpecId::V2), 2);
         assert_eq!(AlpenSpecId::try_from(1u16).unwrap(), AlpenSpecId::V1);
-        assert_eq!(AlpenSpecId::try_from(2u16), Err(2));
+        assert_eq!(AlpenSpecId::try_from(2u16).unwrap(), AlpenSpecId::V2);
+        assert_eq!(AlpenSpecId::try_from(3u16), Err(3));
         assert_eq!(AlpenSpecId::try_from(0xFFFFu16), Err(0xFFFF));
     }
 
     #[test]
     fn successor_chains_and_errs_past_known_versions() {
         assert_eq!(AlpenSpecId::V0.successor(), Ok(AlpenSpecId::V1));
-        assert_eq!(AlpenSpecId::V1.successor(), Err(2));
+        assert_eq!(AlpenSpecId::V1.successor(), Ok(AlpenSpecId::V2));
+        assert_eq!(AlpenSpecId::V2.successor(), Err(3));
     }
 
     #[test]
@@ -389,14 +397,17 @@ mod tests {
     fn schedule_successor_chains_and_errs_past_known_versions() {
         let mut schedule = AlpenSpecSchedule::genesis();
         assert_eq!(schedule.schedule_successor(42), Ok(AlpenSpecId::V1));
+        assert_eq!(schedule.schedule_successor(43), Ok(AlpenSpecId::V2));
         assert_eq!(schedule.activation_of(AlpenSpecId::V1), Some(42));
+        assert_eq!(schedule.activation_of(AlpenSpecId::V2), Some(43));
+        let scheduled = schedule.clone();
         // Every known version is scheduled, so the next successor's raw id
         // has no variant.
         assert_eq!(
-            schedule.schedule_successor(43),
-            Err(AlpenSpecScheduleError::UnknownSuccessor(2))
+            schedule.schedule_successor(44),
+            Err(AlpenSpecScheduleError::UnknownSuccessor(3))
         );
-        assert_eq!(schedule, v1_at(42), "failed call must not mutate");
+        assert_eq!(schedule, scheduled, "failed call must not mutate");
     }
 
     /// A coordinate behind the newest scheduled activation would activate

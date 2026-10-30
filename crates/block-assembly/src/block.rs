@@ -241,7 +241,7 @@ mod tests {
     /// attempt for as long as the node waits to be upgraded.
     #[tokio::test]
     async fn unknown_successor_fails_before_requesting_a_payload() {
-        // V1 is the highest version this binary knows, so its successor is not
+        // V2 is the highest version this binary knows, so its successor is not
         // one it can execute.
         let account_state = EeAccountState::new(
             Hash::zero(),
@@ -253,7 +253,7 @@ mod tests {
         );
 
         let err = build_next_exec_block(
-            assembly_inputs(account_state, AlpenSpecId::V1),
+            assembly_inputs(account_state, AlpenSpecId::V2),
             &NeverBuildsEngine,
         )
         .await

@@ -27,8 +27,8 @@ logger = logging.getLogger(__name__)
 COMMIT_OP_RETURN_PAYLOAD_LEN = 8
 
 # EVM header digest length per blob version. The version is the batch's spec
-# version: v0 carries 5 x u64, and v1 appends the DA rate.
-EVM_HEADER_DIGEST_LEN = {0: 40, 1: 48}
+# version: v0 carries 5 x u64, and v1 and v2 append the DA rate.
+EVM_HEADER_DIGEST_LEN = {0: 40, 1: 48, 2: 48}
 
 # Minimum state_diff size for empty batch (3 u32 counts, 4 bytes BE each).
 EMPTY_STATE_DIFF_MAX_SIZE = 12

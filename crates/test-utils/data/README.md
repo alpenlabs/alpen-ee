@@ -14,7 +14,7 @@ Read by:
 
 ## `workloads/<name>/`
 
-EVM workloads made by `alpen-test-utils-evm-workload`: a run of consecutive V1 blocks with real signed transactions, built on the `params/dev.json` chain. Each directory holds:
+EVM workloads made by `alpen-test-utils-evm-workload`: a run of consecutive V2 blocks with real signed transactions, built on the `params/dev.json` chain. Each directory holds:
 
 - `workload.bin`: the blocks and their deposits, plus the host-side data the provers build their inputs from. That is the chunk prover's pre-state, the account prover's range witness, and the batch state diff. The crate's `Workload` type defines the encoding.
 - `summary.json`: the generator settings, the block range, and how many transactions of each kind the range holds. Nothing reads it; it is there for reviewers.

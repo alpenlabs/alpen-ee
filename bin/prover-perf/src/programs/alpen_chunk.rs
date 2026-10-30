@@ -1,6 +1,6 @@
 //! Perf input for the alpen-chunk SP1 guest.
 //!
-//! Proves the checked-in mixed workload as one chunk: 100 V1 blocks of
+//! Proves the checked-in mixed workload as one chunk: 100 V2 blocks of
 //! transfers, token and pool calls, bridge-outs, precompile calls and
 //! deposits. The input comes from [`build_workload_chunk`], the builder the
 //! chunk proof crate's own native test runs.
@@ -18,7 +18,7 @@ use zkaleido::{ExecutionSummary, ProofReceiptWithMetadata, ZkVmHost, ZkVmProgram
 
 /// The spec version the workload's blocks are stamped with and the guests
 /// prove under.
-pub(super) const PERF_SPEC_VERSION: AlpenSpecId = AlpenSpecId::V1;
+pub(super) const PERF_SPEC_VERSION: AlpenSpecId = AlpenSpecId::V2;
 
 /// The dev-network params the workload was generated with, the same ones the
 /// SP1 guests bake in.

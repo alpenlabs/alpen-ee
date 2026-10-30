@@ -15,7 +15,7 @@
 //! big-endian `u64`. The sequencer freezes the live rate into it per block,
 //! and re-execution reads it back so the in-EVM DA fee charge always sees the
 //! rate the block actually committed to. V0 has no rate field, so V0 blocks
-//! charge no DA fee.
+//! charge no DA fee. V2 keeps V1's body unchanged.
 //!
 //! Decoding is strict: a header claiming a version this binary has no
 //! variant for must fail rather than run under stale rules. A short but
@@ -42,6 +42,9 @@ const DA_RATE_LEN: usize = size_of::<u64>();
 /// Total length of the V1 layout: the version prefix followed by the DA rate.
 const V1_LAYOUT_LEN: usize = SPEC_VERSION_LEN + DA_RATE_LEN;
 
+/// Total length of the V2 layout. The layout does not change from V1 to V2.
+const V2_LAYOUT_LEN: usize = V1_LAYOUT_LEN;
+
 /// The decoded contents of a header's `extra_data`.
 ///
 /// One variant per spec version. Each carries the fields its version commits
@@ -52,6 +55,11 @@ pub enum HeaderExtra {
     V0,
     /// The V1 layout: the version prefix followed by the DA rate.
     V1 {
+        /// The DA rate (wei per byte) the block charges under.
+        da_rate: u64,
+    },
+    /// The V2 layout: the same as V1's.
+    V2 {
         /// The DA rate (wei per byte) the block charges under.
         da_rate: u64,
     },
@@ -95,6 +103,7 @@ impl HeaderExtra {
         match spec_version {
             AlpenSpecId::V0 => Self::V0,
             AlpenSpecId::V1 => Self::V1 { da_rate },
+            AlpenSpecId::V2 => Self::V2 { da_rate },
         }
     }
 
@@ -103,6 +112,7 @@ impl HeaderExtra {
         match self {
             Self::V0 => AlpenSpecId::V0,
             Self::V1 { .. } => AlpenSpecId::V1,
+            Self::V2 { .. } => AlpenSpecId::V2,
         }
     }
 
@@ -111,7 +121,7 @@ impl HeaderExtra {
     pub fn da_rate(&self) -> Option<u64> {
         match self {
             Self::V0 => None,
-            Self::V1 { da_rate } => Some(*da_rate),
+            Self::V1 { da_rate } | Self::V2 { da_rate } => Some(*da_rate),
         }
     }
 
@@ -119,7 +129,7 @@ impl HeaderExtra {
     pub fn encode(&self) -> Vec<u8> {
         let buf = match self {
             Self::V0 => Vec::new(),
-            Self::V1 { da_rate } => {
+            Self::V1 { da_rate } | Self::V2 { da_rate } => {
                 let mut buf = u16::from(self.spec_version()).to_be_bytes().to_vec();
                 buf.extend_from_slice(&da_rate.to_be_bytes());
                 buf
@@ -156,13 +166,16 @@ impl HeaderExtra {
                 }
                 Ok(Self::V0)
             }
-            AlpenSpecId::V1 => {
+            AlpenSpecId::V1 | AlpenSpecId::V2 => {
+                let expected = match spec_version {
+                    AlpenSpecId::V2 => V2_LAYOUT_LEN,
+                    _ => V1_LAYOUT_LEN,
+                };
                 let body: [u8; DA_RATE_LEN] = extra_data[SPEC_VERSION_LEN..]
                     .try_into()
-                    .map_err(|_| wrong_length(V1_LAYOUT_LEN))?;
-                Ok(Self::V1 {
-                    da_rate: u64::from_be_bytes(body),
-                })
+                    .map_err(|_| wrong_length(expected))?;
+                let da_rate = u64::from_be_bytes(body);
+                Ok(Self::new(spec_version, da_rate))
             }
         }
     }
@@ -308,7 +321,7 @@ mod tests {
         // The dev genesis document's `extraData` ("SC") happens to be exactly
         // the spec version prefix's width — proof that operator-authored bytes
         // must never reach decode, only the genesis exemption.
-        for (extra_data, raw) in [(*b"SC", 0x5343), (0x0002u16.to_be_bytes(), 2)] {
+        for (extra_data, raw) in [(*b"SC", 0x5343), (0x0003u16.to_be_bytes(), 3)] {
             let err = HeaderExtraError::UnknownVersion(raw);
             assert_eq!(HeaderExtra::decode(&extra_data), Err(err));
             assert_eq!(peek_spec_version(&extra_data), Err(err));

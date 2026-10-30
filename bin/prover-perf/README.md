@@ -6,7 +6,7 @@ Report formatting and PR posting come from [`zkaleido-perf-report`](https://gith
 
 ## What the guests run on
 
-Both guests run on the checked-in `mixed` workload in `crates/test-utils/data/workloads/mixed/`. It is 100 V1 blocks, the default size of a batch and a chunk, with about 2,100 transactions: native and legacy transfers, ERC-20 transfers and approvals, AMM swaps, contract deploys, bridge-outs, Schnorr precompile calls, and deposits. `summary.json` next to it lists the exact counts. The data README explains how it is built.
+Both guests run on the checked-in `mixed` workload in `crates/test-utils/data/workloads/mixed/`. It is 100 V2 blocks, the default size of a batch and a chunk, with about 2,100 transactions: native and legacy transfers, ERC-20 transfers and approvals, AMM swaps, contract deploys, bridge-outs, Schnorr precompile calls, and deposits. `summary.json` next to it lists the exact counts. The data README explains how it is built.
 
 - `alpen-chunk` proves the 100 blocks as one chunk. Its input is assembled the way the sequencer's chunk prover assembles it.
 - `alpen-acct` proves one account update over that chunk. The update processes the chunk's deposits as inbox messages, verifies the saved Groth16 chunk proof, and checks the batch's DA. The DA is the real batch state diff, posted in SPS-51 commit and reveal transactions inside a full-size synthetic L1 block.
