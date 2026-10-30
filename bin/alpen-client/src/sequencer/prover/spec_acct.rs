@@ -411,7 +411,7 @@ impl AcctSpec {
         let snark_acct_private_input =
             UpdatePrivateInput::new(pub_params, pre_ee_state.as_ssz_bytes(), coinputs);
 
-        Ok(EeAcctProofInput {
+        Ok(EeAcctProofInput::V2 {
             ee_private_input,
             snark_acct_private_input,
             da_witness,

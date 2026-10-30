@@ -1,4 +1,4 @@
-use alpen_acct_runtime::EePrivateInput;
+use alpen_acct_runtime::ChunkInput;
 use alpen_da_types::DaWitness;
 use alpen_params::AlpenSpecId;
 use k256::schnorr::SigningKey;
@@ -8,13 +8,17 @@ use strata_predicate::{PredicateKey, PredicateTypeId};
 use strata_snark_acct_runtime::PrivateInput as UpdatePrivateInput;
 use strata_snark_acct_types::UpdateProofPubParams;
 use zkaleido::{
-    ProofType, PublicValues, ZkVmError, ZkVmInputError, ZkVmInputResult, ZkVmProgram, ZkVmResult,
+    ProofType, PublicValues, ZkVmEnvSerde, ZkVmError, ZkVmInputError, ZkVmInputResult, ZkVmProgram,
+    ZkVmResult,
 };
 use zkaleido_native_adapter::NativeHost;
 
-use crate::process_ee_acct_update;
+use crate::{process_ee_acct_update, v1, v2};
 
-/// Host-side input for the EE account update proof.
+/// Host-side input for the EE account update proof, in the layout of the guest
+/// released for the spec version it proves under.
+///
+/// The native host reads every layout. See [`process_ee_acct_update_native`].
 ///
 /// Note: the chunk predicate key (VK of the chunk SP1 program) is not part of
 /// this input. The acct guest receives it at compile time, baked into the ELF
@@ -26,13 +30,84 @@ use crate::process_ee_acct_update;
 /// For native testing, the predicate key lives on [`EeAcctProgram::new`] and
 /// is passed into the `NativeHost` closure directly.
 #[derive(Debug)]
-pub struct EeAcctProofInput {
-    pub ee_private_input: EePrivateInput,
-    /// Snark-account update private input (`snark_acct_runtime::PrivateInput`):
-    /// the update pub-params, partial pre-state, and per-message coinputs.
-    pub snark_acct_private_input: UpdatePrivateInput,
-    /// Alpen-EE-specific witness input for verifying the batch's DA.
-    pub da_witness: DaWitness,
+pub enum EeAcctProofInput {
+    /// The layout the V1 guest release reads. See [`v1`].
+    V1 {
+        ee_private_input: v1::EePrivateInput,
+        snark_acct_private_input: UpdatePrivateInput,
+        da_witness: v1::DaWitness,
+    },
+
+    /// The layout the V2 guests read. See [`v2`].
+    V2 {
+        ee_private_input: v2::EePrivateInput,
+        /// Snark-account update private input (`snark_acct_runtime::PrivateInput`):
+        /// the update pub-params, partial pre-state, and per-message coinputs.
+        snark_acct_private_input: UpdatePrivateInput,
+        /// Alpen-EE-specific witness input for verifying the batch's DA.
+        da_witness: v2::DaWitness,
+    },
+}
+
+impl EeAcctProofInput {
+    /// Returns whether the guest released for `spec_version` finds the
+    /// bytecode a DA blob omits through code holders in the pre-state.
+    /// Otherwise it takes that bytecode's bytes.
+    pub fn reads_code_holders(spec_version: AlpenSpecId) -> bool {
+        match spec_version {
+            AlpenSpecId::V0 | AlpenSpecId::V1 => false,
+            AlpenSpecId::V2 => true,
+        }
+    }
+
+    /// Builds the input in the layout the guest released for `spec_version`
+    /// reads, keeping only the parts that layout carries.
+    ///
+    /// `raw_partial_pre_state` must hold the code holders exactly when
+    /// [`Self::reads_code_holders`] is true. Otherwise the input carries
+    /// `omitted_bytecodes` in place of `da_witness`'s holder keys.
+    ///
+    /// V0 shares V1's layout. No network proves V0 any more, so its own
+    /// layout is not kept.
+    pub fn new(
+        spec_version: AlpenSpecId,
+        raw_partial_pre_state: Vec<u8>,
+        chunks: Vec<ChunkInput>,
+        snark_acct_private_input: UpdatePrivateInput,
+        da_witness: DaWitness,
+        omitted_bytecodes: Vec<Vec<u8>>,
+    ) -> Self {
+        match spec_version {
+            AlpenSpecId::V0 | AlpenSpecId::V1 => Self::V1 {
+                ee_private_input: v1::EePrivateInput::new(raw_partial_pre_state, chunks),
+                snark_acct_private_input,
+                da_witness: v1::DaWitness::new(da_witness.blocks().to_vec(), omitted_bytecodes),
+            },
+            AlpenSpecId::V2 => Self::V2 {
+                ee_private_input: v2::EePrivateInput::new(raw_partial_pre_state, chunks),
+                snark_acct_private_input,
+                da_witness,
+            },
+        }
+    }
+}
+
+/// Runs the account check natively on an input built by
+/// [`EeAcctProofInput::new`] for `spec_version`.
+///
+/// The native host runs this source's check for every version. It reads each
+/// version's layout, so both backends take the same input.
+pub fn process_ee_acct_update_native(
+    zkvm: &impl ZkVmEnvSerde,
+    spec_version: AlpenSpecId,
+    chunk_predicate_key: &PredicateKey,
+) {
+    match spec_version {
+        AlpenSpecId::V0 | AlpenSpecId::V1 => {
+            v1::process_ee_acct_update(zkvm, spec_version, chunk_predicate_key)
+        }
+        AlpenSpecId::V2 => process_ee_acct_update(zkvm, spec_version, chunk_predicate_key),
+    }
 }
 
 #[derive(Debug)]
@@ -66,20 +141,32 @@ impl ZkVmProgram for EeAcctProgram {
     where
         B: zkaleido::ZkVmInputBuilder<'a>,
     {
+        let (ee_rkyv_bytes, upd_rkyv_bytes, da_rkyv_bytes) = match input {
+            EeAcctProofInput::V1 {
+                ee_private_input,
+                snark_acct_private_input,
+                da_witness,
+            } => (
+                rkyv::to_bytes::<RkyvError>(ee_private_input),
+                rkyv::to_bytes::<RkyvError>(snark_acct_private_input),
+                rkyv::to_bytes::<RkyvError>(da_witness),
+            ),
+            EeAcctProofInput::V2 {
+                ee_private_input,
+                snark_acct_private_input,
+                da_witness,
+            } => (
+                rkyv::to_bytes::<RkyvError>(ee_private_input),
+                rkyv::to_bytes::<RkyvError>(snark_acct_private_input),
+                rkyv::to_bytes::<RkyvError>(da_witness),
+            ),
+        };
+
         let mut builder = B::new();
-
-        let ee_rkyv_bytes = rkyv::to_bytes::<RkyvError>(&input.ee_private_input)
-            .map_err(|e| ZkVmInputError::InputBuild(e.to_string()))?;
-        builder.write_buf(&ee_rkyv_bytes)?;
-
-        let upd_rkyv_bytes = rkyv::to_bytes::<RkyvError>(&input.snark_acct_private_input)
-            .map_err(|e| ZkVmInputError::InputBuild(e.to_string()))?;
-        builder.write_buf(&upd_rkyv_bytes)?;
-
-        let da_rkyv_bytes = rkyv::to_bytes::<RkyvError>(&input.da_witness)
-            .map_err(|e| ZkVmInputError::InputBuild(e.to_string()))?;
-        builder.write_buf(&da_rkyv_bytes)?;
-
+        for bytes in [ee_rkyv_bytes, upd_rkyv_bytes, da_rkyv_bytes] {
+            let bytes = bytes.map_err(|e| ZkVmInputError::InputBuild(e.to_string()))?;
+            builder.write_buf(&bytes)?;
+        }
         builder.build()
     }
 
@@ -104,7 +191,7 @@ impl EeAcctProgram {
         let key = self.chunk_predicate_key.clone();
         let spec_version = self.spec_version;
         NativeHost::new(Self::test_signing_key(), move |zkvm| {
-            process_ee_acct_update(zkvm, spec_version, &key)
+            process_ee_acct_update_native(zkvm, spec_version, &key)
         })
     }
 
@@ -129,7 +216,6 @@ impl EeAcctProgram {
 
 #[cfg(test)]
 mod tests {
-    use alpen_acct_runtime::EePrivateInput;
     use alpen_acct_types::{EeAccountState, UpdateExtraData};
     use alpen_da_types::DaWitness;
     use alpen_params::{AlpenParams, DEV_PARAMS_JSON};
@@ -148,9 +234,16 @@ mod tests {
     use crate::test_utils::build_workload_update;
 
     /// Smoke test: constructs a minimal self-consistent input with zero chunks
-    /// and zero messages, and runs through the full native execution pipeline.
+    /// and zero messages, and runs it through the full native execution
+    /// pipeline in each version's layout.
     #[test]
     fn test_native_acct_execution_zero_chunks() {
+        for spec_version in [AlpenSpecId::V1, AlpenSpecId::V2] {
+            run_native_acct_execution_zero_chunks(spec_version);
+        }
+    }
+
+    fn run_native_acct_execution_zero_chunks(spec_version: AlpenSpecId) {
         // Build a minimal EE account state.
         let initial_blkid = Hash::zero();
         let initial_state =
@@ -176,13 +269,14 @@ mod tests {
         // Construct private inputs.
         let snark_acct_private_input =
             UpdatePrivateInput::new(pub_params, initial_state.as_ssz_bytes(), vec![]);
-        let ee_private_input = EePrivateInput::new(vec![], vec![]);
-
-        let proof_input = EeAcctProofInput {
-            ee_private_input,
+        let proof_input = EeAcctProofInput::new(
+            spec_version,
+            vec![],
+            vec![],
             snark_acct_private_input,
-            da_witness: DaWitness::empty(),
-        };
+            DaWitness::empty(),
+            vec![],
+        );
 
         // Predicate is carried through but never evaluated in this
         // zero-chunks test; either `always_accept` or a real Schnorr
@@ -191,7 +285,7 @@ mod tests {
         let program = EeAcctProgram::new(
             PredicateKey::try_new(PredicateTypeId::Bip340Schnorr, vec![0u8; 32])
                 .expect("condition fits within the length limit"),
-            AlpenSpecId::V0,
+            spec_version,
         );
         let result = program
             .execute(&proof_input)

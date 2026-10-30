@@ -2,8 +2,8 @@
 
 use alpen_acct_runtime::ArchivedEePrivateInput;
 use alpen_acct_types::EeAccountState;
-use alpen_da_runtime::verification::verify_da_witness;
-use alpen_da_types::ArchivedDaWitness;
+use alpen_da_runtime::verification::{OmittedCodeWitness, verify_da};
+use alpen_da_types::{ArchivedDaBlockWitness, ArchivedDaWitness};
 use alpen_params::AlpenSpecId;
 use rkyv::rancor::Error as RkyvError;
 use strata_predicate::PredicateKey;
@@ -14,9 +14,13 @@ use zkaleido::ZkVmEnvSerde;
 mod program;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
+#[cfg(not(target_os = "zkvm"))]
+pub mod v1;
+#[cfg(not(target_os = "zkvm"))]
+pub mod v2;
 
 #[cfg(not(target_os = "zkvm"))]
-pub use program::{EeAcctProgram, EeAcctProofInput};
+pub use program::{EeAcctProgram, EeAcctProofInput, process_ee_acct_update_native};
 
 /// Guest entry point for EE account update proof generation.
 ///
@@ -61,6 +65,28 @@ pub fn process_ee_acct_update(
     let da_witness: &ArchivedDaWitness = rkyv::access::<ArchivedDaWitness, RkyvError>(&da_buf)
         .expect("failed to access rkyv DA witness archive");
 
+    verify_and_commit(
+        zkvm,
+        spec_version,
+        chunk_predicate_key,
+        ee_input,
+        upd_input,
+        da_witness.blocks(),
+        OmittedCodeWitness::Holders(da_witness.dedup_da_witness()),
+    );
+}
+
+/// Verifies the account update and its DA, and commits the update's public
+/// parameters as public output.
+fn verify_and_commit(
+    zkvm: &impl ZkVmEnvSerde,
+    spec_version: AlpenSpecId,
+    chunk_predicate_key: &PredicateKey,
+    ee_input: &ArchivedEePrivateInput,
+    upd_input: &ArchivedUpdatePrivateInput,
+    da_blocks: &[ArchivedDaBlockWitness],
+    omitted_code: OmittedCodeWitness<'_>,
+) {
     alpen_acct_runtime::verify_and_process_update(chunk_predicate_key, ee_input, upd_input)
         .expect("account update verification failed");
 
@@ -76,9 +102,10 @@ pub fn process_ee_acct_update(
         .try_decode_pre_state()
         .expect("failed to decode EE account pre-state");
     let expected_pre_state_root = pre_account_state.last_exec_state_root().0;
-    verify_da_witness(
+    verify_da(
         ee_input,
-        da_witness,
+        da_blocks,
+        omitted_code,
         &update_pub_params,
         expected_pre_state_root,
         spec_version,
