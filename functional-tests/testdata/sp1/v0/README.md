@@ -1,14 +1,12 @@
 # SP1 v0 guest ELFs
 
 Prebuilt `guest-alpen-chunk` / `guest-alpen-acct` ELFs for spec version `v0`,
-used as test data by the functional tests that cross a predicate rotation
-under `EE_PROVER_BACKEND=sp1`.
+used as test data by the Osaka fork test under `EE_PROVER_BACKEND=sp1`.
 
-Those tests need two prover programs resident at once: a `v0` program matching
+That test needs two prover programs resident at once: a `v0` program matching
 the account predicate OL registers at genesis, and a `v1` program the predicate
-rotates to. `run_tests.sh` builds the `v1` pair from this workspace's current
-source on every run. The `v0` pair is committed here because a build only ever
-produces one of the two.
+rotates to. Both are committed, `v1` in the sibling directory, because a build
+only ever produces the version current source names, which is `v2`.
 
 ## Why these are v0
 
@@ -22,11 +20,11 @@ thing that separates the two builds:
 const SPEC_VERSION: AlpenSpecId = AlpenSpecId::V0;
 ```
 
-Current source ships `AlpenSpecId::V1`, which is what `run_tests.sh` builds.
-These ELFs are the same source with that one constant set to `V0`, so the pair
-differs from the `v1` pair only in the rules it replays blocks under. That
-makes them a real rotation target: the verifying key changes with the version,
-so moving between them is a predicate rotation rather than a redeploy.
+When these were built, current source shipped `AlpenSpecId::V1`. These ELFs
+are that source with the one constant set to `V0`, so the pair differs from a
+`v1` pair of that time only in the rules it replays blocks under. The
+verifying key changes with the version, so moving between them is a predicate
+rotation rather than a redeploy.
 
 See `provers/sp1/guest-alpen-chunk/src/main.rs` and
 `provers/sp1/guest-alpen-acct/src/main.rs` for the constant, and
@@ -37,7 +35,7 @@ argument instead of zkVM input.
 
 Built from this workspace, not from a sister repo:
 
-- source: this branch, with `SPEC_VERSION` set to `AlpenSpecId::V0` in both
+- source: this workspace at `55aa51396`, with `SPEC_VERSION` set to `AlpenSpecId::V0` in both
   `provers/sp1/guest-alpen-acct` and `provers/sp1/guest-alpen-chunk`
 - builder: `cargo build --release -p alpen-sp1-guest-builder`, driven by
   `run_tests.sh`'s `build_sp1_guests`
@@ -50,9 +48,9 @@ Built from this workspace, not from a sister repo:
 
 To rebuild them, flip the constant in both guest packages to `V0`, run the
 build, copy `provers/sp1/generated/` back here, and restore the constant to
-`V1`. The ELFs are not byte-reproducible across toolchain versions, so expect
+`V2`. The ELFs are not byte-reproducible across toolchain versions, so expect
 the hashes above to move when the SP1 toolchain changes; what matters is that
-the pair is built together and that its predicate differs from the `v1` pair's.
+the pair is built together and that its predicate differs from the other pairs'.
 
 `alpen-acct.predicate` is the file `provers/sp1/build.rs` wrote next to the
 ELFs. It is the acct guest's predicate, which OL registers as the account's

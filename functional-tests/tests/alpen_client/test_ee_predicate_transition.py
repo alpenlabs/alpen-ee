@@ -5,11 +5,11 @@ Verifies the Alpen snark account's `update_vk` rotates via an admin
 rotated VK's program for everything proved after the rotation (no restart),
 and exercises the boundary of the rotation <-> EE spec-version coupling:
 every consumed rotation unconditionally advances to the successor spec
-version, and this binary currently only supports spec versions V0 and V1 --
-no V2 exists yet. So the first rotation (V0 -> V1) must settle normally, a
-further update after it must also settle -- proved under the *new* VK, not
-the stale pre-rotation one -- and a second rotation (V1 -> V2) must be
-refused rather than silently misapplied.
+version, and this binary currently only supports spec versions V0 to V2 --
+no V3 exists yet. The chain launches on V1. So the first rotation (V1 -> V2)
+must settle normally, a further update after it must also settle -- proved
+under the *new* VK, not the stale pre-rotation one -- and a second rotation
+(V2 -> V3) must be refused rather than silently misapplied.
 """
 
 import logging
@@ -34,8 +34,8 @@ INITIAL_BLOCKS = 5
 POST_ADMIN_UPDATE_L1_BLOCKS = 5
 
 # Resolved from EE_PROVER_BACKEND: both backends can serve a rotation now.
-# Native signs with a per-version key; sp1 holds the committed v0 pair beside
-# the v1 build. `PROVER` owns both the genesis predicate and the rotation
+# Native signs with a per-version key; sp1 holds the committed v1 pair beside
+# the v2 build. `PROVER` owns both the genesis predicate and the rotation
 # target, so the two cannot drift apart from the programs configured below.
 PROVER = resolve_prover_backend(ROTATION_SPEC_VERSIONS)
 
@@ -43,13 +43,13 @@ PROVER = resolve_prover_backend(ROTATION_SPEC_VERSIONS)
 PREDICATE_SETTLE_TIMEOUT_SECONDS = 120 * PROVER.proof_wait_scale
 POST_ROTATION_UPDATE_TIMEOUT_SECONDS = 180 * PROVER.proof_wait_scale
 UNSUPPORTED_ROTATION_TIMEOUT_SECONDS = 120 * PROVER.proof_wait_scale
-V0_ACCT_PREDICATE = PROVER.genesis_predicate
-V1_ACCT_PREDICATE = PROVER.rotation_target_predicate
+V1_ACCT_PREDICATE = PROVER.genesis_predicate
+V2_ACCT_PREDICATE = PROVER.rotation_target_predicate
 
-# A further rotation target, standing in for spec version V2 -- which this
+# A further rotation target, standing in for spec version V3 -- which this
 # binary has no support for, so the rotation to it can't be handled and must
 # be refused.
-V2_ACCOUNT_PREDICATE = "NeverAccept"
+V3_ACCOUNT_PREDICATE = "NeverAccept"
 
 UNHONORABLE_ROTATION_LOG_PATTERN = r"consumed a rotation to unknown spec version"
 
@@ -86,13 +86,13 @@ class TestEePredicateTransition(BaseTest):
                 fund_test_cli_wallet=True,
                 # Two resident programs, keyed by the AlpenSpecId each is
                 # built for (see ProverProgramPaths in
-                # bin/alpen-client/src/config.rs): v1's acct key is the
-                # rotation target, v0's is the genesis-matching key. Both are
+                # bin/alpen-client/src/config.rs): v2's acct key is the
+                # rotation target, v1's is the genesis-matching key. Both are
                 # validated and loaded at startup; the sequencer routes each
                 # batch's proof request to whichever program's version matches
                 # that batch's own governing spec version (see PaasBatchProver
                 # in bin/alpen-client/src/sequencer/prover/batch_prover.rs), so
-                # proving keeps working across the V0 -> V1 rotation below
+                # proving keeps working across the V1 -> V2 rotation below
                 # without a restart.
                 prover=PROVER,
             )
@@ -134,37 +134,37 @@ class TestEePredicateTransition(BaseTest):
         initial_vk = strata_rpc.strata_getSnarkAccountStateByTag(ALPEN_ACCOUNT_ID, "latest")[
             "update_vk"
         ]
-        if initial_vk != V0_ACCT_PREDICATE:
+        if initial_vk != V1_ACCT_PREDICATE:
             raise AssertionError(
-                f"expected initial update_vk to be {V0_ACCT_PREDICATE!r}, got {initial_vk!r}"
+                f"expected initial update_vk to be {V1_ACCT_PREDICATE!r}, got {initial_vk!r}"
             )
 
-        # --- V0 -> V1: the one rotation this binary can honor -----------------
+        # --- V1 -> V2: the one rotation this binary can honor -----------------
         result = create_ee_predicate_update(
             seq_no=1,
-            predicate=V1_ACCT_PREDICATE,
+            predicate=V2_ACCT_PREDICATE,
             admin_xpriv=admin_xpriv,
             btc_url=btc_url,
             btc_user=btc_user,
             btc_password=btc_password,
         )
-        logger.info("Applied %s update (seq 1): %s", V1_ACCT_PREDICATE, result)
+        logger.info("Applied %s update (seq 1): %s", V2_ACCT_PREDICATE, result)
         btc_rpc.proxy.generatetoaddress(POST_ADMIN_UPDATE_L1_BLOCKS, mine_addr)
 
         wait_until_with_value(
             fetch_update_vk_and_mine,
-            lambda vk: vk == V1_ACCT_PREDICATE,
-            error_with=f"update_vk did not transition to {V1_ACCT_PREDICATE} in OL state",
+            lambda vk: vk == V2_ACCT_PREDICATE,
+            error_with=f"update_vk did not transition to {V2_ACCT_PREDICATE} in OL state",
             timeout=PREDICATE_SETTLE_TIMEOUT_SECONDS,
         )
-        logger.info("update_vk transitioned to %s (V0 -> V1)", V1_ACCT_PREDICATE)
+        logger.info("update_vk transitioned to %s (V1 -> V2)", V2_ACCT_PREDICATE)
 
         # --- Post-rotation: a further update must settle under the *new* VK ----
         #
-        # The V0 -> V1 transition above only proves that the update carrying
+        # The V1 -> V2 transition above only proves that the update carrying
         # the rotation itself settles -- that update's own proof is checked
         # against update_vk as it stood *before* the rotation, so it's
-        # provable under the old (v0) program alone. It says nothing about
+        # provable under the old (v1) program alone. It says nothing about
         # whether the sequencer can keep proving *after* the rotation has
         # landed. Mine enough plain blocks (nothing rotation-specific, so this
         # doesn't depend on per-version guest correctness, only on host-side
@@ -172,7 +172,7 @@ class TestEePredicateTransition(BaseTest):
         # sealing, DA, proving, and OL submission, and confirm the account's
         # update sequence number advances again -- which can only happen if
         # that update's proof verifies against the now-current
-        # V1 predicate, i.e. the v1 program.
+        # V2 predicate, i.e. the v2 program.
         seq_no_after_rotation = strata_rpc.strata_getSnarkAccountStateByTag(
             ALPEN_ACCOUNT_ID, "latest"
         )["seq_no"]
@@ -193,24 +193,24 @@ class TestEePredicateTransition(BaseTest):
         )
         logger.info(
             "a further update settled under %s (seq_no advanced past %d)",
-            V1_ACCT_PREDICATE,
+            V2_ACCT_PREDICATE,
             seq_no_after_rotation,
         )
 
         # seq_no is what actually proves the further update settled (see
         # above); update_vk itself doesn't move on an ordinary update, only
         # on one that declares a new predicate. Assert it explicitly anyway,
-        # as a direct check that the account still sits on V1 and no other
+        # as a direct check that the account still sits on V2 and no other
         # rotation slipped in while we were waiting.
         vk_after_further_update = strata_rpc.strata_getSnarkAccountStateByTag(
             ALPEN_ACCOUNT_ID, "latest"
         )["update_vk"]
-        assert vk_after_further_update == V1_ACCT_PREDICATE, (
-            f"update_vk should still be {V1_ACCT_PREDICATE!r} after the further "
+        assert vk_after_further_update == V2_ACCT_PREDICATE, (
+            f"update_vk should still be {V2_ACCT_PREDICATE!r} after the further "
             f"update, got {vk_after_further_update!r}"
         )
 
-        # --- V1 -> V2: no `AlpenSpecId` variant exists for it ------------------
+        # --- V2 -> V3: no `AlpenSpecId` variant exists for it ------------------
         #
         # The EE sequencer must refuse to consume this rotation rather than
         # build a block under a spec version it doesn't know, so block
@@ -220,13 +220,13 @@ class TestEePredicateTransition(BaseTest):
 
         result = create_ee_predicate_update(
             seq_no=2,
-            predicate=V2_ACCOUNT_PREDICATE,
+            predicate=V3_ACCOUNT_PREDICATE,
             admin_xpriv=admin_xpriv,
             btc_url=btc_url,
             btc_user=btc_user,
             btc_password=btc_password,
         )
-        logger.info("Applied %s update (seq 2): %s", V2_ACCOUNT_PREDICATE, result)
+        logger.info("Applied %s update (seq 2): %s", V3_ACCOUNT_PREDICATE, result)
 
         def mine_and_count_refused_rotations() -> int:
             btc_rpc.proxy.generatetoaddress(1, mine_addr)
@@ -238,19 +238,19 @@ class TestEePredicateTransition(BaseTest):
             mine_and_count_refused_rotations,
             lambda count: count > 0,
             error_with=(
-                f"EE sequencer did not refuse the unhonorable V1 -> V2 rotation (log: {log_path})"
+                f"EE sequencer did not refuse the unhonorable V2 -> V3 rotation (log: {log_path})"
             ),
             timeout=UNSUPPORTED_ROTATION_TIMEOUT_SECONDS,
         )
-        logger.info("EE sequencer correctly refused the unhonorable V1 -> V2 rotation")
+        logger.info("EE sequencer correctly refused the unhonorable V2 -> V3 rotation")
 
         # The refused rotation was never consumed by a built block, so
         # update_vk must still sit at the last rotation that did settle.
         stalled_vk = strata_rpc.strata_getSnarkAccountStateByTag(ALPEN_ACCOUNT_ID, "latest")[
             "update_vk"
         ]
-        assert stalled_vk == V1_ACCT_PREDICATE, (
-            f"update_vk should remain at {V1_ACCT_PREDICATE!r} after the refused "
+        assert stalled_vk == V2_ACCT_PREDICATE, (
+            f"update_vk should remain at {V2_ACCT_PREDICATE!r} after the refused "
             f"rotation, got {stalled_vk!r}"
         )
 

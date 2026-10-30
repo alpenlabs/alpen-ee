@@ -28,7 +28,7 @@ EEST_BASE_FEE_FLOOR = {"v0": 0}
 #: version active from genesis (coordinate 0). A test rehearsing an upgrade
 #: launches further back instead, leaving the version it upgrades to
 #: unscheduled.
-LAUNCH_SPEC_SCHEDULE = {"v0": 0, "v1": 0}
+LAUNCH_SPEC_SCHEDULE = {"v0": 0, "v1": 0, "v2": 0}
 
 
 def compose_alpen_params(
