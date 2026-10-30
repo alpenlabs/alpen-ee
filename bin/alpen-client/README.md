@@ -796,6 +796,13 @@ fixed_fee_rate = 1.0
 poll_interval_ms = 5000
 max_fee_rate_sat_vb = 1000  # per-transaction Bitcoin Core guardrail
 
+# Optional. RBF policy for the DA transactions the sequencer publishes, with the
+# keys of the OL node's [btcio.writer.fee_bumping]. Omitted keys keep the btcio
+# defaults; max_fee_rate_sat_vb follows sequencer.broadcaster and may not exceed it.
+[sequencer.fee_bumping]
+min_age_blocks = 2      # L1 blocks a DA transaction may stay unconfirmed before it is replaced
+max_attempts = 5        # broadcasts per replacement chain, at most 64
+
 [sequencer.da_fee_rate]
 policy = "writer_backed"
 refresh_interval_seconds = 60
