@@ -19,7 +19,7 @@ from pathlib import Path
 import flexitest
 
 from common.base_test import BaseTest
-from common.config.constants import ALPEN_ACCOUNT_ID, ServiceType
+from common.config.constants import ALPEN_ACCOUNT_ID, DEFAULT_EE_BLOCK_TIME_MS, ServiceType
 from common.prover_backend import ROTATION_SPEC_VERSIONS, resolve_prover_backend
 from common.services.alpen_client import AlpenClientService
 from common.services.bitcoin import BitcoinService
@@ -39,9 +39,16 @@ POST_ADMIN_UPDATE_L1_BLOCKS = 5
 # target, so the two cannot drift apart from the programs configured below.
 PROVER = resolve_prover_backend(ROTATION_SPEC_VERSIONS)
 
-# Every wait below blocks on a proof, so each scales with the backend.
-PREDICATE_SETTLE_TIMEOUT_SECONDS = 120 * PROVER.proof_wait_scale
-POST_ROTATION_UPDATE_TIMEOUT_SECONDS = 180 * PROVER.proof_wait_scale
+# Every sealed batch costs a chunk and an account proof. Under sp1 those are
+# paid requests to the prover network, and 10-block batches at the 1s block
+# time mean 12 of them a minute. 60-block batches cut that sixfold.
+BATCH_SEALING_BLOCK_COUNT = 60 if PROVER.backend == "sp1" else 10
+BATCH_SEALING_SECONDS = BATCH_SEALING_BLOCK_COUNT * DEFAULT_EE_BLOCK_TIME_MS // 1000
+
+# Every wait below blocks on a proof, so each scales with the backend. The
+# first two also wait for a batch to seal.
+PREDICATE_SETTLE_TIMEOUT_SECONDS = 120 * PROVER.proof_wait_scale + BATCH_SEALING_SECONDS
+POST_ROTATION_UPDATE_TIMEOUT_SECONDS = 180 * PROVER.proof_wait_scale + BATCH_SEALING_SECONDS
 UNSUPPORTED_ROTATION_TIMEOUT_SECONDS = 120 * PROVER.proof_wait_scale
 V1_ACCT_PREDICATE = PROVER.genesis_predicate
 V2_ACCT_PREDICATE = PROVER.rotation_target_predicate
@@ -84,6 +91,7 @@ class TestEePredicateTransition(BaseTest):
                 pre_generate_blocks=110,
                 admin_confirmation_depth=2,
                 fund_test_cli_wallet=True,
+                batch_sealing_block_count=BATCH_SEALING_BLOCK_COUNT,
                 # Two resident programs, keyed by the AlpenSpecId each is
                 # built for (see ProverProgramPaths in
                 # bin/alpen-client/src/config.rs): v2's acct key is the
