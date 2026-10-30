@@ -1,5 +1,8 @@
 # SP1 v1 guest ELFs
 
+Built from: tag `v0.4.0`, commit `4ef60bdc88714723147122db83d603442f975659`,
+unchanged.
+
 Prebuilt `guest-alpen-chunk` / `guest-alpen-acct` ELFs for spec version `v1`,
 used as test data by the functional tests that cross a predicate rotation
 under `EE_PROVER_BACKEND=sp1`.

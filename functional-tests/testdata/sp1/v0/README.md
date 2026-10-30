@@ -1,5 +1,10 @@
 # SP1 v0 guest ELFs
 
+Built from: the branch of PR #77 (`feat/activate-osaka-v1`), with
+`SPEC_VERSION` set to `AlpenSpecId::V0`. The exact commit was not recorded.
+The ELFs landed on `main` in `55aa51396`, and the branch head at merge was
+`8490ecd0a033ef7590c8904ad44a6169fe56fa49`.
+
 Prebuilt `guest-alpen-chunk` / `guest-alpen-acct` ELFs for spec version `v0`,
 used as test data by the Osaka fork test under `EE_PROVER_BACKEND=sp1`.
 
@@ -35,8 +40,9 @@ argument instead of zkVM input.
 
 Built from this workspace, not from a sister repo:
 
-- source: this workspace at `55aa51396`, with `SPEC_VERSION` set to `AlpenSpecId::V0` in both
-  `provers/sp1/guest-alpen-acct` and `provers/sp1/guest-alpen-chunk`
+- source: the PR #77 branch named above, with `SPEC_VERSION` set to
+  `AlpenSpecId::V0` in both `provers/sp1/guest-alpen-acct` and
+  `provers/sp1/guest-alpen-chunk`
 - builder: `cargo build --release -p alpen-sp1-guest-builder`, driven by
   `run_tests.sh`'s `build_sp1_guests`
 - output: `provers/sp1/generated/`, copied here
