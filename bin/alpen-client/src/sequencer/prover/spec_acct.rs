@@ -3,7 +3,8 @@
 //! Task = [`BatchId`] (newtype-wrapped). Program = [`EeAcctProgram`];
 //! `fetch_input` reads chunk receipts (from the shared paas
 //! `ReceiptStore`) and the prior batch's end-state, then assembles
-//! `ee_acct_runtime::PrivateInput` + `snark_acct_runtime::PrivateInput`.
+//! `ee_acct_runtime::PrivateInput` + `snark_acct_runtime::PrivateInput` in the
+//! layout its program's guest reads.
 //!
 //! `LedgerRefs` are derived from the batch's reduced L1 block refs
 //! (`{block_hash, wtxids_root}` at the L1 height index) using the same helper
@@ -13,7 +14,7 @@
 use std::{fmt, sync::Arc};
 
 use alloy_primitives::{Address, B256};
-use alpen_acct_runtime::{ChunkInput, EePrivateInput};
+use alpen_acct_runtime::ChunkInput;
 use alpen_acct_types::UpdateExtraData;
 use alpen_chain_types::ChunkTransition;
 use alpen_common::{
@@ -23,6 +24,7 @@ use alpen_common::{
 use alpen_da_runtime::builders::{
     build_da_witness, BatchDaWitness, DaDedupResolver, DaWitnessBuildError,
 };
+use alpen_params::AlpenSpecId;
 use alpen_proof_acct::{EeAcctProgram, EeAcctProofInput};
 use alpen_storage_api::{BatchStorage, ChunkStorage, DaContext, ExecBlockStorage, Storage};
 use alpen_storage_store::NodeStorage;
@@ -43,10 +45,20 @@ use tokio::task;
 
 use super::ChunkTask;
 
-/// Extracts the range witness for `[first_block, last_block]`, with the given
-/// extra accounts in the partial pre-state.
-pub(crate) type AcctRangeWitnessFn =
-    dyn Fn(B256, B256, Vec<Address>) -> eyre::Result<RangeWitnessData> + Send + Sync;
+/// Reads the EVM state the account prover takes from the node.
+pub(crate) trait AcctStateReader: Send + Sync {
+    /// Extracts the range witness for `[first_block, last_block]`, with
+    /// `extra_accounts` in the partial pre-state.
+    fn range_witness(
+        &self,
+        first_block: B256,
+        last_block: B256,
+        extra_accounts: &[Address],
+    ) -> eyre::Result<RangeWitnessData>;
+
+    /// Reads the bytes of each bytecode in `code_hashes`, in order.
+    fn bytecodes(&self, code_hashes: &[B256]) -> eyre::Result<Vec<Vec<u8>>>;
+}
 
 /// Batch-id-shaped task identifier for paas. Newtype over [`BatchId`]
 /// for the same reasons [`super::ChunkTask`] wraps `ChunkId`.
@@ -128,10 +140,14 @@ pub(crate) struct AcctSpec {
     storage: Arc<NodeStorage>,
     btc_client: Arc<BtcClient>,
     da_ctx: Arc<dyn DaContext + Send + Sync>,
-    range_witness_fn: Arc<AcctRangeWitnessFn>,
+    state_reader: Arc<dyn AcctStateReader>,
+
+    /// Spec version of the batches proved, which picks the input layout.
+    spec_version: AlpenSpecId,
 }
 
 impl AcctSpec {
+    #[expect(clippy::too_many_arguments, reason = "prover spec constructor")]
     pub(crate) fn new(
         chunk_receipts: Arc<dyn ReceiptStore>,
         batch_storage: Arc<dyn BatchStorage>,
@@ -139,7 +155,8 @@ impl AcctSpec {
         storage: Arc<NodeStorage>,
         btc_client: Arc<BtcClient>,
         da_ctx: Arc<dyn DaContext + Send + Sync>,
-        range_witness_fn: Arc<AcctRangeWitnessFn>,
+        state_reader: Arc<dyn AcctStateReader>,
+        spec_version: AlpenSpecId,
     ) -> Self {
         Self {
             chunk_receipts,
@@ -148,7 +165,8 @@ impl AcctSpec {
             storage,
             btc_client,
             da_ctx,
-            range_witness_fn,
+            state_reader,
+            spec_version,
         }
     }
 }
@@ -258,11 +276,13 @@ impl AcctSpec {
         };
 
         // 4. DA witness, built from the blob as published on L1. Its dedup part names the pre-state
-        //    accounts that hold the bytecodes the blob omits.
+        //    accounts that hold the bytecodes the blob omits. The V1 guest takes those bytecodes'
+        //    bytes instead.
         let da_dedup_resolver = DaDedupResolver::new(&*self.da_ctx);
         let BatchDaWitness {
             witness: da_witness,
             code_holders,
+            omitted_code_hashes,
         } = build_da_witness(
             &da_refs,
             batch.spec_version(),
@@ -277,23 +297,31 @@ impl AcctSpec {
         //    The acct guest uses this sparse pre-state to apply the DA blob's
         //    batch state diff and compare the result with the final chunk's
         //    tip state root. This spans the full batch, not just one chunk,
-        //    plus the code holders the DA witness names.
+        //    plus the code holders the DA witness names. The V1 guest reads no
+        //    holders, so its pre-state leaves them out.
         let batch_block_hashes: Vec<Hash> = batch.blocks_iter().collect();
         let first_batch_block = batch_block_hashes.first().copied().ok_or_else(|| {
             PaasError::permanent(format!("batch {batch_id} has no execution blocks"))
         })?;
         let first_block_hash = B256::from(first_batch_block.0);
         let last_block_hash = B256::from(batch.last_block().0);
-        let range_witness_fn = self.range_witness_fn.clone();
-        let range_data = task::spawn_blocking(move || {
-            (range_witness_fn)(first_block_hash, last_block_hash, code_holders)
+        let spec_version = self.spec_version;
+        let state_reader = self.state_reader.clone();
+        let (range_data, omitted_bytecodes) = task::spawn_blocking(move || {
+            let (extra_accounts, omitted_bytecodes) =
+                if EeAcctProofInput::reads_code_holders(spec_version) {
+                    (code_holders, Vec::new())
+                } else {
+                    (Vec::new(), state_reader.bytecodes(&omitted_code_hashes)?)
+                };
+            let range_data =
+                state_reader.range_witness(first_block_hash, last_block_hash, &extra_accounts)?;
+            eyre::Ok((range_data, omitted_bytecodes))
         })
         .await
         .map_err(|e| PaasError::transient(format!("batch witness extraction join: {e}")))?
         .map_err(|e| PaasError::transient(format!("batch witness extraction: {e}")))?;
-
-        let ee_private_input =
-            EePrivateInput::new(range_data.raw_partial_pre_state, chunks.clone());
+        let raw_partial_pre_state = range_data.raw_partial_pre_state;
 
         // 6. Build UpdateProofPubParams from ExecBlockRecords.
         //
@@ -411,11 +439,14 @@ impl AcctSpec {
         let snark_acct_private_input =
             UpdatePrivateInput::new(pub_params, pre_ee_state.as_ssz_bytes(), coinputs);
 
-        Ok(EeAcctProofInput::V2 {
-            ee_private_input,
+        Ok(EeAcctProofInput::new(
+            spec_version,
+            raw_partial_pre_state,
+            chunks,
             snark_acct_private_input,
             da_witness,
-        })
+            omitted_bytecodes,
+        ))
     }
 }
 

@@ -12,14 +12,12 @@ mod dedup;
 mod error;
 mod inclusion;
 
-use alloy_primitives::Address;
+use alloy_primitives::{Address, B256};
 use alpen_common::L1DaBlockRef;
 use alpen_da_types::DaWitness;
 use alpen_params::AlpenSpecId;
 use bitcoind_async_client::traits::Reader;
-pub(crate) use dedup::dedup_witness_for_holders;
-#[cfg(feature = "test-utils")]
-pub(crate) use dedup::deduped_account_code_hashes;
+pub(crate) use dedup::{dedup_witness_for_holders, deduped_account_code_hashes};
 pub use dedup::{DaDedupResolver, DedupWitnessResolver};
 pub use error::DaWitnessBuildError;
 
@@ -36,6 +34,9 @@ pub struct BatchDaWitness {
     /// omits. The prover must add them to the batch's partial pre-state, where
     /// the guest reads their code hashes.
     pub code_holders: Vec<Address>,
+
+    /// Code hashes of the bytecodes the blob omits.
+    pub omitted_code_hashes: Vec<B256>,
 }
 
 /// Builds the DA witness for a batch: the generic L1 tx-inclusion proofs plus the
@@ -62,5 +63,6 @@ pub async fn build_da_witness(
     Ok(BatchDaWitness {
         witness,
         code_holders,
+        omitted_code_hashes: deduped_account_code_hashes(&blob),
     })
 }

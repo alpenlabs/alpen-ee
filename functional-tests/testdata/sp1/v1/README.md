@@ -18,9 +18,9 @@ from `v0` to `v1`, so it always runs on the native backend.
 The `v1` program on live networks is the one release `v0.4.0` shipped, and it
 never changes. The current binary has to keep proving `v1` batches with it
 until a rotation activates `v2`. So the tests run the guest code of that
-release, not current source with the version constant set back. Inputs the
-current host builds for a `v1` batch then reach the guest that will really
-prove them.
+release, not current source with the version constant set back. The current
+host builds `v1` inputs in that release's layout, so they reach the guest that
+will really prove them in the form it reads.
 
 Only the baked-in params differ from the published ELFs. Those bake each
 network's params, while these bake the functional-test params, so the tests'
