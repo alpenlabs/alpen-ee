@@ -10,9 +10,13 @@ use zkaleido::ZkVmEnvSerde;
 mod program;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
+#[cfg(not(target_os = "zkvm"))]
+pub mod v1;
+#[cfg(not(target_os = "zkvm"))]
+pub mod v2;
 
 #[cfg(not(target_os = "zkvm"))]
-pub use program::{EeChunkProgram, EeChunkProofInput};
+pub use program::{EeChunkProgram, EeChunkProofInput, process_ee_chunk_native};
 
 /// Guest entry point for EE chunk proof generation.
 ///
@@ -33,12 +37,21 @@ pub use program::{EeChunkProgram, EeChunkProofInput};
 /// always ends its group -- see `sealing_policy::rotation_policy` -- so no
 /// chunk straddles an activation boundary.
 pub fn process_ee_chunk(zkvm: &impl ZkVmEnvSerde, params: &AlpenParams, spec_version: AlpenSpecId) {
-    let ee = EvmExecutionEnvironment::new(params, spec_version);
-
     let buf = zkvm.read_buf();
     let input: &ArchivedPrivateInput = rkyv::access::<ArchivedPrivateInput, RkyvError>(&buf)
         .expect("failed to access rkyv archive");
 
+    verify_and_commit(zkvm, params, spec_version, input);
+}
+
+/// Verifies the chunk transition in `input` and commits it as public output.
+fn verify_and_commit(
+    zkvm: &impl ZkVmEnvSerde,
+    params: &AlpenParams,
+    spec_version: AlpenSpecId,
+    input: &ArchivedPrivateInput,
+) {
+    let ee = EvmExecutionEnvironment::new(params, spec_version);
     alpen_chunk_runtime::verify_input(&ee, input).expect("chunk verification failed");
 
     zkvm.commit_buf(input.chunk_transition_ssz());

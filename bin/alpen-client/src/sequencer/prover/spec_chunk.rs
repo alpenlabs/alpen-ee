@@ -280,6 +280,6 @@ impl ChunkSpec {
             raw_chunk_pre_state,
         );
 
-        Ok(EeChunkProofInput { private_input })
+        Ok(EeChunkProofInput::V2 { private_input })
     }
 }

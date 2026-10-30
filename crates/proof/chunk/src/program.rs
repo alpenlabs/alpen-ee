@@ -1,21 +1,79 @@
 use alpen_chain_types::ChunkTransition;
-use alpen_chunk_runtime::PrivateInput;
+use alpen_chunk_runtime::RawBlockData;
 use alpen_params::{AlpenParams, AlpenSpecId};
 use k256::schnorr::SigningKey;
 use rkyv::rancor::Error as RkyvError;
 use ssz::Decode;
 use strata_predicate::{PredicateKey, PredicateTypeId};
 use zkaleido::{
-    ProofType, PublicValues, ZkVmError, ZkVmInputError, ZkVmInputResult, ZkVmProgram, ZkVmResult,
+    ProofType, PublicValues, ZkVmEnvSerde, ZkVmError, ZkVmInputError, ZkVmInputResult, ZkVmProgram,
+    ZkVmResult,
 };
 use zkaleido_native_adapter::NativeHost;
 
-use crate::process_ee_chunk;
+use crate::{process_ee_chunk, v1, v2};
 
-/// Host-side input for the EE chunk proof.
+/// Host-side input for the EE chunk proof, in the layout of the guest released
+/// for the spec version it proves under.
+///
+/// The native host reads every layout. See [`process_ee_chunk_native`].
 #[derive(Debug)]
-pub struct EeChunkProofInput {
-    pub private_input: PrivateInput,
+pub enum EeChunkProofInput {
+    /// The layout the V1 guest release reads. See [`v1`].
+    V1 { private_input: v1::PrivateInput },
+
+    /// The layout the V2 guests read. See [`v2`].
+    V2 { private_input: v2::PrivateInput },
+}
+
+impl EeChunkProofInput {
+    /// Builds the input in the layout the guest released for `spec_version`
+    /// reads, keeping only the parts that layout carries.
+    ///
+    /// V0 shares V1's layout. No network proves V0 any more, so its own
+    /// layout is not kept.
+    pub fn new(
+        spec_version: AlpenSpecId,
+        chunk_transition: ChunkTransition,
+        blocks: Vec<RawBlockData>,
+        raw_prev_header: Vec<u8>,
+        raw_partial_pre_state: Vec<u8>,
+    ) -> Self {
+        match spec_version {
+            AlpenSpecId::V0 | AlpenSpecId::V1 => Self::V1 {
+                private_input: v1::PrivateInput::new(
+                    chunk_transition,
+                    blocks,
+                    raw_prev_header,
+                    raw_partial_pre_state,
+                ),
+            },
+            AlpenSpecId::V2 => Self::V2 {
+                private_input: v2::PrivateInput::new(
+                    chunk_transition,
+                    v2::RawChunkData::new(blocks),
+                    raw_prev_header,
+                    raw_partial_pre_state,
+                ),
+            },
+        }
+    }
+}
+
+/// Runs the chunk check natively on an input built by
+/// [`EeChunkProofInput::new`] for `spec_version`.
+///
+/// The native host runs this source's check for every version. It reads each
+/// version's layout, so both backends take the same input.
+pub fn process_ee_chunk_native(
+    zkvm: &impl ZkVmEnvSerde,
+    params: &AlpenParams,
+    spec_version: AlpenSpecId,
+) {
+    match spec_version {
+        AlpenSpecId::V0 | AlpenSpecId::V1 => v1::process_ee_chunk(zkvm, params, spec_version),
+        AlpenSpecId::V2 => process_ee_chunk(zkvm, params, spec_version),
+    }
 }
 
 /// Note: `AlpenParams` (genesis, bridge params) is NOT part of this input.
@@ -56,8 +114,11 @@ impl ZkVmProgram for EeChunkProgram {
         B: zkaleido::ZkVmInputBuilder<'a>,
     {
         let mut builder = B::new();
-        let rkyv_bytes = rkyv::to_bytes::<RkyvError>(&input.private_input)
-            .map_err(|e| ZkVmInputError::InputBuild(e.to_string()))?;
+        let rkyv_bytes = match input {
+            EeChunkProofInput::V1 { private_input } => rkyv::to_bytes::<RkyvError>(private_input),
+            EeChunkProofInput::V2 { private_input } => rkyv::to_bytes::<RkyvError>(private_input),
+        }
+        .map_err(|e| ZkVmInputError::InputBuild(e.to_string()))?;
         builder.write_buf(&rkyv_bytes)?;
         builder.build()
     }
@@ -83,7 +144,7 @@ impl EeChunkProgram {
         let params = self.params.clone();
         let spec_version = self.spec_version;
         NativeHost::new(Self::test_signing_key(), move |zkvm| {
-            process_ee_chunk(zkvm, &params, spec_version)
+            process_ee_chunk_native(zkvm, &params, spec_version)
         })
     }
 
