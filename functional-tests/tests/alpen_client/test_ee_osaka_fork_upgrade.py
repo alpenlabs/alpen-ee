@@ -1,13 +1,14 @@
-"""EE live fork upgrade functional test.
+"""EE Osaka fork upgrade functional test.
 
 Rotates the Alpen EE account's `update_vk` via an Admin subprotocol
 transaction (the only on-chain trigger for a spec-version bump -- there is
 no separate "activate hardfork" action) and verifies that doing so activates
-the Osaka hardfork at the resulting boundary: an OP_CLZ (EIP-7939) probe
-transaction must fail before the boundary and succeed after it. Every
-assertion is read from independent EE fullnodes, not the sequencer, so the
-test also proves fullnodes derive and enforce the boundary on their own
-rather than trusting the sequencer's word for it.
+the Osaka hardfork at the resulting boundary. Osaka arrives with spec version
+v1, so the chain launches on v0 and the rotation moves it to v1. An OP_CLZ
+(EIP-7939) probe transaction must fail before the boundary and succeed after
+it. Every assertion is read from independent EE fullnodes, not the
+sequencer, so the test also proves fullnodes derive and enforce the boundary
+on their own rather than trusting the sequencer's word for it.
 """
 
 import logging
@@ -137,7 +138,7 @@ def _status_ok(receipt: dict) -> bool:
 
 
 @flexitest.register
-class TestEeLiveForkUpgrade(BaseTest):
+class TestEeOsakaForkUpgrade(BaseTest):
     """VK rotation activates Osaka; CLZ fails before, succeeds after -- per fullnodes."""
 
     def __init__(self, ctx: flexitest.InitContext):
