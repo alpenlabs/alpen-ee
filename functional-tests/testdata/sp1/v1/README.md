@@ -7,45 +7,38 @@ under `EE_PROVER_BACKEND=sp1`.
 Those tests need two prover programs resident at once. Most of them launch on
 `v1` and rotate to `v2`, which `run_tests.sh` builds from this workspace's
 current source on every run. The Osaka fork test launches on `v0` and rotates
-to `v1`, so it uses the committed `v0` pair and this one. A build only ever
-produces one version, so the older pairs are committed.
+to `v1`, so it uses the committed `v0` pair and this one.
 
-## Why these are v1
+## Why these come from v0.4.0
 
-A guest proves under exactly one spec version, and that version is baked into
-the binary rather than read from zkVM input. That is what binds it to the
-verifying key, so a prover cannot pick which rules its work is checked under.
-The constant naming the version is the only thing that separates the builds:
+The `v1` program on live networks is the one release `v0.4.0` shipped, and it
+never changes. The current binary has to keep proving `v1` batches with it
+until a rotation activates `v2`. So the tests run the guest code of that
+release, not current source with the version constant set back. Inputs the
+current host builds for a `v1` batch then reach the guest that will really
+prove them.
 
-```rust
-const SPEC_VERSION: AlpenSpecId = AlpenSpecId::V1;
-```
-
-Current source ships `AlpenSpecId::V2`. These ELFs are the same source with
-that one constant set to `V1`.
+Only the baked-in params differ from the published ELFs. Those bake each
+network's params, while these bake the functional-test params, so the tests'
+dev chain can run them.
 
 ## Provenance
 
-Built from this workspace:
-
-- source: this branch, with `SPEC_VERSION` set to `AlpenSpecId::V1` in both
-  `provers/sp1/guest-alpen-acct` and `provers/sp1/guest-alpen-chunk`
-- params: `scripts/gen_sp1_guest_params.py`, as `run_tests.sh`'s
-  `build_sp1_guests` runs it
-- builder: `cargo build --release -p alpen-sp1-guest-builder`
+- source: tag `v0.4.0` (`4ef60bdc88714723147122db83d603442f975659`), unchanged
+- params: that tag's `functional-tests/scripts/gen_sp1_guest_params.py`, with
+  `strata-datatool` built by that tag's `functional-tests/build_strata_bins.sh`
+- builder: `cargo build --release -p alpen-sp1-guest-builder` at that tag
 - output: `provers/sp1/generated/`, copied here
 
 ```
-2f5d182c1359d8e4623a5e5d87d06bc6598a88d7c67a2e7af0612225a3f8d355  guest-alpen-acct.elf
-d12e14555353a25fc6a2056b8f32a9e4183a7fc6ca15db76f731cec66986471d  guest-alpen-chunk.elf
+2f2c30b776e2b4e1e9f0baa8fa0186a5894e13be81fa9d259a0fd1d036df67ea  guest-alpen-acct.elf
+d8221638255c1e78661b35d2fe1c8ccb683ee0bd188ef4cae8d1d0024f183a23  guest-alpen-chunk.elf
 ```
 
-To rebuild them, flip the constant in both guest packages to `V1`, run the
-build, copy `provers/sp1/generated/` back here, and restore the constant to
-`V2`. The ELFs are not byte-reproducible across toolchain versions, so expect
-the hashes above to move when the SP1 toolchain changes. What matters is that
-the pair is built together and that its predicate differs from the other
-pairs'.
+To rebuild them, check out `v0.4.0` in a separate worktree and run the steps
+of its `run_tests.sh` `build_sp1_guests` there. The ELFs are not
+byte-reproducible across toolchain versions, so expect the hashes above to
+move when the SP1 toolchain changes.
 
 `alpen-acct.predicate` is the file `provers/sp1/build.rs` wrote next to the
 ELFs. It is the acct guest's predicate, which OL registers as the account's

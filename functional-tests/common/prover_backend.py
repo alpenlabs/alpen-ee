@@ -242,8 +242,9 @@ class Sp1Backend(ProverBackend):
     """The real compiled guest pairs.
 
     The pair built from current source is the v2 program -- that is the version
-    its guests bake in. The v0 and v1 pairs are committed test data, built with
-    that constant set to their version. Holding two at once is what a rotation
+    its guests bake in. The v0 and v1 pairs are committed test data: v1 is the
+    v0.4.0 release's guest code, and v0 is older source with that constant set
+    to v0. Holding two at once is what a rotation
     under sp1 needs, and it is the production shape: an already-deployed binary
     at genesis handing off to a new one.
     """
