@@ -225,13 +225,44 @@ mod tests {
     use strata_codec::encode_to_vec;
     use strata_identifiers::Hash;
     use strata_predicate::{PredicateKey, PredicateTypeId};
-    use strata_snark_acct_runtime::{IInnerState, PrivateInput as UpdatePrivateInput};
+    use strata_snark_acct_runtime::{Coinput, IInnerState, PrivateInput as UpdatePrivateInput};
     use strata_snark_acct_types::{
         LedgerRefs, ProofState, Seqno, UpdateOutputs, UpdateProofPubParams,
     };
 
     use super::*;
     use crate::test_utils::build_workload_update;
+
+    /// The snark account input built in [`test_snark_acct_input_layout_is_pinned`].
+    ///
+    /// Both layouts carry this type from `strata-snark-acct-runtime`, so these
+    /// bytes are also the ones the V1 guest reads. That crate is at the same
+    /// commit as in v0.4.0.
+    const SNARK_ACCT_BYTES: &str = "0000000000000000050505050505050505050505050505050505050505050505050505050505050501000000000000000606060606060606060606060606060606060606060606060606060606060606020000000000000068000000680000006c00000079000000040000000c0000000c0000000c00000000e1f1f2ffffffff010000007cffffff7a000000eeffffff01000000e8ffffff01000000";
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    fn sample_snark_acct_input() -> UpdatePrivateInput {
+        let pub_params = UpdateProofPubParams::new(
+            Seqno::zero(),
+            ProofState::new(Hash::from([5; 32]), 1),
+            ProofState::new(Hash::from([6; 32]), 2),
+            vec![],
+            LedgerRefs::new_empty(),
+            UpdateOutputs::new_empty(),
+            vec![0xe1],
+        );
+        UpdatePrivateInput::new(pub_params, vec![0xf1], vec![Coinput::new(vec![0xf2])])
+    }
+
+    #[test]
+    fn test_snark_acct_input_layout_is_pinned() {
+        let bytes = rkyv::to_bytes::<RkyvError>(&sample_snark_acct_input())
+            .expect("encode snark account input");
+        assert_eq!(hex(&bytes), SNARK_ACCT_BYTES);
+    }
 
     /// Smoke test: constructs a minimal self-consistent input with zero chunks
     /// and zero messages, and runs it through the full native execution
