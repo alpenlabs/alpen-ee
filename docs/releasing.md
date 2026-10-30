@@ -60,7 +60,9 @@ behavior, staging needs a chain reset to take it, because its guests no longer
 prove the new rules and a new key always means a new spec version.
 
 The tag does not build the `alpen-client` image. To build it, run the
-"CI — Build and Push Images" workflow by hand with the tag as `ref`.
+"CI — Build and Push Images" workflow by hand with the tag as `ref`. The image
+is tagged with the commit's full SHA and with its first 7 characters. Pin the
+full SHA in deployments.
 
 ## What a release publishes
 

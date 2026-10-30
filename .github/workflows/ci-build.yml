@@ -1,6 +1,10 @@
 # Builds the alpen-client Docker image on manual dispatch and pushes it to the
 # shared ECR account (private) and the public ECR gallery.
 #
+# Each image gets two tags: the full commit SHA and its first 7 characters.
+# Deployments should pin the full SHA, since a 7-character prefix can come to
+# match more than one commit.
+#
 # The image does not ship the SP1 guest ELFs. Each network's guests bake in
 # its params, so release.yml publishes them per network instead.
 
@@ -96,7 +100,8 @@ jobs:
           COMMIT_SHA: ${{ steps.resolve.outputs.commit_sha }}
         run: |
           DOCKERFILE_PATH="docker/alpen-client/Dockerfile"
-          FULL_IMAGE="${ECR_REGISTRY}/${ECR_REPOSITORY_PREFIX}/alpen-client:${SHORT_TAG}"
+          PRIVATE_IMAGE="${ECR_REGISTRY}/${ECR_REPOSITORY_PREFIX}/alpen-client"
+          PUBLIC_IMAGE="${PUBLIC_ECR_BASE}/${PUBLIC_REPO}"
 
           # Single build, multiple tags: buildx pushes to both the private and
           # public registries from one image (same digest in both).
@@ -105,11 +110,13 @@ jobs:
             --label "org.opencontainers.image.revision=${COMMIT_SHA}" \
             --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --push \
-            -t "${FULL_IMAGE}" \
-            -t "${PUBLIC_ECR_BASE}/${PUBLIC_REPO}:${SHORT_TAG}" \
+            -t "${PRIVATE_IMAGE}:${COMMIT_SHA}" \
+            -t "${PRIVATE_IMAGE}:${SHORT_TAG}" \
+            -t "${PUBLIC_IMAGE}:${COMMIT_SHA}" \
+            -t "${PUBLIC_IMAGE}:${SHORT_TAG}" \
             -f "${DOCKERFILE_PATH}" .
 
-          echo "Successfully pushed alpen-client:${SHORT_TAG}"
+          echo "Successfully pushed alpen-client:${COMMIT_SHA} and alpen-client:${SHORT_TAG}"
 
   # ---------------------------------------------------------------------------
   # Summary
@@ -133,7 +140,7 @@ jobs:
             echo "| Property | Value |"
             echo "|----------|-------|"
             echo "| **Commit** | \`${COMMIT_SHA}\` |"
-            echo "| **Image Tag** | \`${SHORT_TAG}\` |"
+            echo "| **Image Tags** | \`${COMMIT_SHA}\`, \`${SHORT_TAG}\` |"
             echo "| **Ref** | \`${GITHUB_REF_NAME}\` |"
             echo ""
             echo "### Build Status"
