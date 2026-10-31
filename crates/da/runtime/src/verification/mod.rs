@@ -55,7 +55,40 @@ pub fn verify_da_witness(
     expected_pre_state_root: [u8; 32],
     spec_version: AlpenSpecId,
 ) -> DaVerificationResult {
-    if da_witness.blocks().is_empty() {
+    verify_da(
+        ee_input,
+        da_witness.blocks(),
+        OmittedCodeWitness::Holders(da_witness.dedup_da_witness()),
+        pub_params,
+        expected_pre_state_root,
+        spec_version,
+    )
+}
+
+/// What covers the bytecode a DA blob omits.
+#[derive(Debug)]
+pub enum OmittedCodeWitness<'a> {
+    /// Accounts in the batch's pre-state that hold the code, as the V2 guests
+    /// read it.
+    Holders(&'a ArchivedDedupWitness),
+
+    /// The omitted bytecode itself, as the V1 guest release reads it. The
+    /// check hashes it, which shows the bytes match the code hash but not that
+    /// they were ever published on L1.
+    Bytecodes(Vec<&'a [u8]>),
+}
+
+/// Runs the checks of [`verify_da_witness`] on the parts of a DA witness, with
+/// the omitted bytecode covered by `omitted_code`.
+pub fn verify_da(
+    ee_input: &ArchivedEePrivateInput,
+    blocks: &[ArchivedDaBlockWitness],
+    omitted_code: OmittedCodeWitness<'_>,
+    pub_params: &UpdateProofPubParams,
+    expected_pre_state_root: [u8; 32],
+    spec_version: AlpenSpecId,
+) -> DaVerificationResult {
+    if blocks.is_empty() {
         return if ee_input.chunks().is_empty() {
             Ok(())
         } else {
@@ -67,8 +100,8 @@ pub fn verify_da_witness(
         return Err(DaVerificationError::NoChunks);
     }
 
-    let mut included_blocks = Vec::with_capacity(da_witness.blocks().len());
-    for block in da_witness.blocks() {
+    let mut included_blocks = Vec::with_capacity(blocks.len());
+    for block in blocks {
         let transactions = verify_block_witness(block, pub_params.ledger_refs())?;
         included_blocks.push(L1DaTransactions::new(
             block.inclusion().l1_block_height(),
@@ -85,13 +118,7 @@ pub fn verify_da_witness(
     }
     let pre_state = decode_partial_pre_state(raw_pre_state, expected_pre_state_root)?;
 
-    verify_da_blob_metadata(
-        &blob,
-        &last_chunk,
-        pub_params,
-        &pre_state,
-        da_witness.dedup_da_witness(),
-    )?;
+    verify_da_blob_metadata(&blob, &last_chunk, pub_params, &pre_state, omitted_code)?;
     verify_state_diff_against_chunks(pre_state, &blob, &last_chunk)?;
 
     Ok(())
@@ -174,7 +201,7 @@ fn verify_da_blob_metadata(
     last_chunk: &ChunkTransition,
     pub_params: &UpdateProofPubParams,
     pre_state: &EvmPartialState,
-    dedup_da_witness: &ArchivedDedupWitness,
+    omitted_code: OmittedCodeWitness<'_>,
 ) -> DaVerificationResult {
     let expected_seq_no = *pub_params.seq_no().inner();
     if blob.update_seq_no != expected_seq_no {
@@ -196,22 +223,28 @@ fn verify_da_blob_metadata(
         });
     }
 
-    verify_deployed_bytecodes(&blob.state_diff, pre_state, dedup_da_witness)
+    verify_deployed_bytecodes(&blob.state_diff, pre_state, omitted_code)
 }
 
-/// Collects the code hashes the dedup witness vouches for.
+/// Collects the code hashes `omitted_code` vouches for.
 ///
 /// DA dedup lets the published blob omit bytecode an account already holds in
-/// the batch's pre-state. The dedup witness names each holder by its state
-/// trie key, and the holder's code hash is read from the pre-state, whose root
-/// was checked against the EE account's previous execution root. The holder
-/// took on that code in an earlier batch, whose blob was checked the same way,
-/// so by induction from genesis the bytes are on L1. Future dedup kinds
+/// the batch's pre-state. A dedup witness names each holder by its state trie
+/// key, and the holder's code hash is read from the pre-state, whose root was
+/// checked against the EE account's previous execution root. The holder took
+/// on that code in an earlier batch, whose blob was checked the same way, so
+/// by induction from genesis the bytes are on L1. Future dedup kinds
 /// (account/storage serials) extend this with their own contributions.
-fn dedup_witness_code_hashes(
+fn omitted_code_hashes(
     pre_state: &EvmPartialState,
-    dedup_da_witness: &ArchivedDedupWitness,
+    omitted_code: OmittedCodeWitness<'_>,
 ) -> DaVerificationResult<BTreeSet<B256>> {
+    let dedup_da_witness = match omitted_code {
+        OmittedCodeWitness::Holders(dedup_da_witness) => dedup_da_witness,
+        OmittedCodeWitness::Bytecodes(bytecodes) => {
+            return Ok(bytecodes.into_iter().map(keccak256).collect());
+        }
+    };
     let state_trie = &pre_state.ethereum_state().state_trie;
     dedup_da_witness
         .code_holder_keys()
@@ -232,7 +265,7 @@ fn dedup_witness_code_hashes(
 fn verify_deployed_bytecodes(
     diff: &BatchStateDiff,
     pre_state: &EvmPartialState,
-    dedup_da_witness: &ArchivedDedupWitness,
+    omitted_code: OmittedCodeWitness<'_>,
 ) -> DaVerificationResult {
     let mut available_code_hashes = BTreeSet::new();
 
@@ -249,8 +282,8 @@ fn verify_deployed_bytecodes(
     }
 
     // Bytecodes the blob deduped: held by a pre-state account the dedup
-    // witness names.
-    available_code_hashes.extend(dedup_witness_code_hashes(pre_state, dedup_da_witness)?);
+    // witness names, or supplied as bytes.
+    available_code_hashes.extend(omitted_code_hashes(pre_state, omitted_code)?);
 
     for change in diff.accounts.values() {
         let account_diff = match change {

@@ -72,6 +72,18 @@ where
     }
 }
 
+/// Names a holder for each bytecode `blob` omits, or none without a
+/// `resolver`.
+pub(crate) async fn code_holders_if_resolved(
+    blob: &DaBlob,
+    resolver: Option<&(impl DedupWitnessResolver + Sync)>,
+) -> Result<Vec<Address>, DaWitnessBuildError> {
+    match resolver {
+        Some(resolver) => resolver.resolve_code_holders(blob).await,
+        None => Ok(Vec::new()),
+    }
+}
+
 /// Builds the [`DedupWitness`] naming `code_holders` by their state trie keys.
 pub(crate) fn dedup_witness_for_holders(code_holders: &[Address]) -> DedupWitness {
     DedupWitness::new(
@@ -202,5 +214,23 @@ mod tests {
             .expect_err("an omitted code hash with no holder must fail");
 
         assert!(matches!(err, DaWitnessBuildError::CodeHolderMissing(_)));
+    }
+
+    /// A blob v0.4.0 published omits code it recorded no holder for. A guest
+    /// that takes the bytes needs no holder, so none is looked up.
+    #[tokio::test]
+    async fn no_resolver_skips_holder_lookup() {
+        let (blob, deduped_code_hash) = blob_with_one_deduped_code();
+        let holders = Holders(BTreeMap::new());
+        let resolver = DaDedupResolver::new(&holders);
+
+        let resolved = code_holders_if_resolved(&blob, None::<&DaDedupResolver<'_, Holders>>)
+            .await
+            .expect("no holder is looked up without a resolver");
+        assert!(resolved.is_empty());
+        assert!(code_holders_if_resolved(&blob, Some(&resolver))
+            .await
+            .is_err());
+        assert_eq!(deduped_account_code_hashes(&blob), vec![deduped_code_hash]);
     }
 }

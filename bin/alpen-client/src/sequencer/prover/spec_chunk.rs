@@ -4,17 +4,18 @@
 //! `Display` bounds that paas's `TaskKey` requires without polluting
 //! the domain type). Program = [`EeChunkProgram`]; its `fetch_input`
 //! reads chunk blocks + parent header + pre-state from EE storage and
-//! assembles `ee_chunk_runtime::PrivateInput`.
+//! assembles the private input in the layout its program's guest reads.
 
 use std::{fmt, sync::Arc};
 
 use alpen_acct_types::{ExecBlock, ExecHeader};
 use alpen_chain_types::{ChunkTransition, ExecHeaderSummary, ExecInputs, ExecOutputs};
-use alpen_chunk_runtime::{PrivateInput, RawBlockData, RawChunkData};
+use alpen_chunk_runtime::RawBlockData;
 use alpen_common::{
     decode_chunk_task_key, encode_chunk_task_key, ChunkId, ProverTaskKeyDecodeError,
 };
 use alpen_evm_ee::{EvmBlock, EvmExecutionEnvironment, EvmHeader, EvmPartialState};
+use alpen_params::AlpenSpecId;
 use alpen_proof_chunk::{EeChunkProgram, EeChunkProofInput};
 use alpen_reth_node::BlockWitnessRecord;
 use alpen_storage_api::{BlockWitnessStore, ChunkStorage, ExecBlockStorage};
@@ -77,13 +78,21 @@ impl TryFrom<Vec<u8>> for ChunkTask {
 pub(crate) struct ChunkSpec {
     chunk_storage: Arc<dyn ChunkStorage>,
     storage: Arc<NodeStorage>,
+
+    /// Spec version of the batches proved, which picks the input layout.
+    spec_version: AlpenSpecId,
 }
 
 impl ChunkSpec {
-    pub(crate) fn new(chunk_storage: Arc<dyn ChunkStorage>, storage: Arc<NodeStorage>) -> Self {
+    pub(crate) fn new(
+        chunk_storage: Arc<dyn ChunkStorage>,
+        storage: Arc<NodeStorage>,
+        spec_version: AlpenSpecId,
+    ) -> Self {
         Self {
             chunk_storage,
             storage,
+            spec_version,
         }
     }
 }
@@ -272,14 +281,12 @@ impl ChunkSpec {
             aggregated_outputs,
         );
 
-        let raw_chunk = RawChunkData::new(block_datas);
-        let private_input = PrivateInput::new(
+        Ok(EeChunkProofInput::new(
+            self.spec_version,
             chunk_transition,
-            raw_chunk,
+            block_datas,
             raw_prev_header,
             raw_chunk_pre_state,
-        );
-
-        Ok(EeChunkProofInput { private_input })
+        ))
     }
 }
