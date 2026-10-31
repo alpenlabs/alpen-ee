@@ -617,6 +617,7 @@ until you say otherwise. `.recipes` lists them:
 | `drop_chain_above(target)` | everything above `target`, a block hash or a height. A hash is the usual form: the EE tip OL has accepted, `0x` or not, checked by `tip_height` first. A height is used as given, with no checks. Above the height: every exec block, with its payload, accessed state, witness, height entry and finalized entry. The witness environment's diffs, where that environment is present. The OL epoch entries whose accepted account state points at a dropped block, so the tracker resumes from the last surviving epoch. Last, the batches and chunks that end above the height, through `revert_batches_from`, or `revert_chunks_from` for the open batch. Chain, witness, batches and chunks are each cut by their own top. So a witness that ran ahead is trimmed even when the chain is already at the height |
 | `tip_height(hash)` | nothing; the height of block `hash`, once it is checked to be a block that can be left as the tip. Fails for a string that is not a 32-byte hash. Fails for a block the store does not hold or the height index does not list. Fails for a block at a finalized height that is not the finalized one. Fails for a block that shares an unfinalized height with another. It does not check that the block connects to the chain below it, which OL's accepted tip always does |
 | `set_next_spec_version(hash, version)` | the version the next block built on block `hash` runs under, given as a number, 1 for v1. For a key switch that sends the EE no message, run once right after `drop_chain_above(hash)` is committed. Fails unless `hash` is the tip and the last block of the last sealed batch. Fails unless `version` is the one after the version the record holds now |
+| `prune_witnesses_before(height)` | the proof witness and accessed-state rows of every block below `height`, forks too, picked by key so no witness is decoded. Fails for a `height` above the finalized height. The exec blocks, payloads, state diffs and bytecodes stay |
 | `batch_summary()` | nothing; batches and chunks counted by status |
 | `revert_batches_from(idx)` | batches from `idx`, with their id and chunk-list entries, and their chunks through `revert_chunks_from`. Where the prover environment is present, the account prover tasks of those batches under any spec version, their receipts, and the receipts' proof-id index entries |
 | `revert_chunks_from(idx)` | chunks from `idx`, with their id entries. Where the prover environment is present, their prover tasks under any spec version and their receipts. Use it alone only for chunks past the last sealed batch. A sealed batch's chunks go with `revert_batches_from` |
@@ -680,6 +681,25 @@ batch builder takes the next batch's version from the record of the last
 sealed batch's last block. Each OL update covers one batch and ends on its
 last block, so after the rollback OL's accepted tip is both. The last batch
 keeps v0, the version its blocks ran under.
+
+The sequencer stores a proof witness and an accessed-state record for every
+block it builds, a few hundred KB per block, and nothing in the node prunes
+them yet. The provers read them only for batches not yet proven. A finalized
+block is in an update OL accepted with its proof, so its rows are never read
+again. `prune_witnesses_before` drops them:
+
+```
+db> prune_witnesses_before(chain_summary().finalized_height)
+241868
+db> commit()
+committed 241868 edit(s) to `node`
+241868
+```
+
+MDBX reuses the freed pages but does not shrink the file, so disk usage stays
+where it was. The store stops growing until new rows fill the freed space. To
+give the space back, compact the `node` environment offline with
+`mdbx_copy -c`.
 
 A recipe that touches more than one environment stages `node` first.
 `commit()` applies environments in the order they were first staged, and it

@@ -186,3 +186,40 @@ fn set_next_spec_version(hash, version) {
     set("ExecBlockSchema", block.key, "next_spec_version", version);
     1
 }
+
+/// Stages the removal of the proof witness and accessed-state rows of every
+/// block below `height`, forks and all.
+///
+/// The chunk prover reads the witness and the account prover reads the
+/// accessed state, each only for a batch not yet proven. A finalized block is
+/// in an update OL accepted with its proof, and the node never reorgs below
+/// it, so neither row is read again. It fails for a `height` above the
+/// finalized height. Nothing prunes these rows in the node yet, so they grow
+/// with the chain. The exec block, its payload, its state diff and the
+/// bytecodes stay.
+///
+/// Rows are picked by key, so no witness is decoded. Returns the count staged.
+fn prune_witnesses_before(height) {
+    let kind = height.type_of();
+    if kind != "i64" {
+        throw `prune_witnesses_before takes a height, not ${kind}`;
+    }
+    let fin = last("ExecBlockFinalizedSchema");
+    if fin == () { throw `no finalized chain; nothing is safe to prune`; }
+    let finalized_height = parse_int(fin.key);
+    if height > finalized_height {
+        throw `height ${height} is above the finalized height ${finalized_height}; its witnesses may still be proven`;
+    }
+    if height <= 0 { return 0; }
+
+    let below = #{};
+    for row in scan_range("ExecBlocksAtHeightSchema", "0", (height - 1).to_string(), |r| true) {
+        for hash in row.value { below[hash] = true; }
+    }
+    let n = 0;
+    for table in ["BlockWitnessSchema", "BlockAccessedStateSchema"] {
+        let stale = keys_where(table, |k| k in below);
+        if stale.len() > 0 { n += del(table, stale); }
+    }
+    n
+}
