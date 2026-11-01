@@ -255,7 +255,7 @@ borsh = { version = "1.6.1", features = ["derive"] }
 ciborium = "0.2"
 clap = { version = "4.5.60", default-features = false, features = ["derive"] }
 digest = "0.10"
-dirs = "5.0.1"
+dirs = "7.0.0"
 eyre = "0.6"
 futures = "0.3"
 futures-util = "0.3"
