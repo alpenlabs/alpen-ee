@@ -169,7 +169,7 @@ jobs:
         run: python3 .github/scripts/release.py stage
 
       - name: Upload workflow artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: alpen-guests-${{ inputs.network }}-${{ steps.stage.outputs.version }}
           path: dist/
@@ -179,7 +179,7 @@ jobs:
       # The program ID goes in the release notes but is not a release file, so
       # release.yml reads it from this artifact.
       - name: Upload account program ID
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: alpen-acct-program-id-${{ inputs.network }}
           path: program-ids/
