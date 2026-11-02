@@ -822,6 +822,20 @@ Two secrets are read from the environment instead of the config file, both seque
 - **Health check** — an HTTP endpoint that reports readiness once startup completes.
 - **Tracing & metrics** — structured `tracing` logs, optional OTLP export, and Reth's native Prometheus metrics (via Reth's `--metrics`).
 
+### Metrics
+
+Sequencer metrics on the `--metrics` endpoint, with Reth's `reth_` prefix:
+
+| Metric | Type | Meaning |
+|---|---|---|
+| `alpen_ee_batch_latest_idx{status}` | Gauge | Latest batch per [lifecycle](#batch-lifecycle) stage (`sealed` … `proof_ready`, `ol_latest` = OL tip); gaps show where the pipeline waits |
+| `alpen_ee_update_submitter_errors_total` | Counter | Failed OL update submission passes |
+| `alpen_ee_da_broadcast_pending` | Gauge | DA transactions not yet final |
+| `alpen_ee_block_build_duration_seconds` | Histogram | Payload request through witness persistence |
+| `alpen_da_fee_rate_current_wei_per_byte` | Gauge | DA fee rate in use |
+| `alpen_da_fee_rate_stale` | Gauge | `1` while the rate is stale |
+| `alpen_da_fee_rate_refreshes_total{outcome}` | Counter | Rate refreshes by `success`, `timeout`, `failure` |
+
 ---
 
 ## Glossary

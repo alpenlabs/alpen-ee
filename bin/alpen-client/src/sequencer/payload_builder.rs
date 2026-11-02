@@ -14,6 +14,7 @@ use alpen_common::{
 use alpen_engine::AlpenRethExecEngine;
 use alpen_reth_node::{AlpenBuiltPayload, AlpenEngineTypes, AlpenPayloadAttributes};
 use eyre::{eyre, Context};
+use metrics::histogram;
 use reth_node_builder::{ConsensusEngineHandle, PayloadKind};
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderError, PayloadBuilderHandle};
 use strata_acct_types::Hash;
@@ -22,6 +23,9 @@ use tracing::{debug, info, info_span, warn, Instrument};
 
 const MISSING_PARENT_RETRY_DELAY_MS: u64 = 250;
 const MISSING_PARENT_MAX_RETRIES: u16 = 120;
+
+/// Records successful payload job creation, resolution and witness persistence time, in seconds.
+const BLOCK_BUILD_DURATION_METRIC: &str = "alpen_ee_block_build_duration_seconds";
 
 fn is_retryable_missing_parent(err: &PayloadBuilderError) -> bool {
     matches!(
@@ -270,6 +274,8 @@ impl AlpenRethPayloadEngine {
             .await
             .map_err(|e| eyre!("persist block witness {block_hash:?}: {e}"))?;
         info!(?block_hash, "persisted block witness");
+
+        histogram!(BLOCK_BUILD_DURATION_METRIC).record(build_started.elapsed().as_secs_f64());
 
         Ok(payload)
     }
