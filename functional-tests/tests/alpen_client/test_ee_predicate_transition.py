@@ -1,25 +1,24 @@
 """EE predicate transition functional test.
 
 Verifies the Alpen snark account's `update_vk` rotates via an admin
-`PredicateUpdate`, that the sequencer's prover actually switches to the
-rotated VK's program for everything proved after the rotation (no restart),
-and exercises the boundary of the rotation <-> EE spec-version coupling:
-every consumed rotation unconditionally advances to the successor spec
-version, and this binary currently only supports spec versions V0 to V2 --
-no V3 exists yet. The chain launches on V1. So the first rotation (V1 -> V2)
-must settle normally, a further update after it must also settle -- proved
-under the *new* VK, not the stale pre-rotation one -- and a second rotation
-(V2 -> V3) must be refused rather than silently misapplied.
+`PredicateUpdate`, and that the sequencer's prover actually switches to the
+rotated VK's program for everything proved after the rotation (no restart).
+Every consumed rotation advances to the successor spec version, and the chain
+launches on V1. So the rotation (V1 -> V2) must settle normally, and a further
+update after it must also settle -- proved under the *new* VK, not the stale
+pre-rotation one.
+
+`test_ee_predicate_unknown_spec_version` covers a rotation past V2, which
+this binary must refuse.
 """
 
 import logging
-import re
 from pathlib import Path
 
 import flexitest
 
 from common.base_test import BaseTest
-from common.config.constants import ALPEN_ACCOUNT_ID, ServiceType
+from common.config.constants import ALPEN_ACCOUNT_ID, DEFAULT_EE_BLOCK_TIME_MS, ServiceType
 from common.prover_backend import ROTATION_SPEC_VERSIONS, resolve_prover_backend
 from common.services.alpen_client import AlpenClientService
 from common.services.bitcoin import BitcoinService
@@ -39,41 +38,18 @@ POST_ADMIN_UPDATE_L1_BLOCKS = 5
 # target, so the two cannot drift apart from the programs configured below.
 PROVER = resolve_prover_backend(ROTATION_SPEC_VERSIONS)
 
-# Every wait below blocks on a proof, so each scales with the backend.
-PREDICATE_SETTLE_TIMEOUT_SECONDS = 120 * PROVER.proof_wait_scale
-POST_ROTATION_UPDATE_TIMEOUT_SECONDS = 180 * PROVER.proof_wait_scale
-UNSUPPORTED_ROTATION_TIMEOUT_SECONDS = 120 * PROVER.proof_wait_scale
+# Every sealed batch costs a chunk and an account proof. Under sp1 those are
+# paid requests to the prover network, and 10-block batches at the 1s block
+# time mean 12 of them a minute. 60-block batches cut that sixfold.
+BATCH_SEALING_BLOCK_COUNT = 60 if PROVER.backend == "sp1" else 10
+BATCH_SEALING_SECONDS = BATCH_SEALING_BLOCK_COUNT * DEFAULT_EE_BLOCK_TIME_MS // 1000
+
+# Both waits below block on a proved batch, so each scales with the backend
+# and allows for one batch to seal.
+PREDICATE_SETTLE_TIMEOUT_SECONDS = 120 * PROVER.proof_wait_scale + BATCH_SEALING_SECONDS
+POST_ROTATION_UPDATE_TIMEOUT_SECONDS = 180 * PROVER.proof_wait_scale + BATCH_SEALING_SECONDS
 V1_ACCT_PREDICATE = PROVER.genesis_predicate
 V2_ACCT_PREDICATE = PROVER.rotation_target_predicate
-
-# A further rotation target, standing in for spec version V3 -- which this
-# binary has no support for, so the rotation to it can't be handled and must
-# be refused.
-V3_ACCOUNT_PREDICATE = "NeverAccept"
-
-UNHONORABLE_ROTATION_LOG_PATTERN = r"consumed a rotation to unknown spec version"
-
-# Service logs include tracing ANSI colour codes even when written to file.
-_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
-
-
-def _ee_log_path(alpen_service: AlpenClientService) -> Path:
-    """Path to alpen-client's service log produced by the test harness."""
-    return Path(alpen_service.props["datadir"]) / "service.log"
-
-
-def _count_log_matches(log_path: Path, pattern: str, after_offset: int = 0) -> int:
-    """Return the number of `pattern` matches in `log_path` past `after_offset`.
-
-    Tolerates a not-yet-created log file (returns 0).
-    """
-    if not log_path.exists():
-        return 0
-    with log_path.open("rb") as fh:
-        fh.seek(after_offset)
-        body = fh.read().decode(errors="replace")
-    body = _ANSI_RE.sub("", body)
-    return sum(1 for _ in re.finditer(pattern, body))
 
 
 @flexitest.register
@@ -84,6 +60,7 @@ class TestEePredicateTransition(BaseTest):
                 pre_generate_blocks=110,
                 admin_confirmation_depth=2,
                 fund_test_cli_wallet=True,
+                batch_sealing_block_count=BATCH_SEALING_BLOCK_COUNT,
                 # Two resident programs, keyed by the AlpenSpecId each is
                 # built for (see ProverProgramPaths in
                 # bin/alpen-client/src/config.rs): v2's acct key is the
@@ -208,50 +185,6 @@ class TestEePredicateTransition(BaseTest):
         assert vk_after_further_update == V2_ACCT_PREDICATE, (
             f"update_vk should still be {V2_ACCT_PREDICATE!r} after the further "
             f"update, got {vk_after_further_update!r}"
-        )
-
-        # --- V2 -> V3: no `AlpenSpecId` variant exists for it ------------------
-        #
-        # The EE sequencer must refuse to consume this rotation rather than
-        # build a block under a spec version it doesn't know, so block
-        # building stalls with a specific logged error instead.
-        log_path = _ee_log_path(alpen_seq)
-        log_offset = log_path.stat().st_size if log_path.exists() else 0
-
-        result = create_ee_predicate_update(
-            seq_no=2,
-            predicate=V3_ACCOUNT_PREDICATE,
-            admin_xpriv=admin_xpriv,
-            btc_url=btc_url,
-            btc_user=btc_user,
-            btc_password=btc_password,
-        )
-        logger.info("Applied %s update (seq 2): %s", V3_ACCOUNT_PREDICATE, result)
-
-        def mine_and_count_refused_rotations() -> int:
-            btc_rpc.proxy.generatetoaddress(1, mine_addr)
-            return _count_log_matches(
-                log_path, UNHONORABLE_ROTATION_LOG_PATTERN, after_offset=log_offset
-            )
-
-        wait_until_with_value(
-            mine_and_count_refused_rotations,
-            lambda count: count > 0,
-            error_with=(
-                f"EE sequencer did not refuse the unhonorable V2 -> V3 rotation (log: {log_path})"
-            ),
-            timeout=UNSUPPORTED_ROTATION_TIMEOUT_SECONDS,
-        )
-        logger.info("EE sequencer correctly refused the unhonorable V2 -> V3 rotation")
-
-        # The refused rotation was never consumed by a built block, so
-        # update_vk must still sit at the last rotation that did settle.
-        stalled_vk = strata_rpc.strata_getSnarkAccountStateByTag(ALPEN_ACCOUNT_ID, "latest")[
-            "update_vk"
-        ]
-        assert stalled_vk == V2_ACCT_PREDICATE, (
-            f"update_vk should remain at {V2_ACCT_PREDICATE!r} after the refused "
-            f"rotation, got {stalled_vk!r}"
         )
 
         return True

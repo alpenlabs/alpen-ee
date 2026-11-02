@@ -12,14 +12,14 @@ mod dedup;
 mod error;
 mod inclusion;
 
-use alloy_primitives::Address;
+use alloy_primitives::{Address, B256};
 use alpen_common::L1DaBlockRef;
 use alpen_da_types::DaWitness;
 use alpen_params::AlpenSpecId;
 use bitcoind_async_client::traits::Reader;
-pub(crate) use dedup::dedup_witness_for_holders;
-#[cfg(feature = "test-utils")]
-pub(crate) use dedup::deduped_account_code_hashes;
+pub(crate) use dedup::{
+    code_holders_if_resolved, dedup_witness_for_holders, deduped_account_code_hashes,
+};
 pub use dedup::{DaDedupResolver, DedupWitnessResolver};
 pub use error::DaWitnessBuildError;
 
@@ -34,8 +34,11 @@ pub struct BatchDaWitness {
 
     /// Accounts holding, in the batch's pre-state, the bytecodes the blob
     /// omits. The prover must add them to the batch's partial pre-state, where
-    /// the guest reads their code hashes.
+    /// the guest reads their code hashes. Empty when no holders were resolved.
     pub code_holders: Vec<Address>,
+
+    /// Code hashes of the bytecodes the blob omits.
+    pub omitted_code_hashes: Vec<B256>,
 }
 
 /// Builds the DA witness for a batch: the generic L1 tx-inclusion proofs plus the
@@ -46,21 +49,27 @@ pub struct BatchDaWitness {
 /// between the generic inclusion layer and the EVM dedup resolution), and returns
 /// the [`DaWitness`]. `spec_version` is the version governing the batch, which
 /// names the layout the blob was published under.
+///
+/// Without a `resolver`, the dedup witness names no holders. That suits a
+/// guest that takes the omitted bytecode's bytes instead, such as the V1
+/// release. A blob published before holders were recorded has no holder for
+/// its omitted code, so resolving one would fail.
 pub async fn build_da_witness(
     da_refs: &[L1DaBlockRef],
     spec_version: AlpenSpecId,
     btc: &(impl Reader + Sync),
-    resolver: &(impl DedupWitnessResolver + Sync),
+    resolver: Option<&(impl DedupWitnessResolver + Sync)>,
 ) -> Result<BatchDaWitness, DaWitnessBuildError> {
     let (blocks, included_blocks) = collect_l1_inclusion_blocks(da_refs, btc).await?;
 
     let blob = recover_ee_da_blob(included_blocks, spec_version)?;
 
-    let code_holders = resolver.resolve_code_holders(&blob).await?;
+    let code_holders = code_holders_if_resolved(&blob, resolver).await?;
     let witness = DaWitness::new(blocks, dedup_witness_for_holders(&code_holders));
 
     Ok(BatchDaWitness {
         witness,
         code_holders,
+        omitted_code_hashes: deduped_account_code_hashes(&blob),
     })
 }

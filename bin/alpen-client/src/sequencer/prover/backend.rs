@@ -14,8 +14,8 @@ use std::{collections::BTreeMap, fs, path::Path, sync::Arc, time::Duration};
 
 use alpen_common::SequencerOLClient;
 use alpen_params::{AlpenParams, AlpenSpecId};
-use alpen_proof_acct::process_ee_acct_update;
-use alpen_proof_chunk::process_ee_chunk;
+use alpen_proof_acct::process_ee_acct_update_native;
+use alpen_proof_chunk::process_ee_chunk_native;
 use alpen_storage_api::{BatchStorage, ChunkStorage};
 use eyre::Context;
 use k256::schnorr::SigningKey;
@@ -145,7 +145,7 @@ async fn build_ee_provers(
                     let chunk_params = (*params).clone();
                     let spec_version = *spec_version;
                     NativeHost::new(chunk_signing_key, move |zkvm| {
-                        process_ee_chunk(zkvm, &chunk_params, spec_version)
+                        process_ee_chunk_native(zkvm, &chunk_params, spec_version)
                     })
                 };
                 let chunk = (builders.chunk)(*spec_version).native(chunk_host);
@@ -153,7 +153,7 @@ async fn build_ee_provers(
                 let acct_host = {
                     let spec_version = *spec_version;
                     NativeHost::new(acct_signing_key, move |zkvm| {
-                        process_ee_acct_update(zkvm, spec_version, &chunk_predicate_key)
+                        process_ee_acct_update_native(zkvm, spec_version, &chunk_predicate_key)
                     })
                 };
                 let account = (builders.account)(*spec_version).native(acct_host);

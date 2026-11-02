@@ -177,6 +177,29 @@ where
         })
     }
 
+    /// Reads the bytes of each bytecode in `code_hashes`, in order.
+    ///
+    /// Reth keeps every bytecode the chain deployed, so the latest state
+    /// serves any code hash an account ever held.
+    pub fn bytecodes(&self, code_hashes: &[B256]) -> Result<Vec<Vec<u8>>> {
+        let state = self.provider_factory.latest()?;
+        code_hashes
+            .iter()
+            .map(|code_hash| {
+                let bytecode = state
+                    .bytecode_by_hash(code_hash)?
+                    .ok_or_else(|| eyre!("no bytecode for code hash {code_hash}"))?;
+                let bytes = bytecode.original_bytes().to_vec();
+                if keccak256(&bytes) != *code_hash {
+                    return Err(eyre!(
+                        "bytecode for code hash {code_hash} hashes differently"
+                    ));
+                }
+                Ok(bytes)
+            })
+            .collect()
+    }
+
     /// Read the per-block accessed-state records produced by the
     /// `AccessedStateGenerator` exex for the block range and union them
     /// into a single `AccumulatedState`. Also returns the alloy `Block`

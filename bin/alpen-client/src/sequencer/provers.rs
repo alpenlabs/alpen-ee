@@ -16,20 +16,22 @@
 
 use std::sync::Arc;
 
+use alloy_primitives::{Address, B256};
 use alpen_common::SequencerOLClient;
 use alpen_params::{AlpenParams, AlpenSpecId};
-use alpen_storage_api::{BatchStorage, ChunkStorage};
+use alpen_storage_api::{AccessedStateStore, BatchStorage, ChunkStorage};
 use alpen_storage_store::{NodeStorage, SequencerDatabases};
-use alpen_witness::RangeWitnessExtractor;
+use alpen_witness::{RangeWitnessData, RangeWitnessExtractor};
 use bitcoind_async_client::Client as BtcClient;
+use reth_ethereum_primitives::Block;
 use reth_provider::{BlockReader, StateProviderFactory};
 use strata_paas::{ProverBuilder, ReceiptStore, RetryConfig};
 use tracing::info;
 
 use super::prover::{
-    launch_validated_ee_batch_prover, AcctRangeWitnessFn, AcctReceiptHook, AcctSpec,
-    ChunkReceiptHook, ChunkSpec, EeAcctTaskStore, EeBatchProofDbManager, EeChunkReceiptStore,
-    EeChunkTaskStore, EeProverBuilders, EeProverStores, PaasBatchProver,
+    launch_validated_ee_batch_prover, AcctReceiptHook, AcctSpec, AcctStateReader, ChunkReceiptHook,
+    ChunkSpec, EeAcctTaskStore, EeBatchProofDbManager, EeChunkReceiptStore, EeChunkTaskStore,
+    EeProverBuilders, EeProverStores, PaasBatchProver,
 };
 use crate::{config::ProverBackendConfig, service_executor::ServiceExecutor};
 
@@ -53,11 +55,7 @@ pub(crate) async fn launch<P>(
     inputs: EeProverInputs<P>,
 ) -> eyre::Result<Arc<PaasBatchProver>>
 where
-    P: StateProviderFactory
-        + BlockReader<Block = reth_ethereum_primitives::Block>
-        + Send
-        + Sync
-        + 'static,
+    P: StateProviderFactory + BlockReader<Block = Block> + Send + Sync + 'static,
 {
     let EeProverInputs {
         storage,
@@ -79,14 +77,8 @@ where
     // multiproof from per-block accessed-state records. Migrating to
     // inline per-block witnesses would let us drop this extractor and
     // the multiproof.
-    let range_witness_extractor =
+    let acct_state_reader: Arc<dyn AcctStateReader> =
         Arc::new(RangeWitnessExtractor::new(node_provider, storage.clone()));
-    let acct_range_witness_fn: Arc<AcctRangeWitnessFn> = {
-        let extractor = range_witness_extractor.clone();
-        Arc::new(move |first_block, last_block, extra_accounts| {
-            extractor.extract_range_witness_with_accounts(first_block, last_block, &extra_accounts)
-        })
-    };
     let da_ctx = dbs.da_context_db();
 
     // A `ProverBuilder` is single-use (`.native(host)`/`.remote(host)`
@@ -104,11 +96,15 @@ where
         let prover_db = prover_db.clone();
         let chunk_receipts = chunk_receipts.clone();
         Box::new(move |spec_version| {
-            ProverBuilder::new(ChunkSpec::new(chunk_storage_dyn.clone(), storage.clone()))
-                .task_store(EeChunkTaskStore::new(prover_db.clone(), spec_version))
-                .receipt_store(chunk_receipts.clone())
-                .receipt_hook(ChunkReceiptHook::new(chunk_storage_dyn.clone()))
-                .retry(RetryConfig::default())
+            ProverBuilder::new(ChunkSpec::new(
+                chunk_storage_dyn.clone(),
+                storage.clone(),
+                spec_version,
+            ))
+            .task_store(EeChunkTaskStore::new(prover_db.clone(), spec_version))
+            .receipt_store(chunk_receipts.clone())
+            .receipt_hook(ChunkReceiptHook::new(chunk_storage_dyn.clone()))
+            .retry(RetryConfig::default())
         })
     };
 
@@ -119,7 +115,7 @@ where
         let storage = storage.clone();
         let btc_client = btc_client.clone();
         let da_ctx = da_ctx.clone();
-        let acct_range_witness_fn = acct_range_witness_fn.clone();
+        let acct_state_reader = acct_state_reader.clone();
         let prover_db = prover_db.clone();
         let batch_proofs = batch_proofs.clone();
         Box::new(move |spec_version| {
@@ -130,7 +126,8 @@ where
                 storage.clone(),
                 btc_client.clone(),
                 da_ctx.clone(),
-                acct_range_witness_fn.clone(),
+                acct_state_reader.clone(),
+                spec_version,
             ))
             .task_store(EeAcctTaskStore::new(prover_db.clone(), spec_version))
             .receipt_hook(AcctReceiptHook::new(
@@ -165,4 +162,23 @@ where
     );
 
     Ok(batch_prover)
+}
+
+impl<F, S> AcctStateReader for RangeWitnessExtractor<F, S>
+where
+    F: StateProviderFactory + BlockReader<Block = Block> + Send + Sync,
+    S: AccessedStateStore + 'static,
+{
+    fn range_witness(
+        &self,
+        first_block: B256,
+        last_block: B256,
+        extra_accounts: &[Address],
+    ) -> eyre::Result<RangeWitnessData> {
+        self.extract_range_witness_with_accounts(first_block, last_block, extra_accounts)
+    }
+
+    fn bytecodes(&self, code_hashes: &[B256]) -> eyre::Result<Vec<Vec<u8>>> {
+        RangeWitnessExtractor::bytecodes(self, code_hashes)
+    }
 }

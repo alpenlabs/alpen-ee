@@ -23,7 +23,7 @@ use strata_snark_acct_types::{
     AccumulatorClaim, LedgerRefs, ProofState, Seqno, UpdateOutputs, UpdateProofPubParams,
 };
 
-use super::{verify_da_witness, DaVerificationError};
+use super::{verify_da, verify_da_witness, DaVerificationError, OmittedCodeWitness};
 use crate::DaBlobRecoveryError;
 
 /// Spec version the fixtures are built under. V1 is the first layout that
@@ -307,6 +307,59 @@ fn verify_da_witness_rejects_holder_with_other_code() {
     ));
 }
 
+/// Runs the DA check with the omitted code supplied as `bytecodes`, as the V1
+/// guest release reads it.
+fn run_verify_da_with_bytecodes(
+    ee_input: &EePrivateInput,
+    da_witness: &DaWitness,
+    bytecodes: &[&[u8]],
+    pub_params: &UpdateProofPubParams,
+    expected_pre_root: [u8; 32],
+) -> Result<(), DaVerificationError> {
+    let (ee_bytes, da_bytes) = archive_inputs(ee_input, da_witness);
+    let archived_ee = rkyv::access::<ArchivedEePrivateInput, RkyvError>(&ee_bytes).unwrap();
+    let archived_da = rkyv::access::<ArchivedDaWitness, RkyvError>(&da_bytes).unwrap();
+
+    verify_da(
+        archived_ee,
+        archived_da.blocks(),
+        OmittedCodeWitness::Bytecodes(bytecodes.to_vec()),
+        pub_params,
+        expected_pre_root,
+        SPEC_VERSION,
+    )
+}
+
+#[test]
+fn verify_da_accepts_deduped_bytecode_supplied_as_bytes() {
+    let bytecode = [0x60, 0x80, 0x60, 0x40, 0x52];
+    let (ee_input, da_witness, pub_params, pre_root) =
+        deduped_code_fixture(keccak256(bytecode), &[], Vec::new());
+
+    run_verify_da_with_bytecodes(&ee_input, &da_witness, &[&bytecode], &pub_params, pre_root)
+        .expect("the omitted bytecode's bytes should satisfy its code hash");
+}
+
+#[test]
+fn verify_da_rejects_supplied_bytecode_with_other_hash() {
+    let (ee_input, da_witness, pub_params, pre_root) =
+        deduped_code_fixture(keccak256([0x60, 0x80, 0x60, 0x40, 0x52]), &[], Vec::new());
+
+    let err = run_verify_da_with_bytecodes(
+        &ee_input,
+        &da_witness,
+        &[&[0x60, 0x00]],
+        &pub_params,
+        pre_root,
+    )
+    .expect_err("other bytes must not vouch for the omitted code");
+
+    assert!(matches!(
+        err,
+        DaVerificationError::MissingDeployedBytecode(_)
+    ));
+}
+
 #[test]
 fn verify_da_blob_metadata_rejects_missing_deployed_bytecode() {
     let header = EvmHeaderSummary {
@@ -365,7 +418,7 @@ fn verify_da_blob_metadata_rejects_missing_deployed_bytecode() {
         &transition,
         &pub_params,
         &pre_state,
-        archived_da.dedup_da_witness(),
+        OmittedCodeWitness::Holders(archived_da.dedup_da_witness()),
     )
     .expect_err("account code hash with no published or witnessed bytecode must fail");
 

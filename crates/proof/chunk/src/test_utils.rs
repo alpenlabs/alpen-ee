@@ -100,7 +100,7 @@ pub fn build_workload_chunk(
     );
 
     WorkloadChunk {
-        input: EeChunkProofInput { private_input },
+        input: EeChunkProofInput::V2 { private_input },
         transition,
     }
 }

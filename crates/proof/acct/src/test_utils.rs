@@ -105,7 +105,7 @@ pub fn build_workload_update(
         .map(|_| Coinput::new(Vec::new()))
         .collect();
 
-    EeAcctProofInput {
+    EeAcctProofInput::V2 {
         ee_private_input: EePrivateInput::new(
             workload.range_pre_state.clone(),
             vec![ChunkInput::new(transition.clone(), chunk_proof)],
