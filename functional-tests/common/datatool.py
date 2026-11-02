@@ -23,6 +23,7 @@ GENESIS_INNER_STATE_ROOTS = {
     "mainnet": "308ce726a90fd45d3638fd86dec816cca262edc0d5acee9b130cfa33dbb740b0",
     "staging": "2a82d8daab762ffd91786783f47ca123d7d2206982533748697413e21c05f4b2",
     "testnet": "87da9f8fd94022e63d24f05207dffd8a513136d1b07d68c0a350c47190085036",
+    "testnet-stress": "0b76f9c36b4d4054987d4f84a7cd26535a2ec21f59b1db909328de90373ba596",
 }
 
 
