@@ -46,6 +46,7 @@ class AlpenClientEnvParams:
     l1_reorg_safe_depth: int = 2
     batch_sealing_block_count: int = 10
     chunk_sealing_block_count: int | None = None
+    chunk_sealing_gas_limit: int | None = None
     batch_sealing_da_size_bytes: int | None = None
     epoch_tracking_mode: str = "confirmed"
     beneficiary_address: str | None = None
@@ -188,6 +189,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
             da_config=da_config,
             batch_sealing_block_count=envparams.batch_sealing_block_count,
             chunk_sealing_block_count=envparams.chunk_sealing_block_count,
+            chunk_sealing_gas_limit=envparams.chunk_sealing_gas_limit,
             batch_sealing_da_size_bytes=envparams.batch_sealing_da_size_bytes,
             epoch_tracking_mode=envparams.epoch_tracking_mode,
             beneficiary_address=envparams.beneficiary_address,
