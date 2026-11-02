@@ -13,6 +13,8 @@ there.
 import json
 from pathlib import Path
 
+from common import network_profile
+
 # Per-network params files, one ``<network>.json`` each.
 PARAMS_DIR = Path(__file__).resolve().parents[2] / "params"
 
@@ -62,6 +64,12 @@ def compose_alpen_params(
             set. Defaults to the deployed networks' floors. EEST sets every
             version to zero to exercise the standard Ethereum recurrence.
     """
+    profile = network_profile.load()
+    chain = profile.get("chain", chain)
+    bridge_denomination = profile.get("bridge_denomination", bridge_denomination)
+    max_withdrawal_amount = profile.get("max_withdrawal_amount", max_withdrawal_amount)
+    base_fee_floor = profile.get("base_fee_floor", base_fee_floor)
+    spec_schedule = profile.get("spec_schedule", spec_schedule)
     if max_withdrawal_amount == 0:
         raise ValueError("max_withdrawal_amount=0 is not a valid cap; pass None to disable it")
     if "v0" not in base_fee_floor:

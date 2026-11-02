@@ -4,6 +4,7 @@ import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from common import network_profile
 from common.config.config import BitcoindConfig
 from common.config.params import GenesisAccountData
 
@@ -213,6 +214,7 @@ def write_genesis_accounts(datadir: Path, predicate: str, chain: str = "dev") ->
     so it cannot be computed here. ``alpen-genesis`` pins the same values in
     ``genesis_inner_state_roots_are_stable`` and fails if EE genesis moves.
     """
+    chain = network_profile.load().get("chain", chain)
     accounts_path = datadir / "genesis-accounts.json"
     account = GenesisAccountData(predicate=predicate, inner_state=GENESIS_INNER_STATE_ROOTS[chain])
     accounts_path.write_text(json.dumps({ALPEN_EE_ACCOUNT_ID: asdict(account)}, indent=2))
@@ -234,6 +236,9 @@ def generate_ee_params(
     the ee-params.json embedded bridge params (used for OL/ASM genesis) agree
     with the alpen-params.json bridge params (used by the EE node at runtime).
     """
+    profile = network_profile.load()
+    bridge_denomination_sats = profile.get("bridge_denomination", bridge_denomination_sats)
+    max_withdrawal_amount_sats = profile.get("max_withdrawal_amount", max_withdrawal_amount_sats)
     params_path = datadir / "ee-params.json"
     params = {
         "account_id": ALPEN_EE_ACCOUNT_ID,
