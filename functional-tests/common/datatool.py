@@ -215,9 +215,13 @@ def write_genesis_accounts(datadir: Path, predicate: str, chain: str = "dev") ->
     so it cannot be computed here. ``alpen-genesis`` pins the same values in
     ``genesis_inner_state_roots_are_stable`` and fails if EE genesis moves.
     """
-    chain = network_profile.load().get("chain", chain)
+    profile = network_profile.load()
+    chain = profile.get("chain", chain)
     accounts_path = datadir / "genesis-accounts.json"
-    account = GenesisAccountData(predicate=predicate, inner_state=GENESIS_INNER_STATE_ROOTS[chain])
+    # On a live network deposits fund the EE account on the OL; a profile that funds EE genesis
+    # accounts directly must fund the OL side to match, or the OL rejects the first withdrawal.
+    account = GenesisAccountData(predicate=predicate, inner_state=GENESIS_INNER_STATE_ROOTS[chain],
+                                 balance=profile.get("genesis_ol_balance_sats", 0))
     accounts_path.write_text(json.dumps({ALPEN_EE_ACCOUNT_ID: asdict(account)}, indent=2))
     return accounts_path
 

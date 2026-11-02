@@ -4,7 +4,8 @@
 composition defaults, so the guest-baked params (``scripts.gen_sp1_guest_params``)
 and the live node's ``--alpen-params`` stay byte-for-byte identical. Keys:
 ``chain`` (``params/<chain>.json``), ``bridge_denomination``,
-``max_withdrawal_amount``, ``base_fee_floor``, ``spec_schedule``.
+``max_withdrawal_amount``, ``base_fee_floor``, ``spec_schedule``, ``genesis_ol_balance_sats``
+(the EE account's OL balance at genesis, matching the EE genesis allocation).
 """
 
 import json
@@ -12,7 +13,8 @@ import os
 from pathlib import Path
 
 ENV = "ALPEN_FT_NETWORK_PROFILE"
-KEYS = {"chain", "bridge_denomination", "max_withdrawal_amount", "base_fee_floor", "spec_schedule"}
+KEYS = {"chain", "bridge_denomination", "max_withdrawal_amount", "base_fee_floor", "spec_schedule",
+        "genesis_ol_balance_sats"}
 
 
 def load() -> dict:
