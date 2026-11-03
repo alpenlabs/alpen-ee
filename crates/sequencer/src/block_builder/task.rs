@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use alpen_acct_types::EeAccountState;
 use alpen_block_assembly::{build_next_exec_block, BlockAssemblyInputs, BlockAssemblyOutputs};
@@ -9,12 +9,20 @@ use alpen_exec_chain::ExecChainHandle;
 use alpen_params::AlpenSpecId;
 use alpen_storage_api::ExecBlockStorage;
 use eyre::Context;
+use metrics::{counter, gauge, histogram};
 use strata_acct_types::{Hash, MessageEntry};
 use strata_identifiers::{OLBlockCommitment, OLBlockId};
 use thiserror::Error;
 use tracing::{debug, error, trace, warn};
 
-use crate::{block_builder::BlockBuilderConfig, ol_chain_tracker::OLChainTrackerHandle};
+use crate::{
+    block_builder::BlockBuilderConfig,
+    metrics::{
+        BLOCKS_BUILT, BLOCK_BUILD_FAILURES, BLOCK_BUILD_SECONDS, BLOCK_INBOX_MESSAGES,
+        BLOCK_INTERVAL_SECONDS, BLOCK_LATEST_HEIGHT, BLOCK_PAYLOAD_BYTES,
+    },
+    ol_chain_tracker::OLChainTrackerHandle,
+};
 
 /// Error type for block builder that distinguishes retriable from real errors.
 #[derive(Debug, Error)]
@@ -189,10 +197,12 @@ pub async fn block_builder_task<
         {
             Ok((blockhash, next_target)) => {
                 debug!(?blockhash, "built new block");
+                counter!(BLOCKS_BUILT).increment(1);
                 next_block_target = next_target;
             }
             Err(BlockBuilderError::BlocktimeConstraintViolated) => {
                 warn!("blocktime constraint violated, retrying immediately");
+                counter!(BLOCK_BUILD_FAILURES, "reason" => "blocktime_violation").increment(1);
             }
             Err(BlockBuilderError::ProductionStopped) => {
                 trace!("block production stopped, skipping turn");
@@ -200,6 +210,7 @@ pub async fn block_builder_task<
             }
             Err(BlockBuilderError::Other(err)) => {
                 error!(?err, "failed to build block");
+                counter!(BLOCK_BUILD_FAILURES, "reason" => "error").increment(1);
                 clock.sleep_ms(config.error_backoff_ms()).await;
             }
         }
@@ -222,6 +233,7 @@ async fn block_builder_task_inner<TEngine: PayloadBuilderEngine>(
 ) -> Result<(Hash, BlockTarget), BlockBuilderError> {
     // if we are not ready, sleep
     clock.sleep_until(next_block_target.timestamp_ms).await;
+    let started = Instant::now();
 
     // we can build blocks now
     let (block, payload, blockhash) = build_next_block(
@@ -234,13 +246,14 @@ async fn block_builder_task_inner<TEngine: PayloadBuilderEngine>(
         clock,
     )
     .await?;
+    histogram!(BLOCK_BUILD_SECONDS, "stage" => "assemble").record(started.elapsed().as_secs_f64());
 
     // encode the payload for storage first, since submitting it takes it
-    let payload_bytes = ExecBlockPayload::from_bytes(
-        payload
-            .to_bytes()
-            .context("block_builder: serialize payload")?,
-    );
+    let encoded_payload = payload
+        .to_bytes()
+        .context("block_builder: serialize payload")?;
+    histogram!(BLOCK_PAYLOAD_BYTES).record(encoded_payload.len() as f64);
+    let payload_bytes = ExecBlockPayload::from_bytes(encoded_payload);
 
     // submit the built payload back to engine so reth knows the block (inserts
     // it into the engine tree as VALID, not yet canonical)
@@ -251,6 +264,7 @@ async fn block_builder_task_inner<TEngine: PayloadBuilderEngine>(
 
     // cache next block target before the block is consumed by the save below
     let next_block_target = compute_next_block_target(&block, config);
+    let blocknum = block.blocknum();
 
     // save block outputs to Alpen storage (the source of truth)
     storage
@@ -263,6 +277,8 @@ async fn block_builder_task_inner<TEngine: PayloadBuilderEngine>(
         .new_block(blockhash)
         .await
         .context("block_builder: submit new exec block")?;
+    gauge!(BLOCK_LATEST_HEIGHT, "status" => "head").set(blocknum as f64);
+    histogram!(BLOCK_BUILD_SECONDS, "stage" => "total").record(started.elapsed().as_secs_f64());
 
     // Canonicalization (forkchoice update) is intentionally NOT performed here.
     // The engine control task is the single owner of reth's canonical head: the
@@ -321,6 +337,8 @@ async fn build_next_block<TEngine: PayloadBuilderEngine>(
         last_local_block.timestamp_ms(),
         config.blocktime_ms(),
     )?;
+    histogram!(BLOCK_INTERVAL_SECONDS)
+        .record(timestamp_ms.saturating_sub(last_local_block.timestamp_ms()) as f64 / 1000.0);
 
     // check if there are new OL block inputs that need to be included
     let best_ol_block = ol_chain_handle
@@ -343,6 +361,7 @@ async fn build_next_block<TEngine: PayloadBuilderEngine>(
             .into_parts(),
         None => (vec![], last_local_block.next_inbox_msg_idx()),
     };
+    counter!(BLOCK_INBOX_MESSAGES).increment(inbox_messages.len() as u64);
 
     // The version governing this block: whatever the parent block's account
     // state already settled on. A rotation consumed by *this* block only

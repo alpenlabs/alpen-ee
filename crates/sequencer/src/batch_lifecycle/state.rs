@@ -4,8 +4,8 @@ use alpen_common::{BatchId, BatchStatus};
 use alpen_storage_api::{require_genesis_batch, BatchStorage, StorageError};
 use metrics::gauge;
 
-/// Tracks the latest canonical batch to reach each lifecycle status, in batch indices.
-pub(crate) const BATCH_LATEST_IDX_METRIC: &str = "alpen_ee_batch_latest_idx";
+use super::timing::StageClock;
+use crate::metrics::BATCH_LATEST_IDX;
 
 /// A frontier tracks the latest batch that has reached a particular status.
 ///
@@ -76,6 +76,9 @@ pub struct BatchLifecycleState {
 
     /// Latest batch with proof complete (status == ProofReady).
     proof_ready: Frontier,
+
+    /// When each in-flight batch was seen and last changed stage, for metrics.
+    clock: StageClock,
 }
 
 impl BatchLifecycleState {
@@ -87,7 +90,13 @@ impl BatchLifecycleState {
             da_complete: genesis,
             proof_pending: genesis,
             proof_ready: genesis,
+            clock: StageClock::default(),
         }
+    }
+
+    /// The stage clock, for recording a batch's transitions.
+    pub(crate) fn clock_mut(&mut self) -> &mut StageClock {
+        &mut self.clock
     }
 
     /// Get the DA pending frontier.
@@ -113,25 +122,25 @@ impl BatchLifecycleState {
     /// Advance DA pending frontier to a new batch.
     pub(crate) fn advance_da_pending(&mut self, idx: u64, id: BatchId) {
         self.da_pending = Frontier::new(idx, id);
-        gauge!(BATCH_LATEST_IDX_METRIC, "status" => "da_pending").set(idx as f64);
+        gauge!(BATCH_LATEST_IDX, "status" => "da_pending").set(idx as f64);
     }
 
     /// Advance DA complete frontier to a new batch.
     pub(crate) fn advance_da_complete(&mut self, idx: u64, id: BatchId) {
         self.da_complete = Frontier::new(idx, id);
-        gauge!(BATCH_LATEST_IDX_METRIC, "status" => "da_complete").set(idx as f64);
+        gauge!(BATCH_LATEST_IDX, "status" => "da_complete").set(idx as f64);
     }
 
     /// Advance proof pending frontier to a new batch.
     pub(crate) fn advance_proof_pending(&mut self, idx: u64, id: BatchId) {
         self.proof_pending = Frontier::new(idx, id);
-        gauge!(BATCH_LATEST_IDX_METRIC, "status" => "proof_pending").set(idx as f64);
+        gauge!(BATCH_LATEST_IDX, "status" => "proof_pending").set(idx as f64);
     }
 
     /// Advance proof ready frontier to a new batch.
     pub(crate) fn advance_proof_ready(&mut self, idx: u64, id: BatchId) {
         self.proof_ready = Frontier::new(idx, id);
-        gauge!(BATCH_LATEST_IDX_METRIC, "status" => "proof_ready").set(idx as f64);
+        gauge!(BATCH_LATEST_IDX, "status" => "proof_ready").set(idx as f64);
     }
 
     /// Reset all frontiers to genesis state.
@@ -141,17 +150,20 @@ impl BatchLifecycleState {
         self.da_complete = genesis;
         self.proof_pending = genesis;
         self.proof_ready = genesis;
+        self.clock.clear();
     }
 
     /// Reset da_pending to match da_complete.
     pub(crate) fn reset_to_da_complete(&mut self) {
         self.da_pending = self.da_complete;
+        self.clock.clear();
     }
 
     /// Reset da_pending and da_complete to match proof_pending.
     pub(crate) fn reset_to_proof_pending(&mut self) {
         self.da_pending = self.proof_pending;
         self.da_complete = self.proof_pending;
+        self.clock.clear();
     }
 
     /// Reset all higher frontiers to match proof_ready.
@@ -159,6 +171,7 @@ impl BatchLifecycleState {
         self.da_pending = self.proof_ready;
         self.da_complete = self.proof_ready;
         self.proof_pending = self.proof_ready;
+        self.clock.clear();
     }
 }
 

@@ -8,6 +8,7 @@ use std::{
 
 use alpen_common::{ConsensusHeads, OLClient, OLFinalizedStatus};
 use alpen_storage_api::Storage;
+use metrics::counter;
 use serde::{Deserialize, Serialize};
 use strata_service::{AsyncService, Response, Service, ServiceState};
 use tokio::sync::watch;
@@ -15,6 +16,7 @@ use tracing::{debug, error};
 
 use crate::{
     error::OLTrackerError,
+    metrics::{OL_TRACKER_ACTIONS, OL_TRACKER_FAILURES},
     reorg::handle_reorg,
     state::OLTrackerState,
     task::{handle_extend_ee_state, handle_refresh_finalized, track_ol_state, TrackOLAction},
@@ -121,6 +123,7 @@ where
         {
             Ok(TrackOLAction::Extend(epoch_operations, chain_status)) => {
                 debug!(?epoch_operations, ?chain_status, "received track action");
+                counter!(OL_TRACKER_ACTIONS, "action" => "extend").increment(1);
                 if let Err(error) = handle_extend_ee_state(
                     &epoch_operations,
                     &chain_status,
@@ -135,6 +138,7 @@ where
             }
             Ok(TrackOLAction::RefreshFinalized(chain_status)) => {
                 debug!(?chain_status, "received finalized refresh action");
+                counter!(OL_TRACKER_ACTIONS, "action" => "refresh_finalized").increment(1);
                 if let Err(error) = handle_refresh_finalized(
                     &chain_status,
                     &mut state.tracker_state,
@@ -148,6 +152,7 @@ where
             }
             Ok(TrackOLAction::Reorg) => {
                 debug!("received reorg action");
+                counter!(OL_TRACKER_ACTIONS, "action" => "reorg").increment(1);
                 if let Err(error) = handle_reorg(
                     &mut state.tracker_state,
                     state.storage.as_ref(),
@@ -162,6 +167,7 @@ where
             }
             Ok(TrackOLAction::Noop) => {
                 debug!("received noop action");
+                counter!(OL_TRACKER_ACTIONS, "action" => "noop").increment(1);
             }
             Err(error) => {
                 return handle_tracker_error(error);
@@ -179,6 +185,8 @@ where
 /// `Ok(Continue)` to retry on the next tick.
 fn handle_tracker_error(error: impl Into<OLTrackerError>) -> anyhow::Result<Response> {
     let error = error.into();
+    counter!(OL_TRACKER_FAILURES, "fatal" => if error.is_fatal() { "true" } else { "false" })
+        .increment(1);
 
     if error.is_fatal() {
         Err(anyhow::anyhow!("{}", error.panic_message()))

@@ -27,16 +27,13 @@ use tokio::{runtime::Handle, time::interval};
 use tracing::{info, info_span, warn, Instrument};
 
 use super::{evm_code::RethEvmCodeProvider, header_summary::RethHeaderSummaryProvider};
-use crate::service_executor::ServiceExecutor;
+use crate::{metrics::DA_TXS_PENDING, service_executor::ServiceExecutor};
 
 // Mirrors bitcoind-async-client's upstream defaults, applied when
 // `BitcoindConfig.retry_count`/`retry_interval` are left unset in
 // `[sequencer.bitcoind]`.
 const DEFAULT_BTCIO_RETRY_COUNT: u16 = 3;
 const DEFAULT_BTCIO_RETRY_INTERVAL_MS: u64 = 1_000;
-
-/// Tracks broadcast transactions awaiting processing or finalization, in transactions.
-const DA_BROADCAST_PENDING_METRIC: &str = "alpen_ee_da_broadcast_pending";
 
 /// Everything [`start`] needs to bring up the DA pipeline.
 pub(crate) struct DaPipelineInputs<'a, P> {
@@ -159,8 +156,7 @@ where
             let mut poll = interval(Duration::from_secs(10));
             loop {
                 poll.tick().await;
-                gauge!(DA_BROADCAST_PENDING_METRIC)
-                    .set(monitor.get_current().unfinalized_count as f64);
+                gauge!(DA_TXS_PENDING).set(monitor.get_current().unfinalized_count as f64);
             }
         });
     } else {

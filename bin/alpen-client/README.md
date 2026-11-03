@@ -861,17 +861,86 @@ Two secrets are read from the environment instead of the config file, both seque
 
 ### Metrics
 
-Sequencer metrics on the `--metrics` endpoint, with Reth's `reth_` prefix:
+Every Alpen series is recorded through the `metrics` facade onto Reth's Prometheus recorder, so it is served on Reth's `--metrics` endpoint with the `reth_` prefix: `alpen_ee_blocks_built_total` is scraped as `reth_alpen_ee_blocks_built_total`. Histograms render as summaries (`quantile="0.5"` and so on, plus `_sum` and `_count`). Names follow `alpen_ee_<subsystem>_<noun>[_unit][_total]`: one metric per concept with a label for the variant, counters end in `_total`, failed attempts are `failures_total`, histograms carry `_seconds` or `_bytes`. Each crate keeps its constants and descriptions in its `metrics.rs`. Type: C counter, G gauge, H histogram.
 
-| Metric | Type | Meaning |
-|---|---|---|
-| `alpen_ee_batch_latest_idx{status}` | Gauge | Latest batch per [lifecycle](#batch-lifecycle) stage (`sealed` … `proof_ready`, `ol_latest` = OL tip); gaps show where the pipeline waits |
-| `alpen_ee_update_submitter_errors_total` | Counter | Failed OL update submission passes |
-| `alpen_ee_da_broadcast_pending` | Gauge | DA transactions not yet final |
-| `alpen_ee_block_build_duration_seconds` | Histogram | Payload request through witness persistence |
-| `alpen_da_fee_rate_current_wei_per_byte` | Gauge | DA fee rate in use |
-| `alpen_da_fee_rate_stale` | Gauge | `1` while the rate is stale |
-| `alpen_da_fee_rate_refreshes_total{outcome}` | Counter | Rate refreshes by `success`, `timeout`, `failure` |
+**Block production** (`alpen-sequencer`, `alpen-engine-reth`)
+
+| Metric | T | Labels | Question it answers |
+|---|---|---|---|
+| `alpen_ee_blocks_built_total` | C | | Is the sequencer producing blocks? |
+| `alpen_ee_block_build_failures_total` | C | `reason`: `blocktime_violation`, `error` | Why are blocks not being produced? |
+| `alpen_ee_block_build_seconds` | H | `stage`: `assemble` (payload built), `total` (built, submitted, stored, announced) | Is block production keeping up with the block time? |
+| `alpen_ee_block_interval_seconds` | H | | Is the chain's cadence regular? |
+| `alpen_ee_block_payload_bytes` | H | | How big are blocks? |
+| `alpen_ee_block_inbox_messages_total` | C | | Are deposits flowing into blocks? |
+| `alpen_ee_block_latest_height` | G | `status`: `head` (built), `preconf` (sent to reth), `safe`, `finalized` | How far behind the head are the OL's confirmed and finalized views? |
+| `alpen_ee_payload_build_seconds` | H | `stage`: `accept`, `resolve`, `persist` (witness stored), `total` | Where does a payload build spend its time? |
+| `alpen_ee_payload_build_retries_total` | C | | Is reth lagging behind the sequencer's parent? |
+| `alpen_ee_payload_build_failures_total` | C | `reason`: `missing`, `rejected`, `communication`, `resolve_failed` | Why do payload builds fail? |
+| `alpen_ee_forkchoice_updates_total` | C | `kind`: `preconf`, `consensus`, `catchup` | Is reth being driven? |
+| `alpen_ee_forkchoice_failures_total` | C | | Is reth rejecting heads? |
+
+**Batches and chunks** (`alpen-sequencer`)
+
+| Metric | T | Labels | Question it answers |
+|---|---|---|---|
+| `alpen_ee_batches_sealed_total` | C | `reason`: the policy that fired | Which limit closes batches? |
+| `alpen_ee_batch_blocks` | H | | How close to the block-count limit do batches get? |
+| `alpen_ee_chunks_sealed_total` | C | `reason` | Which limit closes chunks? |
+| `alpen_ee_batch_latest_idx` | G | `status`: `sealed`, `da_pending`, `da_complete`, `proof_pending`, `proof_ready`, `ol_latest` (included at the OL tip) | Is the [lifecycle](#batch-lifecycle) moving, and on which stage is it waiting? The gap between two statuses is that stage's backlog in batches. |
+| `alpen_ee_batch_transitions_total` | C | `status` entered | How many batches pass each stage? |
+| `alpen_ee_batch_transition_failures_total` | C | `status` attempted | Which stage is failing and retrying? |
+| `alpen_ee_batch_status_seconds` | H | `status` entered: time to reach it from the previous one | How long does each stage take? |
+| `alpen_ee_batch_settlement_seconds` | H | | How long from sealed to proof ready? |
+| `alpen_ee_batch_reorgs_total` | C | | Are sealed batches being reverted? |
+
+**Data availability** (`alpen-da-provider`, `alpen-client`)
+
+| Metric | T | Labels | Question it answers |
+|---|---|---|---|
+| `alpen_ee_da_blobs_built_total` | C | `empty` | Are DA blobs being produced, and are batches empty? |
+| `alpen_ee_da_blob_blocks` | H | | How many blocks per blob? |
+| `alpen_ee_da_blob_bytes` | H | | How much DA is posted per blob? |
+| `alpen_ee_da_bytecodes_deduped_total` | C | | Is bytecode dedup saving DA? |
+| `alpen_ee_da_envelope_chunks` | H | | How many L1 transactions per envelope? |
+| `alpen_ee_da_envelopes_submitted_total` | C | | Is DA being handed to the L1 writer? |
+| `alpen_ee_da_envelopes_finalized_total` | C | | Is DA reaching finality on L1? |
+| `alpen_ee_da_status_checks_total` | C | `status` | What does the lifecycle see when it polls DA? |
+| `alpen_ee_da_txs_pending` | G | | Is Bitcoin DA publication backing up? Non-zero normally; sustained growth is the signal. |
+| `alpen_ee_da_fee_rate_wei_per_byte` | G | | What DA fee is charged? |
+| `alpen_ee_da_fee_rate_stale` | G | | Is the DA fee rate stale (`1`)? |
+| `alpen_ee_da_fee_rate_refreshes_total` | C | `outcome`: `success`, `timeout`, `failure` | Is the fee-rate source healthy? |
+
+**Proving** (`alpen-client`)
+
+| Metric | T | Labels | Question it answers |
+|---|---|---|---|
+| `alpen_ee_proof_tasks_submitted_total` | C | `kind`: `chunk`, `acct` | Is proving being requested? |
+| `alpen_ee_proof_receipts_total` | C | `kind` | Are proofs coming back? |
+| `alpen_ee_proof_wait_seconds` | H | | How long does proving take end to end? |
+| `alpen_ee_proof_status_checks_total` | C | `status` | What does the lifecycle see when it polls the prover? |
+
+**OL link** (`alpen-sequencer`, `alpen-ol-tracker`)
+
+| Metric | T | Labels | Question it answers |
+|---|---|---|---|
+| `alpen_ee_ol_updates_submitted_total` | C | `kind`: `first`, `retry` | Are updates going out, and how often are they resent? |
+| `alpen_ee_ol_update_failures_total` | C | | Can the sequencer read OL state and submit? Counted per failed submitter pass. |
+| `alpen_ee_ol_update_outputs_total` | C | `kind`: `transfer`, `message` | Are withdrawals and messages leaving the EE? |
+| `alpen_ee_ol_epoch` | G | `status`: `local`, `confirmed`, `finalized`, `latest` | Is the node keeping up with the OL? |
+| `alpen_ee_ol_epochs_applied_total` | C | | Is the tracker applying epochs? |
+| `alpen_ee_ol_tracker_actions_total` | C | `action`: `extend`, `refresh_finalized`, `reorg`, `noop` | What does the tracker do on each poll? |
+| `alpen_ee_ol_tracker_failures_total` | C | `fatal` | Is the OL link failing? |
+
+**Gossip and store** (`alpen-client`)
+
+| Metric | T | Labels | Question it answers |
+|---|---|---|---|
+| `alpen_ee_gossip_broadcasts_total` | C | | Is the sequencer announcing blocks? |
+| `alpen_ee_gossip_received_total` | C | | Are full nodes hearing them? |
+| `alpen_ee_gossip_peers` | G | | Who is connected? |
+| `alpen_ee_store_rows` | G | `env`, `table` | How is the store growing, per table? Sampled every 30 s from MDBX table stats. |
+| `alpen_ee_store_env_bytes` | G | `env` | How much disk does each environment use? |
 
 ---
 

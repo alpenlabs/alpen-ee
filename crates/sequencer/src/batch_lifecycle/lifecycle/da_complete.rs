@@ -1,9 +1,13 @@
 use alpen_common::{Batch, BatchDaProvider, BatchProver, BatchStatus, DaStatus};
 use alpen_storage_api::BatchStorage;
 use eyre::Result;
+use metrics::counter;
 use tracing::{debug, error, warn};
 
-use crate::batch_lifecycle::{ctx::BatchLifecycleCtx, state::BatchLifecycleState};
+use crate::{
+    batch_lifecycle::{ctx::BatchLifecycleCtx, state::BatchLifecycleState},
+    metrics::BATCH_TRANSITION_FAILURES,
+};
 
 /// Marks DA complete for as many batches as possible (DaPending → DaComplete).
 ///
@@ -54,6 +58,8 @@ where
                                 "failed to confirm DA complete; \
                                  leaving batch in DaPending and retrying next lifecycle tick"
                             );
+                            counter!(BATCH_TRANSITION_FAILURES, "status" => "da_complete")
+                                .increment(1);
                             return Ok(());
                         }
 
@@ -65,6 +71,7 @@ where
                             .await?;
 
                         state.advance_da_complete(target_idx, batch.id());
+                        state.clock_mut().transition(target_idx, "da_complete");
                     }
                     DaStatus::NotRequested => {
                         warn!(
@@ -83,6 +90,8 @@ where
                                     error = %e,
                                     "failed to restart DA posting; will retry next lifecycle tick"
                                 );
+                                counter!(BATCH_TRANSITION_FAILURES, "status" => "da_pending")
+                                    .increment(1);
                                 return Ok(());
                             }
                         };
@@ -104,6 +113,7 @@ where
                             "CRITICAL: DA posting failed - manual intervention required. \
                              Batch is stuck in DaPending state."
                         );
+                        counter!(BATCH_TRANSITION_FAILURES, "status" => "da_complete").increment(1);
                         return Ok(());
                     }
                 };

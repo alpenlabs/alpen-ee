@@ -1,9 +1,13 @@
 use alpen_common::{Batch, BatchDaProvider, BatchProver, BatchStatus};
 use alpen_storage_api::BatchStorage;
 use eyre::Result;
+use metrics::counter;
 use tracing::{debug, warn};
 
-use crate::batch_lifecycle::{ctx::BatchLifecycleCtx, state::BatchLifecycleState};
+use crate::{
+    batch_lifecycle::{ctx::BatchLifecycleCtx, state::BatchLifecycleState},
+    metrics::BATCH_TRANSITION_FAILURES,
+};
 
 /// Posts DA for as many sealed batches as possible (Sealed → DaPending).
 ///
@@ -34,6 +38,7 @@ where
         match status {
             BatchStatus::Sealed => {
                 let batch_id = batch.id();
+                state.clock_mut().observe(batch_idx);
 
                 debug!(batch_idx, ?batch_id, "Posting DA");
 
@@ -46,6 +51,7 @@ where
                             error = %e,
                             "failed to post batch DA; will retry next lifecycle tick"
                         );
+                        counter!(BATCH_TRANSITION_FAILURES, "status" => "da_pending").increment(1);
                         return Ok(());
                     }
                 };
@@ -55,6 +61,7 @@ where
                     .await?;
 
                 state.advance_da_pending(batch_idx, batch_id);
+                state.clock_mut().transition(batch_idx, "da_pending");
             }
             BatchStatus::DaPending { .. }
             | BatchStatus::DaComplete { .. }

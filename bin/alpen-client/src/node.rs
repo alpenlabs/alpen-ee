@@ -12,7 +12,12 @@
 //! instead, via [`LaunchedNode`] and [`NodeBootstrap::run_until_exit`], both
 //! of which take the node's handles individually.
 
-use std::{future::Future, net::SocketAddr, path::Path, sync::Arc};
+use std::{
+    future::Future,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use alpen_common::{chain_status_checked, BlockNumHash, ConsensusHeads, OLClient};
 use alpen_engine_reth::{create_engine_control_task, AlpenRethExecEngine};
@@ -24,7 +29,7 @@ use alpen_rpc_server::{
     get_or_create_jwt_secret, start_authenticated_rpc_server, AdminRpcServer, AlpenAdminRpcServer,
     RpcBlockProductionControl,
 };
-use alpen_storage_store::{open_stores, NodeStorage};
+use alpen_storage_store::{open_stores, NodeDbMdbx, NodeStorage};
 use eyre::Context;
 use jsonrpsee::server::ServerHandle;
 use reth_chainspec::ChainSpec;
@@ -122,6 +127,10 @@ pub(crate) struct NodeBootstrap {
     /// exactly the watchers it needs, where it needs them — a full node
     /// never reads `ol_status_watcher` at all, for instance.
     pub(crate) ol_tracker: services::ol_tracker::OLTrackerHandle,
+    /// The node environment's database and the MDBX directory, for the
+    /// store sampler that publishes row counts and data-file sizes.
+    pub(crate) node_db: Arc<NodeDbMdbx>,
+    pub(crate) mdbx_dir: PathBuf,
     #[cfg(feature = "sequencer")]
     pub(crate) sequencer: sequencer::BootstrapResources,
 }
@@ -226,6 +235,8 @@ async fn bootstrap_node(
         params: params.clone(),
         storage,
         ol_tracker,
+        node_db: db.node_db(),
+        mdbx_dir: db.mdbx_dir().to_path_buf(),
         #[cfg(feature = "sequencer")]
         sequencer: sequencer::BootstrapResources {
             service_executor,

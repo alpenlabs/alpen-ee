@@ -4,6 +4,7 @@
 mod control;
 mod engine;
 mod errors;
+pub mod metrics;
 mod payload_builder;
 mod retry;
 mod sync;

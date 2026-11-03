@@ -16,8 +16,9 @@ use super::{
         try_advance_proof_ready,
     },
     reorg::{detect_reorg, handle_reorg, ReorgResult},
-    state::{BatchLifecycleState, BATCH_LATEST_IDX_METRIC},
+    state::BatchLifecycleState,
 };
+use crate::metrics::BATCH_LATEST_IDX;
 
 /// Polling interval for checking DA readiness and proof status.
 const POLL_INTERVAL: Duration = Duration::from_secs(10);
@@ -89,7 +90,7 @@ where
         ("proof_pending", state.proof_pending().idx()),
         ("proof_ready", state.proof_ready().idx()),
     ] {
-        gauge!(BATCH_LATEST_IDX_METRIC, "status" => status).set(idx as f64);
+        gauge!(BATCH_LATEST_IDX, "status" => status).set(idx as f64);
     }
 
     // Advance frontiers in lifecycle order so each stage can consume progress

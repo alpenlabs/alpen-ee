@@ -11,7 +11,7 @@ use tokio::{sync::watch, time};
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    batch_lifecycle::BATCH_LATEST_IDX_METRIC,
+    metrics::{BATCH_LATEST_IDX, OL_UPDATES_SUBMITTED, OL_UPDATE_FAILURES, OL_UPDATE_OUTPUTS},
     update_submitter::update_builder::build_update_from_batch,
 };
 
@@ -19,9 +19,6 @@ use crate::{
 const DEFAULT_UPDATE_CACHE_MAX_SIZE: usize = 64;
 /// Polling interval to process batches regardless of events.
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(60);
-
-/// Counts failed update submitter passes, including OL account state reads, in errors.
-const UPDATE_SUBMITTER_ERRORS_METRIC: &str = "alpen_ee_update_submitter_errors_total";
 
 /// Cache for built updates, keyed by BatchId.
 /// Stores (batch_idx, update) to allow eviction based on sequence number.
@@ -89,7 +86,7 @@ pub async fn create_update_submitter_task<C, S, ES, P>(
     )
     .await
     {
-        counter!(UPDATE_SUBMITTER_ERRORS_METRIC).increment(1);
+        counter!(OL_UPDATE_FAILURES).increment(1);
         error!(error = %e, "Update submitter error");
     }
 
@@ -124,7 +121,7 @@ pub async fn create_update_submitter_task<C, S, ES, P>(
         )
         .await
         {
-            counter!(UPDATE_SUBMITTER_ERRORS_METRIC).increment(1);
+            counter!(OL_UPDATE_FAILURES).increment(1);
             error!(error = %e, "Update submitter error");
         }
     }
@@ -148,7 +145,7 @@ async fn process_ready_batches(
     let next_sequence_no = *account_state.seq_no.inner();
     // Batch `n` carries update seq_no `n - 1`, so the OL tip includes batches up to
     // `next_sequence_no`.
-    gauge!(BATCH_LATEST_IDX_METRIC, "status" => "ol_latest").set(next_sequence_no as f64);
+    gauge!(BATCH_LATEST_IDX, "status" => "ol_latest").set(next_sequence_no as f64);
     // NOTE: ensure batch 0 (genesis batch) is never sent in an update.
     let next_batch_idx = next_sequence_no
         .checked_add(1)
@@ -176,6 +173,7 @@ async fn process_ready_batches(
 
         // Get update from cache or build it
         let batch_id = batch.id();
+        let resubmission = update_cache.get(&batch_id).is_some();
         let update = if let Some(cached) = update_cache.get(&batch_id) {
             cached.clone()
         } else {
@@ -195,6 +193,10 @@ async fn process_ready_batches(
             .map(|message| message.payload().value().to_sat())
             .sum();
         let txid = ol_client.submit_update(update).await?;
+        counter!(OL_UPDATES_SUBMITTED, "kind" => if resubmission { "retry" } else { "first" })
+            .increment(1);
+        counter!(OL_UPDATE_OUTPUTS, "kind" => "transfer").increment(output_transfer_count as u64);
+        counter!(OL_UPDATE_OUTPUTS, "kind" => "message").increment(output_message_count as u64);
 
         info!(
             component = "alpen_ee_update_submitter",

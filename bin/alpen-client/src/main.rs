@@ -34,6 +34,7 @@ mod args;
 mod config;
 mod full_node;
 mod gossip;
+mod metrics;
 mod node;
 mod ol;
 #[cfg(feature = "sequencer")]
