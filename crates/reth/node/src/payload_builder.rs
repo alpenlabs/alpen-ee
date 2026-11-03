@@ -2,6 +2,7 @@ use std::{
     cell::Cell,
     io,
     sync::{atomic::Ordering, Arc},
+    time::Instant,
 };
 
 use alloy_consensus::{Header, Transaction};
@@ -14,6 +15,7 @@ use alpen_reth_evm::{
     extract_withdrawal_intents,
 };
 use alpen_reth_primitives::WithdrawalIntent;
+use metrics::histogram;
 use reth_basic_payload_builder::*;
 use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{BlockExecutionError, BlockValidationError};
@@ -52,6 +54,14 @@ use crate::{
 /// Block space is accounted on actual `gas_used`, so we do not pre-reject on the
 /// DA-inflated signed `gas_limit`; the precise per-tx fit is checked post-execution.
 const MIN_TX_GAS_LIMIT: u64 = 21_000;
+
+/// Payload build time per stage, in seconds: `execute` (the transaction loop, including the
+/// in-EVM DA fee), `finish` (state root and block sealing) and `witness` (proof-witness
+/// capture and encoding).
+const PAYLOAD_STAGE_METRIC: &str = "alpen_ee_payload_stage_seconds";
+
+/// Encoded proof-witness size of each built block, in bytes.
+const BLOCK_WITNESS_BYTES_METRIC: &str = "alpen_ee_block_witness_bytes";
 
 /// A custom payload service builder that supports the custom engine types
 #[derive(Debug, Clone)]
@@ -353,6 +363,7 @@ where
     let speculative_gas_budget = block_gas_limit;
     let mut speculative_gas_used: u64 = 0;
 
+    let execute_started = Instant::now();
     while let Some(pool_tx) = best_txs.next() {
         // Stop once even a minimal transaction can no longer fit the remaining budget.
         if cumulative_gas_used + MIN_TX_GAS_LIMIT > block_gas_limit {
@@ -484,11 +495,17 @@ where
         });
     }
 
+    let finish_started = Instant::now();
+    histogram!(PAYLOAD_STAGE_METRIC, "stage" => "execute")
+        .record(finish_started.duration_since(execute_started).as_secs_f64());
     let BlockBuilderOutcome {
         execution_result,
         block,
         ..
     } = builder.finish(&state_provider, None)?;
+    let witness_started = Instant::now();
+    histogram!(PAYLOAD_STAGE_METRIC, "stage" => "finish")
+        .record(witness_started.duration_since(finish_started).as_secs_f64());
 
     // Inline depth-0 proof-witness capture. The block was just executed into
     // `db`; reuse that post-execution state (no re-execution) to read the
@@ -510,6 +527,8 @@ where
     let block_witness = record.encode().map_err(|e| {
         PayloadBuilderError::other(io::Error::other(format!("witness encode: {e}")))
     })?;
+    histogram!(PAYLOAD_STAGE_METRIC, "stage" => "witness").record(witness_started.elapsed().as_secs_f64());
+    histogram!(BLOCK_WITNESS_BYTES_METRIC).record(block_witness.len() as f64);
 
     let requests = chain_spec
         .is_prague_active_at_timestamp(attributes.timestamp)

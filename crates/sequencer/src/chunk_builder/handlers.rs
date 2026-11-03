@@ -7,6 +7,7 @@
 
 use alpen_common::{BatchId, BatchStorage, BlockNumHash, Chunk, ChunkStorage, ExecBlockStorage};
 use eyre::{eyre, Result};
+use metrics::{counter, histogram};
 use strata_acct_types::Hash;
 use tracing::{debug, warn};
 
@@ -21,6 +22,12 @@ const SEAL_REASON_BATCH_BOUNDARY: SealReason = "batch_boundary";
 
 /// Maximum number of entries to process in a single tick cycle.
 const MAX_ENTRIES_PER_TICK: usize = 10;
+
+/// Chunks sealed, by the policy that sealed them (or the batch boundary).
+const CHUNK_SEALED_METRIC: &str = "alpen_ee_chunk_sealed_total";
+
+/// Size of each sealed chunk, per sealing measure (`block_count`, `gas`, ...).
+const CHUNK_SEALED_SIZE_METRIC: &str = "alpen_ee_chunk_sealed_size";
 
 /// Process pending entries from the queue.
 ///
@@ -84,7 +91,7 @@ where
                 // tick. Popping first would drop it: this state isn't
                 // persisted, and `current_batch_idx` would never advance, so
                 // every later block would fail the batch_idx check.
-                handle_batch_boundary(state, chunk_storage, batch_id).await?;
+                handle_batch_boundary(state, chunk_storage, sealing_policy, batch_id).await?;
                 state.pop_pending();
             }
             PendingEntry::Block { block, batch_idx } => {
@@ -138,7 +145,7 @@ where
                     })
                     .flatten();
                 if let Some(reason) = exceeded {
-                    seal_chunk(state, chunk_storage, reason).await?;
+                    seal_chunk(state, chunk_storage, sealing_policy, reason).await?;
                 }
 
                 state.accumulator_mut().add_block(block, &block_data);
@@ -159,10 +166,11 @@ where
 async fn handle_batch_boundary<P: AccumulationPolicy>(
     state: &mut ChunkBuilderState<P>,
     chunk_storage: &impl ChunkStorage,
+    sealing_policy: &impl SealingPolicy<P>,
     batch_id: BatchId,
 ) -> Result<()> {
     if !state.accumulator().is_empty() {
-        seal_chunk(state, chunk_storage, SEAL_REASON_BATCH_BOUNDARY).await?;
+        seal_chunk(state, chunk_storage, sealing_policy, SEAL_REASON_BATCH_BOUNDARY).await?;
     }
 
     // Read the chunk IDs without clearing them, so a failed `set_batch_chunks`
@@ -259,6 +267,7 @@ async fn reset_state_to_storage_frontier<P: AccumulationPolicy>(
 async fn seal_chunk<P: AccumulationPolicy>(
     state: &mut ChunkBuilderState<P>,
     chunk_storage: &impl ChunkStorage,
+    sealing_policy: &impl SealingPolicy<P>,
     reason: SealReason,
 ) -> Result<()> {
     // Read the accumulated blocks without releasing them, so a failed
@@ -296,6 +305,11 @@ async fn seal_chunk<P: AccumulationPolicy>(
         .save_next_chunk(chunk)
         .await
         .map_err(|e| eyre!("save_next_chunk: {e}"))?;
+
+    counter!(CHUNK_SEALED_METRIC, "reason" => reason).increment(1);
+    for (measure, value) in sealing_policy.observe(state.accumulator().value()) {
+        histogram!(CHUNK_SEALED_SIZE_METRIC, "measure" => measure).record(value);
+    }
 
     // The chunk is durable, so the blocks it covers can go. `advance_chunk`
     // doesn't touch the accumulator, unlike its batch-level counterpart.

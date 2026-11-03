@@ -23,6 +23,7 @@ alloy-rpc-types.workspace = true
 ciborium.workspace = true
 eyre.workspace = true
 futures.workspace = true
+metrics.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-chainspec.workspace = true
 reth-consensus.workspace = true

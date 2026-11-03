@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use alpen_common::{Batch, BatchId, BatchStorage, BlockNumHash, ExecBlockStorage};
 use eyre::{eyre, Result};
+use metrics::{counter, histogram};
 use strata_acct_types::Hash;
 use tokio::{sync::mpsc, time};
 use tracing::{debug, error, warn};
@@ -20,6 +21,12 @@ const PENDING_BLOCK_POLL_INTERVAL: Duration = Duration::from_millis(100);
 /// Maximum number of blocks to process in a single polling cycle.
 /// This prevents blocking the select loop for too long when many blocks have data ready.
 const MAX_BLOCKS_PER_CYCLE: usize = 10;
+
+/// Batches sealed, by the policy that sealed them.
+const BATCH_SEALED_METRIC: &str = "alpen_ee_batch_sealed_total";
+
+/// Size of each sealed batch, per sealing measure (`block_count`, `da_size` bytes, ...).
+const BATCH_SEALED_SIZE_METRIC: &str = "alpen_ee_batch_sealed_size";
 
 /// Get block hashes and heights from `from_hash` (exclusive) to `to_hash` (inclusive).
 ///
@@ -75,6 +82,7 @@ async fn seal_batch<P: AccumulationPolicy>(
     state: &mut BatchBuilderState<P>,
     storage: &impl BatchStorage,
     block_storage: &impl ExecBlockStorage,
+    sealing_policy: &impl SealingPolicy<P>,
     reason: SealReason,
 ) -> Result<Option<BatchId>> {
     // Read the accumulated blocks without releasing them. `save_next_batch`
@@ -133,6 +141,11 @@ async fn seal_batch<P: AccumulationPolicy>(
 
     storage.save_next_batch(batch).await?;
 
+    counter!(BATCH_SEALED_METRIC, "reason" => reason).increment(1);
+    for (measure, value) in sealing_policy.observe(state.accumulator().value()) {
+        histogram!(BATCH_SEALED_SIZE_METRIC, "measure" => measure).record(value);
+    }
+
     // The batch is durable, so the blocks it covers can go.
     // `advance_batch` resets the accumulator.
     state.advance_batch(last_block);
@@ -167,6 +180,7 @@ where
         state,
         ctx.batch_storage.as_ref(),
         ctx.block_storage.as_ref(),
+        &ctx.sealing_policy,
         reason,
     )
     .await?
@@ -368,6 +382,7 @@ where
                 state,
                 ctx.batch_storage.as_ref(),
                 ctx.block_storage.as_ref(),
+                &ctx.sealing_policy,
                 reason,
             )
             .await?
@@ -569,7 +584,14 @@ mod tests {
             .expect_get_exec_block()
             .returning(move |_| Ok(Some(exec_record(genesis, None))));
 
-        let result = seal_batch(&mut state, &batch_storage, &block_storage, "test").await;
+        let result = seal_batch(
+            &mut state,
+            &batch_storage,
+            &block_storage,
+            &FixedBlockCountSealing::new(u64::MAX),
+            "test",
+        )
+        .await;
 
         assert!(result.is_err(), "a failed batch write must surface");
         assert_eq!(

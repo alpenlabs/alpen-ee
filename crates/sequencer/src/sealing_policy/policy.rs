@@ -83,6 +83,15 @@ pub trait SealingPolicy<P: AccumulationPolicy>: Send + Sync {
         false
     }
 
+    /// Measurements of an accumulated group, as `(name, value)` pairs, for metrics at seal
+    /// time.
+    ///
+    /// Leaf policies report the quantity they limit under [`Self::name`]; combinators
+    /// concatenate their children. Defaults to none, for policies with nothing to measure.
+    fn observe(&self, _value: &P::AccumulatedValue) -> Vec<(SealReason, f64)> {
+        Vec::new()
+    }
+
     /// [`Self::would_exceed`], naming the policy that triggered.
     fn would_exceed_with_reason(
         &self,

@@ -84,6 +84,10 @@ impl SealingPolicy<DaBatchSizePolicy> for MaxDaSizeSealing {
     ) -> bool {
         estimate_da_size(&ProjectedBatch::new(accumulated_diff, block_diff)) > self.max_size()
     }
+
+    fn observe(&self, accumulated_diff: &BatchBuilder) -> Vec<(SealReason, f64)> {
+        vec![(self.name(), estimate_da_size(accumulated_diff) as f64)]
+    }
 }
 
 #[cfg(test)]

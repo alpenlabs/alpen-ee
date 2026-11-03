@@ -82,6 +82,12 @@ where
         self.a.must_seal(&value.0) || self.b.must_seal(&value.1)
     }
 
+    fn observe(&self, value: &(A::AccumulatedValue, B::AccumulatedValue)) -> Vec<(SealReason, f64)> {
+        let mut measured = self.a.observe(&value.0);
+        measured.extend(self.b.observe(&value.1));
+        measured
+    }
+
     fn would_exceed_with_reason(
         &self,
         value: &(A::AccumulatedValue, B::AccumulatedValue),

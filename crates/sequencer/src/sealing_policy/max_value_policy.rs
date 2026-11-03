@@ -60,6 +60,10 @@ impl SealingPolicy<ValueAccumulatorPolicy> for MaxValueSealing {
     fn would_exceed(&self, accumulated: &u64, new: &u64) -> bool {
         accumulated.saturating_add(*new) > self.max_limit
     }
+
+    fn observe(&self, accumulated: &u64) -> Vec<(SealReason, f64)> {
+        vec![(self.name, *accumulated as f64)]
+    }
 }
 
 #[cfg(test)]
