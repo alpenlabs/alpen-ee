@@ -5,6 +5,7 @@ use std::time::Duration;
 use alpen_common::{BatchDaProvider, BatchProver};
 use alpen_storage_api::{require_latest_batch, BatchStorage};
 use eyre::Result;
+use metrics::gauge;
 use tokio::time;
 use tracing::{error, warn};
 
@@ -15,7 +16,7 @@ use super::{
         try_advance_proof_ready,
     },
     reorg::{detect_reorg, handle_reorg, ReorgResult},
-    state::BatchLifecycleState,
+    state::{BatchLifecycleState, BATCH_LATEST_IDX_METRIC},
 };
 
 /// Polling interval for checking DA readiness and proof status.
@@ -78,6 +79,17 @@ where
     let reorg = detect_reorg(state, ctx.batch_storage.as_ref()).await?;
     if !matches!(reorg, ReorgResult::None) {
         handle_reorg(state, &latest_batch, ctx.batch_storage.as_ref(), reorg).await?;
+    }
+
+    // Publish recovered and reorg-adjusted frontiers before attempting new transitions.
+    for (status, idx) in [
+        ("sealed", latest_batch.idx()),
+        ("da_pending", state.da_pending().idx()),
+        ("da_complete", state.da_complete().idx()),
+        ("proof_pending", state.proof_pending().idx()),
+        ("proof_ready", state.proof_ready().idx()),
+    ] {
+        gauge!(BATCH_LATEST_IDX_METRIC, "status" => status).set(idx as f64);
     }
 
     // Advance frontiers in lifecycle order so each stage can consume progress

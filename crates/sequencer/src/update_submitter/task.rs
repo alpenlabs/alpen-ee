@@ -5,16 +5,23 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use alpen_common::{BatchId, BatchProver, BatchStatus, OLFinalizedStatus, SequencerOLClient};
 use alpen_storage_api::{BatchStorage, ExecBlockStorage};
 use eyre::{eyre, Result};
+use metrics::{counter, gauge};
 use strata_snark_acct_types::SnarkAccountUpdate;
 use tokio::{sync::watch, time};
 use tracing::{debug, error, info, warn};
 
-use crate::update_submitter::update_builder::build_update_from_batch;
+use crate::{
+    batch_lifecycle::BATCH_LATEST_IDX_METRIC,
+    update_submitter::update_builder::build_update_from_batch,
+};
 
 /// Maximum number of entries in the update cache.
 const DEFAULT_UPDATE_CACHE_MAX_SIZE: usize = 64;
 /// Polling interval to process batches regardless of events.
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Counts failed update submitter passes, including OL account state reads, in errors.
+const UPDATE_SUBMITTER_ERRORS_METRIC: &str = "alpen_ee_update_submitter_errors_total";
 
 /// Cache for built updates, keyed by BatchId.
 /// Stores (batch_idx, update) to allow eviction based on sequence number.
@@ -82,6 +89,7 @@ pub async fn create_update_submitter_task<C, S, ES, P>(
     )
     .await
     {
+        counter!(UPDATE_SUBMITTER_ERRORS_METRIC).increment(1);
         error!(error = %e, "Update submitter error");
     }
 
@@ -116,6 +124,7 @@ pub async fn create_update_submitter_task<C, S, ES, P>(
         )
         .await
         {
+            counter!(UPDATE_SUBMITTER_ERRORS_METRIC).increment(1);
             error!(error = %e, "Update submitter error");
         }
     }
@@ -137,6 +146,9 @@ async fn process_ready_batches(
     let account_state = ol_client.get_latest_account_state().await?;
     debug!(?account_state, "Latest account state");
     let next_sequence_no = *account_state.seq_no.inner();
+    // Batch `n` carries update seq_no `n - 1`, so the OL tip includes batches up to
+    // `next_sequence_no`.
+    gauge!(BATCH_LATEST_IDX_METRIC, "status" => "ol_latest").set(next_sequence_no as f64);
     // NOTE: ensure batch 0 (genesis batch) is never sent in an update.
     let next_batch_idx = next_sequence_no
         .checked_add(1)
