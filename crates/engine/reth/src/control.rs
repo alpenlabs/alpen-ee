@@ -4,6 +4,7 @@ use alloy_primitives::B256;
 use alloy_rpc_types_engine::ForkchoiceState;
 use alpen_common::{BlockNumHash, ConsensusHeads};
 use alpen_engine_api::ExecutionEngine;
+use metrics::{counter, gauge};
 use reth_node_builder::NodeTypesWithDB;
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
@@ -15,6 +16,8 @@ use tokio::{
     time,
 };
 use tracing::{debug, error, warn};
+
+use crate::metrics::{BLOCK_LATEST_HEIGHT, FORKCHOICE_FAILURES, FORKCHOICE_UPDATES};
 
 /// How often the engine control task checks for safe and finalized blocks reth is missing.
 ///
@@ -37,6 +40,9 @@ trait CanonicalChain {
 
     /// Returns whether `blockhash` is on the canonical chain.
     fn contains(&self, blockhash: B256) -> Result<bool, Self::Error>;
+
+    /// Returns the height of `blockhash`, if the engine knows the block.
+    fn height(&self, blockhash: B256) -> Result<Option<u64>, Self::Error>;
 }
 
 impl<N: NodeTypesWithDB + ProviderNodeTypes> CanonicalChain for BlockchainProvider<N> {
@@ -66,6 +72,10 @@ impl<N: NodeTypesWithDB + ProviderNodeTypes> CanonicalChain for BlockchainProvid
             return Ok(false);
         };
         Ok(blockhash == canonical_blockhash)
+    }
+
+    fn height(&self, blockhash: B256) -> Result<Option<u64>, ProviderError> {
+        self.block_number(blockhash)
     }
 }
 
@@ -149,9 +159,23 @@ fn pending_hash<C: CanonicalChain>(
 async fn send_forkchoice_update<E: ExecutionEngine>(engine: &E, update: ForkchoiceState) -> bool {
     if let Err(err) = engine.update_consensus_state(update).await {
         warn!(?err, "forkchoice_update failed");
+        counter!(FORKCHOICE_FAILURES).increment(1);
         return false;
     }
     true
+}
+
+/// Publishes the heights of the EE blocks the OL's confirmed and finalized
+/// heads point at, when reth knows them.
+fn record_consensus_heights<C: CanonicalChain>(consensus_state: &ConsensusHeads, chain: &C) {
+    let safe = B256::from_slice(consensus_state.confirmed().as_slice());
+    let finalized = B256::from_slice(consensus_state.finalized().as_slice());
+    if let Ok(Some(height)) = chain.height(safe) {
+        gauge!(BLOCK_LATEST_HEIGHT, "status" => "safe").set(height as f64);
+    }
+    if let Ok(Some(height)) = chain.height(finalized) {
+        gauge!(BLOCK_LATEST_HEIGHT, "status" => "finalized").set(height as f64);
+    }
 }
 
 /// Takes chain updates from OL and sequencer/p2p and updates the chain in engine (reth).
@@ -192,9 +216,11 @@ async fn engine_control_task_inner<C, E, T>(
                 let consensus_state = consensus_rx.borrow_and_update().clone();
                 match forkchoice_state_from_consensus(&consensus_state, head_block_hash, &chain) {
                     Ok(update) => {
+                        counter!(FORKCHOICE_UPDATES, "kind" => "consensus").increment(1);
                         if send_forkchoice_update(&engine, update).await {
                             head_block_hash = update.head_block_hash;
                         }
+                        record_consensus_heights(&consensus_state, &chain);
                     }
                     Err(err) => error!(?err, "failed to read the canonical chain"),
                 }
@@ -208,6 +234,8 @@ async fn engine_control_task_inner<C, E, T>(
                 // got head block from sequencer / p2p
                 let blocknumhash = *preconf_rx.borrow_and_update();
                 let next_head_block_hash = B256::from_slice(blocknumhash.hash().as_slice());
+                gauge!(BLOCK_LATEST_HEIGHT, "status" => "preconf").set(blocknumhash.blocknum() as f64);
+                counter!(FORKCHOICE_UPDATES, "kind" => "preconf").increment(1);
 
                 let update = ForkchoiceState {
                     head_block_hash: next_head_block_hash,
@@ -237,7 +265,10 @@ async fn engine_control_task_inner<C, E, T>(
                     ?update,
                     "applying OL safe and finalized blocks reth is missing"
                 );
-                send_forkchoice_update(&engine, update).await;
+                counter!(FORKCHOICE_UPDATES, "kind" => "catchup").increment(1);
+                if send_forkchoice_update(&engine, update).await {
+                    record_consensus_heights(&consensus_state, &chain);
+                }
             }
             Ok(None) => {}
             Err(err) => error!(?err, "failed to read the canonical chain"),
@@ -321,6 +352,10 @@ mod tests {
 
         fn contains(&self, blockhash: B256) -> Result<bool, Infallible> {
             Ok(self.0.lock().unwrap().canonical.contains(&blockhash))
+        }
+
+        fn height(&self, _blockhash: B256) -> Result<Option<u64>, Infallible> {
+            Ok(None)
         }
     }
 

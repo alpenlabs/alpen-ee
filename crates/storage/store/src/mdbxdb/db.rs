@@ -5,7 +5,7 @@ use alpen_common::{
     AccessedStateRecord, Batch, BatchId, BatchStatus, Chunk, ChunkId, ChunkStatus,
     EeAccountStateAtEpoch, ExecBlockRecord,
 };
-use alpen_storage_mdbx::{MdbxConfig, MdbxEnv};
+use alpen_storage_mdbx::{DbResult as MdbxResult, MdbxConfig, MdbxEnv};
 use strata_acct_types::Hash;
 use strata_identifiers::{EpochCommitment, OLBlockId};
 use tracing::{error, trace, warn};
@@ -44,6 +44,17 @@ impl NodeDbMdbx {
     pub fn open(path: &Path, config: &MdbxConfig) -> DbResult<Self> {
         let env = MdbxEnv::open(path, config, &node_tables())?;
         Ok(Self::new(Arc::new(env)))
+    }
+
+    /// Row counts of every node table, as `(table, rows)`, each O(1)
+    /// through MDBX's table stat.
+    pub fn table_counts(&self) -> MdbxResult<Vec<(&'static str, usize)>> {
+        self.env.view(|reader| {
+            node_tables()
+                .iter()
+                .map(|table| Ok((table.name, reader.count_table(table.name)?)))
+                .collect()
+        })
     }
 }
 

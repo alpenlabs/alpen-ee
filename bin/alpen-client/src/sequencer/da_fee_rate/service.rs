@@ -11,10 +11,7 @@ use tokio::time::{sleep_until, Instant};
 use tracing::{debug, info, warn};
 
 use super::state::{fetch_policy_rate, DaFeeRateServiceState, RateUpdate};
-
-const CURRENT_RATE_METRIC: &str = "alpen_da_fee_rate_current_wei_per_byte";
-const STALE_METRIC: &str = "alpen_da_fee_rate_stale";
-const REFRESHES_METRIC: &str = "alpen_da_fee_rate_refreshes_total";
+use crate::metrics::{DA_FEE_RATE_REFRESHES, DA_FEE_RATE_STALE, DA_FEE_RATE_WEI_PER_BYTE};
 
 /// Runs [`DaFeeRateServiceState`] from periodic framework ticks.
 #[derive(Debug)]
@@ -83,7 +80,7 @@ pub(super) async fn launch(
 /// Records the initial fixed or writer-backed rate.
 pub(super) fn record_initialized_rate(rate_handle: &DaFeeRateHandle) {
     set_current_rate_metric(rate_handle.current_rate());
-    gauge!(STALE_METRIC).set(0);
+    gauge!(DA_FEE_RATE_STALE).set(0);
     info!(
         initial_rate_wei_per_byte = rate_handle.current_rate(),
         "DA fee rate initialized"
@@ -146,8 +143,8 @@ impl AsyncService for DaFeeRateService {
             Ok(update) => {
                 log_update(&update);
                 set_current_rate_metric(update.adjusted_rate.wei_per_byte());
-                gauge!(STALE_METRIC).set(0);
-                counter!(REFRESHES_METRIC, "outcome" => "success").increment(1);
+                gauge!(DA_FEE_RATE_STALE).set(0);
+                counter!(DA_FEE_RATE_REFRESHES, "outcome" => "success").increment(1);
             }
             Err(error) => {
                 let outcome = if error.is_timeout() {
@@ -155,7 +152,7 @@ impl AsyncService for DaFeeRateService {
                 } else {
                     "failure"
                 };
-                counter!(REFRESHES_METRIC, "outcome" => outcome).increment(1);
+                counter!(DA_FEE_RATE_REFRESHES, "outcome" => outcome).increment(1);
                 warn!(
                     %error,
                     current_rate_wei_per_byte = state.handle.current_rate(),
@@ -173,7 +170,7 @@ impl AsyncService for DaFeeRateService {
 }
 
 fn record_stale_transition(state: &DaFeeRateServiceState) {
-    gauge!(STALE_METRIC).set(1);
+    gauge!(DA_FEE_RATE_STALE).set(1);
     warn!(
         current_rate_wei_per_byte = state.handle.current_rate(),
         stale_after_seconds = state.stale_after.as_secs(),
@@ -186,7 +183,7 @@ fn set_current_rate_metric(rate_wei_per_byte: u64) {
         clippy::cast_precision_loss,
         reason = "metrics gauges represent values as f64"
     )]
-    gauge!(CURRENT_RATE_METRIC).set(rate_wei_per_byte as f64);
+    gauge!(DA_FEE_RATE_WEI_PER_BYTE).set(rate_wei_per_byte as f64);
 }
 
 /// Records a successful rate publication and any state transition it caused.

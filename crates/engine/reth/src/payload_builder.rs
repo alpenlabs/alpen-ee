@@ -15,20 +15,20 @@ use alpen_reth_node::{AlpenBuiltPayload, AlpenEngineTypes, AlpenPayloadAttribute
 use alpen_storage_api::BlockWitnessStore;
 use async_trait::async_trait;
 use eyre::{eyre, Context};
-use metrics::histogram;
+use metrics::{counter, histogram};
 use reth_node_builder::{ConsensusEngineHandle, PayloadKind};
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderError, PayloadBuilderHandle};
 use strata_acct_types::Hash;
 use tokio::time::sleep;
 use tracing::{debug, info, info_span, warn, Instrument};
 
-use crate::AlpenRethExecEngine;
+use crate::{
+    metrics::{PAYLOAD_BUILD_FAILURES, PAYLOAD_BUILD_RETRIES, PAYLOAD_BUILD_SECONDS},
+    AlpenRethExecEngine,
+};
 
 const MISSING_PARENT_RETRY_DELAY_MS: u64 = 250;
 const MISSING_PARENT_MAX_RETRIES: u16 = 120;
-
-/// Records successful payload job creation, resolution and witness persistence time, in seconds.
-const BLOCK_BUILD_DURATION_METRIC: &str = "alpen_ee_block_build_duration_seconds";
 
 fn is_retryable_missing_parent(err: &PayloadBuilderError) -> bool {
     matches!(
@@ -172,6 +172,8 @@ impl AlpenRethPayloadEngine {
                         elapsed_ms = build_started.elapsed().as_millis(),
                         "payload builder accepted job"
                     );
+                    histogram!(PAYLOAD_BUILD_SECONDS, "stage" => "accept")
+                        .record(build_started.elapsed().as_secs_f64());
                     payload_id
                 }
                 Ok(Err(err))
@@ -179,6 +181,7 @@ impl AlpenRethPayloadEngine {
                         && missing_parent_retries < MISSING_PARENT_MAX_RETRIES =>
                 {
                     missing_parent_retries += 1;
+                    counter!(PAYLOAD_BUILD_RETRIES).increment(1);
                     sleep_before_missing_parent_retry(
                         missing_parent_retries,
                         build_started.elapsed().as_millis(),
@@ -193,6 +196,7 @@ impl AlpenRethPayloadEngine {
                         error = %err,
                         "payload builder rejected job"
                     );
+                    counter!(PAYLOAD_BUILD_FAILURES, "reason" => "rejected").increment(1);
                     return Err(err).context("failed to build payload");
                 }
                 Err(err) => {
@@ -201,6 +205,7 @@ impl AlpenRethPayloadEngine {
                         error = %err,
                         "failed to communicate with payload builder"
                     );
+                    counter!(PAYLOAD_BUILD_FAILURES, "reason" => "communication").increment(1);
                     return Err(err).context("failed to communicate with payload builder");
                 }
             };
@@ -226,6 +231,8 @@ impl AlpenRethPayloadEngine {
                         total_elapsed_ms = build_started.elapsed().as_millis(),
                         "payload builder resolved payload"
                     );
+                    histogram!(PAYLOAD_BUILD_SECONDS, "stage" => "resolve")
+                        .record(resolve_started.elapsed().as_secs_f64());
                     break payload;
                 }
                 Some(Err(err))
@@ -233,6 +240,7 @@ impl AlpenRethPayloadEngine {
                         && missing_parent_retries < MISSING_PARENT_MAX_RETRIES =>
                 {
                     missing_parent_retries += 1;
+                    counter!(PAYLOAD_BUILD_RETRIES).increment(1);
                     sleep_before_missing_parent_retry(
                         missing_parent_retries,
                         build_started.elapsed().as_millis(),
@@ -248,6 +256,7 @@ impl AlpenRethPayloadEngine {
                         error = %err,
                         "payload builder failed while resolving payload"
                     );
+                    counter!(PAYLOAD_BUILD_FAILURES, "reason" => "resolve_failed").increment(1);
                     return Err(err).context("failed build payload");
                 }
                 None => {
@@ -257,6 +266,7 @@ impl AlpenRethPayloadEngine {
                         total_elapsed_ms = build_started.elapsed().as_millis(),
                         "payload builder returned no payload"
                     );
+                    counter!(PAYLOAD_BUILD_FAILURES, "reason" => "missing").increment(1);
                     return Err(eyre::eyre!("build payload missing"));
                 }
             }
@@ -271,13 +281,16 @@ impl AlpenRethPayloadEngine {
         let witness = payload
             .take_block_witness()
             .ok_or_else(|| eyre!("payload {block_hash:?} built without inline witness"))?;
+        let persist_started = Instant::now();
         self.block_witness_store
             .put_block_witness(block_hash, witness)
             .await
             .map_err(|e| eyre!("persist block witness {block_hash:?}: {e}"))?;
         info!(?block_hash, "persisted block witness");
-
-        histogram!(BLOCK_BUILD_DURATION_METRIC).record(build_started.elapsed().as_secs_f64());
+        histogram!(PAYLOAD_BUILD_SECONDS, "stage" => "persist")
+            .record(persist_started.elapsed().as_secs_f64());
+        histogram!(PAYLOAD_BUILD_SECONDS, "stage" => "total")
+            .record(build_started.elapsed().as_secs_f64());
 
         Ok(payload)
     }

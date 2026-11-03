@@ -429,6 +429,14 @@ impl<'txn> Reader<'txn> {
         count_in::<S, _>(self.txn)
     }
 
+    /// Returns the number of entries in the table named `table` (O(1) via
+    /// MDBX stat), for callers that hold a [`TableSpec`] rather than its
+    /// schema type.
+    pub fn count_table(&self, table: &str) -> DbResult<usize> {
+        let db = self.txn.open_db(Some(table))?;
+        Ok(self.txn.db_stat(&db)?.entries())
+    }
+
     /// Walks the table's raw entries from `start` in `direction` until `f`
     /// breaks or the table runs out; see [`Direction`].
     ///

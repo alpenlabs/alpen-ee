@@ -52,7 +52,6 @@ sequencer = [
   "dep:alpen-witness",
   "dep:bitcoind-async-client",
   "dep:k256",
-  "dep:metrics",
   "dep:reth-payload-builder",
   "dep:strata-btcio",
   "dep:strata-codec",
@@ -119,7 +118,7 @@ alpen-storage-store.workspace = true
 alpen-witness = { workspace = true, optional = true }
 bitcoind-async-client = { workspace = true, optional = true }
 k256 = { workspace = true, optional = true }
-metrics = { workspace = true, optional = true }
+metrics.workspace = true
 ssz.workspace = true
 strata-acct-types.workspace = true
 strata-btcio = { workspace = true, optional = true }

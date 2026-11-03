@@ -11,6 +11,7 @@ use std::sync::Arc;
 use alpen_common::{BatchStatus, ChunkStatus};
 use alpen_storage_api::{BatchStorage, ChunkStorage};
 use async_trait::async_trait;
+use metrics::counter;
 use strata_paas::{ProverError, ProverResult, ReceiptHook};
 use tracing::{info, warn};
 use zkaleido::ProofReceiptWithMetadata;
@@ -18,6 +19,7 @@ use zkaleido::ProofReceiptWithMetadata;
 use super::{
     spec_acct::AcctSpec, spec_chunk::ChunkSpec, BatchTask, ChunkTask, EeBatchProofDbManager,
 };
+use crate::metrics::{note_proof_ready, PROOF_RECEIPTS};
 
 /// Hook fired after a chunk proof is stored in paas's `ReceiptStore`.
 ///
@@ -45,6 +47,7 @@ impl ReceiptHook<ChunkSpec> for ChunkReceiptHook {
         let chunk_id = task.0;
         let proof_id = chunk_id.last_block();
         info!(?chunk_id, %proof_id, "marking chunk as proof-ready");
+        counter!(PROOF_RECEIPTS, "kind" => "chunk").increment(1);
         self.chunk_storage
             .update_chunk_status(chunk_id, ChunkStatus::ProofReady(proof_id))
             .await
@@ -85,6 +88,7 @@ impl ReceiptHook<AcctSpec> for AcctReceiptHook {
         let batch_id = task.0;
         let proof_id = EeBatchProofDbManager::proof_id_for(batch_id);
         info!(%batch_id, %proof_id, "persisting batch acct proof");
+        counter!(PROOF_RECEIPTS, "kind" => "acct").increment(1);
 
         self.batch_proofs
             .put_proof(batch_id, receipt.clone())
@@ -121,6 +125,8 @@ impl ReceiptHook<AcctSpec> for AcctReceiptHook {
                 },
             )
             .await
-            .map_err(|e| ProverError::Storage(format!("update_batch_status: {e}")))
+            .map_err(|e| ProverError::Storage(format!("update_batch_status: {e}")))?;
+        note_proof_ready(batch_id);
+        Ok(())
     }
 }

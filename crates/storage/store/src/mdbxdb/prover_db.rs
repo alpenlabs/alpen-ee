@@ -4,7 +4,7 @@ use std::{path::Path, sync::Arc};
 
 use alpen_common::{BatchId, ChunkId, ProofId, ProverTaskKeyDecodeError};
 use alpen_params::AlpenSpecId;
-use alpen_storage_mdbx::{MdbxConfig, MdbxEnv, Schema};
+use alpen_storage_mdbx::{DbResult as MdbxResult, MdbxConfig, MdbxEnv, Schema};
 use strata_db_types::{errors::DbError, DbResult};
 use strata_paas::TaskRecordData;
 use zkaleido::ProofReceiptWithMetadata;
@@ -117,6 +117,17 @@ impl ProverDbMdbx {
     pub fn open(path: &Path, config: &MdbxConfig) -> DbResult<Self> {
         let env = MdbxEnv::open(path, config, &prover_tables()).map_err(to_db_error)?;
         Ok(Self::new(Arc::new(env)))
+    }
+
+    /// Row counts of every prover table, as `(table, rows)`, each O(1)
+    /// through MDBX's table stat.
+    pub fn table_counts(&self) -> MdbxResult<Vec<(&'static str, usize)>> {
+        self.env.view(|reader| {
+            prover_tables()
+                .iter()
+                .map(|table| Ok((table.name, reader.count_table(table.name)?)))
+                .collect()
+        })
     }
 
     // --- Tasks ---

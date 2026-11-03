@@ -22,6 +22,7 @@ use tracing::info;
 use crate::{
     config::FullNodeConfig,
     gossip::GossipConfig,
+    metrics::{describe_all, spawn_store_sampler},
     node::{LaunchedNode, NodeBootstrap},
 };
 
@@ -92,6 +93,21 @@ pub(crate) async fn run(
         })
         .launch()
         .await?;
+
+    // Reth installed its Prometheus recorder while launching; describe the
+    // Alpen metrics now so their HELP lines reach the endpoint.
+    describe_all();
+    spawn_store_sampler(&handle.node.task_executor, common.mdbx_dir.clone(), {
+        let node_db = common.node_db.clone();
+        move || {
+            Ok(node_db
+                .table_counts()
+                .map_err(|e| eyre::eyre!("node table stats: {e}"))?
+                .into_iter()
+                .map(|(table, n)| ("node", table, n))
+                .collect())
+        }
+    });
 
     LaunchedNode {
         provider: handle.node.provider.clone(),

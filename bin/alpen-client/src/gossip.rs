@@ -6,6 +6,7 @@ use alpen_common::BlockNumHash;
 use alpen_reth_node::{
     AlpenGossipCommand, AlpenGossipEvent, AlpenGossipMessage, AlpenGossipPackage, AlpenGossipState,
 };
+use metrics::{counter, gauge};
 use reth_network_api::{test_utils::PeersHandle, PeerId};
 use reth_primitives_traits::Header;
 use reth_provider::CanonStateNotification;
@@ -17,6 +18,7 @@ use tokio::{
 };
 use tracing::{debug, info, warn};
 
+use crate::metrics::{GOSSIP_BROADCASTS, GOSSIP_PEERS, GOSSIP_RECEIVED};
 #[cfg(feature = "sequencer")]
 use crate::sequencer::sequencer_gossip_pubkey;
 
@@ -150,6 +152,7 @@ fn handle_gossip_package(
         seq_no,
         "Received gossip package"
     );
+    counter!(GOSSIP_RECEIVED).increment(1);
 
     // Forward the block hash and number to engine control task for fork choice update
     let hash = Hash::from(block_hash.0);
@@ -235,6 +238,8 @@ fn broadcast_new_block(
         peer_count = connections.len(),
         "Broadcasting new block to peers"
     );
+    counter!(GOSSIP_BROADCASTS).increment(1);
+    gauge!(GOSSIP_PEERS).set(connections.len() as f64);
 
     let msg = AlpenGossipMessage::new(
         tip.clone(),

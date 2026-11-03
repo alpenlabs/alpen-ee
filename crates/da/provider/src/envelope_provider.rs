@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use bitcoin::{Block, BlockHash, Txid, Wtxid};
 use bitcoind_async_client::{traits::Reader, Client as BtcClient};
 use eyre::{bail, ensure};
+use metrics::{counter, histogram};
 use strata_btc_types::{BlockHashExt, Buf32BitcoinExt};
 use strata_btcio::writer::chunked_envelope::ChunkedEnvelopeHandle;
 use strata_db_types::{
@@ -20,7 +21,14 @@ use strata_l1_envelope_fmt::MAX_ENVELOPE_PAYLOAD_SIZE;
 use strata_l1_txfmt::MagicBytes;
 use tracing::*;
 
-use crate::{chunking::prepare_da_chunks, DaBlobSource};
+use crate::{
+    chunking::prepare_da_chunks,
+    metrics::{
+        DA_BLOB_BYTES, DA_ENVELOPES_FINALIZED, DA_ENVELOPES_SUBMITTED, DA_ENVELOPE_CHUNKS,
+        DA_STATUS_CHECKS,
+    },
+    DaBlobSource,
+};
 
 /// Per-block accumulator: commit (when present) plus reveals tagged with
 /// their commit-output vout for stable ordering.
@@ -158,6 +166,7 @@ impl BatchDaProvider for ChunkedEnvelopeDaProvider {
         let blob = self.blob_provider.get_blob(batch_id).await?;
         let chunks = prepare_da_chunks(&blob, self.max_chunk_payload)?;
         ensure!(!chunks.is_empty(), "prepare_da_chunks returned empty");
+        let blob_bytes: usize = chunks.iter().map(Vec::len).sum();
 
         let entry = ChunkedEnvelopeEntry::new_unsigned(
             chunks,
@@ -178,6 +187,9 @@ impl BatchDaProvider for ChunkedEnvelopeDaProvider {
             chunk_count,
             "submitted chunked envelope for batch DA"
         );
+        counter!(DA_ENVELOPES_SUBMITTED).increment(1);
+        histogram!(DA_BLOB_BYTES).record(blob_bytes as f64);
+        histogram!(DA_ENVELOPE_CHUNKS).record(chunk_count as f64);
         Ok(idx)
     }
 
@@ -205,6 +217,7 @@ impl BatchDaProvider for ChunkedEnvelopeDaProvider {
 
         async {
             debug!(status = %entry.status, "checking chunked envelope status");
+            counter!(DA_STATUS_CHECKS, "status" => entry.status.to_string()).increment(1);
 
             match entry.status {
                 // `DaStatus::Ready` also updates the persistent EE DA bytecode
@@ -219,6 +232,7 @@ impl BatchDaProvider for ChunkedEnvelopeDaProvider {
                         .collect::<Vec<_>>()
                         .join(", ");
                     info!(%da_block_refs, "batch DA finalized on L1");
+                    counter!(DA_ENVELOPES_FINALIZED).increment(1);
                     Ok(DaStatus::Ready(block_refs))
                 }
                 ChunkedEnvelopeStatus::Unsigned

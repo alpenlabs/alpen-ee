@@ -4,6 +4,7 @@ use alpen_common::{
     chain_status_checked, EeAccountStateAtEpoch, OLChainStatus, OLClient, SnarkAccountUpdateInfo,
 };
 use alpen_storage_api::Storage;
+use metrics::{counter, gauge};
 use strata_identifiers::{EpochCommitment, Hash};
 use strata_snark_acct_runtime::IInnerState;
 use strata_snark_acct_types::UpdateManifest;
@@ -11,6 +12,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     error::{OLTrackerError, Result},
+    metrics::{OL_EPOCH, OL_EPOCHS_APPLIED},
     service::EpochTrackingMode,
     state::{build_tracker_state, OLTrackerState},
 };
@@ -64,6 +66,11 @@ pub(crate) async fn track_ol_state(
     };
     let best_ol_epoch = best_ol_commitment.epoch();
     let best_local_epoch = state.best_ol_epoch().epoch();
+    gauge!(OL_EPOCH, "status" => "local").set(f64::from(best_local_epoch));
+    gauge!(OL_EPOCH, "status" => "confirmed").set(f64::from(best_ol_epoch));
+    gauge!(OL_EPOCH, "status" => "finalized")
+        .set(f64::from(effective_ol_status.finalized().epoch()));
+    gauge!(OL_EPOCH, "status" => "latest").set(f64::from(ol_status.latest.epoch()));
 
     debug!(
         %best_local_epoch,
@@ -257,6 +264,7 @@ pub(crate) async fn handle_extend_ee_state<TStorage: Storage>(
         *state = next_state;
 
         info!(%ol_epoch, "applied epoch to ee state");
+        counter!(OL_EPOCHS_APPLIED).increment(1);
     }
 
     Ok(())

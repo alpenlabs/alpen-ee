@@ -71,6 +71,7 @@ use self::sealing_policy::gas_data_provider::RethGasDataProvider;
 use crate::{
     config::SequencerMode,
     gossip::GossipConfig,
+    metrics::{describe_all, spawn_store_sampler, TableCounts},
     node::{LaunchedNode, NodeBootstrap},
     ol::OLClientKind,
     sequencer::sealing_policy::da_size::{DaBatchSizePolicy, DaSizeProvider, MaxDaSizeSealing},
@@ -246,11 +247,12 @@ pub(crate) async fn run(
 ) -> eyre::Result<()> {
     // Creating these also creates their MDBX environments, which is why it happens
     // here and not in bootstrap: a full node should never materialize them.
-    let sequencer_dbs = common
+    let sequencer_dbs: Arc<SequencerDatabases> = common
         .sequencer
         .db
         .sequencer_databases()
-        .context("failed to open sequencer databases")?;
+        .context("failed to open sequencer databases")?
+        .into();
 
     // Account-state genesis is common to every node and already done during
     // bootstrap; exec-chain and batch genesis only matter once a sequencer
@@ -370,6 +372,24 @@ pub(crate) async fn run(
     info!(target: "alpen-client", component = "alpen", "installed AccessedStateGenerator exex (account-proof range witness)");
 
     let node = &handle.node;
+
+    // Reth installed its Prometheus recorder while launching; describe the
+    // Alpen metrics now so their HELP lines reach the endpoint.
+    describe_all();
+    spawn_store_sampler(&node.task_executor, common.mdbx_dir.clone(), {
+        let node_db = common.node_db.clone();
+        let sequencer_dbs = sequencer_dbs.clone();
+        move || {
+            let mut rows: TableCounts = node_db
+                .table_counts()
+                .map_err(|e| eyre::eyre!("node table stats: {e}"))?
+                .into_iter()
+                .map(|(table, n)| ("node", table, n))
+                .collect();
+            rows.extend(sequencer_dbs.table_counts()?);
+            Ok(rows)
+        }
+    });
 
     // Sync chainstate to engine before starting other tasks
     let engine = AlpenRethExecEngine::new(node.beacon_engine_handle.clone());

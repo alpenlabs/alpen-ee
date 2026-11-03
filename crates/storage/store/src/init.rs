@@ -98,6 +98,16 @@ impl Stores {
         Ok(NodeStorage::new(handle, self.node_db.clone()))
     }
 
+    /// The directory holding the MDBX environments (`<datadir>/mdbx`).
+    pub fn mdbx_dir(&self) -> &Path {
+        &self.mdbx_dir
+    }
+
+    /// The node environment's database, for row-count sampling.
+    pub fn node_db(&self) -> Arc<NodeDbMdbx> {
+        self.node_db.clone()
+    }
+
     /// Opens and returns the databases only a sequencer uses.
     ///
     /// A full node should not call this, so its environments are never created.
@@ -157,6 +167,21 @@ pub struct SequencerDatabases {
 }
 
 impl SequencerDatabases {
+    /// Row counts of every sequencer-only table, as `(environment, table,
+    /// rows)`.
+    pub fn table_counts(&self) -> Result<Vec<(&'static str, &'static str, usize)>> {
+        let mut rows = Vec::new();
+        for (env, counts) in [
+            ("prover", self.prover_db.table_counts()),
+            ("witness", self.witness_db.table_counts()),
+            ("da", self.chunked_envelope_db.table_counts()),
+        ] {
+            let counts = counts.map_err(|e| eyre!("{env} table stats: {e}"))?;
+            rows.extend(counts.into_iter().map(|(table, n)| (env, table, n)));
+        }
+        Ok(rows)
+    }
+
     /// Returns a clone of the witness database.
     pub fn witness_db(&self) -> Arc<WitnessDbMdbx> {
         self.witness_db.clone()

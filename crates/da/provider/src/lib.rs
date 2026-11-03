@@ -9,6 +9,7 @@ mod blob_provider;
 mod blob_source;
 mod chunking;
 mod envelope_provider;
+pub mod metrics;
 
 pub use blob_provider::StateDiffBlobProvider;
 pub use blob_source::DaBlobSource;

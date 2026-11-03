@@ -1,6 +1,7 @@
 //! Tracks and manages the OL chain state for Alpen execution environment.
 
 mod error;
+pub mod metrics;
 mod reorg;
 pub mod service;
 mod state;

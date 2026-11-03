@@ -23,11 +23,15 @@ use alpen_common::{BatchId, BatchProver, ChunkStatus, Proof, ProofGenerationStat
 use alpen_params::AlpenSpecId;
 use alpen_storage_api::{BatchStorage, ChunkStorage};
 use async_trait::async_trait;
+use metrics::counter;
 use strata_paas::{ProverError as PaasError, ProverHandle, TaskStatus};
 use tracing::{debug, info, warn};
 
 use super::{
     spec_acct::AcctSpec, spec_chunk::ChunkSpec, BatchTask, ChunkTask, EeBatchProofDbManager,
+};
+use crate::metrics::{
+    note_proof_ready, note_proof_submitted, PROOF_STATUS_CHECKS, PROOF_TASKS_SUBMITTED,
 };
 
 /// One resident `--prover-program` candidate's launched chunk + acct prover
@@ -100,6 +104,7 @@ impl BatchProver for PaasBatchProver {
             chunk_count = chunks.len(),
             "submitting chunk + acct proof tasks"
         );
+        note_proof_submitted(batch_id);
 
         for chunk_id in chunks {
             let task = ChunkTask(chunk_id);
@@ -108,6 +113,7 @@ impl BatchProver for PaasBatchProver {
                 .submit(task)
                 .await
                 .map_err(|e| eyre::eyre!("submit chunk task {chunk_id:?}: {e}"))?;
+            counter!(PROOF_TASKS_SUBMITTED, "kind" => "chunk").increment(1);
 
             let Some((_chunk, status)) = self.chunk_storage.get_chunk_by_id(chunk_id).await? else {
                 warn!(?chunk_id, %batch_id, "submitted chunk task for missing chunk");
@@ -126,6 +132,7 @@ impl BatchProver for PaasBatchProver {
             .submit(BatchTask(batch_id))
             .await
             .map_err(|e| eyre::eyre!("submit acct task {batch_id}: {e}"))?;
+        counter!(PROOF_TASKS_SUBMITTED, "kind" => "acct").increment(1);
 
         Ok(())
     }
@@ -134,6 +141,8 @@ impl BatchProver for PaasBatchProver {
         // Source of truth: the typed batch proof DB (the acct hook writes
         // there). Present ⇒ Ready.
         if self.batch_proofs.has_proof(batch_id) {
+            note_proof_ready(batch_id);
+            counter!(PROOF_STATUS_CHECKS, "status" => "ready").increment(1);
             return Ok(ProofGenerationStatus::Ready {
                 proof_id: EeBatchProofDbManager::proof_id_for(batch_id),
             });
@@ -144,7 +153,19 @@ impl BatchProver for PaasBatchProver {
         // Else map paas's task lifecycle status. `TaskNotFound` ⇒ NotStarted
         // (we never submitted, or we're in a fresh process and haven't yet
         // recovered).
-        match program.acct_handle.get_status(&BatchTask(batch_id)) {
+        let status = program.acct_handle.get_status(&BatchTask(batch_id));
+        let status_name = match &status {
+            Ok(TaskStatus::Completed) => "completed",
+            Ok(TaskStatus::PermanentFailure { .. }) => "failed",
+            Ok(TaskStatus::Pending) => "pending",
+            Ok(TaskStatus::Proving { .. }) => "proving",
+            Ok(TaskStatus::Blocked { .. }) => "blocked",
+            Ok(TaskStatus::TransientFailure { .. }) => "transient_failure",
+            Err(PaasError::TaskNotFound(_)) => "not_started",
+            Err(_) => "error",
+        };
+        counter!(PROOF_STATUS_CHECKS, "status" => status_name).increment(1);
+        match status {
             Ok(TaskStatus::Completed) => {
                 // Completed but not in the proof DB? Hook hasn't fired yet
                 // or the DB lost its entry. Treat as Pending so the

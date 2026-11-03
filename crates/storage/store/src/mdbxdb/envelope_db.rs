@@ -6,13 +6,16 @@
 
 use std::sync::Arc;
 
-use alpen_storage_mdbx::MdbxEnv;
+use alpen_storage_mdbx::{DbResult as MdbxResult, MdbxEnv};
 use strata_db_types::{
     chunked_envelope::{ChunkedEnvelopeEntry, L1ChunkedEnvelopeDatabase},
     DbResult,
 };
 
-use super::{schema::L1ChunkedEnvelopeSchema, to_db_error};
+use super::{
+    schema::{da_tables, L1ChunkedEnvelopeSchema},
+    to_db_error,
+};
 
 /// MDBX-backed [`L1ChunkedEnvelopeDatabase`] over a shared [`MdbxEnv`].
 #[derive(Debug)]
@@ -25,6 +28,17 @@ impl L1ChunkedEnvelopeDbMdbx {
     /// envelope table.
     pub(crate) fn new(env: Arc<MdbxEnv>) -> Self {
         Self { env }
+    }
+
+    /// Row counts of every DA-environment table, as `(table, rows)`, each O(1)
+    /// through MDBX's table stat.
+    pub(crate) fn table_counts(&self) -> MdbxResult<Vec<(&'static str, usize)>> {
+        self.env.view(|reader| {
+            da_tables()
+                .iter()
+                .map(|table| Ok((table.name, reader.count_table(table.name)?)))
+                .collect()
+        })
     }
 }
 
