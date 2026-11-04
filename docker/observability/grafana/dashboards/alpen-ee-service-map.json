@@ -7334,9 +7334,9 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "(rate(reth_alpen_ee_batch_reorgs_total{instance=~\"$instance\"}[$__rate_interval])) * 60",
-          "legendFormat": "batch reorgs /min",
-          "refId": "batch reorgs /min",
+          "expr": "(sum by (kind) (rate(reth_alpen_ee_batch_reorgs_total{instance=~\"$instance\"}[$__rate_interval]))) * 60",
+          "legendFormat": "{{kind}} reorgs /min",
+          "refId": "{{kind}} reorgs /min",
           "instant": false,
           "range": true,
           "editorMode": "code"
