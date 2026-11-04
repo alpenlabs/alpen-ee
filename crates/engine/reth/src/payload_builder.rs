@@ -196,7 +196,12 @@ impl AlpenRethPayloadEngine {
                         error = %err,
                         "payload builder rejected job"
                     );
-                    counter!(PAYLOAD_BUILD_FAILURES, "reason" => "rejected").increment(1);
+                    let reason = if is_retryable_missing_parent(&err) {
+                        "missing"
+                    } else {
+                        "rejected"
+                    };
+                    counter!(PAYLOAD_BUILD_FAILURES, "reason" => reason).increment(1);
                     return Err(err).context("failed to build payload");
                 }
                 Err(err) => {
@@ -256,7 +261,12 @@ impl AlpenRethPayloadEngine {
                         error = %err,
                         "payload builder failed while resolving payload"
                     );
-                    counter!(PAYLOAD_BUILD_FAILURES, "reason" => "resolve_failed").increment(1);
+                    let reason = if is_retryable_missing_parent(&err) {
+                        "missing"
+                    } else {
+                        "resolve_failed"
+                    };
+                    counter!(PAYLOAD_BUILD_FAILURES, "reason" => reason).increment(1);
                     return Err(err).context("failed build payload");
                 }
                 None => {
@@ -266,7 +276,7 @@ impl AlpenRethPayloadEngine {
                         total_elapsed_ms = build_started.elapsed().as_millis(),
                         "payload builder returned no payload"
                     );
-                    counter!(PAYLOAD_BUILD_FAILURES, "reason" => "missing").increment(1);
+                    counter!(PAYLOAD_BUILD_FAILURES, "reason" => "no_payload").increment(1);
                     return Err(eyre::eyre!("build payload missing"));
                 }
             }

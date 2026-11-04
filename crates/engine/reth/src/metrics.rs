@@ -3,6 +3,7 @@
 //! Names surface with reth's `reth_` prefix on its `--metrics` endpoint; see
 //! `alpen_sequencer::metrics` for the convention.
 
+use alpen_common::metrics::BLOCK_LATEST_HEIGHT;
 use metrics::{describe_counter, describe_gauge, describe_histogram, Unit};
 
 /// Seconds a payload build took, by `stage`: `accept` (job accepted),
@@ -12,19 +13,15 @@ pub const PAYLOAD_BUILD_SECONDS: &str = "alpen_ee_payload_build_seconds";
 /// Payload builds retried because reth did not yet have the parent.
 pub const PAYLOAD_BUILD_RETRIES: &str = "alpen_ee_payload_build_retries_total";
 /// Payload builds that failed, by `reason`: `missing` (parent not in reth after
-/// the retries), `rejected`, `communication`, `resolve_failed`, `witness_missing`
-/// (built without an inline witness) and `persist` (witness store write failed).
+/// the retries), `rejected`, `communication`, `resolve_failed`, `no_payload`
+/// (resolved to nothing), `witness_missing` (built without an inline witness)
+/// and `persist` (witness store write failed).
 pub const PAYLOAD_BUILD_FAILURES: &str = "alpen_ee_payload_build_failures_total";
 /// Fork-choice updates sent to reth, by `kind`: `preconf` (new head),
 /// `consensus` (OL safe and finalized heads) and `catchup` (resent heads).
 pub const FORKCHOICE_UPDATES: &str = "alpen_ee_forkchoice_updates_total";
 /// Fork-choice updates reth rejected or that failed.
 pub const FORKCHOICE_FAILURES: &str = "alpen_ee_forkchoice_failures_total";
-/// Height of the chain at each `status` the engine drives: `preconf` (latest
-/// head sent to reth), `safe` and `finalized` (the OL's confirmed and finalized
-/// EE blocks, when reth knows them). The sequencer reports `head` under the
-/// same name.
-pub const BLOCK_LATEST_HEIGHT: &str = "alpen_ee_block_latest_height";
 
 /// Registers the description and unit of every metric above.
 pub fn describe() {

@@ -156,14 +156,14 @@ impl BatchLifecycleState {
     /// Reset da_pending to match da_complete.
     pub(crate) fn reset_to_da_complete(&mut self) {
         self.da_pending = self.da_complete;
-        self.clock.clear();
+        self.clock.retain_up_to(self.da_complete.idx());
     }
 
     /// Reset da_pending and da_complete to match proof_pending.
     pub(crate) fn reset_to_proof_pending(&mut self) {
         self.da_pending = self.proof_pending;
         self.da_complete = self.proof_pending;
-        self.clock.clear();
+        self.clock.retain_up_to(self.proof_pending.idx());
     }
 
     /// Reset all higher frontiers to match proof_ready.
@@ -171,7 +171,7 @@ impl BatchLifecycleState {
         self.da_pending = self.proof_ready;
         self.da_complete = self.proof_ready;
         self.proof_pending = self.proof_ready;
-        self.clock.clear();
+        self.clock.retain_up_to(self.proof_ready.idx());
     }
 }
 

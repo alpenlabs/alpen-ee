@@ -211,8 +211,11 @@ async fn process_ready_batches(
         update_cache.mark_submitted(batch_id, batch_idx);
         counter!(OL_UPDATES_SUBMITTED, "kind" => if resubmission { "retry" } else { "first" })
             .increment(1);
-        counter!(OL_UPDATE_OUTPUTS, "kind" => "transfer").increment(output_transfer_count as u64);
-        counter!(OL_UPDATE_OUTPUTS, "kind" => "message").increment(output_message_count as u64);
+        if !resubmission {
+            counter!(OL_UPDATE_OUTPUTS, "kind" => "transfer")
+                .increment(output_transfer_count as u64);
+            counter!(OL_UPDATE_OUTPUTS, "kind" => "message").increment(output_message_count as u64);
+        }
 
         info!(
             component = "alpen_ee_update_submitter",

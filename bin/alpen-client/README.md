@@ -876,7 +876,7 @@ Every Alpen series is recorded through the `metrics` facade onto Reth's Promethe
 | `alpen_ee_block_latest_height` | G | `status`: `head` (built), `preconf` (sent to reth), `safe`, `finalized` | How far behind the head are the OL's confirmed and finalized views? |
 | `alpen_ee_payload_build_seconds` | H | `stage`: `accept`, `resolve`, `persist` (witness stored), `total` | Where does a payload build spend its time? |
 | `alpen_ee_payload_build_retries_total` | C | | Is reth lagging behind the sequencer's parent? |
-| `alpen_ee_payload_build_failures_total` | C | `reason`: `missing`, `rejected`, `communication`, `resolve_failed`, `witness_missing`, `persist` | Why do payload builds fail? |
+| `alpen_ee_payload_build_failures_total` | C | `reason`: `missing` (parent not in reth after the retries), `rejected`, `communication`, `resolve_failed`, `no_payload`, `witness_missing`, `persist` | Why do payload builds fail? |
 | `alpen_ee_forkchoice_updates_total` | C | `kind`: `preconf`, `consensus`, `catchup` | Is reth being driven? |
 | `alpen_ee_forkchoice_failures_total` | C | | Is reth rejecting heads? |
 
@@ -898,12 +898,10 @@ Every Alpen series is recorded through the `metrics` facade onto Reth's Promethe
 
 | Metric | T | Labels | Question it answers |
 |---|---|---|---|
-| `alpen_ee_da_blobs_built_total` | C | `empty` | Are DA blobs being produced, and are batches empty? |
-| `alpen_ee_da_blob_blocks` | H | | How many blocks per blob? |
 | `alpen_ee_da_blob_bytes` | H | | How much DA is posted per blob? |
-| `alpen_ee_da_bytecodes_deduped_total` | C | | Is bytecode dedup saving DA? |
+| `alpen_ee_da_bytecodes_deduped_total` | C | | Is bytecode dedup saving DA? Per blob build. |
 | `alpen_ee_da_envelope_chunks` | H | | How many L1 transactions per envelope? |
-| `alpen_ee_da_envelopes_submitted_total` | C | | Is DA being handed to the L1 writer? |
+| `alpen_ee_da_envelopes_submitted_total` | C | `empty` | Is DA being handed to the L1 writer, and are batches empty? |
 | `alpen_ee_da_status_checks_total` | C | `status` | What does the lifecycle see when it polls DA? Finality is `alpen_ee_batch_transitions_total{status="da_complete"}`, once per batch. |
 | `alpen_ee_da_txs_pending` | G | | Is Bitcoin DA publication backing up? Non-zero normally; sustained growth is the signal. |
 | `alpen_ee_da_fee_rate_wei_per_byte` | G | | What DA fee is charged? |
@@ -916,7 +914,6 @@ Every Alpen series is recorded through the `metrics` facade onto Reth's Promethe
 |---|---|---|---|
 | `alpen_ee_proof_tasks_submitted_total` | C | `kind`: `chunk`, `acct` | Is proving being requested? |
 | `alpen_ee_proof_receipts_total` | C | `kind` | Are proofs coming back? |
-| `alpen_ee_proof_wait_seconds` | H | | How long does proving take end to end? |
 | `alpen_ee_proof_status_checks_total` | C | `status` | What does the lifecycle see when it polls the prover? |
 
 **OL link** (`alpen-sequencer`, `alpen-ol-tracker`)

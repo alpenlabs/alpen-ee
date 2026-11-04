@@ -30,9 +30,7 @@ use tracing::{debug, info, warn};
 use super::{
     spec_acct::AcctSpec, spec_chunk::ChunkSpec, BatchTask, ChunkTask, EeBatchProofDbManager,
 };
-use crate::metrics::{
-    note_proof_ready, note_proof_submitted, PROOF_STATUS_CHECKS, PROOF_TASKS_SUBMITTED,
-};
+use crate::metrics::{PROOF_STATUS_CHECKS, PROOF_TASKS_SUBMITTED};
 
 /// One resident `--prover-program` candidate's launched chunk + acct prover
 /// handles. Named to mirror the config-side `ProverProgramPaths` it was
@@ -132,7 +130,6 @@ impl BatchProver for PaasBatchProver {
             .await
             .map_err(|e| eyre::eyre!("submit acct task {batch_id}: {e}"))?;
         counter!(PROOF_TASKS_SUBMITTED, "kind" => "acct").increment(1);
-        note_proof_submitted(batch_id);
 
         Ok(())
     }
@@ -141,7 +138,6 @@ impl BatchProver for PaasBatchProver {
         // Source of truth: the typed batch proof DB (the acct hook writes
         // there). Present ⇒ Ready.
         if self.batch_proofs.has_proof(batch_id) {
-            note_proof_ready(batch_id);
             counter!(PROOF_STATUS_CHECKS, "status" => "ready").increment(1);
             return Ok(ProofGenerationStatus::Ready {
                 proof_id: EeBatchProofDbManager::proof_id_for(batch_id),
@@ -154,38 +150,34 @@ impl BatchProver for PaasBatchProver {
         // (we never submitted, or we're in a fresh process and haven't yet
         // recovered).
         let status = program.acct_handle.get_status(&BatchTask(batch_id));
-        let status_name = match &status {
-            Ok(TaskStatus::Completed) => "completed",
-            Ok(TaskStatus::PermanentFailure { .. }) => "failed",
-            Ok(TaskStatus::Pending) => "pending",
-            Ok(TaskStatus::Proving { .. }) => "proving",
-            Ok(TaskStatus::Blocked { .. }) => "blocked",
-            Ok(TaskStatus::TransientFailure { .. }) => "transient_failure",
-            Err(PaasError::TaskNotFound(_)) => "not_started",
-            Err(_) => "error",
-        };
-        counter!(PROOF_STATUS_CHECKS, "status" => status_name).increment(1);
-        match status {
+        let (status_name, result) = match status {
             Ok(TaskStatus::Completed) => {
                 // Completed but not in the proof DB? Hook hasn't fired yet
                 // or the DB lost its entry. Treat as Pending so the
                 // lifecycle keeps polling.
                 debug!(%batch_id, "acct task Completed but proof not yet in DB; reporting Pending");
-                Ok(ProofGenerationStatus::Pending)
+                ("completed", Ok(ProofGenerationStatus::Pending))
             }
-            Ok(TaskStatus::PermanentFailure { error }) => {
-                Ok(ProofGenerationStatus::Failed { reason: error })
+            Ok(TaskStatus::PermanentFailure { error }) => (
+                "failed",
+                Ok(ProofGenerationStatus::Failed { reason: error }),
+            ),
+            Ok(TaskStatus::Pending) => ("pending", Ok(ProofGenerationStatus::Pending)),
+            Ok(TaskStatus::Proving { .. }) => ("proving", Ok(ProofGenerationStatus::Pending)),
+            Ok(TaskStatus::Blocked { .. }) => ("blocked", Ok(ProofGenerationStatus::Pending)),
+            Ok(TaskStatus::TransientFailure { .. }) => {
+                ("transient_failure", Ok(ProofGenerationStatus::Pending))
             }
-            Ok(TaskStatus::Pending)
-            | Ok(TaskStatus::Proving { .. })
-            | Ok(TaskStatus::Blocked { .. })
-            | Ok(TaskStatus::TransientFailure { .. }) => Ok(ProofGenerationStatus::Pending),
-            Err(PaasError::TaskNotFound(_)) => Ok(ProofGenerationStatus::NotStarted),
+            Err(PaasError::TaskNotFound(_)) => {
+                ("not_started", Ok(ProofGenerationStatus::NotStarted))
+            }
             Err(e) => {
                 warn!(%batch_id, %e, "acct_handle.get_status failed");
-                Err(eyre::eyre!("get_status({batch_id}): {e}"))
+                ("error", Err(eyre::eyre!("get_status({batch_id}): {e}")))
             }
-        }
+        };
+        counter!(PROOF_STATUS_CHECKS, "status" => status_name).increment(1);
+        result
     }
 
     async fn get_proof(&self, proof_id: ProofId) -> eyre::Result<Option<Proof>> {

@@ -184,7 +184,8 @@ impl BatchDaProvider for ChunkedEnvelopeDaProvider {
             chunk_count,
             "submitted chunked envelope for batch DA"
         );
-        counter!(DA_ENVELOPES_SUBMITTED).increment(1);
+        counter!(DA_ENVELOPES_SUBMITTED, "empty" => if blob.state_diff.is_empty() { "true" } else { "false" })
+            .increment(1);
         histogram!(DA_BLOB_BYTES).record(blob_bytes as f64);
         histogram!(DA_ENVELOPE_CHUNKS).record(chunk_count as f64);
         Ok(idx)

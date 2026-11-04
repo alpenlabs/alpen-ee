@@ -32,12 +32,7 @@ impl WitnessDbMdbx {
     /// Row counts of every witness-environment table, as `(table, rows)`, each O(1)
     /// through MDBX's table stat.
     pub fn table_counts(&self) -> MdbxResult<Vec<(&'static str, usize)>> {
-        self.env.view(|reader| {
-            witness_tables()
-                .iter()
-                .map(|table| Ok((table.name, reader.count_table(table.name)?)))
-                .collect()
-        })
+        self.env.table_counts(&witness_tables())
     }
 
     /// Opens a standalone environment at `path` with just the state-diff tables.

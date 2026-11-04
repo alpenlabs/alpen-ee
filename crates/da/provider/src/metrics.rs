@@ -5,28 +5,21 @@
 
 use metrics::{describe_counter, describe_histogram, Unit};
 
-/// DA blobs built, by whether the aggregated state diff was `empty`.
-pub const DA_BLOBS_BUILT: &str = "alpen_ee_da_blobs_built_total";
-/// Blocks aggregated into each DA blob.
-pub const DA_BLOB_BLOCKS: &str = "alpen_ee_da_blob_blocks";
 /// Deployed bytecodes left out of a blob because an earlier batch published them.
+/// Counted per blob build; a post that is retried builds the blob again.
 pub const DA_BYTECODES_DEDUPED: &str = "alpen_ee_da_bytecodes_deduped_total";
 /// Encoded bytes of each DA blob, as split into envelope chunks.
 pub const DA_BLOB_BYTES: &str = "alpen_ee_da_blob_bytes";
 /// Chunks each envelope carries.
 pub const DA_ENVELOPE_CHUNKS: &str = "alpen_ee_da_envelope_chunks";
-/// Chunked envelopes handed to the L1 writer.
+/// Chunked envelopes handed to the L1 writer, by whether the blob's state diff
+/// was `empty`. One per batch posted.
 pub const DA_ENVELOPES_SUBMITTED: &str = "alpen_ee_da_envelopes_submitted_total";
 /// Envelope status checks by the lifecycle, by the envelope's L1 `status`.
 pub const DA_STATUS_CHECKS: &str = "alpen_ee_da_status_checks_total";
 
 /// Registers the description and unit of every metric above.
 pub fn describe() {
-    describe_counter!(
-        DA_BLOBS_BUILT,
-        "DA blobs built, by whether the state diff was empty"
-    );
-    describe_histogram!(DA_BLOB_BLOCKS, "Blocks aggregated into each DA blob");
     describe_counter!(
         DA_BYTECODES_DEDUPED,
         "Deployed bytecodes left out of a blob because an earlier batch published them"

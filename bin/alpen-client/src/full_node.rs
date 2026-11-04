@@ -12,6 +12,7 @@ use alpen_reth_node::{
 };
 use alpen_reth_rpc::AlpenFeeApiServer;
 use alpen_rpc_server::{AlpenEeRpcServer, EeRpcServer};
+use alpen_storage_store::ENV_NODE;
 use reth_chainspec::ChainSpec;
 use reth_network::{protocol::IntoRlpxSubProtocol, NetworkProtocols};
 use reth_network_api::test_utils::PeersHandleProvider;
@@ -101,7 +102,7 @@ pub(crate) async fn run(
                 .table_counts()
                 .map_err(|e| eyre::eyre!("node table stats: {e}"))?
                 .into_iter()
-                .map(|(table, n)| ("node", table, n))
+                .map(|(table, n)| (ENV_NODE, table, n))
                 .collect())
         }
     });

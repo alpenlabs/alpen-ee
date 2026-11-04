@@ -31,14 +31,21 @@ where
             return Ok(());
         }
 
-        let Some((batch, status)) = ctx.batch_storage.get_batch_by_idx(batch_idx).await? else {
+        let Some((batch, status)) = ctx
+            .batch_storage
+            .get_batch_by_idx(batch_idx)
+            .await
+            .inspect_err(|_| {
+                counter!(BATCH_TRANSITION_FAILURES, "status" => "da_pending").increment(1);
+            })?
+        else {
             return Ok(());
         };
 
         match status {
             BatchStatus::Sealed => {
                 let batch_id = batch.id();
-                state.clock_mut().observe(batch_idx);
+                state.clock_mut().observe(batch.id(), batch_idx);
 
                 debug!(batch_idx, ?batch_id, "Posting DA");
 
@@ -64,7 +71,7 @@ where
                     })?;
 
                 state.advance_da_pending(batch_idx, batch_id);
-                state.clock_mut().transition(batch_idx, "da_pending");
+                state.clock_mut().transition(batch_id, "da_pending");
             }
             BatchStatus::DaPending { .. }
             | BatchStatus::DaComplete { .. }

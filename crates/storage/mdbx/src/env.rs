@@ -188,6 +188,17 @@ impl MdbxEnv {
         f(&Reader { txn: &txn })
     }
 
+    /// Row counts of `tables`, as `(table, rows)`, each O(1) through MDBX's
+    /// table stat.
+    pub fn table_counts(&self, tables: &[TableSpec]) -> DbResult<Vec<(&'static str, usize)>> {
+        self.view(|reader| {
+            tables
+                .iter()
+                .map(|table| Ok((table.name, reader.count_table(table.name)?)))
+                .collect()
+        })
+    }
+
     /// Runs `f` inside a read-write transaction. If `f` returns `Ok`, the
     /// transaction is committed atomically; if it returns `Err`, the
     /// transaction is aborted and no changes are persisted.
