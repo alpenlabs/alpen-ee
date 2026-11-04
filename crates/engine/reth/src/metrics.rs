@@ -11,7 +11,9 @@ use metrics::{describe_counter, describe_gauge, describe_histogram, Unit};
 pub const PAYLOAD_BUILD_SECONDS: &str = "alpen_ee_payload_build_seconds";
 /// Payload builds retried because reth did not yet have the parent.
 pub const PAYLOAD_BUILD_RETRIES: &str = "alpen_ee_payload_build_retries_total";
-/// Payload builds that failed, by `reason`.
+/// Payload builds that failed, by `reason`: `missing` (parent not in reth after
+/// the retries), `rejected`, `communication`, `resolve_failed`, `witness_missing`
+/// (built without an inline witness) and `persist` (witness store write failed).
 pub const PAYLOAD_BUILD_FAILURES: &str = "alpen_ee_payload_build_failures_total";
 /// Fork-choice updates sent to reth, by `kind`: `preconf` (new head),
 /// `consensus` (OL safe and finalized heads) and `catchup` (resent heads).

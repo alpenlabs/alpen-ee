@@ -278,14 +278,18 @@ impl AlpenRethPayloadEngine {
         // advanced without its witness, and the witness's multiproofs are
         // always shallow (captured while the block was at tip).
         let block_hash: Hash = payload.blockhash();
-        let witness = payload
-            .take_block_witness()
-            .ok_or_else(|| eyre!("payload {block_hash:?} built without inline witness"))?;
+        let witness = payload.take_block_witness().ok_or_else(|| {
+            counter!(PAYLOAD_BUILD_FAILURES, "reason" => "witness_missing").increment(1);
+            eyre!("payload {block_hash:?} built without inline witness")
+        })?;
         let persist_started = Instant::now();
         self.block_witness_store
             .put_block_witness(block_hash, witness)
             .await
-            .map_err(|e| eyre!("persist block witness {block_hash:?}: {e}"))?;
+            .map_err(|e| {
+                counter!(PAYLOAD_BUILD_FAILURES, "reason" => "persist").increment(1);
+                eyre!("persist block witness {block_hash:?}: {e}")
+            })?;
         info!(?block_hash, "persisted block witness");
         histogram!(PAYLOAD_BUILD_SECONDS, "stage" => "persist")
             .record(persist_started.elapsed().as_secs_f64());

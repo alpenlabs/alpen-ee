@@ -68,7 +68,11 @@ where
                                 batch.id(),
                                 BatchStatus::DaComplete { da: da_refs },
                             )
-                            .await?;
+                            .await
+                            .inspect_err(|_| {
+                                counter!(BATCH_TRANSITION_FAILURES, "status" => "da_complete")
+                                    .increment(1);
+                            })?;
 
                         state.advance_da_complete(target_idx, batch.id());
                         state.clock_mut().transition(target_idx, "da_complete");
@@ -102,7 +106,11 @@ where
                                     envelope_idx: new_envelope_idx,
                                 },
                             )
-                            .await?;
+                            .await
+                            .inspect_err(|_| {
+                                counter!(BATCH_TRANSITION_FAILURES, "status" => "da_pending")
+                                    .increment(1);
+                            })?;
                         return Ok(());
                     }
                     DaStatus::Failed { reason } => {

@@ -60,7 +60,11 @@ where
                                     proof: proof_id,
                                 },
                             )
-                            .await?;
+                            .await
+                            .inspect_err(|_| {
+                                counter!(BATCH_TRANSITION_FAILURES, "status" => "proof_ready")
+                                    .increment(1);
+                            })?;
 
                         // Notify watchers
                         let _ = ctx.proof_ready_tx.send(Some(batch_id));
