@@ -501,7 +501,7 @@ def build():
         quant("batch_blocks", "0.5", "blocks per batch p50"),
         rate_q("batches_sealed_total", "batches sealed: {{reason}} /min", mul=60, by="reason"),
         rate_q("chunks_sealed_total", "chunks sealed: {{reason}} /min", mul=60, by="reason"),
-        rate_q("batch_reorgs_total", "batch reorgs /min", mul=60),
+        rate_q("batch_reorgs_total", "{{kind}} reorgs /min", mul=60, by="kind"),
     ], grid(16, y, 8, 7), desc="Sealing policy at work: reason is the policy that fired.", decimals=1, fill=0))
     y += 7
 
