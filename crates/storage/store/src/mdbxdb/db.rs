@@ -49,12 +49,7 @@ impl NodeDbMdbx {
     /// Row counts of every node table, as `(table, rows)`, each O(1)
     /// through MDBX's table stat.
     pub fn table_counts(&self) -> MdbxResult<Vec<(&'static str, usize)>> {
-        self.env.view(|reader| {
-            node_tables()
-                .iter()
-                .map(|table| Ok((table.name, reader.count_table(table.name)?)))
-                .collect()
-        })
+        self.env.table_counts(&node_tables())
     }
 }
 

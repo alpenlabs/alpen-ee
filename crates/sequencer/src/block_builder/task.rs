@@ -3,7 +3,10 @@ use std::{sync::Arc, time::Instant};
 use alpen_acct_types::EeAccountState;
 use alpen_block_assembly::{build_next_exec_block, BlockAssemblyInputs, BlockAssemblyOutputs};
 use alpen_chain_types::ExecBlockPackage;
-use alpen_common::{BlockProductionControl, Clock, ExecBlockPayload, ExecBlockRecord, SystemClock};
+use alpen_common::{
+    metrics::BLOCK_LATEST_HEIGHT, BlockProductionControl, Clock, ExecBlockPayload, ExecBlockRecord,
+    SystemClock,
+};
 use alpen_engine_api::{EnginePayload, PayloadBuilderEngine};
 use alpen_exec_chain::ExecChainHandle;
 use alpen_params::AlpenSpecId;
@@ -19,7 +22,7 @@ use crate::{
     block_builder::BlockBuilderConfig,
     metrics::{
         BLOCKS_BUILT, BLOCK_BUILD_FAILURES, BLOCK_BUILD_SECONDS, BLOCK_INBOX_MESSAGES,
-        BLOCK_INTERVAL_SECONDS, BLOCK_LATEST_HEIGHT, BLOCK_PAYLOAD_BYTES,
+        BLOCK_INTERVAL_SECONDS, BLOCK_PAYLOAD_BYTES,
     },
     ol_chain_tracker::OLChainTrackerHandle,
 };

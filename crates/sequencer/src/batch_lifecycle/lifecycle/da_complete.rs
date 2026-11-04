@@ -31,7 +31,14 @@ where
             return Ok(());
         }
 
-        let Some((batch, status)) = ctx.batch_storage.get_batch_by_idx(target_idx).await? else {
+        let Some((batch, status)) = ctx
+            .batch_storage
+            .get_batch_by_idx(target_idx)
+            .await
+            .inspect_err(|_| {
+                counter!(BATCH_TRANSITION_FAILURES, "status" => "da_complete").increment(1);
+            })?
+        else {
             return Ok(());
         };
 
@@ -43,7 +50,10 @@ where
                 let da_status = ctx
                     .da_provider
                     .check_da_status(batch.id(), envelope_idx)
-                    .await?;
+                    .await
+                    .inspect_err(|_| {
+                        counter!(BATCH_TRANSITION_FAILURES, "status" => "da_complete").increment(1);
+                    })?;
                 debug!(?da_status, "checking da status");
                 match da_status {
                     DaStatus::Pending => {
@@ -75,7 +85,7 @@ where
                             })?;
 
                         state.advance_da_complete(target_idx, batch.id());
-                        state.clock_mut().transition(target_idx, "da_complete");
+                        state.clock_mut().transition(batch.id(), "da_complete");
                     }
                     DaStatus::NotRequested => {
                         warn!(
@@ -121,7 +131,8 @@ where
                             "CRITICAL: DA posting failed - manual intervention required. \
                              Batch is stuck in DaPending state."
                         );
-                        counter!(BATCH_TRANSITION_FAILURES, "status" => "da_complete").increment(1);
+                        // Not a retried transition: the frontier stays, which the
+                        // batch_latest_idx gap shows, until someone intervenes.
                         return Ok(());
                     }
                 };

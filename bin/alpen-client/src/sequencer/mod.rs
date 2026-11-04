@@ -43,7 +43,7 @@ use alpen_sequencer::{
     OLChainTrackerState,
 };
 use alpen_storage_api::{require_latest_batch, ExecBlockStorage};
-use alpen_storage_store::{NodeStorage, SequencerDatabases, Stores};
+use alpen_storage_store::{NodeStorage, SequencerDatabases, Stores, ENV_NODE};
 use bitcoind_async_client::{
     corepc_types::bitcoin::{
         key::Keypair,
@@ -381,7 +381,7 @@ pub(crate) async fn run(
                 .table_counts()
                 .map_err(|e| eyre::eyre!("node table stats: {e}"))?
                 .into_iter()
-                .map(|(table, n)| ("node", table, n))
+                .map(|(table, n)| (ENV_NODE, table, n))
                 .collect();
             match sequencer_dbs.table_counts() {
                 Ok(sequencer_rows) => rows.extend(sequencer_rows),

@@ -19,7 +19,7 @@ use zkaleido::ProofReceiptWithMetadata;
 use super::{
     spec_acct::AcctSpec, spec_chunk::ChunkSpec, BatchTask, ChunkTask, EeBatchProofDbManager,
 };
-use crate::metrics::{note_proof_ready, PROOF_RECEIPTS};
+use crate::metrics::PROOF_RECEIPTS;
 
 /// Hook fired after a chunk proof is stored in paas's `ReceiptStore`.
 ///
@@ -47,11 +47,12 @@ impl ReceiptHook<ChunkSpec> for ChunkReceiptHook {
         let chunk_id = task.0;
         let proof_id = chunk_id.last_block();
         info!(?chunk_id, %proof_id, "marking chunk as proof-ready");
-        counter!(PROOF_RECEIPTS, "kind" => "chunk").increment(1);
         self.chunk_storage
             .update_chunk_status(chunk_id, ChunkStatus::ProofReady(proof_id))
             .await
-            .map_err(|e| ProverError::Storage(format!("update_chunk_status: {e}")))
+            .map_err(|e| ProverError::Storage(format!("update_chunk_status: {e}")))?;
+        counter!(PROOF_RECEIPTS, "kind" => "chunk").increment(1);
+        Ok(())
     }
 }
 
@@ -88,11 +89,10 @@ impl ReceiptHook<AcctSpec> for AcctReceiptHook {
         let batch_id = task.0;
         let proof_id = EeBatchProofDbManager::proof_id_for(batch_id);
         info!(%batch_id, %proof_id, "persisting batch acct proof");
-        counter!(PROOF_RECEIPTS, "kind" => "acct").increment(1);
-
         self.batch_proofs
             .put_proof(batch_id, receipt.clone())
             .map_err(|e| ProverError::Storage(format!("put_proof({batch_id}): {e}")))?;
+        counter!(PROOF_RECEIPTS, "kind" => "acct").increment(1);
 
         // Read current status to extract the DA refs the lifecycle attached
         // when the batch transitioned DaComplete → ProofPending.
@@ -126,7 +126,6 @@ impl ReceiptHook<AcctSpec> for AcctReceiptHook {
             )
             .await
             .map_err(|e| ProverError::Storage(format!("update_batch_status: {e}")))?;
-        note_proof_ready(batch_id);
         Ok(())
     }
 }

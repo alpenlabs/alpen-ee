@@ -33,12 +33,7 @@ impl L1ChunkedEnvelopeDbMdbx {
     /// Row counts of every DA-environment table, as `(table, rows)`, each O(1)
     /// through MDBX's table stat.
     pub(crate) fn table_counts(&self) -> MdbxResult<Vec<(&'static str, usize)>> {
-        self.env.view(|reader| {
-            da_tables()
-                .iter()
-                .map(|table| Ok((table.name, reader.count_table(table.name)?)))
-                .collect()
-        })
+        self.env.table_counts(&da_tables())
     }
 }
 

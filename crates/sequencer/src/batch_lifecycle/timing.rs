@@ -10,6 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use alpen_common::BatchId;
 use metrics::{counter, histogram};
 
 use crate::metrics::{BATCH_SETTLEMENT_SECONDS, BATCH_STATUS_SECONDS, BATCH_TRANSITIONS};
@@ -21,6 +22,7 @@ const FINAL_STAGE: &str = "proof_ready";
 /// When a batch was first seen and when it last changed stage.
 #[derive(Debug, Clone, Copy)]
 struct BatchTimes {
+    idx: u64,
     first_seen: Instant,
     stage_entered: Instant,
 }
@@ -28,15 +30,16 @@ struct BatchTimes {
 /// Per-batch stage timing, keyed by batch index.
 #[derive(Debug, Default)]
 pub(crate) struct StageClock {
-    batches: HashMap<u64, BatchTimes>,
+    batches: HashMap<BatchId, BatchTimes>,
 }
 
 impl StageClock {
     /// Notes that the lifecycle sees `idx` as sealed, if it had not already.
-    pub(crate) fn observe(&mut self, idx: u64) {
-        self.batches.entry(idx).or_insert_with(|| {
+    pub(crate) fn observe(&mut self, id: BatchId, idx: u64) {
+        self.batches.entry(id).or_insert_with(|| {
             let now = Instant::now();
             BatchTimes {
+                idx,
                 first_seen: now,
                 stage_entered: now,
             }
@@ -47,10 +50,10 @@ impl StageClock {
     /// when the batch's timing is known, records how long the previous stage
     /// took. Entering the final stage also records the whole settlement time
     /// and drops the batch.
-    pub(crate) fn transition(&mut self, idx: u64, stage: &'static str) {
+    pub(crate) fn transition(&mut self, id: BatchId, stage: &'static str) {
         counter!(BATCH_TRANSITIONS, "status" => stage).increment(1);
         let now = Instant::now();
-        let Some(times) = self.batches.get_mut(&idx) else {
+        let Some(times) = self.batches.get_mut(&id) else {
             return;
         };
         histogram!(BATCH_STATUS_SECONDS, "status" => stage)
@@ -58,13 +61,19 @@ impl StageClock {
         times.stage_entered = now;
         if stage == FINAL_STAGE {
             histogram!(BATCH_SETTLEMENT_SECONDS).record(secs(now.duration_since(times.first_seen)));
-            self.batches.remove(&idx);
+            self.batches.remove(&id);
         }
     }
 
     /// Forgets every batch, as after a reorg reset.
     pub(crate) fn clear(&mut self) {
         self.batches.clear();
+    }
+
+    /// Forgets the batches above `idx`: the ones a reorg invalidated. The
+    /// batches at or below it keep their timings.
+    pub(crate) fn retain_up_to(&mut self, idx: u64) {
+        self.batches.retain(|_, times| times.idx <= idx);
     }
 }
 

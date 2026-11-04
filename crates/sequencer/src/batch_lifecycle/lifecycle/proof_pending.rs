@@ -28,7 +28,14 @@ where
         return Ok(());
     }
 
-    let Some((batch, status)) = ctx.batch_storage.get_batch_by_idx(target_idx).await? else {
+    let Some((batch, status)) = ctx
+        .batch_storage
+        .get_batch_by_idx(target_idx)
+        .await
+        .inspect_err(|_| {
+            counter!(BATCH_TRANSITION_FAILURES, "status" => "proof_pending").increment(1);
+        })?
+    else {
         return Ok(()); // Batch doesn't exist yet
     };
 
@@ -55,7 +62,7 @@ where
                 })?;
 
             state.advance_proof_pending(target_idx, batch.id());
-            state.clock_mut().transition(target_idx, "proof_pending");
+            state.clock_mut().transition(batch.id(), "proof_pending");
         }
         BatchStatus::ProofPending { .. }
         | BatchStatus::ProofReady { .. }

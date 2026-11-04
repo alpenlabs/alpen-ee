@@ -2,7 +2,7 @@ use std::{fmt::Debug, future::Future, time::Duration};
 
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::ForkchoiceState;
-use alpen_common::{BlockNumHash, ConsensusHeads};
+use alpen_common::{metrics::BLOCK_LATEST_HEIGHT, BlockNumHash, ConsensusHeads};
 use alpen_engine_api::ExecutionEngine;
 use metrics::{counter, gauge};
 use reth_node_builder::NodeTypesWithDB;
@@ -17,7 +17,7 @@ use tokio::{
 };
 use tracing::{debug, error, warn};
 
-use crate::metrics::{BLOCK_LATEST_HEIGHT, FORKCHOICE_FAILURES, FORKCHOICE_UPDATES};
+use crate::metrics::{FORKCHOICE_FAILURES, FORKCHOICE_UPDATES};
 
 /// How often the engine control task checks for safe and finalized blocks reth is missing.
 ///

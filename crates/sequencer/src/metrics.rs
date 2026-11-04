@@ -21,9 +21,6 @@ pub const BLOCK_INTERVAL_SECONDS: &str = "alpen_ee_block_interval_seconds";
 pub const BLOCK_PAYLOAD_BYTES: &str = "alpen_ee_block_payload_bytes";
 /// OL inbox messages (deposits) consumed by blocks.
 pub const BLOCK_INBOX_MESSAGES: &str = "alpen_ee_block_inbox_messages_total";
-/// Height of the chain at each `status`: `head` is the last block the sequencer
-/// built. The engine reports `preconf`, `safe` and `finalized` under the same name.
-pub const BLOCK_LATEST_HEIGHT: &str = "alpen_ee_block_latest_height";
 
 /// Batches sealed, by the sealing `reason` (the policy that fired).
 pub const BATCHES_SEALED: &str = "alpen_ee_batches_sealed_total";
@@ -88,10 +85,6 @@ pub fn describe() {
         BLOCK_INBOX_MESSAGES,
         "OL inbox messages (deposits) consumed by blocks"
     );
-    describe_gauge!(
-        BLOCK_LATEST_HEIGHT,
-        "Height of the chain at each status (head, preconf, safe, finalized)"
-    );
     describe_counter!(
         BATCHES_SEALED,
         "Batches sealed, by the sealing policy that fired"
@@ -133,7 +126,7 @@ pub fn describe() {
     );
     describe_counter!(
         OL_UPDATE_FAILURES,
-        "Update submissions the OL refused or that failed"
+        "Update submitter passes that failed: the OL state read, the update build or the submit"
     );
     describe_counter!(
         OL_UPDATE_OUTPUTS,

@@ -122,12 +122,7 @@ impl ProverDbMdbx {
     /// Row counts of every prover table, as `(table, rows)`, each O(1)
     /// through MDBX's table stat.
     pub fn table_counts(&self) -> MdbxResult<Vec<(&'static str, usize)>> {
-        self.env.view(|reader| {
-            prover_tables()
-                .iter()
-                .map(|table| Ok((table.name, reader.count_table(table.name)?)))
-                .collect()
-        })
+        self.env.table_counts(&prover_tables())
     }
 
     // --- Tasks ---

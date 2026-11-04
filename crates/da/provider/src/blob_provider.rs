@@ -8,13 +8,10 @@ use alpen_da_types::DaBlob;
 use alpen_reth_statediff::{AccountChange, BatchBuilder, BatchStateDiff};
 use alpen_storage_api::{BatchStorage, DaContext, StateDiffProvider};
 use async_trait::async_trait;
-use metrics::{counter, histogram};
+use metrics::counter;
 use tracing::*;
 
-use crate::{
-    metrics::{DA_BLOBS_BUILT, DA_BLOB_BLOCKS, DA_BYTECODES_DEDUPED},
-    DaBlobSource,
-};
+use crate::{metrics::DA_BYTECODES_DEDUPED, DaBlobSource};
 
 /// [`DaBlobSource`] that builds encoded DA blobs from Reth state diffs.
 ///
@@ -204,11 +201,7 @@ where
             .update_seq_no()
             .ok_or_else(|| eyre::eyre!("cannot build DA blob for genesis batch"))?;
 
-        // 5. Construct the DaBlob with metadata. Nothing below can fail, so the build counts only
-        //    now: a retried build is not two blobs.
-        counter!(DA_BLOBS_BUILT, "empty" => if state_diff.is_empty() { "true" } else { "false" })
-            .increment(1);
-        histogram!(DA_BLOB_BLOCKS).record(block_count as f64);
+        // 5. Construct the DaBlob with metadata.
         counter!(DA_BYTECODES_DEDUPED).increment(deduped as u64);
         Ok(DaBlob {
             spec_version: batch.spec_version(),

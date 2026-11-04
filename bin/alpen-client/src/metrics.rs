@@ -12,11 +12,6 @@
 //! Histograms render as summaries (`quantile="0.5"` and so on, plus `_sum`
 //! and `_count`) because reth's recorder sets no buckets.
 
-#[cfg(feature = "sequencer")]
-use std::{
-    collections::HashMap,
-    sync::{LazyLock, Mutex},
-};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -25,13 +20,12 @@ use std::{
 };
 
 #[cfg(feature = "sequencer")]
-use alpen_common::BatchId;
+use alpen_da_provider::metrics::describe as describe_da;
 use alpen_engine_reth::metrics::describe as describe_engine;
 use alpen_ol_tracker::metrics::describe as describe_ol_tracker;
 #[cfg(feature = "sequencer")]
-use metrics::describe_histogram;
-#[cfg(feature = "sequencer")]
-use metrics::histogram;
+use alpen_sequencer::metrics::describe as describe_sequencer;
+use alpen_storage_store::MDBX_ENVS;
 use metrics::{describe_counter, describe_gauge, gauge, Unit};
 use reth_tasks::TaskExecutor;
 use tokio::{task::spawn_blocking, time::sleep};
@@ -50,9 +44,6 @@ pub(crate) const PROOF_TASKS_SUBMITTED: &str = "alpen_ee_proof_tasks_submitted_t
 /// Proof receipts the provers stored, by `kind`.
 #[cfg(feature = "sequencer")]
 pub(crate) const PROOF_RECEIPTS: &str = "alpen_ee_proof_receipts_total";
-/// Seconds from a batch's proof tasks being submitted to its account proof being in the store.
-#[cfg(feature = "sequencer")]
-pub(crate) const PROOF_WAIT_SECONDS: &str = "alpen_ee_proof_wait_seconds";
 /// Proof status checks by the lifecycle, by the `status` found.
 #[cfg(feature = "sequencer")]
 pub(crate) const PROOF_STATUS_CHECKS: &str = "alpen_ee_proof_status_checks_total";
@@ -69,51 +60,6 @@ pub(crate) const DA_FEE_RATE_REFRESHES: &str = "alpen_ee_da_fee_rate_refreshes_t
 /// Non-zero normally; sustained growth means L1 publication is backing up.
 #[cfg(feature = "sequencer")]
 pub(crate) const DA_TXS_PENDING: &str = "alpen_ee_da_txs_pending";
-/// When each batch's proof tasks were submitted, until its account proof is
-/// stored. Shared by the prover (which submits) and the acct receipt hook
-/// (which stores), so the wait is measured on the path the node takes: the
-/// hook flips the batch to `ProofReady` before the lifecycle ever polls.
-#[cfg(feature = "sequencer")]
-static PROOF_SUBMITTED_AT: LazyLock<Mutex<HashMap<BatchId, Instant>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-/// Batches the proof wait is tracked for at once. A batch whose account proof
-/// never lands (permanent prover failure, batch reorg) would otherwise stay
-/// forever; past this many, the oldest submission is forgotten.
-#[cfg(feature = "sequencer")]
-const PROOF_TIMING_MAX_BATCHES: usize = 256;
-
-/// Marks `batch_id`'s proof tasks as submitted now, unless already marked.
-#[cfg(feature = "sequencer")]
-pub(crate) fn note_proof_submitted(batch_id: BatchId) {
-    let mut submitted = PROOF_SUBMITTED_AT
-        .lock()
-        .expect("proof timing lock poisoned");
-    submitted.entry(batch_id).or_insert_with(Instant::now);
-    if submitted.len() > PROOF_TIMING_MAX_BATCHES {
-        if let Some(oldest) = submitted
-            .iter()
-            .min_by_key(|(_, started)| **started)
-            .map(|(id, _)| *id)
-        {
-            submitted.remove(&oldest);
-        }
-    }
-}
-
-/// Records the proof wait for `batch_id` if its submission was marked; a
-/// second call for the same batch is a no-op.
-#[cfg(feature = "sequencer")]
-pub(crate) fn note_proof_ready(batch_id: BatchId) {
-    let started = PROOF_SUBMITTED_AT
-        .lock()
-        .expect("proof timing lock poisoned")
-        .remove(&batch_id);
-    if let Some(started) = started {
-        histogram!(PROOF_WAIT_SECONDS).record(started.elapsed().as_secs_f64());
-    }
-}
-
 /// Rows in each store table, by `env` and `table`.
 pub(crate) const STORE_ROWS: &str = "alpen_ee_store_rows";
 /// Bytes each MDBX environment's data file occupies on disk, by `env`.
@@ -121,9 +67,6 @@ pub(crate) const STORE_ENV_BYTES: &str = "alpen_ee_store_env_bytes";
 
 /// How often the store sampler counts rows and measures the data files.
 const STORE_SAMPLE_INTERVAL: Duration = Duration::from_secs(30);
-
-/// The MDBX environments under `<datadir>/mdbx`, by directory name.
-const STORE_ENVS: [&str; 4] = ["node", "prover", "witness", "da"];
 
 /// Row counts as `(environment, table, rows)`.
 pub(crate) type TableCounts = Vec<(&'static str, &'static str, usize)>;
@@ -136,9 +79,6 @@ pub(crate) fn describe_all() {
     describe_ol_tracker();
     #[cfg(feature = "sequencer")]
     {
-        use alpen_da_provider::metrics::describe as describe_da;
-        use alpen_sequencer::metrics::describe as describe_sequencer;
-
         describe_sequencer();
         describe_da();
         describe_counter!(
@@ -146,11 +86,6 @@ pub(crate) fn describe_all() {
             "Proof tasks handed to the provers, by kind"
         );
         describe_counter!(PROOF_RECEIPTS, "Proof receipts the provers stored, by kind");
-        describe_histogram!(
-            PROOF_WAIT_SECONDS,
-            Unit::Seconds,
-            "Seconds from a batch's proof tasks being submitted to its account proof being stored"
-        );
         describe_counter!(
             PROOF_STATUS_CHECKS,
             "Proof status checks by the lifecycle, by status"
@@ -217,7 +152,7 @@ fn sample_store(mdbx_dir: &Path, counts: &(dyn Fn() -> eyre::Result<TableCounts>
         }
         Err(error) => warn!(%error, "store row sampling failed"),
     }
-    for env in STORE_ENVS {
+    for env in MDBX_ENVS {
         if let Some(bytes) = data_file_bytes(&mdbx_dir.join(env).join("mdbx.dat")) {
             gauge!(STORE_ENV_BYTES, "env" => env).set(bytes as f64);
         }
