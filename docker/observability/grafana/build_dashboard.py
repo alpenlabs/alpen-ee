@@ -164,7 +164,7 @@ def point(rect, a):
 
 
 def text_el(name, text, rect, size=13, color="#e6e9ef", align="center", valign="middle",
-            fill=None, border=None, bold=False):
+            fill=None, border=None):
     x, y, w, h = rect
     el = {
         "type": "text", "name": name,
@@ -175,8 +175,6 @@ def text_el(name, text, rect, size=13, color="#e6e9ef", align="center", valign="
         "constraint": {"horizontal": "left", "vertical": "top"},
         "placement": {"top": y, "left": x, "width": w, "height": h},
     }
-    if bold:
-        el["config"]["text"]["fixed"] = text
     return el
 
 
@@ -203,7 +201,6 @@ def service_map_panel(y):
         c = LANES[lane]
         box = text_el(sid, name, (x, y0, w, h), size=13, align="center", valign="top",
                       fill=c["fill"], border=c["color"])
-        box["config"]["text"]["fixed"] = name
         boxes[sid] = box
         elements.append(box)
         elements.append(text_el(f"{sid}__sub", subtitle, (x + 4, y0 + 18, w - 8, 14), size=9,
@@ -212,7 +209,7 @@ def service_map_panel(y):
                                   size=13, align="left"))
         elements.append(text_el(f"{sid}__cap", caption, (x + w // 2 + 10, y0 + 37, w // 2 - 14, 16),
                                 size=9, color="#aab2bf", align="right"))
-        targets.append(target(f"({query}) or vector(0)", f"svc_{sid}", instant=True))
+        targets.append(target(query, f"svc_{sid}", instant=True))
         overrides.append(override(f"svc_{sid}", unit, decimals))
 
     for flow in FLOWS:
@@ -250,7 +247,7 @@ def service_map_panel(y):
                                   color="#f2f4f7"))
         elements.append(text_el(f"{fid}__cap", caption, (lx, ly + 15, lw, 13), size=9,
                                 color="#aab2bf"))
-        targets.append(target(f"({query}) or vector(0)", f"flow_{fid}", instant=True))
+        targets.append(target(query, f"flow_{fid}", instant=True))
         overrides.append(override(f"flow_{fid}", unit, decimals))
 
     # lane legend
@@ -269,7 +266,7 @@ def service_map_panel(y):
                        "reports now. Rates are over the dashboard's rate interval.",
         "gridPos": {"x": 0, "y": y, "w": 24, "h": 18},
         "datasource": DS, "targets": targets,
-        "fieldConfig": {"defaults": {"color": {"mode": "fixed", "fixedColor": "#ffffff"},
+        "fieldConfig": {"defaults": {"noValue": "no data", "color": {"mode": "fixed", "fixedColor": "#ffffff"},
                                      "unit": "short", "decimals": 1},
                         "overrides": overrides},
         "options": {
@@ -544,7 +541,7 @@ def build():
     panels.append(row("Data availability on Bitcoin", y)); y += 1
     panels.append(timeseries("Envelopes submitted and finalized", [
         rate_q("da_envelopes_submitted_total", "submitted /min", mul=60),
-        rate_q("da_envelopes_finalized_total", "finalized /min", mul=60),
+        rate_q("batch_transitions_total", "DA complete /min", 'status="da_complete"', mul=60),
         rate_q("da_blobs_built_total", "blobs built /min", mul=60),
     ], grid(0, y, 8, 8), desc="Per minute. Each envelope is one commit and one reveal transaction.", decimals=1))
     panels.append(timeseries("Time to DA finality", [
@@ -601,7 +598,7 @@ def build():
         rate_q("ol_update_outputs_total", "{{kind}} outputs /min", mul=60, by="kind"),
         q("batch_latest_idx", 'status="ol_latest"', "OL latest (next seq no)"),
     ], grid(16, y, 8, 7), desc="Transfers and messages carried by updates; the OL account's next sequence number as last read.", decimals=1, fill=0,
-       overrides=[{"matcher": {"id": "byName", "options": "account seq no"},
+       overrides=[{"matcher": {"id": "byName", "options": "OL latest (next seq no)"},
                    "properties": [{"id": "custom.axisPlacement", "value": "right"}]}]))
     y += 7
 

@@ -4,8 +4,8 @@
 # Targets live in targets/alpen.yml (file-based discovery, re-read every 30 s
 # without a restart): the default is a node on the docker host started with
 # `--metrics 0.0.0.0:9001` or the docker entrypoint's METRICS_ADDR. Add a
-# second target for a full node; the dashboard filters on the `instance` and
-# `role` labels.
+# second target for a full node; the dashboard's node picker is the `instance`
+# label, `role` only annotates the target.
 global:
   scrape_interval: 5s
   evaluation_interval: 15s
