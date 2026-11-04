@@ -63,16 +63,25 @@ pub struct AlpenGossipState {
 }
 
 impl AlpenGossipState {
-    /// Creates a new [`AlpenGossipState`] that only accepts packages signed
+    /// Creates the state for a full node, which only accepts packages signed
     /// by `sequencer_pubkey`.
-    pub fn new(
+    pub fn full_node(
         events: mpsc::UnboundedSender<AlpenGossipEvent>,
         peers: PeersHandle,
         sequencer_pubkey: Buf32,
     ) -> Self {
         Self {
             events,
-            ingress: GossipIngress::new(sequencer_pubkey),
+            ingress: GossipIngress::verify(sequencer_pubkey),
+            peers,
+        }
+    }
+
+    /// Creates the state for the sequencer, which ignores inbound packages.
+    pub fn sequencer(events: mpsc::UnboundedSender<AlpenGossipEvent>, peers: PeersHandle) -> Self {
+        Self {
+            events,
+            ingress: GossipIngress::Ignore,
             peers,
         }
     }

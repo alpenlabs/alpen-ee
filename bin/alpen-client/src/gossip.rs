@@ -64,13 +64,12 @@ impl GossipConfig {
         events: mpsc::UnboundedSender<AlpenGossipEvent>,
         peers: PeersHandle,
     ) -> AlpenGossipState {
-        let sequencer_pubkey = match self {
-            Self::FullNode { sequencer_pubkey }
-            | Self::Sequencer {
-                sequencer_pubkey, ..
-            } => *sequencer_pubkey,
-        };
-        AlpenGossipState::new(events, peers, sequencer_pubkey)
+        match self {
+            Self::FullNode { sequencer_pubkey } => {
+                AlpenGossipState::full_node(events, peers, *sequencer_pubkey)
+            }
+            Self::Sequencer { .. } => AlpenGossipState::sequencer(events, peers),
+        }
     }
 }
 

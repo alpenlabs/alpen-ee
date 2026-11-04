@@ -9,18 +9,26 @@ use strata_primitives::Buf32;
 
 use crate::AlpenGossipPackage;
 
-/// Admits a gossip package only if the sequencer signed it and it carries a
-/// block newer than any admitted so far.
+/// How a node treats the gossip packages its peers send it.
 ///
 /// Every check runs on the connection that received the package, so a peer
 /// that floods us only slows its own connection, and only packages that pass
 /// reach the node's shared gossip task.
 #[derive(Clone, Debug)]
-pub(crate) struct GossipIngress {
-    sequencer_pubkey: Buf32,
+pub(crate) enum GossipIngress {
+    /// Drops every package unchecked.
+    ///
+    /// The sequencer makes the blocks, so its peers have nothing to tell it.
+    Ignore,
 
-    /// Highest sequence number admitted, shared by all connections.
-    highest_seq_no: Arc<AtomicU64>,
+    /// Admits a package only if the sequencer signed it and it carries a
+    /// block newer than any admitted so far.
+    Verify {
+        sequencer_pubkey: Buf32,
+
+        /// Highest sequence number admitted, shared by all connections.
+        highest_seq_no: Arc<AtomicU64>,
+    },
 }
 
 /// What a connection does with a package after [`GossipIngress::check`].
@@ -37,18 +45,21 @@ pub(crate) enum IngressVerdict {
 }
 
 impl GossipIngress {
-    pub(crate) fn new(sequencer_pubkey: Buf32) -> Self {
-        Self {
+    pub(crate) fn verify(sequencer_pubkey: Buf32) -> Self {
+        Self::Verify {
             sequencer_pubkey,
             highest_seq_no: Arc::new(AtomicU64::new(0)),
         }
     }
 
     pub(crate) fn check(&self, package: &AlpenGossipPackage) -> IngressVerdict {
-        let Self {
+        let Self::Verify {
             sequencer_pubkey,
             highest_seq_no,
-        } = self;
+        } = self
+        else {
+            return IngressVerdict::Drop;
+        };
 
         // Honest peers on this network only relay packages they verified, so
         // a package under any other key means the peer is hostile or on
@@ -104,7 +115,13 @@ mod tests {
     }
 
     fn sequencer_ingress() -> GossipIngress {
-        GossipIngress::new(pubkey_of(SEQUENCER_PRIVKEY))
+        GossipIngress::verify(pubkey_of(SEQUENCER_PRIVKEY))
+    }
+
+    #[test]
+    fn test_ignore_drops_valid_package() {
+        let package = signed_package(SEQUENCER_PRIVKEY, 1);
+        assert_eq!(GossipIngress::Ignore.check(&package), IngressVerdict::Drop);
     }
 
     #[test]
