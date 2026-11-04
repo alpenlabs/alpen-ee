@@ -42,6 +42,7 @@ impl DaFeeRateServiceHandle {
     }
 
     /// Returns the service framework monitor for health observation.
+    #[expect(dead_code, reason = "part of service handle API, not yet consumed")]
     pub(crate) fn monitor(&self) -> &ServiceMonitor<DaFeeRateStatus> {
         &self.monitor
     }
@@ -76,13 +77,13 @@ pub(super) async fn launch(
     })
 }
 
-/// Records the initial fixed or writer-backed rate.
 /// Publishes the rate and freshness gauges.
 pub(super) fn record_rate(rate_wei_per_byte: u64, is_stale: bool) {
     set_current_rate_metric(rate_wei_per_byte);
     gauge!(DA_FEE_RATE_STALE).set(if is_stale { 1.0 } else { 0.0 });
 }
 
+/// Records the initial fixed or writer-backed rate.
 pub(super) fn record_initialized_rate(rate_handle: &DaFeeRateHandle) {
     record_rate(rate_handle.current_rate(), false);
     info!(
@@ -146,8 +147,7 @@ impl AsyncService for DaFeeRateService {
         match fetch_result.and_then(|rate| state.apply_policy_rate(now, rate)) {
             Ok(update) => {
                 log_update(&update);
-                set_current_rate_metric(update.adjusted_rate.wei_per_byte());
-                gauge!(DA_FEE_RATE_STALE).set(0);
+                record_rate(update.adjusted_rate.wei_per_byte(), false);
                 counter!(DA_FEE_RATE_REFRESHES, "outcome" => "success").increment(1);
             }
             Err(error) => {

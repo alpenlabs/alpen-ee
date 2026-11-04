@@ -219,8 +219,8 @@ async fn engine_control_task_inner<C, E, T>(
                         counter!(FORKCHOICE_UPDATES, "kind" => "consensus").increment(1);
                         if send_forkchoice_update(&engine, update).await {
                             head_block_hash = update.head_block_hash;
+                            record_consensus_heights(&consensus_state, &chain);
                         }
-                        record_consensus_heights(&consensus_state, &chain);
                     }
                     Err(err) => error!(?err, "failed to read the canonical chain"),
                 }
@@ -234,7 +234,6 @@ async fn engine_control_task_inner<C, E, T>(
                 // got head block from sequencer / p2p
                 let blocknumhash = *preconf_rx.borrow_and_update();
                 let next_head_block_hash = B256::from_slice(blocknumhash.hash().as_slice());
-                gauge!(BLOCK_LATEST_HEIGHT, "status" => "preconf").set(blocknumhash.blocknum() as f64);
                 counter!(FORKCHOICE_UPDATES, "kind" => "preconf").increment(1);
 
                 let update = ForkchoiceState {
@@ -244,6 +243,7 @@ async fn engine_control_task_inner<C, E, T>(
                 };
                 if send_forkchoice_update(&engine, update).await {
                     head_block_hash = next_head_block_hash;
+                    gauge!(BLOCK_LATEST_HEIGHT, "status" => "preconf").set(blocknumhash.blocknum() as f64);
                 }
             }
             res = canon_state_rx.recv() => {

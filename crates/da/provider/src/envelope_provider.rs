@@ -23,10 +23,7 @@ use tracing::*;
 
 use crate::{
     chunking::prepare_da_chunks,
-    metrics::{
-        DA_BLOB_BYTES, DA_ENVELOPES_FINALIZED, DA_ENVELOPES_SUBMITTED, DA_ENVELOPE_CHUNKS,
-        DA_STATUS_CHECKS,
-    },
+    metrics::{DA_BLOB_BYTES, DA_ENVELOPES_SUBMITTED, DA_ENVELOPE_CHUNKS, DA_STATUS_CHECKS},
     DaBlobSource,
 };
 
@@ -232,7 +229,6 @@ impl BatchDaProvider for ChunkedEnvelopeDaProvider {
                         .collect::<Vec<_>>()
                         .join(", ");
                     info!(%da_block_refs, "batch DA finalized on L1");
-                    counter!(DA_ENVELOPES_FINALIZED).increment(1);
                     Ok(DaStatus::Ready(block_refs))
                 }
                 ChunkedEnvelopeStatus::Unsigned
