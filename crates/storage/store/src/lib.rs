@@ -13,6 +13,7 @@ mod storage;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_db;
 
+pub use database::PrunedWitnesses;
 pub use error::{DbError, DbResult};
 #[cfg(feature = "test-utils")]
 pub use init::open_da_ops;

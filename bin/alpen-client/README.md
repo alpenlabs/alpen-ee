@@ -22,6 +22,7 @@ It describes the structure of the node, the flow of blocks from production throu
   - [Prover (Sequencer)](#prover-sequencer)
   - [DA Pipeline (Sequencer)](#da-pipeline-sequencer)
   - [Update Submitter (Sequencer)](#update-submitter-sequencer)
+  - [Witness Pruner (Sequencer)](#witness-pruner-sequencer)
   - [Gossip Protocol](#gossip-protocol)
 - [Data Flows](#data-flows)
   - [Block Sync (Fullnode)](#block-sync-fullnode)
@@ -234,7 +235,7 @@ graph TB
 
 Long-running components run as tasks on Reth's task executor. Some are structured with the [`strata_service`](../../crates) `AsyncService` framework via a thin [`ServiceExecutor`](src/service_executor.rs) adapter (currently the OL tracker, exec chain, and chunk builder); the rest are plain critical tasks. All of them are wired together in [main.rs](src/main.rs).
 
-Every component runs as a Reth *critical* task. This is deliberate: these components are required for correct operation, so if any one hits a fatal error the whole node shuts down rather than continue in a degraded state with a critical component missing.
+Every component the chain depends on runs as a Reth *critical* task. This is deliberate: those components are required for correct operation, so if any one hits a fatal error the whole node shuts down rather than continue in a degraded state with a critical component missing. Housekeeping that the chain does not depend on, such as the witness pruner, runs as a plain task.
 
 ### Communication Pattern
 
@@ -471,6 +472,21 @@ Proofs and prover tasks live in a dedicated MDBX instance, separate from OL stor
 - Submit them in strict `seq_no` order (starting at the OL account's current `seq_no + 1`)
 - Build each `SnarkAccountUpdate` (proof bytes, DA references, inbox messages, output messages/transfers, new tip commitment) to be byte-identical to what the prover committed
 - Rely on OL to dedupe transactions already in its mempool
+
+---
+
+### Witness Pruner (Sequencer)
+
+**Purpose**: Deletes the per-block proof witnesses and accessed-state records of finalized blocks, which are proving inputs nothing reads once the block's update is accepted by OL.
+
+**Location**: [src/sequencer/witness_pruner.rs](src/sequencer/witness_pruner.rs)
+
+**Responsibilities**:
+- Every `interval_secs`, read the finalized height and delete the rows of every height below `finalized - keep_blocks`, in transactions of `heights_per_txn` heights, at most `max_txns_per_tick` per pass
+- Find where pruning left off by binary search over the finalized chain on start, so no marker is persisted
+- Leave block records, payloads, state diffs and bytecodes alone: only `BlockWitnessSchema` and `BlockAccessedStateSchema` rows go
+
+MDBX reuses freed pages but never shrinks the file, so the store stops growing from this source rather than getting smaller. Full nodes build no witnesses and run no pruner. The pruner runs iff `[sequencer.pruning.witness]` is configured, which it is by default; see [Configuration](#configuration) for how to turn it off.
 
 ---
 
@@ -804,6 +820,18 @@ max_fee_rate_sat_vb = 1000  # per-transaction Bitcoin Core guardrail
 [sequencer.fee_bumping]
 min_age_blocks = 2      # L1 blocks a DA transaction may stay unconfirmed before it is replaced
 max_attempts = 5        # broadcasts per replacement chain, at most 64
+
+# Optional. What the sequencer deletes below finality, one subsection per
+# kind of row; a kind is pruned iff its subsection is present. Leaving the
+# whole [sequencer.pruning] table out runs every kind with its defaults; a
+# [sequencer.pruning] table without the subsection turns the kind off.
+# witness: each finalized block's proof witness and accessed-state record,
+# the store's largest rows; all keys below are the defaults.
+[sequencer.pruning.witness]
+keep_blocks = 1000          # margin below the finalized height that keeps its rows
+interval_secs = 60
+heights_per_txn = 1000      # heights per write transaction
+max_txns_per_tick = 20      # transactions per pass while a backlog drains
 
 [sequencer.da_fee_rate]
 policy = "writer_backed"

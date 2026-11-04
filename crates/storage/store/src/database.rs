@@ -1,3 +1,5 @@
+use std::ops::AddAssign;
+
 use alpen_acct_types::EeAccountState;
 use alpen_common::{
     AccessedStateRecord, Batch, BatchId, BatchStatus, Chunk, ChunkId, ChunkStatus,
@@ -8,6 +10,29 @@ use strata_db_macros::gen_proxy;
 use strata_identifiers::{EpochCommitment, OLBlockId};
 
 use crate::{DbError, DbResult};
+
+/// What one `prune_proof_witnesses` call removed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PrunedWitnesses {
+    /// Proof witness rows deleted.
+    pub witnesses: usize,
+    /// Accessed-state rows deleted.
+    pub accessed_states: usize,
+}
+
+impl PrunedWitnesses {
+    /// Whether anything was removed.
+    pub fn is_empty(&self) -> bool {
+        self.witnesses == 0 && self.accessed_states == 0
+    }
+}
+
+impl AddAssign for PrunedWitnesses {
+    fn add_assign(&mut self, other: Self) {
+        self.witnesses += other.witnesses;
+        self.accessed_states += other.accessed_states;
+    }
+}
 
 /// Database interface for EE node account state management.
 #[gen_proxy(error = DbError, tracing_component = "storage:ee_node")]
@@ -45,6 +70,11 @@ pub(crate) trait NodeDb: Send + Sync + 'static {
 
     /// Remove all block data below specified height
     fn prune_block_data(&self, to_height: u64) -> DbResult<()>;
+
+    /// Deletes the proof witness and the accessed-state record of every
+    /// block at a height in `from_height..to_height`, forks included. The
+    /// block records themselves stay. Idempotent; returns what was removed.
+    fn prune_proof_witnesses(&self, from_height: u64, to_height: u64) -> DbResult<PrunedWitnesses>;
 
     /// Get exec block for the highest blocknum available in the local view of canonical chain.
     fn best_finalized_block(&self) -> DbResult<Option<ExecBlockRecord>>;

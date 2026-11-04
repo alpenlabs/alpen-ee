@@ -1,14 +1,15 @@
 //! [`ExecBlockStorage`] behaviour of [`NodeStorage`](crate::storage::NodeStorage).
 
-use alpen_common::{ExecBlockPayload, ExecBlockRecord};
+use alpen_common::{AccessedStateRecord, ExecBlockPayload, ExecBlockRecord};
 use alpen_storage_api::{
     testing::{create_exec_block, create_exec_block_with_messages, create_message_entry},
-    ExecBlockStorage,
+    AccessedStateStore, BlockWitnessStore, ExecBlockStorage,
 };
 use strata_acct_types::Hash;
 use strata_identifiers::Buf32;
 
 use super::setup_storage;
+use crate::PrunedWitnesses;
 
 /// Helper to create a test block hash from a u8 value
 fn hash_from_u8(value: u8) -> Hash {
@@ -1051,4 +1052,78 @@ async fn test_empty_messages() {
         "Expected empty messages, got {}",
         retrieved_block.messages().len()
     );
+}
+
+/// Pruning proof witnesses removes the witness and accessed-state rows of the
+/// heights asked for, forks included, and nothing else.
+#[tokio::test]
+async fn test_prune_proof_witnesses() {
+    let storage = &setup_storage();
+    let hashes: Vec<Hash> = (0..5).map(hash_from_u8).collect();
+    let block0 = create_exec_block(0, Hash::default(), hashes[0], 0);
+    storage
+        .save_exec_block(block0, ExecBlockPayload::from_bytes(vec![0]))
+        .await
+        .unwrap();
+    storage.init_finalized_chain(hashes[0]).await.unwrap();
+    for i in 1..5usize {
+        let block = create_exec_block(i as u64, hashes[i - 1], hashes[i], i as u64);
+        storage
+            .save_exec_block(block, ExecBlockPayload::from_bytes(vec![i as u8]))
+            .await
+            .unwrap();
+        storage.extend_finalized_chain(hashes[i]).await.unwrap();
+        storage
+            .put_block_witness(hashes[i], vec![i as u8; 8])
+            .await
+            .unwrap();
+        storage
+            .put_block_accessed_state(hashes[i], AccessedStateRecord::new(vec![], vec![], vec![]))
+            .await
+            .unwrap();
+    }
+    // A fork at height 2 with its own witness.
+    let fork = hash_from_u8(42);
+    storage
+        .save_exec_block(
+            create_exec_block(2, hashes[1], fork, 2),
+            ExecBlockPayload::from_bytes(vec![42]),
+        )
+        .await
+        .unwrap();
+    storage.put_block_witness(fork, vec![42; 8]).await.unwrap();
+
+    // Heights 1 and 2: three witnesses (block 1, block 2, the fork), two records.
+    let pruned = storage.prune_proof_witnesses(0, 3).await.unwrap();
+    assert_eq!(
+        pruned,
+        PrunedWitnesses {
+            witnesses: 3,
+            accessed_states: 2
+        }
+    );
+    for h in [hashes[1], hashes[2], fork] {
+        assert!(storage.get_block_witness(h).await.unwrap().is_none());
+        assert!(storage.get_block_accessed_state(h).await.unwrap().is_none());
+        assert!(
+            storage.get_exec_block(h).await.unwrap().is_some(),
+            "block records stay"
+        );
+        assert!(storage.get_block_payload(h).await.unwrap().is_some());
+    }
+    for h in [hashes[3], hashes[4]] {
+        assert!(storage.get_block_witness(h).await.unwrap().is_some());
+        assert!(storage.get_block_accessed_state(h).await.unwrap().is_some());
+    }
+    // Idempotent, and heights without blocks are skipped.
+    assert!(storage
+        .prune_proof_witnesses(0, 3)
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(storage
+        .prune_proof_witnesses(100, 200)
+        .await
+        .unwrap()
+        .is_empty());
 }
