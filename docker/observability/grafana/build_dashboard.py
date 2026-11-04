@@ -85,7 +85,7 @@ SERVICES = [
     ("batch_lifecycle", "Batch Lifecycle", "ee_batch_lifecycle", "settlement", (4, 2),
      f'{P}batch_latest_idx{{instance=~"$instance",status="proof_ready"}}', "proof-ready", "none", 0),
     ("da_pipeline", "DA Pipeline", "l1_broadcaster + watcher", "settlement", (3, 2),
-     f"rate({P}da_envelopes_submitted_total{I}{RATE}) * 60", "envelopes/min", "short", 1),
+     f"sum(rate({P}da_envelopes_submitted_total{I}{RATE})) * 60", "envelopes/min", "short", 1),
     ("prover", "Prover", "prover", "prover", (5, 2),
      f'rate({P}proof_receipts_total{{instance=~"$instance",kind="acct"}}{RATE}) * 60', "acct/min", "short", 1),
     ("bitcoind", "Bitcoin node", "RPC", "external", (3, 3),
@@ -130,7 +130,7 @@ FLOWS = [
     ("life_to_da", "batch_lifecycle", "da_pipeline",
      f'{P}da_blob_bytes{{instance=~"$instance",quantile="0.5"}}', "blob p50", "bytes", 0),
     ("da_to_btc", "da_pipeline", "bitcoind",
-     f"rate({P}da_envelopes_submitted_total{I}{RATE}) * 120", "L1 txs/min", "short", 1),
+     f"sum(rate({P}da_envelopes_submitted_total{I}{RATE})) * 120", "L1 txs/min", "short", 1),
     ("btc_to_da", "bitcoind", "da_pipeline",
      f'{P}batch_status_seconds{{instance=~"$instance",status="da_complete",quantile="0.5"}}', "seal→DA p50", "s", 1),
     ("life_to_prover", "batch_lifecycle", "prover",
@@ -557,9 +557,8 @@ def build():
     # --- DA on Bitcoin
     panels.append(row("Data availability on Bitcoin", y)); y += 1
     panels.append(timeseries("Envelopes submitted and finalized", [
-        rate_q("da_envelopes_submitted_total", "submitted /min", mul=60),
+        rate_q("da_envelopes_submitted_total", "submitted (empty={{empty}}) /min", mul=60, by="empty"),
         rate_q("batch_transitions_total", "DA complete /min", 'status="da_complete"', mul=60),
-        rate_q("da_blobs_built_total", "blobs built (empty={{empty}}) /min", mul=60, by="empty"),
     ], grid(0, y, 8, 8), desc="Per minute. Each envelope is one commit and one reveal transaction.", decimals=1))
     panels.append(timeseries("Time to DA finality", [
         quant("batch_status_seconds", "0.5", "seal → DA finalized p50", 'status="da_complete"'),
@@ -575,7 +574,6 @@ def build():
         avg_q("da_blob_bytes", "mean"),
     ], grid(0, y, 8, 7), unit="bytes", desc="Bytes per DA blob (state diffs, bytecodes deduplicated)."))
     panels.append(timeseries("Blob composition", [
-        quant("da_blob_blocks", "0.5", "blocks per blob p50"),
         quant("da_envelope_chunks", "0.5", "chunks per envelope p50"),
         rate_q("da_bytecodes_deduped_total", "bytecodes deduped /min", mul=60),
     ], grid(8, y, 8, 7), desc="", decimals=1, fill=0))
