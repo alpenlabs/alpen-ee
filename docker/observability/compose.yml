@@ -13,6 +13,9 @@
 # The `logs` profile adds Loki and an Alloy agent that ships every container's
 # stdout, labelled by compose service, for the dashboard's log panels.
 
+# Pinned: the Alloy config drops this project's own containers by this name.
+name: observability
+
 services:
 
   prometheus:
