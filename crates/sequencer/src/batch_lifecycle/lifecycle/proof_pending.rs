@@ -49,7 +49,10 @@ where
 
             ctx.batch_storage
                 .update_batch_status(batch.id(), BatchStatus::ProofPending { da })
-                .await?;
+                .await
+                .inspect_err(|_| {
+                    counter!(BATCH_TRANSITION_FAILURES, "status" => "proof_pending").increment(1);
+                })?;
 
             state.advance_proof_pending(target_idx, batch.id());
             state.clock_mut().transition(target_idx, "proof_pending");

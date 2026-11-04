@@ -236,7 +236,12 @@ async fn block_builder_task_inner<TEngine: PayloadBuilderEngine>(
     let started = Instant::now();
 
     // we can build blocks now
-    let (block, payload, blockhash) = build_next_block(
+    let BuiltBlock {
+        block,
+        payload,
+        blockhash,
+        parent_timestamp_ms,
+    } = build_next_block(
         next_block_target,
         config,
         exec_chain_handle,
@@ -266,6 +271,7 @@ async fn block_builder_task_inner<TEngine: PayloadBuilderEngine>(
     let next_block_target = compute_next_block_target(&block, config);
     let blocknum = block.blocknum();
     let inbox_message_count = block.messages().len();
+    let block_timestamp_ms = block.timestamp_ms();
 
     // save block outputs to Alpen storage (the source of truth)
     storage
@@ -280,6 +286,8 @@ async fn block_builder_task_inner<TEngine: PayloadBuilderEngine>(
         .context("block_builder: submit new exec block")?;
     gauge!(BLOCK_LATEST_HEIGHT, "status" => "head").set(blocknum as f64);
     counter!(BLOCK_INBOX_MESSAGES).increment(inbox_message_count as u64);
+    histogram!(BLOCK_INTERVAL_SECONDS)
+        .record(block_timestamp_ms.saturating_sub(parent_timestamp_ms) as f64 / 1000.0);
     histogram!(BLOCK_BUILD_SECONDS, "stage" => "total").record(started.elapsed().as_secs_f64());
 
     // Canonicalization (forkchoice update) is intentionally NOT performed here.
@@ -302,6 +310,15 @@ struct BlockTarget {
     timestamp_ms: u64,
 }
 
+/// A block built but not yet submitted, with what the caller records once it is.
+struct BuiltBlock<P> {
+    block: ExecBlockRecord,
+    payload: P,
+    blockhash: Hash,
+    /// Timestamp of the parent, for the block interval.
+    parent_timestamp_ms: u64,
+}
+
 async fn build_next_block<TEngine: PayloadBuilderEngine>(
     expected_block_target: &BlockTarget,
     config: &BlockBuilderConfig,
@@ -310,7 +327,7 @@ async fn build_next_block<TEngine: PayloadBuilderEngine>(
     payload_builder: &TEngine,
     block_production: &impl BlockProductionControl,
     clock: &impl Clock,
-) -> Result<(ExecBlockRecord, TEngine::TEnginePayload, Hash), BlockBuilderError> {
+) -> Result<BuiltBlock<TEngine::TEnginePayload>, BlockBuilderError> {
     let last_local_block = exec_chain_handle
         .get_best_block()
         .await
@@ -339,8 +356,6 @@ async fn build_next_block<TEngine: PayloadBuilderEngine>(
         last_local_block.timestamp_ms(),
         config.blocktime_ms(),
     )?;
-    histogram!(BLOCK_INTERVAL_SECONDS)
-        .record(timestamp_ms.saturating_sub(last_local_block.timestamp_ms()) as f64 / 1000.0);
 
     // check if there are new OL block inputs that need to be included
     let best_ol_block = ol_chain_handle
@@ -404,7 +419,12 @@ async fn build_next_block<TEngine: PayloadBuilderEngine>(
         inbox_messages,
     );
 
-    Ok((block, payload, blockhash))
+    Ok(BuiltBlock {
+        block,
+        payload,
+        blockhash,
+        parent_timestamp_ms: last_local_block.timestamp_ms(),
+    })
 }
 
 #[cfg(test)]

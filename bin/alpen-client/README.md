@@ -876,7 +876,7 @@ Every Alpen series is recorded through the `metrics` facade onto Reth's Promethe
 | `alpen_ee_block_latest_height` | G | `status`: `head` (built), `preconf` (sent to reth), `safe`, `finalized` | How far behind the head are the OL's confirmed and finalized views? |
 | `alpen_ee_payload_build_seconds` | H | `stage`: `accept`, `resolve`, `persist` (witness stored), `total` | Where does a payload build spend its time? |
 | `alpen_ee_payload_build_retries_total` | C | | Is reth lagging behind the sequencer's parent? |
-| `alpen_ee_payload_build_failures_total` | C | `reason`: `missing`, `rejected`, `communication`, `resolve_failed` | Why do payload builds fail? |
+| `alpen_ee_payload_build_failures_total` | C | `reason`: `missing`, `rejected`, `communication`, `resolve_failed`, `witness_missing`, `persist` | Why do payload builds fail? |
 | `alpen_ee_forkchoice_updates_total` | C | `kind`: `preconf`, `consensus`, `catchup` | Is reth being driven? |
 | `alpen_ee_forkchoice_failures_total` | C | | Is reth rejecting heads? |
 

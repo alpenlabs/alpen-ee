@@ -58,7 +58,10 @@ where
 
                 ctx.batch_storage
                     .update_batch_status(batch_id, BatchStatus::DaPending { envelope_idx })
-                    .await?;
+                    .await
+                    .inspect_err(|_| {
+                        counter!(BATCH_TRANSITION_FAILURES, "status" => "da_pending").increment(1);
+                    })?;
 
                 state.advance_da_pending(batch_idx, batch_id);
                 state.clock_mut().transition(batch_idx, "da_pending");
