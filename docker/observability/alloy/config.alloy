@@ -10,6 +10,13 @@ discovery.docker "containers" {
 discovery.relabel "containers" {
   targets = discovery.docker.containers.targets
 
+  // The stack's own containers are not shipped: Loki ingesting its own
+  // request log, pushed by Alloy, would feed back on itself.
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    regex         = "observability"
+    action        = "drop"
+  }
   rule {
     source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
     target_label  = "service"

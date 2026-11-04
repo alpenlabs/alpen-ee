@@ -39,6 +39,8 @@ LOKI = {"type": "loki", "uid": "alpen-loki"}
 P = "reth_alpen_ee_"  # every Alpen metric as the reth recorder exposes it
 I = '{instance=~"$instance"}'  # the node picked at the top of the dashboard
 RATE = "[$__rate_interval]"
+FINALITY_LAG = (f'{P}block_latest_height{{instance=~"$instance",status="head"}}'
+                f' - ignoring(status) {P}block_latest_height{{instance=~"$instance",status="finalized"}}')
 
 # ---------------------------------------------------------------- the map ---
 
@@ -100,7 +102,7 @@ FLOWS = [
     ("ol_to_tracker", "ol_node", "ol_tracker",
      f'{P}ol_epoch{{instance=~"$instance",status="local"}}', "epoch applied", "none", 0),
     ("tracker_to_engine", "ol_tracker", "engine_control",
-     f'{P}block_latest_height{{instance=~"$instance",status="head"}} - ignoring(status) {P}block_latest_height{{instance=~"$instance",status="finalized"}}', "finality lag", "short", 0),
+     FINALITY_LAG, "finality lag", "short", 0),
     ("tracker_to_olct", "ol_tracker", "ol_chain_tracker",
      f'{P}ol_epoch{{instance=~"$instance",status="latest"}}', "latest epoch", "none", 0),
     ("olct_to_bb", "ol_chain_tracker", "block_builder",
@@ -132,7 +134,7 @@ FLOWS = [
     ("btc_to_da", "bitcoind", "da_pipeline",
      f'{P}batch_status_seconds{{instance=~"$instance",status="da_complete",quantile="0.5"}}', "seal→DA p50", "s", 1),
     ("life_to_prover", "batch_lifecycle", "prover",
-     f'{P}proof_wait_seconds{{instance=~"$instance",quantile="0.5"}}', "proof wait p50", "s", 1),
+     f'{P}batch_status_seconds{{instance=~"$instance",status="proof_ready",quantile="0.5"}}', "proof wait p50", "s", 1),
     ("prover_to_backend", "prover", "prover_net",
      f"sum(rate({P}proof_receipts_total{I}{RATE})) * 60", "receipts/min", "short", 1),
     ("life_to_submit", "batch_lifecycle", "update_submitter",
@@ -196,6 +198,7 @@ def service_map_panel(y):
     lanes = {s[0]: s[3] for s in SERVICES}
     elements, targets, overrides = [], [], []
     boxes = {}
+    field_by_query = {}  # one instant query per distinct expression
     for sid, name, subtitle, lane, _, query, caption, unit, decimals in SERVICES:
         x, y0, w, h = rects[sid]
         c = LANES[lane]
@@ -210,6 +213,7 @@ def service_map_panel(y):
         elements.append(text_el(f"{sid}__cap", caption, (x + w // 2 + 10, y0 + 37, w // 2 - 14, 16),
                                 size=9, color="#aab2bf", align="right"))
         targets.append(target(query, f"svc_{sid}", instant=True))
+        field_by_query.setdefault(query, f"svc_{sid}")
         overrides.append(override(f"svc_{sid}", unit, decimals))
 
     for flow in FLOWS:
@@ -243,12 +247,15 @@ def service_map_panel(y):
                 lx = mx + 5 if side > 0 else mx - lw - 5
         else:  # diagonal: label beside the point, vertically centred on it
             lx, ly = mx + 6, my - lh / 2
-        elements.append(metric_el(f"{fid}__val", f"flow_{fid}", (lx, ly, lw, 16), size=11,
+        field = field_by_query.get(query, f"flow_{fid}")
+        elements.append(metric_el(f"{fid}__val", field, (lx, ly, lw, 16), size=11,
                                   color="#f2f4f7"))
         elements.append(text_el(f"{fid}__cap", caption, (lx, ly + 15, lw, 13), size=9,
                                 color="#aab2bf"))
-        targets.append(target(query, f"flow_{fid}", instant=True))
-        overrides.append(override(f"flow_{fid}", unit, decimals))
+        if field == f"flow_{fid}":  # a new query; otherwise the service's field is reused
+            targets.append(target(query, field, instant=True))
+            overrides.append(override(field, unit, decimals))
+            field_by_query[query] = field
 
     # lane legend
     lx = 20
@@ -290,6 +297,13 @@ def next_id():
     return next(_ids)
 
 
+def numbered(targets):
+    """refIds by position (A, B, ...), so legends may repeat or carry templates."""
+    for i, t in enumerate(targets):
+        t["refId"] = chr(65 + i) if i < 26 else f"q{i}"
+    return targets
+
+
 def target(expr, legend, instant=False, ref=None):
     t = {"datasource": DS, "expr": expr, "legendFormat": legend, "refId": ref or legend[:40],
          "instant": instant, "range": not instant, "editorMode": "code"}
@@ -315,7 +329,7 @@ def timeseries(title, targets, gp, unit="short", desc="", decimals=None, stack=F
     if min0:
         defaults["min"] = 0
     return {"type": "timeseries", "title": title, "id": next_id(), "description": desc,
-            "gridPos": gp, "datasource": DS, "targets": targets,
+            "gridPos": gp, "datasource": DS, "targets": numbered(targets),
             "fieldConfig": {"defaults": defaults, "overrides": overrides or []},
             "options": {"legend": {"displayMode": "list", "placement": legend, "showLegend": True},
                         "tooltip": {"mode": "multi", "sort": "desc"}}}
@@ -330,7 +344,7 @@ def stat(title, targets, gp, unit="short", desc="", decimals=None, color="blue",
         defaults["color"] = {"mode": "thresholds"}
         defaults["thresholds"] = {"mode": "absolute", "steps": thresholds}
     return {"type": "stat", "title": title, "id": next_id(), "description": desc,
-            "gridPos": gp, "datasource": DS, "targets": targets,
+            "gridPos": gp, "datasource": DS, "targets": numbered(targets),
             "fieldConfig": {"defaults": defaults, "overrides": []},
             "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False},
                         "graphMode": "area" if sparkline else "none", "colorMode": "value",
@@ -344,7 +358,7 @@ def bargauge(title, targets, gp, unit="short", desc="", decimals=None, max_=None
     if max_ is not None:
         defaults["max"] = max_
     return {"type": "bargauge", "title": title, "id": next_id(), "description": desc,
-            "gridPos": gp, "datasource": DS, "targets": targets,
+            "gridPos": gp, "datasource": DS, "targets": numbered(targets),
             "fieldConfig": {"defaults": defaults, "overrides": []},
             "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False},
                         "orientation": "horizontal", "displayMode": "gradient",
@@ -354,7 +368,7 @@ def bargauge(title, targets, gp, unit="short", desc="", decimals=None, max_=None
 
 def table(title, targets, gp, desc="", transformations=None, overrides=None):
     return {"type": "table", "title": title, "id": next_id(), "description": desc,
-            "gridPos": gp, "datasource": DS, "targets": targets,
+            "gridPos": gp, "datasource": DS, "targets": numbered(targets),
             "transformations": transformations or [],
             "fieldConfig": {"defaults": {"custom": {"align": "auto", "cellOptions": {"type": "auto"}}},
                             "overrides": overrides or []},
@@ -377,15 +391,19 @@ def row(title, y, collapsed=False, panels=None):
     return r
 
 
+def sel(extra=""):
+    """The node selector every query starts with; the cluster target rewrites it."""
+    return 'instance=~"$instance"' + (", " + extra if extra else "")
+
+
 def q(metric_suffix, extra="", legend=None, instant=False):
     """A series of one Alpen metric for the selected node."""
-    sel = 'instance=~"$instance"' + (", " + extra if extra else "")
-    return target(f"{P}{metric_suffix}{{{sel}}}", legend or metric_suffix, instant=instant)
+    sel_ = sel(extra)
+    return target(f"{P}{metric_suffix}{{{sel_}}}", legend or metric_suffix, instant=instant)
 
 
 def rate_q(metric_suffix, legend, extra="", mul=None, by=None):
-    sel = 'instance=~"$instance"' + (", " + extra if extra else "")
-    expr = f"rate({P}{metric_suffix}{{{sel}}}{RATE})"
+    expr = f"rate({P}{metric_suffix}{{{sel(extra)}}}{RATE})"
     if by:
         expr = f"sum by ({by}) ({expr})"
     if mul:
@@ -394,16 +412,15 @@ def rate_q(metric_suffix, legend, extra="", mul=None, by=None):
 
 
 def avg_q(metric_suffix, legend, extra=""):
-    sel = 'instance=~"$instance"' + (", " + extra if extra else "")
-    return target(f"rate({P}{metric_suffix}_sum{{{sel}}}{RATE}) / rate({P}{metric_suffix}_count{{{sel}}}{RATE})",
+    sel_ = sel(extra)
+    return target(f"rate({P}{metric_suffix}_sum{{{sel_}}}{RATE}) / rate({P}{metric_suffix}_count{{{sel_}}}{RATE})",
                   legend)
 
 
 def quant(metric_suffix, quantile, legend, extra=""):
     # Prometheus 3 normalises quantile labels to floats ("1.0"); 2.x keeps "1".
     qsel = f'quantile=~"{quantile}|{quantile}.0"' if quantile in ("0", "1") else f'quantile="{quantile}"'
-    sel = f'instance=~"$instance", {qsel}' + (", " + extra if extra else "")
-    return target(f"{P}{metric_suffix}{{{sel}}}", legend)
+    return target(f"{P}{metric_suffix}{{{sel(qsel + (', ' + extra if extra else ''))}}}", legend)
 
 
 # ------------------------------------------------------------- sections ---
@@ -416,7 +433,7 @@ def build():
     tiles = [
         ("Head height", [q("block_latest_height", 'status="head"', "head")], "none", "blue", 0),
         ("Finalized height", [q("block_latest_height", 'status="finalized"', "finalized")], "none", "green", 0),
-        ("Finality lag (blocks)", [target(f'{P}block_latest_height{{instance=~"$instance",status="head"}} - ignoring(status) {P}block_latest_height{{instance=~"$instance",status="finalized"}}', "lag")], "none", "orange", 0),
+        ("Finality lag (blocks)", [target(FINALITY_LAG, "lag")], "none", "orange", 0),
         ("Latest sealed batch", [q("batch_latest_idx", 'status="sealed"', "sealed")], "none", "blue", 0),
         ("OL latest batch", [q("batch_latest_idx", 'status="ol_latest"', "ol_latest")], "none", "purple", 0),
         ("Settlement p50", [quant("batch_settlement_seconds", "0.5", "p50")], "s", "orange", 1),
@@ -511,7 +528,7 @@ def build():
         q("block_latest_height", 'status="finalized"', "finalized"),
     ], grid(0, y, 8, 8), desc="What the engine was last told. Safe and finalized follow OL epochs.", fill=0, decimals=0))
     panels.append(timeseries("Finality lag", [
-        target(f'{P}block_latest_height{{instance=~"$instance",status="head"}} - ignoring(status) {P}block_latest_height{{instance=~"$instance",status="finalized"}}', "head − finalized"),
+        target(FINALITY_LAG, "head − finalized"),
         target(f'{P}block_latest_height{{instance=~"$instance",status="head"}} - ignoring(status) {P}block_latest_height{{instance=~"$instance",status="safe"}}', "head − safe"),
     ], grid(8, y, 8, 8), desc="Blocks between the built head and the finalized / safe head.", decimals=0))
     panels.append(timeseries("OL epochs", [
@@ -527,7 +544,7 @@ def build():
     ], grid(0, y, 8, 7), desc="Engine API forkchoiceUpdated calls per minute, by what drove them.", decimals=1))
     panels.append(timeseries("OL tracker actions", [
         rate_q("ol_tracker_actions_total", "{{action}} /min", mul=60, by="action"),
-        rate_q("ol_tracker_failures_total", "failures /min", mul=60),
+        rate_q("ol_tracker_failures_total", "failures (fatal={{fatal}}) /min", mul=60, by="fatal"),
         rate_q("ol_epochs_applied_total", "epochs applied /min", mul=60),
     ], grid(8, y, 8, 7), desc="What each OL poll led to, per minute.", decimals=1))
     panels.append(timeseries("Gossip", [
@@ -542,7 +559,7 @@ def build():
     panels.append(timeseries("Envelopes submitted and finalized", [
         rate_q("da_envelopes_submitted_total", "submitted /min", mul=60),
         rate_q("batch_transitions_total", "DA complete /min", 'status="da_complete"', mul=60),
-        rate_q("da_blobs_built_total", "blobs built /min", mul=60),
+        rate_q("da_blobs_built_total", "blobs built (empty={{empty}}) /min", mul=60, by="empty"),
     ], grid(0, y, 8, 8), desc="Per minute. Each envelope is one commit and one reveal transaction.", decimals=1))
     panels.append(timeseries("Time to DA finality", [
         quant("batch_status_seconds", "0.5", "seal → DA finalized p50", 'status="da_complete"'),
@@ -574,9 +591,9 @@ def build():
         rate_q("proof_receipts_total", "{{kind}} receipts /min", mul=60, by="kind"),
     ], grid(0, y, 8, 8), desc="Chunk proofs cover a chunk's blocks; the account proof covers a batch and waits for its chunks and DA.", decimals=1))
     panels.append(timeseries("Account proof wait", [
-        quant("proof_wait_seconds", "0.5", "p50"),
-        quant("proof_wait_seconds", "0.9", "p90"),
-        quant("proof_wait_seconds", "1", "max"),
+        quant("batch_status_seconds", "0.5", "p50", 'status="proof_ready"'),
+        quant("batch_status_seconds", "0.9", "p90", 'status="proof_ready"'),
+        quant("batch_status_seconds", "1", "max", 'status="proof_ready"'),
     ], grid(8, y, 8, 8), unit="s", desc="From a batch's proof tasks being submitted to its account proof being in the store. Includes waiting for the prover's next tick.", decimals=1))
     panels.append(timeseries("Proof status checks", [
         rate_q("proof_status_checks_total", "{{status}} /min", mul=60, by="status"),
@@ -713,7 +730,7 @@ def to_cluster(dash, namespace):
         "alpen-client's services, data flows and pipeline metrics. Generated by "
         "alpen-ee docker/observability/grafana/build_dashboard.py --target cluster; edit there."
     )
-    pod_query = f'label_values({P}block_latest_height{{namespace="$rollup_namespace",status="head"}}, pod)'
+    pod_query = f'label_values({P}block_latest_height{{namespace="$rollup_namespace"}}, pod)'
     dash["templating"] = {"list": [
         {"name": "prometheus_datasource", "label": "Prometheus", "type": "datasource", "query": "prometheus",
          "refresh": 1, "hide": 0, "current": {}, "options": [], "regex": ""},

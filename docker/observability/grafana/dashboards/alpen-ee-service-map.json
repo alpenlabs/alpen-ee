@@ -89,7 +89,7 @@
           },
           "expr": "reth_alpen_ee_block_latest_height{instance=~\"$instance\", status=\"head\"}",
           "legendFormat": "head",
-          "refId": "head",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -144,7 +144,7 @@
           },
           "expr": "reth_alpen_ee_block_latest_height{instance=~\"$instance\", status=\"finalized\"}",
           "legendFormat": "finalized",
-          "refId": "finalized",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -199,7 +199,7 @@
           },
           "expr": "reth_alpen_ee_block_latest_height{instance=~\"$instance\",status=\"head\"} - ignoring(status) reth_alpen_ee_block_latest_height{instance=~\"$instance\",status=\"finalized\"}",
           "legendFormat": "lag",
-          "refId": "lag",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -254,7 +254,7 @@
           },
           "expr": "reth_alpen_ee_batch_latest_idx{instance=~\"$instance\", status=\"sealed\"}",
           "legendFormat": "sealed",
-          "refId": "sealed",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -309,7 +309,7 @@
           },
           "expr": "reth_alpen_ee_batch_latest_idx{instance=~\"$instance\", status=\"ol_latest\"}",
           "legendFormat": "ol_latest",
-          "refId": "ol_latest",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -364,7 +364,7 @@
           },
           "expr": "reth_alpen_ee_batch_settlement_seconds{instance=~\"$instance\", quantile=\"0.5\"}",
           "legendFormat": "p50",
-          "refId": "p50",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -657,42 +657,6 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "increase(reth_alpen_ee_block_inbox_messages_total{instance=~\"$instance\"}[1h])",
-          "legendFormat": "flow_olct_to_bb",
-          "refId": "flow_olct_to_bb",
-          "instant": true,
-          "range": false,
-          "editorMode": "code"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "alpen-prometheus"
-          },
-          "expr": "reth_alpen_ee_payload_build_seconds{instance=~\"$instance\",stage=\"total\",quantile=\"0.5\"}",
-          "legendFormat": "flow_bb_to_engine",
-          "refId": "flow_bb_to_engine",
-          "instant": true,
-          "range": false,
-          "editorMode": "code"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "alpen-prometheus"
-          },
-          "expr": "rate(reth_alpen_ee_blocks_built_total{instance=~\"$instance\"}[$__rate_interval])",
-          "legendFormat": "flow_bb_to_exec",
-          "refId": "flow_bb_to_exec",
-          "instant": true,
-          "range": false,
-          "editorMode": "code"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "alpen-prometheus"
-          },
           "expr": "reth_alpen_ee_block_interval_seconds{instance=~\"$instance\",quantile=\"0.5\"}",
           "legendFormat": "flow_exec_to_engine",
           "refId": "flow_exec_to_engine",
@@ -705,69 +669,9 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "sum(rate(reth_alpen_ee_forkchoice_updates_total{instance=~\"$instance\"}[$__rate_interval]))",
-          "legendFormat": "flow_engine_to_reth",
-          "refId": "flow_engine_to_reth",
-          "instant": true,
-          "range": false,
-          "editorMode": "code"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "alpen-prometheus"
-          },
-          "expr": "rate(reth_alpen_ee_gossip_broadcasts_total{instance=~\"$instance\"}[$__rate_interval])",
-          "legendFormat": "flow_exec_to_gossip",
-          "refId": "flow_exec_to_gossip",
-          "instant": true,
-          "range": false,
-          "editorMode": "code"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "alpen-prometheus"
-          },
-          "expr": "reth_alpen_ee_gossip_peers{instance=~\"$instance\"}",
-          "legendFormat": "flow_gossip_to_peers",
-          "refId": "flow_gossip_to_peers",
-          "instant": true,
-          "range": false,
-          "editorMode": "code"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "alpen-prometheus"
-          },
           "expr": "reth_alpen_ee_batch_blocks{instance=~\"$instance\",quantile=\"0.5\"}",
           "legendFormat": "flow_exec_to_bb2",
           "refId": "flow_exec_to_bb2",
-          "instant": true,
-          "range": false,
-          "editorMode": "code"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "alpen-prometheus"
-          },
-          "expr": "sum(rate(reth_alpen_ee_chunks_sealed_total{instance=~\"$instance\"}[$__rate_interval])) * 60",
-          "legendFormat": "flow_bb2_to_chunk",
-          "refId": "flow_bb2_to_chunk",
-          "instant": true,
-          "range": false,
-          "editorMode": "code"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "alpen-prometheus"
-          },
-          "expr": "sum(rate(reth_alpen_ee_batches_sealed_total{instance=~\"$instance\"}[$__rate_interval])) * 60",
-          "legendFormat": "flow_bb2_to_life",
-          "refId": "flow_bb2_to_life",
           "instant": true,
           "range": false,
           "editorMode": "code"
@@ -825,45 +729,9 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "reth_alpen_ee_proof_wait_seconds{instance=~\"$instance\",quantile=\"0.5\"}",
+          "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\",status=\"proof_ready\",quantile=\"0.5\"}",
           "legendFormat": "flow_life_to_prover",
           "refId": "flow_life_to_prover",
-          "instant": true,
-          "range": false,
-          "editorMode": "code"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "alpen-prometheus"
-          },
-          "expr": "sum(rate(reth_alpen_ee_proof_receipts_total{instance=~\"$instance\"}[$__rate_interval])) * 60",
-          "legendFormat": "flow_prover_to_backend",
-          "refId": "flow_prover_to_backend",
-          "instant": true,
-          "range": false,
-          "editorMode": "code"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "alpen-prometheus"
-          },
-          "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\",status=\"proof_ready\",quantile=\"0.5\"}",
-          "legendFormat": "flow_life_to_submit",
-          "refId": "flow_life_to_submit",
-          "instant": true,
-          "range": false,
-          "editorMode": "code"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "alpen-prometheus"
-          },
-          "expr": "sum(rate(reth_alpen_ee_ol_updates_submitted_total{instance=~\"$instance\"}[$__rate_interval])) * 60",
-          "legendFormat": "flow_submit_to_ol",
-          "refId": "flow_submit_to_ol",
           "instant": true,
           "range": false,
           "editorMode": "code"
@@ -1203,54 +1071,6 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "flow_olct_to_bb"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "short"
-              },
-              {
-                "id": "decimals",
-                "value": 0
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "flow_bb_to_engine"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "s"
-              },
-              {
-                "id": "decimals",
-                "value": 3
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "flow_bb_to_exec"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "short"
-              },
-              {
-                "id": "decimals",
-                "value": 2
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
               "options": "flow_exec_to_engine"
             },
             "properties": [
@@ -1267,54 +1087,6 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "flow_engine_to_reth"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "short"
-              },
-              {
-                "id": "decimals",
-                "value": 2
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "flow_exec_to_gossip"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "short"
-              },
-              {
-                "id": "decimals",
-                "value": 2
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "flow_gossip_to_peers"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "short"
-              },
-              {
-                "id": "decimals",
-                "value": 0
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
               "options": "flow_exec_to_bb2"
             },
             "properties": [
@@ -1325,38 +1097,6 @@
               {
                 "id": "decimals",
                 "value": 0
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "flow_bb2_to_chunk"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "short"
-              },
-              {
-                "id": "decimals",
-                "value": 1
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "flow_bb2_to_life"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "short"
-              },
-              {
-                "id": "decimals",
-                "value": 1
               }
             ]
           },
@@ -1433,54 +1173,6 @@
               {
                 "id": "unit",
                 "value": "s"
-              },
-              {
-                "id": "decimals",
-                "value": 1
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "flow_prover_to_backend"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "short"
-              },
-              {
-                "id": "decimals",
-                "value": 1
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "flow_life_to_submit"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "s"
-              },
-              {
-                "id": "decimals",
-                "value": 1
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "flow_submit_to_ol"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "short"
               },
               {
                 "id": "decimals",
@@ -4723,7 +4415,7 @@
               "config": {
                 "text": {
                   "mode": "field",
-                  "field": "flow_olct_to_bb",
+                  "field": "svc_ol_chain_tracker",
                   "fixed": ""
                 },
                 "size": 11,
@@ -4799,7 +4491,7 @@
               "config": {
                 "text": {
                   "mode": "field",
-                  "field": "flow_bb_to_engine",
+                  "field": "svc_alpen_reth",
                   "fixed": ""
                 },
                 "size": 11,
@@ -4875,7 +4567,7 @@
               "config": {
                 "text": {
                   "mode": "field",
-                  "field": "flow_bb_to_exec",
+                  "field": "svc_block_builder",
                   "fixed": ""
                 },
                 "size": 11,
@@ -5027,7 +4719,7 @@
               "config": {
                 "text": {
                   "mode": "field",
-                  "field": "flow_engine_to_reth",
+                  "field": "svc_engine_control",
                   "fixed": ""
                 },
                 "size": 11,
@@ -5103,7 +4795,7 @@
               "config": {
                 "text": {
                   "mode": "field",
-                  "field": "flow_exec_to_gossip",
+                  "field": "svc_gossip",
                   "fixed": ""
                 },
                 "size": 11,
@@ -5179,7 +4871,7 @@
               "config": {
                 "text": {
                   "mode": "field",
-                  "field": "flow_gossip_to_peers",
+                  "field": "svc_peers",
                   "fixed": ""
                 },
                 "size": 11,
@@ -5331,7 +5023,7 @@
               "config": {
                 "text": {
                   "mode": "field",
-                  "field": "flow_bb2_to_chunk",
+                  "field": "svc_chunk_builder",
                   "fixed": ""
                 },
                 "size": 11,
@@ -5407,7 +5099,7 @@
               "config": {
                 "text": {
                   "mode": "field",
-                  "field": "flow_bb2_to_life",
+                  "field": "svc_batch_builder",
                   "fixed": ""
                 },
                 "size": 11,
@@ -5863,7 +5555,7 @@
               "config": {
                 "text": {
                   "mode": "field",
-                  "field": "flow_prover_to_backend",
+                  "field": "svc_prover_net",
                   "fixed": ""
                 },
                 "size": 11,
@@ -5939,7 +5631,7 @@
               "config": {
                 "text": {
                   "mode": "field",
-                  "field": "flow_life_to_submit",
+                  "field": "flow_life_to_prover",
                   "fixed": ""
                 },
                 "size": 11,
@@ -6015,7 +5707,7 @@
               "config": {
                 "text": {
                   "mode": "field",
-                  "field": "flow_submit_to_ol",
+                  "field": "svc_update_submitter",
                   "fixed": ""
                 },
                 "size": 11,
@@ -6374,7 +6066,7 @@
           },
           "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\", quantile=\"0.5\", status=\"da_complete\"}",
           "legendFormat": "seal \u2192 DA finalized",
-          "refId": "seal \u2192 DA finalized",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6386,7 +6078,7 @@
           },
           "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\", quantile=\"0.5\", status=\"proof_pending\"}",
           "legendFormat": "DA \u2192 proof tasks",
-          "refId": "DA \u2192 proof tasks",
+          "refId": "B",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6398,7 +6090,7 @@
           },
           "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\", quantile=\"0.5\", status=\"proof_ready\"}",
           "legendFormat": "proving",
-          "refId": "proving",
+          "refId": "C",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6410,7 +6102,7 @@
           },
           "expr": "reth_alpen_ee_batch_settlement_seconds{instance=~\"$instance\", quantile=\"0.5\"}",
           "legendFormat": "whole settlement",
-          "refId": "whole settlement",
+          "refId": "D",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6466,7 +6158,7 @@
           },
           "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\", quantile=\"0.9\", status=\"da_complete\"}",
           "legendFormat": "seal \u2192 DA finalized",
-          "refId": "seal \u2192 DA finalized",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6478,7 +6170,7 @@
           },
           "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\", quantile=\"0.9\", status=\"proof_pending\"}",
           "legendFormat": "DA \u2192 proof tasks",
-          "refId": "DA \u2192 proof tasks",
+          "refId": "B",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6490,7 +6182,7 @@
           },
           "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\", quantile=\"0.9\", status=\"proof_ready\"}",
           "legendFormat": "proving",
-          "refId": "proving",
+          "refId": "C",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6502,7 +6194,7 @@
           },
           "expr": "reth_alpen_ee_batch_settlement_seconds{instance=~\"$instance\", quantile=\"0.9\"}",
           "legendFormat": "whole settlement",
-          "refId": "whole settlement",
+          "refId": "D",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6558,7 +6250,7 @@
           },
           "expr": "reth_alpen_ee_batch_settlement_seconds{instance=~\"$instance\", quantile=\"0.5\"}",
           "legendFormat": "p50",
-          "refId": "p50",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6570,7 +6262,7 @@
           },
           "expr": "reth_alpen_ee_batch_settlement_seconds{instance=~\"$instance\", quantile=\"0.9\"}",
           "legendFormat": "p90",
-          "refId": "p90",
+          "refId": "B",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6582,7 +6274,7 @@
           },
           "expr": "reth_alpen_ee_batch_settlement_seconds{instance=~\"$instance\", quantile=\"0.99\"}",
           "legendFormat": "p99",
-          "refId": "p99",
+          "refId": "C",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6645,7 +6337,7 @@
           },
           "expr": "reth_alpen_ee_batch_latest_idx{instance=~\"$instance\", status=\"sealed\"}",
           "legendFormat": "sealed",
-          "refId": "sealed",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6657,7 +6349,7 @@
           },
           "expr": "reth_alpen_ee_batch_latest_idx{instance=~\"$instance\", status=\"da_pending\"}",
           "legendFormat": "da_pending",
-          "refId": "da_pending",
+          "refId": "B",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6669,7 +6361,7 @@
           },
           "expr": "reth_alpen_ee_batch_latest_idx{instance=~\"$instance\", status=\"da_complete\"}",
           "legendFormat": "da_complete",
-          "refId": "da_complete",
+          "refId": "C",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6681,7 +6373,7 @@
           },
           "expr": "reth_alpen_ee_batch_latest_idx{instance=~\"$instance\", status=\"proof_pending\"}",
           "legendFormat": "proof_pending",
-          "refId": "proof_pending",
+          "refId": "D",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6693,7 +6385,7 @@
           },
           "expr": "reth_alpen_ee_batch_latest_idx{instance=~\"$instance\", status=\"proof_ready\"}",
           "legendFormat": "proof_ready",
-          "refId": "proof_ready",
+          "refId": "E",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6705,7 +6397,7 @@
           },
           "expr": "reth_alpen_ee_batch_latest_idx{instance=~\"$instance\", status=\"ol_latest\"}",
           "legendFormat": "ol_latest (included at OL tip)",
-          "refId": "ol_latest (included at OL tip)",
+          "refId": "F",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6768,7 +6460,7 @@
           },
           "expr": "(sum by (status) (rate(reth_alpen_ee_batch_transitions_total{instance=~\"$instance\"}[$__rate_interval]))) * 60",
           "legendFormat": "{{status}} entered",
-          "refId": "{{status}} entered",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6780,7 +6472,7 @@
           },
           "expr": "(sum by (status) (rate(reth_alpen_ee_batch_transition_failures_total{instance=~\"$instance\"}[$__rate_interval]))) * 60",
           "legendFormat": "{{status}} failed",
-          "refId": "{{status}} failed",
+          "refId": "B",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6856,7 +6548,7 @@
           },
           "expr": "reth_alpen_ee_block_interval_seconds{instance=~\"$instance\", quantile=\"0.5\"}",
           "legendFormat": "p50",
-          "refId": "p50",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6868,7 +6560,7 @@
           },
           "expr": "reth_alpen_ee_block_interval_seconds{instance=~\"$instance\", quantile=\"0.9\"}",
           "legendFormat": "p90",
-          "refId": "p90",
+          "refId": "B",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6880,7 +6572,7 @@
           },
           "expr": "reth_alpen_ee_block_interval_seconds{instance=~\"$instance\", quantile=\"0.99\"}",
           "legendFormat": "p99",
-          "refId": "p99",
+          "refId": "C",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6892,7 +6584,7 @@
           },
           "expr": "reth_alpen_ee_block_interval_seconds{instance=~\"$instance\", quantile=~\"1|1.0\"}",
           "legendFormat": "max",
-          "refId": "max",
+          "refId": "D",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6954,7 +6646,7 @@
           },
           "expr": "reth_alpen_ee_payload_build_seconds{instance=~\"$instance\", quantile=\"0.5\", stage=\"resolve\"}",
           "legendFormat": "resolve (reth builds)",
-          "refId": "resolve (reth builds)",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6966,7 +6658,7 @@
           },
           "expr": "reth_alpen_ee_payload_build_seconds{instance=~\"$instance\", quantile=\"0.5\", stage=\"accept\"}",
           "legendFormat": "accept (engine newPayload)",
-          "refId": "accept (engine newPayload)",
+          "refId": "B",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6978,7 +6670,7 @@
           },
           "expr": "reth_alpen_ee_payload_build_seconds{instance=~\"$instance\", quantile=\"0.5\", stage=\"persist\"}",
           "legendFormat": "persist (witness stored)",
-          "refId": "persist (witness stored)",
+          "refId": "C",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6990,7 +6682,7 @@
           },
           "expr": "reth_alpen_ee_payload_build_seconds{instance=~\"$instance\", quantile=\"0.5\", stage=\"total\"}",
           "legendFormat": "total",
-          "refId": "total",
+          "refId": "D",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7002,7 +6694,7 @@
           },
           "expr": "reth_alpen_ee_block_build_seconds{instance=~\"$instance\", quantile=\"0.5\", stage=\"total\"}",
           "legendFormat": "block task total",
-          "refId": "block task total",
+          "refId": "E",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7065,7 +6757,7 @@
           },
           "expr": "(rate(reth_alpen_ee_blocks_built_total{instance=~\"$instance\"}[$__rate_interval])) * 60",
           "legendFormat": "built /min",
-          "refId": "built /min",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7077,7 +6769,7 @@
           },
           "expr": "(sum by (reason) (rate(reth_alpen_ee_block_build_failures_total{instance=~\"$instance\"}[$__rate_interval]))) * 60",
           "legendFormat": "failed: {{reason}} /min",
-          "refId": "failed: {{reason}} /min",
+          "refId": "B",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7089,7 +6781,7 @@
           },
           "expr": "(rate(reth_alpen_ee_payload_build_retries_total{instance=~\"$instance\"}[$__rate_interval])) * 60",
           "legendFormat": "payload retries /min",
-          "refId": "payload retries /min",
+          "refId": "C",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7101,7 +6793,7 @@
           },
           "expr": "(sum by (reason) (rate(reth_alpen_ee_payload_build_failures_total{instance=~\"$instance\"}[$__rate_interval]))) * 60",
           "legendFormat": "payload failed: {{reason}} /min",
-          "refId": "payload failed: {{reason}} /min",
+          "refId": "D",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7164,7 +6856,7 @@
           },
           "expr": "reth_alpen_ee_block_payload_bytes{instance=~\"$instance\", quantile=\"0.5\"}",
           "legendFormat": "p50",
-          "refId": "p50",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7176,7 +6868,7 @@
           },
           "expr": "reth_alpen_ee_block_payload_bytes{instance=~\"$instance\", quantile=\"0.99\"}",
           "legendFormat": "p99",
-          "refId": "p99",
+          "refId": "B",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7238,7 +6930,7 @@
           },
           "expr": "(rate(reth_alpen_ee_block_inbox_messages_total{instance=~\"$instance\"}[$__rate_interval])) * 60",
           "legendFormat": "inbox messages /min",
-          "refId": "inbox messages /min",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7301,7 +6993,7 @@
           },
           "expr": "reth_alpen_ee_batch_blocks{instance=~\"$instance\", quantile=\"0.5\"}",
           "legendFormat": "blocks per batch p50",
-          "refId": "blocks per batch p50",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7313,7 +7005,7 @@
           },
           "expr": "(sum by (reason) (rate(reth_alpen_ee_batches_sealed_total{instance=~\"$instance\"}[$__rate_interval]))) * 60",
           "legendFormat": "batches sealed: {{reason}} /min",
-          "refId": "batches sealed: {{reason}} /min",
+          "refId": "B",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7325,7 +7017,7 @@
           },
           "expr": "(sum by (reason) (rate(reth_alpen_ee_chunks_sealed_total{instance=~\"$instance\"}[$__rate_interval]))) * 60",
           "legendFormat": "chunks sealed: {{reason}} /min",
-          "refId": "chunks sealed: {{reason}} /min",
+          "refId": "C",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7337,7 +7029,7 @@
           },
           "expr": "(sum by (kind) (rate(reth_alpen_ee_batch_reorgs_total{instance=~\"$instance\"}[$__rate_interval]))) * 60",
           "legendFormat": "{{kind}} reorgs /min",
-          "refId": "{{kind}} reorgs /min",
+          "refId": "D",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7413,7 +7105,7 @@
           },
           "expr": "reth_alpen_ee_block_latest_height{instance=~\"$instance\", status=\"head\"}",
           "legendFormat": "head (built)",
-          "refId": "head (built)",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7425,7 +7117,7 @@
           },
           "expr": "reth_alpen_ee_block_latest_height{instance=~\"$instance\", status=\"preconf\"}",
           "legendFormat": "preconf",
-          "refId": "preconf",
+          "refId": "B",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7437,7 +7129,7 @@
           },
           "expr": "reth_alpen_ee_block_latest_height{instance=~\"$instance\", status=\"safe\"}",
           "legendFormat": "safe",
-          "refId": "safe",
+          "refId": "C",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7449,7 +7141,7 @@
           },
           "expr": "reth_alpen_ee_block_latest_height{instance=~\"$instance\", status=\"finalized\"}",
           "legendFormat": "finalized",
-          "refId": "finalized",
+          "refId": "D",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7512,7 +7204,7 @@
           },
           "expr": "reth_alpen_ee_block_latest_height{instance=~\"$instance\",status=\"head\"} - ignoring(status) reth_alpen_ee_block_latest_height{instance=~\"$instance\",status=\"finalized\"}",
           "legendFormat": "head \u2212 finalized",
-          "refId": "head \u2212 finalized",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7524,7 +7216,7 @@
           },
           "expr": "reth_alpen_ee_block_latest_height{instance=~\"$instance\",status=\"head\"} - ignoring(status) reth_alpen_ee_block_latest_height{instance=~\"$instance\",status=\"safe\"}",
           "legendFormat": "head \u2212 safe",
-          "refId": "head \u2212 safe",
+          "refId": "B",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7587,7 +7279,7 @@
           },
           "expr": "reth_alpen_ee_ol_epoch{instance=~\"$instance\", status=\"latest\"}",
           "legendFormat": "latest (OL)",
-          "refId": "latest (OL)",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7599,7 +7291,7 @@
           },
           "expr": "reth_alpen_ee_ol_epoch{instance=~\"$instance\", status=\"local\"}",
           "legendFormat": "local (applied to EE)",
-          "refId": "local (applied to EE)",
+          "refId": "B",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7611,7 +7303,7 @@
           },
           "expr": "reth_alpen_ee_ol_epoch{instance=~\"$instance\", status=\"confirmed\"}",
           "legendFormat": "confirmed",
-          "refId": "confirmed",
+          "refId": "C",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7623,7 +7315,7 @@
           },
           "expr": "reth_alpen_ee_ol_epoch{instance=~\"$instance\", status=\"finalized\"}",
           "legendFormat": "finalized",
-          "refId": "finalized",
+          "refId": "D",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7686,7 +7378,7 @@
           },
           "expr": "(sum by (kind) (rate(reth_alpen_ee_forkchoice_updates_total{instance=~\"$instance\"}[$__rate_interval]))) * 60",
           "legendFormat": "{{kind}} /min",
-          "refId": "{{kind}} /min",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7698,7 +7390,7 @@
           },
           "expr": "(rate(reth_alpen_ee_forkchoice_failures_total{instance=~\"$instance\"}[$__rate_interval])) * 60",
           "legendFormat": "failed /min",
-          "refId": "failed /min",
+          "refId": "B",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7761,7 +7453,7 @@
           },
           "expr": "(sum by (action) (rate(reth_alpen_ee_ol_tracker_actions_total{instance=~\"$instance\"}[$__rate_interval]))) * 60",
           "legendFormat": "{{action}} /min",
-          "refId": "{{action}} /min",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7771,9 +7463,9 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "(rate(reth_alpen_ee_ol_tracker_failures_total{instance=~\"$instance\"}[$__rate_interval])) * 60",
-          "legendFormat": "failures /min",
-          "refId": "failures /min",
+          "expr": "(sum by (fatal) (rate(reth_alpen_ee_ol_tracker_failures_total{instance=~\"$instance\"}[$__rate_interval]))) * 60",
+          "legendFormat": "failures (fatal={{fatal}}) /min",
+          "refId": "B",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7785,7 +7477,7 @@
           },
           "expr": "(rate(reth_alpen_ee_ol_epochs_applied_total{instance=~\"$instance\"}[$__rate_interval])) * 60",
           "legendFormat": "epochs applied /min",
-          "refId": "epochs applied /min",
+          "refId": "C",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7848,7 +7540,7 @@
           },
           "expr": "reth_alpen_ee_gossip_peers{instance=~\"$instance\"}",
           "legendFormat": "peers",
-          "refId": "peers",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7860,7 +7552,7 @@
           },
           "expr": "(rate(reth_alpen_ee_gossip_broadcasts_total{instance=~\"$instance\"}[$__rate_interval])) * 60",
           "legendFormat": "headers broadcast /min",
-          "refId": "headers broadcast /min",
+          "refId": "B",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7872,7 +7564,7 @@
           },
           "expr": "(rate(reth_alpen_ee_gossip_received_total{instance=~\"$instance\"}[$__rate_interval])) * 60",
           "legendFormat": "packages received /min",
-          "refId": "packages received /min",
+          "refId": "C",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7948,7 +7640,7 @@
           },
           "expr": "(rate(reth_alpen_ee_da_envelopes_submitted_total{instance=~\"$instance\"}[$__rate_interval])) * 60",
           "legendFormat": "submitted /min",
-          "refId": "submitted /min",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7960,7 +7652,7 @@
           },
           "expr": "(rate(reth_alpen_ee_batch_transitions_total{instance=~\"$instance\", status=\"da_complete\"}[$__rate_interval])) * 60",
           "legendFormat": "DA complete /min",
-          "refId": "DA complete /min",
+          "refId": "B",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7970,9 +7662,9 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "(rate(reth_alpen_ee_da_blobs_built_total{instance=~\"$instance\"}[$__rate_interval])) * 60",
-          "legendFormat": "blobs built /min",
-          "refId": "blobs built /min",
+          "expr": "(sum by (empty) (rate(reth_alpen_ee_da_blobs_built_total{instance=~\"$instance\"}[$__rate_interval]))) * 60",
+          "legendFormat": "blobs built (empty={{empty}}) /min",
+          "refId": "C",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -8035,7 +7727,7 @@
           },
           "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\", quantile=\"0.5\", status=\"da_complete\"}",
           "legendFormat": "seal \u2192 DA finalized p50",
-          "refId": "seal \u2192 DA finalized p50",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -8047,7 +7739,7 @@
           },
           "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\", quantile=\"0.9\", status=\"da_complete\"}",
           "legendFormat": "seal \u2192 DA finalized p90",
-          "refId": "seal \u2192 DA finalized p90",
+          "refId": "B",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -8110,7 +7802,7 @@
           },
           "expr": "(sum by (status) (rate(reth_alpen_ee_da_status_checks_total{instance=~\"$instance\"}[$__rate_interval]))) * 60",
           "legendFormat": "{{status}} /min",
-          "refId": "{{status}} /min",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -8173,7 +7865,7 @@
           },
           "expr": "reth_alpen_ee_da_blob_bytes{instance=~\"$instance\", quantile=\"0.5\"}",
           "legendFormat": "p50",
-          "refId": "p50",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -8185,7 +7877,7 @@
           },
           "expr": "reth_alpen_ee_da_blob_bytes{instance=~\"$instance\", quantile=\"0.99\"}",
           "legendFormat": "p99",
-          "refId": "p99",
+          "refId": "B",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -8197,7 +7889,7 @@
           },
           "expr": "rate(reth_alpen_ee_da_blob_bytes_sum{instance=~\"$instance\"}[$__rate_interval]) / rate(reth_alpen_ee_da_blob_bytes_count{instance=~\"$instance\"}[$__rate_interval])",
           "legendFormat": "mean",
-          "refId": "mean",
+          "refId": "C",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -8259,7 +7951,7 @@
           },
           "expr": "reth_alpen_ee_da_blob_blocks{instance=~\"$instance\", quantile=\"0.5\"}",
           "legendFormat": "blocks per blob p50",
-          "refId": "blocks per blob p50",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -8271,7 +7963,7 @@
           },
           "expr": "reth_alpen_ee_da_envelope_chunks{instance=~\"$instance\", quantile=\"0.5\"}",
           "legendFormat": "chunks per envelope p50",
-          "refId": "chunks per envelope p50",
+          "refId": "B",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -8283,7 +7975,7 @@
           },
           "expr": "(rate(reth_alpen_ee_da_bytecodes_deduped_total{instance=~\"$instance\"}[$__rate_interval])) * 60",
           "legendFormat": "bytecodes deduped /min",
-          "refId": "bytecodes deduped /min",
+          "refId": "C",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -8346,7 +8038,7 @@
           },
           "expr": "rate(reth_alpen_ee_da_blob_bytes_sum{instance=~\"$instance\"}[$__rate_interval]) * 60",
           "legendFormat": "blob bytes /min",
-          "refId": "blob bytes /min",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -8421,7 +8113,7 @@
           },
           "expr": "(sum by (kind) (rate(reth_alpen_ee_proof_tasks_submitted_total{instance=~\"$instance\"}[$__rate_interval]))) * 60",
           "legendFormat": "{{kind}} tasks submitted /min",
-          "refId": "{{kind}} tasks submitted /min",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -8433,7 +8125,7 @@
           },
           "expr": "(sum by (kind) (rate(reth_alpen_ee_proof_receipts_total{instance=~\"$instance\"}[$__rate_interval]))) * 60",
           "legendFormat": "{{kind}} receipts /min",
-          "refId": "{{kind}} receipts /min",
+          "refId": "B",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -8494,9 +8186,9 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "reth_alpen_ee_proof_wait_seconds{instance=~\"$instance\", quantile=\"0.5\"}",
+          "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\", quantile=\"0.5\", status=\"proof_ready\"}",
           "legendFormat": "p50",
-          "refId": "p50",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -8506,9 +8198,9 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "reth_alpen_ee_proof_wait_seconds{instance=~\"$instance\", quantile=\"0.9\"}",
+          "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\", quantile=\"0.9\", status=\"proof_ready\"}",
           "legendFormat": "p90",
-          "refId": "p90",
+          "refId": "B",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -8518,9 +8210,9 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "reth_alpen_ee_proof_wait_seconds{instance=~\"$instance\", quantile=~\"1|1.0\"}",
+          "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\", quantile=~\"1|1.0\", status=\"proof_ready\"}",
           "legendFormat": "max",
-          "refId": "max",
+          "refId": "C",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -8583,7 +8275,7 @@
           },
           "expr": "(sum by (status) (rate(reth_alpen_ee_proof_status_checks_total{instance=~\"$instance\"}[$__rate_interval]))) * 60",
           "legendFormat": "{{status}} /min",
-          "refId": "{{status}} /min",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -8659,7 +8351,7 @@
           },
           "expr": "(rate(reth_alpen_ee_ol_updates_submitted_total{instance=~\"$instance\", kind=\"first\"}[$__rate_interval])) * 60",
           "legendFormat": "first submissions /min",
-          "refId": "first submissions /min",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -8671,7 +8363,7 @@
           },
           "expr": "(rate(reth_alpen_ee_ol_updates_submitted_total{instance=~\"$instance\", kind=\"retry\"}[$__rate_interval])) * 60",
           "legendFormat": "retries /min",
-          "refId": "retries /min",
+          "refId": "B",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -8683,7 +8375,7 @@
           },
           "expr": "(rate(reth_alpen_ee_ol_update_failures_total{instance=~\"$instance\"}[$__rate_interval])) * 60",
           "legendFormat": "failed /min",
-          "refId": "failed /min",
+          "refId": "C",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -8746,7 +8438,7 @@
           },
           "expr": "reth_alpen_ee_batch_latest_idx{instance=~\"$instance\",status=\"sealed\"} - ignoring(status) reth_alpen_ee_batch_latest_idx{instance=~\"$instance\",status=\"ol_latest\"}",
           "legendFormat": "sealed \u2212 OL latest (batches)",
-          "refId": "sealed \u2212 OL latest (batches)",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -8758,7 +8450,7 @@
           },
           "expr": "reth_alpen_ee_batch_latest_idx{instance=~\"$instance\",status=\"proof_ready\"} - ignoring(status) reth_alpen_ee_batch_latest_idx{instance=~\"$instance\",status=\"ol_latest\"}",
           "legendFormat": "proof-ready \u2212 OL latest",
-          "refId": "proof-ready \u2212 OL latest",
+          "refId": "B",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -8821,7 +8513,7 @@
           },
           "expr": "(sum by (kind) (rate(reth_alpen_ee_ol_update_outputs_total{instance=~\"$instance\"}[$__rate_interval]))) * 60",
           "legendFormat": "{{kind}} outputs /min",
-          "refId": "{{kind}} outputs /min",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -8833,7 +8525,7 @@
           },
           "expr": "reth_alpen_ee_batch_latest_idx{instance=~\"$instance\", status=\"ol_latest\"}",
           "legendFormat": "OL latest (next seq no)",
-          "refId": "OL latest (next seq no)",
+          "refId": "B",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -8922,7 +8614,7 @@
           },
           "expr": "reth_alpen_ee_store_env_bytes{instance=~\"$instance\"}",
           "legendFormat": "{{env}}",
-          "refId": "{{env}}",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -8984,7 +8676,7 @@
           },
           "expr": "reth_alpen_ee_store_rows{instance=~\"$instance\"}",
           "legendFormat": "{{env}}/{{table}}",
-          "refId": "{{env}}/{{table}}",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -9047,7 +8739,7 @@
           },
           "expr": "reth_alpen_ee_store_rows{instance=~\"$instance\"}",
           "legendFormat": "{{env}}/{{table}}",
-          "refId": "{{env}}/{{table}}",
+          "refId": "A",
           "instant": true,
           "range": false,
           "editorMode": "code"
