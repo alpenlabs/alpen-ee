@@ -1,6 +1,8 @@
 # One entry per alpen-client node to scrape. `host.docker.internal` is the
 # docker host; a node in another compose project is reachable by its service
-# name once this stack is attached to that network.
+# name once this stack is attached to that network. Port 9001 is what
+# docker/docker-compose-eest.yml publishes (METRICS_HOST_PORT) and what the
+# entrypoint's METRICS_ADDR defaults to: move one, move the others.
 - targets: ["host.docker.internal:9001"]
   labels:
     role: sequencer
