@@ -21,7 +21,6 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}
-      - --web.enable-lifecycle
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
