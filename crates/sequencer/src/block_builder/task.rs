@@ -262,9 +262,10 @@ async fn block_builder_task_inner<TEngine: PayloadBuilderEngine>(
         .await
         .context("block_builder: submit payload to engine")?;
 
-    // cache next block target before the block is consumed by the save below
+    // cache what the metrics and the next target need before the save consumes the block
     let next_block_target = compute_next_block_target(&block, config);
     let blocknum = block.blocknum();
+    let inbox_message_count = block.messages().len();
 
     // save block outputs to Alpen storage (the source of truth)
     storage
@@ -278,6 +279,7 @@ async fn block_builder_task_inner<TEngine: PayloadBuilderEngine>(
         .await
         .context("block_builder: submit new exec block")?;
     gauge!(BLOCK_LATEST_HEIGHT, "status" => "head").set(blocknum as f64);
+    counter!(BLOCK_INBOX_MESSAGES).increment(inbox_message_count as u64);
     histogram!(BLOCK_BUILD_SECONDS, "stage" => "total").record(started.elapsed().as_secs_f64());
 
     // Canonicalization (forkchoice update) is intentionally NOT performed here.
@@ -361,7 +363,6 @@ async fn build_next_block<TEngine: PayloadBuilderEngine>(
             .into_parts(),
         None => (vec![], last_local_block.next_inbox_msg_idx()),
     };
-    counter!(BLOCK_INBOX_MESSAGES).increment(inbox_messages.len() as u64);
 
     // The version governing this block: whatever the parent block's account
     // state already settled on. A rotation consumed by *this* block only

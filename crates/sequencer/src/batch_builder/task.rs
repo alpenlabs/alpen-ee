@@ -282,6 +282,8 @@ where
             // State is already reset by check_and_handle_reorg;
             let _ = ctx.latest_batch_tx.send(batch_id);
             counter!(BATCH_REORGS).increment(1);
+            gauge!(BATCH_LATEST_IDX, "status" => "sealed")
+                .set(state.next_batch_idx().saturating_sub(1) as f64);
             emit_event(
                 &ctx.event_tx,
                 BatchBuilderEvent::reorg(
