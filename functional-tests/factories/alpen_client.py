@@ -18,6 +18,7 @@ from common.config import (
     AlpenFullNodeConfig,
     AlpenL1FeePolicyConfig,
     AlpenOlConfig,
+    AlpenPruningConfig,
     AlpenSequencerConfig,
     BitcoindConfig,
     EeDaConfig,
@@ -92,6 +93,7 @@ class AlpenClientFactory(flexitest.Factory):
         da_fee_rate: AlpenDaFeeRateConfig | None = None,
         base_fee_floor: dict[str, int] = DEFAULT_BASE_FEE_FLOOR,
         prover: ProverBackend = NATIVE_BACKEND,
+        pruning: AlpenPruningConfig | None = None,
         **kwargs,
     ) -> AlpenClientService:
         """
@@ -183,6 +185,7 @@ class AlpenClientFactory(flexitest.Factory):
             prover=prover_config,
             l1_fee_policy=l1_fee_policy,
             da_fee_rate=da_fee_rate,
+            pruning=pruning,
         )
 
         alpen_config = AlpenClientConfig(

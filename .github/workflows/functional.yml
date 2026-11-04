@@ -124,7 +124,8 @@ jobs:
       - name: Build Cargo project
         env:
           RUSTFLAGS: "-Cinstrument-coverage"
-        run: cargo build --locked --bin alpen-client
+        # dbconsole: the tests probe a node's store through it (common/dbconsole.py).
+        run: cargo build --locked -p alpen-client -p alpen-dbconsole
 
       - name: Build strata binaries from pinned rev
         run: |

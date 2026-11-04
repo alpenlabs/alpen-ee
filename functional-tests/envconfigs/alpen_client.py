@@ -12,6 +12,7 @@ from common.alpen_params import DEFAULT_BASE_FEE_FLOOR
 from common.config import (
     AlpenDaFeeRateConfig,
     AlpenL1FeePolicyConfig,
+    AlpenPruningConfig,
     EeDaConfig,
     ServiceType,
 )
@@ -55,6 +56,7 @@ class AlpenClientEnvParams:
     da_fee_rate: AlpenDaFeeRateConfig | None = None
     forward_tx: bool = True
     base_fee_floor: dict[str, int] = field(default_factory=lambda: dict(DEFAULT_BASE_FEE_FLOOR))
+    pruning: AlpenPruningConfig | None = None
 
 
 class AlpenClientEnv(flexitest.EnvConfig):
@@ -194,6 +196,7 @@ class AlpenClientEnv(flexitest.EnvConfig):
             l1_fee_policy=envparams.l1_fee_policy,
             da_fee_rate=envparams.da_fee_rate,
             base_fee_floor=envparams.base_fee_floor,
+            pruning=envparams.pruning,
         )
         sequencer.wait_for_ready(timeout=60)
         seq_enode = sequencer.get_enode()

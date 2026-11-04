@@ -39,10 +39,12 @@ setup_path() {
 # Builds the alpen binaries from this workspace.
 build() {
     # TODO(STR-3692): different binaries for sequencer and full nodes
+    # dbconsole reads a node's store read-only while it runs; tests probe
+    # tables through it (common/dbconsole.py).
     if [ "$EE_PROVER_BACKEND" = sp1 ]; then
-      cargo build --release --bin alpen-client
+      cargo build --release -p alpen-client -p alpen-dbconsole
     else
-      cargo build --bin alpen-client
+      cargo build -p alpen-client -p alpen-dbconsole
     fi
 }
 

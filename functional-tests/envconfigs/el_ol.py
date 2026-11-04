@@ -5,7 +5,7 @@ Alpen-client test environment configurations.
 import flexitest
 
 from common.alpen_params import DEFAULT_BASE_FEE_FLOOR
-from common.config.config import EpochSealingConfig
+from common.config.config import AlpenPruningConfig, EpochSealingConfig
 from common.config.constants import ServiceType
 from common.prover_backend import NATIVE_BACKEND, ProverBackend
 from common.services.bitcoin import BitcoinService
@@ -46,6 +46,7 @@ class EeOLEnv(flexitest.EnvConfig):
         prover: ProverBackend = NATIVE_BACKEND,
         chunk_sealing_block_count: int | None = None,
         base_fee_floor: dict[str, int] = DEFAULT_BASE_FEE_FLOOR,
+        pruning: AlpenPruningConfig | None = None,
     ):
         epoch_seal_config = (
             EpochSealingConfig.new_fixed_slot(seal_epoch_slots)
@@ -63,6 +64,7 @@ class EeOLEnv(flexitest.EnvConfig):
             chunk_sealing_block_count=chunk_sealing_block_count,
             epoch_tracking_mode=epoch_tracking_mode,
             base_fee_floor=base_fee_floor,
+            pruning=pruning,
         )
         self.strata_config = StrataEnvConfig(
             pre_generate_blocks=pre_generate_blocks,
