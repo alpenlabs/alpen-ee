@@ -47,10 +47,13 @@ pub const BATCH_TRANSITION_FAILURES: &str = "alpen_ee_batch_transition_failures_
 
 /// Snark account updates submitted to the OL, by `kind`: `first` for a batch's
 /// first submission, `retry` when the OL had not yet accepted an earlier one.
+/// What was submitted is remembered per process: after a restart, a batch the
+/// OL has not accepted yet counts as `first` again.
 pub const OL_UPDATES_SUBMITTED: &str = "alpen_ee_ol_updates_submitted_total";
 /// Update submitter passes that failed: the OL state read, the update build or the submit.
 pub const OL_UPDATE_FAILURES: &str = "alpen_ee_ol_update_failures_total";
-/// Outputs carried by submitted updates, by `kind` (`transfer`, `message`).
+/// Outputs carried by first submissions, by `kind` (`transfer`, `message`);
+/// counted again if a restart resubmits an unaccepted batch.
 pub const OL_UPDATE_OUTPUTS: &str = "alpen_ee_ol_update_outputs_total";
 
 /// Registers the description and unit of every metric above.

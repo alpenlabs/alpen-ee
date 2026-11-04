@@ -5,8 +5,12 @@ use std::collections::VecDeque;
 use alpen_common::BlockNumHash;
 use alpen_storage_api::BatchStorage;
 use eyre::Result;
+use metrics::gauge;
 
-use crate::sealing_policy::{AccumulationPolicy, Accumulator};
+use crate::{
+    metrics::BATCH_LATEST_IDX,
+    sealing_policy::{AccumulationPolicy, Accumulator},
+};
 
 /// State for the batch builder task.
 ///
@@ -31,6 +35,9 @@ impl<P: AccumulationPolicy> BatchBuilderState<P> {
     ///
     /// Used when resuming from storage where batches already exist.
     pub fn from_last_batch(batch_idx: u64, last_block: BlockNumHash) -> Self {
+        // Published here so the series exists after a restart on a quiet chain,
+        // not only after the next seal.
+        gauge!(BATCH_LATEST_IDX, "status" => "sealed").set(batch_idx as f64);
         Self {
             prev_batch_end: last_block,
             next_batch_idx: batch_idx + 1,

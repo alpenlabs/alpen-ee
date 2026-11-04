@@ -27,7 +27,7 @@ struct BatchTimes {
     stage_entered: Instant,
 }
 
-/// Per-batch stage timing, keyed by batch index.
+/// Per-batch stage timing, keyed by batch id.
 #[derive(Debug, Default)]
 pub(crate) struct StageClock {
     batches: HashMap<BatchId, BatchTimes>,

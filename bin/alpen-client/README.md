@@ -873,7 +873,7 @@ Every Alpen series is recorded through the `metrics` facade onto Reth's Promethe
 | `alpen_ee_block_interval_seconds` | H | | Is the chain's cadence regular? |
 | `alpen_ee_block_payload_bytes` | H | | How big are blocks? |
 | `alpen_ee_block_inbox_messages_total` | C | | Are deposits flowing into blocks? |
-| `alpen_ee_block_latest_height` | G | `status`: `head` (built), `preconf` (sent to reth), `safe`, `finalized` | How far behind the head are the OL's confirmed and finalized views? |
+| `alpen_ee_block_latest_height` | G | `status`: `head` (built), `preconf` (sent to reth), `safe`, `finalized` (the heads sent to reth: the OL's confirmed and finalized, or the latest epoch under `Latest` tracking) | How far behind the head are the safe and finalized heads? |
 | `alpen_ee_payload_build_seconds` | H | `stage`: `accept`, `resolve`, `persist` (witness stored), `total` | Where does a payload build spend its time? |
 | `alpen_ee_payload_build_retries_total` | C | | Is reth lagging behind the sequencer's parent? |
 | `alpen_ee_payload_build_failures_total` | C | `reason`: `missing` (parent not in reth after the retries), `rejected`, `communication`, `resolve_failed`, `no_payload`, `witness_missing`, `persist` | Why do payload builds fail? |
@@ -920,9 +920,9 @@ Every Alpen series is recorded through the `metrics` facade onto Reth's Promethe
 
 | Metric | T | Labels | Question it answers |
 |---|---|---|---|
-| `alpen_ee_ol_updates_submitted_total` | C | `kind`: `first`, `retry` | Are updates going out, and how often are they resent? |
+| `alpen_ee_ol_updates_submitted_total` | C | `kind`: `first`, `retry` | Are updates going out, and how often are they resent? Submission memory is per process: after a restart an unaccepted batch counts as `first` again. |
 | `alpen_ee_ol_update_failures_total` | C | | Can the sequencer read OL state and submit? Counted per failed submitter pass. |
-| `alpen_ee_ol_update_outputs_total` | C | `kind`: `transfer`, `message` | Are withdrawals and messages leaving the EE? |
+| `alpen_ee_ol_update_outputs_total` | C | `kind`: `transfer`, `message` | Are withdrawals and messages leaving the EE? Counted on first submissions, so a restart can count an unaccepted batch's outputs again. |
 | `alpen_ee_ol_epoch` | G | `status`: `local`, `confirmed`, `finalized`, `latest` | Is the node keeping up with the OL? |
 | `alpen_ee_ol_epochs_applied_total` | C | | Is the tracker applying epochs? |
 | `alpen_ee_ol_tracker_actions_total` | C | `action`: `extend`, `refresh_finalized`, `reorg`, `noop` | What does the tracker do on each poll? |

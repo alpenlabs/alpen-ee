@@ -280,6 +280,7 @@ pub(crate) async fn create_gossip_task(
 ) {
     let mut connections: HashMap<PeerId, mpsc::UnboundedSender<AlpenGossipCommand>> =
         HashMap::new();
+    gauge!(GOSSIP_PEERS).set(0.0);
     let mut last_forwarded_seq_no: u64 = 0;
 
     loop {
