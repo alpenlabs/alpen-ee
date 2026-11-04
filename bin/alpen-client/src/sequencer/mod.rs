@@ -25,8 +25,7 @@ use alpen_exec_chain::{init_exec_chain_state_from_storage, ExecChainState};
 use alpen_exex::{AccessedStateGenerator, StateDiffGenerator};
 use alpen_genesis::{ensure_batch_genesis, ensure_finalized_exec_chain_genesis};
 use alpen_reth_node::{
-    AlpenEngineTypes, AlpenEthereumNode, AlpenGossipProtocolHandler, AlpenGossipState,
-    AlpenNodeMode,
+    AlpenEngineTypes, AlpenEthereumNode, AlpenGossipProtocolHandler, AlpenNodeMode,
 };
 use alpen_reth_rpc::AlpenFeeApiServer;
 use alpen_rpc_server::{AlpenEeRpcServer, EeRpcServer, RpcBlockProductionControl};
@@ -54,6 +53,7 @@ use bitcoind_async_client::{
 use eyre::Context;
 use reth_chainspec::ChainSpec;
 use reth_network::{protocol::IntoRlpxSubProtocol, NetworkProtocols};
+use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_builder::{NodeBuilder, NodeTypesWithDB, WithLaunchContext};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::{
@@ -304,6 +304,10 @@ pub(crate) async fn run(
 
     // Create gossip channel before building the node so we can register it early
     let (gossip_tx, gossip_rx) = mpsc::unbounded_channel();
+    // The sequencer's gossip pubkey is *derived* from its private key,
+    // not taken as separate config. Contrast `GossipConfig::full_node`,
+    // which is told the pubkey.
+    let gossip_config = GossipConfig::sequencer(privkey)?;
     let (preconf_tx, preconf_rx) = watch::channel(initial_preconf_head);
 
     let handle = builder
@@ -312,7 +316,9 @@ pub(crate) async fn run(
         .on_component_initialized(move |node| {
             // Add the custom RLPx subprotocol before node fully starts
             // See: crates/reth/node/src/gossip/
-            let handler = AlpenGossipProtocolHandler::new(AlpenGossipState::new(gossip_tx));
+            let peers = node.components.network.peers_handle().clone();
+            let handler =
+                AlpenGossipProtocolHandler::new(gossip_config.protocol_state(gossip_tx, peers));
             node.components
                 .network
                 .add_rlpx_sub_protocol(handler.into_rlpx_sub_protocol());
@@ -385,14 +391,7 @@ pub(crate) async fn run(
         preconf_rx,
     };
 
-    launched.spawn_shared_tasks(
-        consensus_watcher,
-        gossip_rx,
-        // The sequencer's gossip pubkey is *derived* from its private key,
-        // not taken as separate config. Contrast `GossipConfig::full_node`,
-        // which is told the pubkey.
-        GossipConfig::sequencer(privkey)?,
-    );
+    launched.spawn_shared_tasks(consensus_watcher, gossip_rx, gossip_config);
 
     start_services(
         &common,

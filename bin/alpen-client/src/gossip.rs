@@ -4,9 +4,9 @@ use std::collections::HashMap;
 
 use alpen_common::BlockNumHash;
 use alpen_reth_node::{
-    AlpenGossipCommand, AlpenGossipEvent, AlpenGossipMessage, AlpenGossipPackage,
+    AlpenGossipCommand, AlpenGossipEvent, AlpenGossipMessage, AlpenGossipPackage, AlpenGossipState,
 };
-use reth_network_api::PeerId;
+use reth_network_api::{test_utils::PeersHandle, PeerId};
 use reth_primitives_traits::Header;
 use reth_provider::CanonStateNotification;
 use strata_acct_types::Hash;
@@ -15,7 +15,7 @@ use tokio::{
     select,
     sync::{broadcast, mpsc, watch},
 };
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 #[cfg(feature = "sequencer")]
 use crate::sequencer::sequencer_gossip_pubkey;
@@ -58,13 +58,19 @@ impl GossipConfig {
         })
     }
 
-    fn sequencer_pubkey(&self) -> Buf32 {
-        match self {
+    /// Builds the gossip protocol state that matches this config.
+    pub(crate) fn protocol_state(
+        &self,
+        events: mpsc::UnboundedSender<AlpenGossipEvent>,
+        peers: PeersHandle,
+    ) -> AlpenGossipState {
+        let sequencer_pubkey = match self {
             Self::FullNode { sequencer_pubkey }
             | Self::Sequencer {
                 sequencer_pubkey, ..
             } => *sequencer_pubkey,
-        }
+        };
+        AlpenGossipState::new(events, peers, sequencer_pubkey)
     }
 }
 
@@ -72,9 +78,7 @@ impl GossipConfig {
 fn handle_gossip_event(
     event: AlpenGossipEvent,
     connections: &mut HashMap<PeerId, mpsc::UnboundedSender<AlpenGossipCommand>>,
-    highest_seq_no: &mut u64,
     preconf_tx: &watch::Sender<BlockNumHash>,
-    config: &GossipConfig,
 ) -> bool {
     match event {
         AlpenGossipEvent::Established {
@@ -100,66 +104,23 @@ fn handle_gossip_event(
             connections.remove(&peer_id);
             true
         }
-        AlpenGossipEvent::Package { peer_id, package } => handle_gossip_package(
-            peer_id,
-            package,
-            connections,
-            highest_seq_no,
-            preconf_tx,
-            config,
-        ),
+        AlpenGossipEvent::Package { peer_id, package } => {
+            handle_gossip_package(peer_id, package, connections, preconf_tx)
+        }
     }
 }
 
 /// Handles a received gossip package.
+///
+/// The connection that received the package has already checked its
+/// signature and dropped it if stale, so every package here is a new block.
 fn handle_gossip_package(
     peer_id: PeerId,
     package: AlpenGossipPackage,
     connections: &HashMap<PeerId, mpsc::UnboundedSender<AlpenGossipCommand>>,
-    highest_seq_no: &mut u64,
     preconf_tx: &watch::Sender<BlockNumHash>,
-    config: &GossipConfig,
 ) -> bool {
-    // Validate signature before processing
-    if !package.validate_signature() {
-        error!(
-            target: "alpen-gossip",
-            %peer_id,
-            "Received gossip package with invalid signature"
-        );
-        return true; // Continue loop
-    }
-
-    // Verify the public key matches the expected sequencer public key
-    if package.public_key() != &config.sequencer_pubkey() {
-        error!(
-            target: "alpen-gossip",
-            %peer_id,
-            "Received gossip package from unexpected public key"
-        );
-        return true; // Continue loop
-    }
-
     let seq_no = package.message().seq_no();
-
-    // Check if already seen using sequence number (dedup).
-    // Since seq_no is the block number and blocks are produced monotonically by the sequencer,
-    // we only need to check if this seq_no is greater than the highest we've seen.
-    // This prevents duplicate messages and replay of stale blocks.
-    if seq_no <= *highest_seq_no {
-        debug!(
-            target: "alpen-gossip",
-            %peer_id,
-            seq_no,
-            highest_seq_no = *highest_seq_no,
-            "Package already seen or stale, skipping"
-        );
-        return true; // Continue loop
-    }
-
-    // Update the highest sequence number seen
-    *highest_seq_no = seq_no;
-
     let block_hash = package.message().header().hash_slow();
 
     info!(
@@ -293,21 +254,11 @@ pub(crate) async fn create_gossip_task(
 ) {
     let mut connections: HashMap<PeerId, mpsc::UnboundedSender<AlpenGossipCommand>> =
         HashMap::new();
-    // Track the highest sequence number (block number) seen from the sequencer.
-    // This prevents duplicate and stale message processing since blocks are produced
-    // monotonically.
-    let mut highest_seq_no: u64 = 0;
 
     loop {
         select! {
             Some(event) = gossip_rx.recv() => {
-                handle_gossip_event(
-                    event,
-                    &mut connections,
-                    &mut highest_seq_no,
-                    &preconf_tx,
-                    &config,
-                );
+                handle_gossip_event(event, &mut connections, &preconf_tx);
             },
             res = state_events.recv() => {
                 if !handle_state_event(res, &connections, &config) {
