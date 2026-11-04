@@ -15,6 +15,7 @@ use std::{
 
 use alpen_storage_mdbx::{MdbxConfig, MdbxEnv};
 use eyre::{eyre, Result};
+use tracing::warn;
 
 /// The MDBX directory under the datadir.
 pub const MDBX_DIR: &str = "mdbx";
@@ -181,16 +182,20 @@ pub struct SequencerDatabases {
 
 impl SequencerDatabases {
     /// Row counts of every sequencer-only table, as `(environment, table,
-    /// rows)`.
+    /// rows)`. An environment whose stats fail is logged and left out.
     pub fn table_counts(&self) -> Result<Vec<(&'static str, &'static str, usize)>> {
         let mut rows = Vec::new();
+        // One environment's stats failing leaves the others' rows in place: the
+        // caller samples what it can and the failed environment goes stale alone.
         for (env, counts) in [
             (ENV_PROVER, self.prover_db.table_counts()),
             (ENV_WITNESS, self.witness_db.table_counts()),
             (ENV_DA, self.chunked_envelope_db.table_counts()),
         ] {
-            let counts = counts.map_err(|e| eyre!("{env} table stats: {e}"))?;
-            rows.extend(counts.into_iter().map(|(table, n)| (env, table, n)));
+            match counts {
+                Ok(counts) => rows.extend(counts.into_iter().map(|(table, n)| (env, table, n))),
+                Err(error) => warn!(%error, env, "table stats failed; environment skipped"),
+            }
         }
         Ok(rows)
     }
