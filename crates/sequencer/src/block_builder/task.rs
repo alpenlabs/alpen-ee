@@ -257,7 +257,7 @@ async fn block_builder_task_inner<TEngine: PayloadBuilderEngine>(
     let encoded_payload = payload
         .to_bytes()
         .context("block_builder: serialize payload")?;
-    histogram!(BLOCK_PAYLOAD_BYTES).record(encoded_payload.len() as f64);
+    let encoded_payload_len = encoded_payload.len();
     let payload_bytes = ExecBlockPayload::from_bytes(encoded_payload);
 
     // submit the built payload back to engine so reth knows the block (inserts
@@ -286,6 +286,7 @@ async fn block_builder_task_inner<TEngine: PayloadBuilderEngine>(
         .context("block_builder: submit new exec block")?;
     gauge!(BLOCK_LATEST_HEIGHT, "status" => "head").set(blocknum as f64);
     counter!(BLOCK_INBOX_MESSAGES).increment(inbox_message_count as u64);
+    histogram!(BLOCK_PAYLOAD_BYTES).record(encoded_payload_len as f64);
     histogram!(BLOCK_INTERVAL_SECONDS)
         .record(block_timestamp_ms.saturating_sub(parent_timestamp_ms) as f64 / 1000.0);
     histogram!(BLOCK_BUILD_SECONDS, "stage" => "total").record(started.elapsed().as_secs_f64());

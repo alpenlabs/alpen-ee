@@ -23,47 +23,47 @@ const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(60);
 /// Cache for built updates, keyed by BatchId.
 /// Stores (batch_idx, update) to allow eviction based on sequence number.
 struct UpdateCache {
-    /// `(batch_idx, update, submitted)`: `submitted` once the OL has received it.
-    entries: HashMap<BatchId, (u64, SnarkAccountUpdate, bool)>,
+    entries: HashMap<BatchId, (u64, SnarkAccountUpdate)>,
+    /// Batches whose update the OL received at least once, by index. Kept
+    /// apart from `entries`, which is bounded and may not hold the update.
+    submitted: HashMap<BatchId, u64>,
 }
 
 impl UpdateCache {
     fn new() -> Self {
         Self {
             entries: HashMap::new(),
+            submitted: HashMap::new(),
         }
     }
 
     /// Get a cached update by BatchId.
     fn get(&self, batch_id: &BatchId) -> Option<&SnarkAccountUpdate> {
-        self.entries.get(batch_id).map(|(_, update, _)| update)
+        self.entries.get(batch_id).map(|(_, update)| update)
     }
 
     /// Insert an update into the cache if there is room.
     /// If the cache is at max capacity, the entry is not inserted.
     fn insert(&mut self, batch_id: BatchId, batch_idx: u64, update: SnarkAccountUpdate) {
         if self.entries.len() < DEFAULT_UPDATE_CACHE_MAX_SIZE {
-            self.entries.insert(batch_id, (batch_idx, update, false));
+            self.entries.insert(batch_id, (batch_idx, update));
         }
     }
 
     /// Evict entries for batches that have been accepted (batch_idx < current_seq_no).
     fn evict_accepted(&mut self, current_seq_no: u64) {
-        self.entries.retain(|_, (idx, _, _)| *idx >= current_seq_no);
+        self.entries.retain(|_, (idx, _)| *idx >= current_seq_no);
+        self.submitted.retain(|_, idx| *idx >= current_seq_no);
     }
 
-    /// Whether the cached update for `batch_id` was handed to the OL at least once.
+    /// Whether an update for `batch_id` was handed to the OL at least once.
     fn was_submitted(&self, batch_id: &BatchId) -> bool {
-        self.entries
-            .get(batch_id)
-            .is_some_and(|(_, _, submitted)| *submitted)
+        self.submitted.contains_key(batch_id)
     }
 
-    /// Marks the cached update for `batch_id` as handed to the OL.
-    fn mark_submitted(&mut self, batch_id: &BatchId) {
-        if let Some((_, _, submitted)) = self.entries.get_mut(batch_id) {
-            *submitted = true;
-        }
+    /// Records that an update for `batch_id` (at `batch_idx`) reached the OL.
+    fn mark_submitted(&mut self, batch_id: BatchId, batch_idx: u64) {
+        self.submitted.insert(batch_id, batch_idx);
     }
 }
 
@@ -208,7 +208,7 @@ async fn process_ready_batches(
             .map(|message| message.payload().value().to_sat())
             .sum();
         let txid = ol_client.submit_update(update).await?;
-        update_cache.mark_submitted(&batch_id);
+        update_cache.mark_submitted(batch_id, batch_idx);
         counter!(OL_UPDATES_SUBMITTED, "kind" => if resubmission { "retry" } else { "first" })
             .increment(1);
         counter!(OL_UPDATE_OUTPUTS, "kind" => "transfer").increment(output_transfer_count as u64);
