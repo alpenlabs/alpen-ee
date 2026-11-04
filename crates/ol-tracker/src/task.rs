@@ -66,10 +66,11 @@ pub(crate) async fn track_ol_state(
     };
     let best_ol_epoch = best_ol_commitment.epoch();
     let best_local_epoch = state.best_ol_epoch().epoch();
+    // The gauges report the OL's own view, not the effective one the tracking
+    // mode substitutes, so the confirmation and finalization lag stays visible.
     gauge!(OL_EPOCH, "status" => "local").set(f64::from(best_local_epoch));
-    gauge!(OL_EPOCH, "status" => "confirmed").set(f64::from(best_ol_epoch));
-    gauge!(OL_EPOCH, "status" => "finalized")
-        .set(f64::from(effective_ol_status.finalized().epoch()));
+    gauge!(OL_EPOCH, "status" => "confirmed").set(f64::from(ol_status.confirmed().epoch()));
+    gauge!(OL_EPOCH, "status" => "finalized").set(f64::from(ol_status.finalized().epoch()));
     gauge!(OL_EPOCH, "status" => "latest").set(f64::from(ol_status.latest.epoch()));
 
     debug!(

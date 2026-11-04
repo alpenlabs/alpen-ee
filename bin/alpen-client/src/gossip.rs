@@ -95,6 +95,7 @@ fn handle_gossip_event(
                 "New gossip connection established"
             );
             connections.insert(peer_id, to_connection);
+            gauge!(GOSSIP_PEERS).set(connections.len() as f64);
             true
         }
         AlpenGossipEvent::Closed { peer_id } => {
@@ -104,6 +105,7 @@ fn handle_gossip_event(
                 "Gossip connection closed"
             );
             connections.remove(&peer_id);
+            gauge!(GOSSIP_PEERS).set(connections.len() as f64);
             true
         }
         AlpenGossipEvent::Package { peer_id, package } => handle_gossip_package(
@@ -239,7 +241,6 @@ fn broadcast_new_block(
         "Broadcasting new block to peers"
     );
     counter!(GOSSIP_BROADCASTS).increment(1);
-    gauge!(GOSSIP_PEERS).set(connections.len() as f64);
 
     let msg = AlpenGossipMessage::new(
         tip.clone(),
