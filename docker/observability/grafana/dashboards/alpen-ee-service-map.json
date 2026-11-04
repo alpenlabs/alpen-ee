@@ -197,7 +197,7 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "reth_alpen_ee_block_latest_height{instance=~\"$instance\",status=\"head\"} - ignoring(status) reth_alpen_ee_block_latest_height{instance=~\"$instance\",status=\"finalized\"}",
+          "expr": "reth_alpen_ee_block_latest_height{instance=~\"$instance\", status=\"head\"} - ignoring(status) reth_alpen_ee_block_latest_height{instance=~\"$instance\", status=\"finalized\"}",
           "legendFormat": "lag",
           "refId": "A",
           "instant": false,
@@ -453,7 +453,7 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "reth_alpen_ee_payload_build_seconds{instance=~\"$instance\",stage=\"total\",quantile=\"0.5\"}",
+          "expr": "reth_alpen_ee_payload_build_seconds{instance=~\"$instance\", stage=\"total\", quantile=\"0.5\"}",
           "legendFormat": "svc_alpen_reth",
           "refId": "svc_alpen_reth",
           "instant": true,
@@ -513,7 +513,7 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "reth_alpen_ee_block_latest_height{instance=~\"$instance\",status=\"head\"}",
+          "expr": "reth_alpen_ee_block_latest_height{instance=~\"$instance\", status=\"head\"}",
           "legendFormat": "svc_exec_chain",
           "refId": "svc_exec_chain",
           "instant": true,
@@ -549,7 +549,7 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "reth_alpen_ee_batch_latest_idx{instance=~\"$instance\",status=\"proof_ready\"}",
+          "expr": "reth_alpen_ee_batch_latest_idx{instance=~\"$instance\", status=\"proof_ready\"}",
           "legendFormat": "svc_batch_lifecycle",
           "refId": "svc_batch_lifecycle",
           "instant": true,
@@ -573,7 +573,7 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "rate(reth_alpen_ee_proof_receipts_total{instance=~\"$instance\",kind=\"acct\"}[$__rate_interval]) * 60",
+          "expr": "rate(reth_alpen_ee_proof_receipts_total{instance=~\"$instance\", kind=\"acct\"}[$__rate_interval]) * 60",
           "legendFormat": "svc_prover",
           "refId": "svc_prover",
           "instant": true,
@@ -621,7 +621,7 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "reth_alpen_ee_ol_epoch{instance=~\"$instance\",status=\"local\"}",
+          "expr": "reth_alpen_ee_ol_epoch{instance=~\"$instance\", status=\"local\"}",
           "legendFormat": "flow_ol_to_tracker",
           "refId": "flow_ol_to_tracker",
           "instant": true,
@@ -633,7 +633,7 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "reth_alpen_ee_block_latest_height{instance=~\"$instance\",status=\"head\"} - ignoring(status) reth_alpen_ee_block_latest_height{instance=~\"$instance\",status=\"finalized\"}",
+          "expr": "reth_alpen_ee_block_latest_height{instance=~\"$instance\", status=\"head\"} - ignoring(status) reth_alpen_ee_block_latest_height{instance=~\"$instance\", status=\"finalized\"}",
           "legendFormat": "flow_tracker_to_engine",
           "refId": "flow_tracker_to_engine",
           "instant": true,
@@ -645,7 +645,7 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "reth_alpen_ee_ol_epoch{instance=~\"$instance\",status=\"latest\"}",
+          "expr": "reth_alpen_ee_ol_epoch{instance=~\"$instance\", status=\"latest\"}",
           "legendFormat": "flow_tracker_to_olct",
           "refId": "flow_tracker_to_olct",
           "instant": true,
@@ -657,7 +657,7 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "reth_alpen_ee_block_interval_seconds{instance=~\"$instance\",quantile=\"0.5\"}",
+          "expr": "reth_alpen_ee_block_interval_seconds{instance=~\"$instance\", quantile=\"0.5\"}",
           "legendFormat": "flow_exec_to_engine",
           "refId": "flow_exec_to_engine",
           "instant": true,
@@ -669,7 +669,7 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "reth_alpen_ee_batch_blocks{instance=~\"$instance\",quantile=\"0.5\"}",
+          "expr": "reth_alpen_ee_batch_blocks{instance=~\"$instance\", quantile=\"0.5\"}",
           "legendFormat": "flow_exec_to_bb2",
           "refId": "flow_exec_to_bb2",
           "instant": true,
@@ -681,7 +681,7 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "rate(reth_alpen_ee_proof_tasks_submitted_total{instance=~\"$instance\",kind=\"chunk\"}[$__rate_interval]) * 60",
+          "expr": "rate(reth_alpen_ee_proof_tasks_submitted_total{instance=~\"$instance\", kind=\"chunk\"}[$__rate_interval]) * 60",
           "legendFormat": "flow_chunk_to_prover",
           "refId": "flow_chunk_to_prover",
           "instant": true,
@@ -693,7 +693,7 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "reth_alpen_ee_da_blob_bytes{instance=~\"$instance\",quantile=\"0.5\"}",
+          "expr": "reth_alpen_ee_da_blob_bytes{instance=~\"$instance\", quantile=\"0.5\"}",
           "legendFormat": "flow_life_to_da",
           "refId": "flow_life_to_da",
           "instant": true,
@@ -717,7 +717,7 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\",status=\"da_complete\",quantile=\"0.5\"}",
+          "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\", status=\"da_complete\", quantile=\"0.5\"}",
           "legendFormat": "flow_btc_to_da",
           "refId": "flow_btc_to_da",
           "instant": true,
@@ -729,9 +729,21 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\",status=\"proof_ready\",quantile=\"0.5\"}",
+          "expr": "rate(reth_alpen_ee_proof_tasks_submitted_total{instance=~\"$instance\", kind=\"acct\"}[$__rate_interval]) * 60",
           "legendFormat": "flow_life_to_prover",
           "refId": "flow_life_to_prover",
+          "instant": true,
+          "range": false,
+          "editorMode": "code"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "alpen-prometheus"
+          },
+          "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\", status=\"proof_ready\", quantile=\"0.5\"}",
+          "legendFormat": "flow_life_to_submit",
+          "refId": "flow_life_to_submit",
           "instant": true,
           "range": false,
           "editorMode": "code"
@@ -1168,6 +1180,22 @@
             "matcher": {
               "id": "byName",
               "options": "flow_life_to_prover"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "flow_life_to_submit"
             },
             "properties": [
               {
@@ -5441,7 +5469,7 @@
               "config": {
                 "text": {
                   "mode": "fixed",
-                  "fixed": "seal\u2192DA p50"
+                  "fixed": "DA finality p50"
                 },
                 "size": 9,
                 "color": {
@@ -5517,7 +5545,7 @@
               "config": {
                 "text": {
                   "mode": "fixed",
-                  "fixed": "proof wait p50"
+                  "fixed": "acct tasks/min"
                 },
                 "size": 9,
                 "color": {
@@ -5631,7 +5659,7 @@
               "config": {
                 "text": {
                   "mode": "field",
-                  "field": "flow_life_to_prover",
+                  "field": "flow_life_to_submit",
                   "fixed": ""
                 },
                 "size": 11,
@@ -6047,7 +6075,7 @@
       "type": "bargauge",
       "title": "Stage duration, p50",
       "id": 9,
-      "description": "Seconds a batch spent in the stage it left. da_complete: sealed until the DA envelope finalized on L1. proof_pending: DA finalized until the account proof task was handed over. proof_ready: proving. The clock forgets stages a restart interrupted.",
+      "description": "Seconds a batch took to reach each status from the previous one. da_pending: sealed until its DA envelope was submitted. da_complete: submitted until finalized on L1. proof_pending: finalized until the proof tasks were handed over. proof_ready: proving. The clock forgets batches a restart interrupted.",
       "gridPos": {
         "x": 0,
         "y": 23,
@@ -6064,9 +6092,21 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\", quantile=\"0.5\", status=\"da_complete\"}",
-          "legendFormat": "seal \u2192 DA finalized",
+          "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\", quantile=\"0.5\", status=\"da_pending\"}",
+          "legendFormat": "seal \u2192 DA submitted",
           "refId": "A",
+          "instant": false,
+          "range": true,
+          "editorMode": "code"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "alpen-prometheus"
+          },
+          "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\", quantile=\"0.5\", status=\"da_complete\"}",
+          "legendFormat": "DA submitted \u2192 finalized",
+          "refId": "B",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6078,7 +6118,7 @@
           },
           "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\", quantile=\"0.5\", status=\"proof_pending\"}",
           "legendFormat": "DA \u2192 proof tasks",
-          "refId": "B",
+          "refId": "C",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6090,7 +6130,7 @@
           },
           "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\", quantile=\"0.5\", status=\"proof_ready\"}",
           "legendFormat": "proving",
-          "refId": "C",
+          "refId": "D",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6102,7 +6142,7 @@
           },
           "expr": "reth_alpen_ee_batch_settlement_seconds{instance=~\"$instance\", quantile=\"0.5\"}",
           "legendFormat": "whole settlement",
-          "refId": "D",
+          "refId": "E",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6139,7 +6179,7 @@
       "type": "bargauge",
       "title": "Stage duration, p90",
       "id": 10,
-      "description": "Seconds a batch spent in the stage it left. da_complete: sealed until the DA envelope finalized on L1. proof_pending: DA finalized until the account proof task was handed over. proof_ready: proving. The clock forgets stages a restart interrupted.",
+      "description": "Seconds a batch took to reach each status from the previous one. da_pending: sealed until its DA envelope was submitted. da_complete: submitted until finalized on L1. proof_pending: finalized until the proof tasks were handed over. proof_ready: proving. The clock forgets batches a restart interrupted.",
       "gridPos": {
         "x": 8,
         "y": 23,
@@ -6156,9 +6196,21 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\", quantile=\"0.9\", status=\"da_complete\"}",
-          "legendFormat": "seal \u2192 DA finalized",
+          "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\", quantile=\"0.9\", status=\"da_pending\"}",
+          "legendFormat": "seal \u2192 DA submitted",
           "refId": "A",
+          "instant": false,
+          "range": true,
+          "editorMode": "code"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "alpen-prometheus"
+          },
+          "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\", quantile=\"0.9\", status=\"da_complete\"}",
+          "legendFormat": "DA submitted \u2192 finalized",
+          "refId": "B",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6170,7 +6222,7 @@
           },
           "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\", quantile=\"0.9\", status=\"proof_pending\"}",
           "legendFormat": "DA \u2192 proof tasks",
-          "refId": "B",
+          "refId": "C",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6182,7 +6234,7 @@
           },
           "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\", quantile=\"0.9\", status=\"proof_ready\"}",
           "legendFormat": "proving",
-          "refId": "C",
+          "refId": "D",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -6194,7 +6246,7 @@
           },
           "expr": "reth_alpen_ee_batch_settlement_seconds{instance=~\"$instance\", quantile=\"0.9\"}",
           "legendFormat": "whole settlement",
-          "refId": "D",
+          "refId": "E",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7202,7 +7254,7 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "reth_alpen_ee_block_latest_height{instance=~\"$instance\",status=\"head\"} - ignoring(status) reth_alpen_ee_block_latest_height{instance=~\"$instance\",status=\"finalized\"}",
+          "expr": "reth_alpen_ee_block_latest_height{instance=~\"$instance\", status=\"head\"} - ignoring(status) reth_alpen_ee_block_latest_height{instance=~\"$instance\", status=\"finalized\"}",
           "legendFormat": "head \u2212 finalized",
           "refId": "A",
           "instant": false,
@@ -7214,7 +7266,7 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "reth_alpen_ee_block_latest_height{instance=~\"$instance\",status=\"head\"} - ignoring(status) reth_alpen_ee_block_latest_height{instance=~\"$instance\",status=\"safe\"}",
+          "expr": "reth_alpen_ee_block_latest_height{instance=~\"$instance\", status=\"head\"} - ignoring(status) reth_alpen_ee_block_latest_height{instance=~\"$instance\", status=\"safe\"}",
           "legendFormat": "head \u2212 safe",
           "refId": "B",
           "instant": false,
@@ -7694,9 +7746,9 @@
     },
     {
       "type": "timeseries",
-      "title": "Time to DA finality",
+      "title": "Time to DA submission and finality",
       "id": 30,
-      "description": "From the batch being sealed to its envelope reaching the configured L1 confirmations.",
+      "description": "Seal to envelope submission, and submission to the configured L1 confirmations.",
       "gridPos": {
         "x": 8,
         "y": 72,
@@ -7713,8 +7765,8 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\", quantile=\"0.5\", status=\"da_complete\"}",
-          "legendFormat": "seal \u2192 DA finalized p50",
+          "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\", quantile=\"0.5\", status=\"da_pending\"}",
+          "legendFormat": "seal \u2192 submitted p50",
           "refId": "A",
           "instant": false,
           "range": true,
@@ -7725,9 +7777,21 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\", quantile=\"0.9\", status=\"da_complete\"}",
-          "legendFormat": "seal \u2192 DA finalized p90",
+          "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\", quantile=\"0.5\", status=\"da_complete\"}",
+          "legendFormat": "submitted \u2192 finalized p50",
           "refId": "B",
+          "instant": false,
+          "range": true,
+          "editorMode": "code"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "alpen-prometheus"
+          },
+          "expr": "reth_alpen_ee_batch_status_seconds{instance=~\"$instance\", quantile=\"0.9\", status=\"da_complete\"}",
+          "legendFormat": "submitted \u2192 finalized p90",
+          "refId": "C",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -8145,7 +8209,7 @@
       "type": "timeseries",
       "title": "Account proof wait",
       "id": 37,
-      "description": "From a batch's proof tasks being submitted to its account proof being in the store. Includes waiting for the prover's next tick.",
+      "description": "Seconds from the proof tasks being handed to the prover to the account proof being ready, as the lifecycle saw it: its poll bounds the precision, and a restart forgets batches in flight.",
       "gridPos": {
         "x": 8,
         "y": 88,
@@ -8412,7 +8476,7 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "reth_alpen_ee_batch_latest_idx{instance=~\"$instance\",status=\"sealed\"} - ignoring(status) reth_alpen_ee_batch_latest_idx{instance=~\"$instance\",status=\"ol_latest\"}",
+          "expr": "reth_alpen_ee_batch_latest_idx{instance=~\"$instance\", status=\"sealed\"} - ignoring(status) reth_alpen_ee_batch_latest_idx{instance=~\"$instance\", status=\"ol_latest\"}",
           "legendFormat": "sealed \u2212 OL latest (batches)",
           "refId": "A",
           "instant": false,
@@ -8424,7 +8488,7 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "reth_alpen_ee_batch_latest_idx{instance=~\"$instance\",status=\"proof_ready\"} - ignoring(status) reth_alpen_ee_batch_latest_idx{instance=~\"$instance\",status=\"ol_latest\"}",
+          "expr": "reth_alpen_ee_batch_latest_idx{instance=~\"$instance\", status=\"proof_ready\"} - ignoring(status) reth_alpen_ee_batch_latest_idx{instance=~\"$instance\", status=\"ol_latest\"}",
           "legendFormat": "proof-ready \u2212 OL latest",
           "refId": "B",
           "instant": false,
@@ -8731,6 +8795,10 @@
             ],
             "mode": "columns"
           }
+        },
+        {
+          "id": "merge",
+          "options": {}
         },
         {
           "id": "organize",

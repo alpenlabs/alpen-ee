@@ -37,10 +37,24 @@ OUT = Path(__file__).parent / "dashboards" / "alpen-ee-service-map.json"
 DS = {"type": "prometheus", "uid": "alpen-prometheus"}
 LOKI = {"type": "loki", "uid": "alpen-loki"}
 P = "reth_alpen_ee_"  # every Alpen metric as the reth recorder exposes it
-I = '{instance=~"$instance"}'  # the node picked at the top of the dashboard
+COMPOSE_SELECTOR = 'instance=~"$instance"'  # the node picked at the top of the dashboard
+I = "{" + COMPOSE_SELECTOR + "}"
 RATE = "[$__rate_interval]"
-FINALITY_LAG = (f'{P}block_latest_height{{instance=~"$instance",status="head"}}'
-                f' - ignoring(status) {P}block_latest_height{{instance=~"$instance",status="finalized"}}')
+
+
+COMPOSE_LOGS_DESC = "Container stdout shipped by Alloy. Nothing here until the logs profile runs."
+COMPOSE_LOGS_ROW = "Logs (compose --profile logs: Loki + Alloy)"
+
+
+def sel(extra="", **labels):
+    """The node selector every query starts with, plus label matchers; the
+    cluster target rewrites the node part, so every query must go through here."""
+    parts = [COMPOSE_SELECTOR] + ([extra] if extra else []) + [f'{k}="{v}"' for k, v in labels.items()]
+    return ", ".join(parts)
+
+
+FINALITY_LAG = (f'{P}block_latest_height{{{sel(status="head")}}}'
+                f' - ignoring(status) {P}block_latest_height{{{sel(status="finalized")}}}')
 
 # ---------------------------------------------------------------- the map ---
 
@@ -67,7 +81,7 @@ SERVICES = [
     ("engine_control", "Engine Control", "engine_control", "consensus", (2, 0),
      f"sum(rate({P}forkchoice_updates_total{I}{RATE}))", "fcu/s", "short", 2),
     ("alpen_reth", "Alpen Reth", "engine::tree + exex", "reth", (3, 0),
-     f'{P}payload_build_seconds{{instance=~"$instance",stage="total",quantile="0.5"}}', "build p50", "s", 3),
+     f'{P}payload_build_seconds{{{sel(stage="total", quantile="0.5")}}}', "build p50", "s", 3),
     ("gossip", "Gossip", "gossip_task", "consensus", (4, 0),
      f"rate({P}gossip_broadcasts_total{I}{RATE})", "headers/s", "short", 2),
     ("peers", "P2P peers", "RLPx alpen_gossip/1", "external", (5, 0),
@@ -77,17 +91,17 @@ SERVICES = [
     ("block_builder", "Block Builder", "block_assembly", "pipeline", (2, 1),
      f"rate({P}blocks_built_total{I}{RATE})", "blocks/s", "short", 2),
     ("exec_chain", "Exec Chain", "exec_chain", "pipeline", (3, 1),
-     f'{P}block_latest_height{{instance=~"$instance",status="head"}}', "head", "none", 0),
+     f'{P}block_latest_height{{{sel(status="head")}}}', "head", "none", 0),
     ("batch_builder", "Batch Builder", "ee_batch_builder", "pipeline", (4, 1),
      f"sum(rate({P}batches_sealed_total{I}{RATE})) * 60", "batches/min", "short", 1),
     ("chunk_builder", "Chunk Builder", "chunk_builder", "pipeline", (5, 1),
      f"sum(rate({P}chunks_sealed_total{I}{RATE})) * 60", "chunks/min", "short", 1),
     ("batch_lifecycle", "Batch Lifecycle", "ee_batch_lifecycle", "settlement", (4, 2),
-     f'{P}batch_latest_idx{{instance=~"$instance",status="proof_ready"}}', "proof-ready", "none", 0),
+     f'{P}batch_latest_idx{{{sel(status="proof_ready")}}}', "proof-ready", "none", 0),
     ("da_pipeline", "DA Pipeline", "l1_broadcaster + watcher", "settlement", (3, 2),
      f"sum(rate({P}da_envelopes_submitted_total{I}{RATE})) * 60", "envelopes/min", "short", 1),
     ("prover", "Prover", "prover", "prover", (5, 2),
-     f'rate({P}proof_receipts_total{{instance=~"$instance",kind="acct"}}{RATE}) * 60', "acct/min", "short", 1),
+     f'rate({P}proof_receipts_total{{{sel(kind="acct")}}}{RATE}) * 60', "acct/min", "short", 1),
     ("bitcoind", "Bitcoin node", "RPC", "external", (3, 3),
      f"sum(rate({P}da_status_checks_total{I}{RATE}))", "L1 polls/s", "short", 2),
     ("update_submitter", "Update Submitter", "ee_update_submitter", "settlement", (4, 3),
@@ -100,19 +114,19 @@ SERVICES = [
 # label sits, 0..1 from the source; default 0.5]
 FLOWS = [
     ("ol_to_tracker", "ol_node", "ol_tracker",
-     f'{P}ol_epoch{{instance=~"$instance",status="local"}}', "epoch applied", "none", 0),
+     f'{P}ol_epoch{{{sel(status="local")}}}', "epoch applied", "none", 0),
     ("tracker_to_engine", "ol_tracker", "engine_control",
      FINALITY_LAG, "finality lag", "short", 0),
     ("tracker_to_olct", "ol_tracker", "ol_chain_tracker",
-     f'{P}ol_epoch{{instance=~"$instance",status="latest"}}', "latest epoch", "none", 0),
+     f'{P}ol_epoch{{{sel(status="latest")}}}', "latest epoch", "none", 0),
     ("olct_to_bb", "ol_chain_tracker", "block_builder",
      f"increase({P}block_inbox_messages_total{I}[1h])", "deposits/h", "short", 0),
     ("bb_to_engine", "block_builder", "alpen_reth",
-     f'{P}payload_build_seconds{{instance=~"$instance",stage="total",quantile="0.5"}}', "build p50", "s", 3, 0.75),
+     f'{P}payload_build_seconds{{{sel(stage="total", quantile="0.5")}}}', "build p50", "s", 3, 0.75),
     ("bb_to_exec", "block_builder", "exec_chain",
      f"rate({P}blocks_built_total{I}{RATE})", "blocks/s", "short", 2),
     ("exec_to_engine", "exec_chain", "engine_control",
-     f'{P}block_interval_seconds{{instance=~"$instance",quantile="0.5"}}', "interval p50", "s", 2, 0.3),
+     f'{P}block_interval_seconds{{{sel(quantile="0.5")}}}', "interval p50", "s", 2, 0.3),
     ("engine_to_reth", "engine_control", "alpen_reth",
      f"sum(rate({P}forkchoice_updates_total{I}{RATE}))", "fcu/s", "short", 2),
     ("exec_to_gossip", "exec_chain", "gossip",
@@ -120,25 +134,25 @@ FLOWS = [
     ("gossip_to_peers", "gossip", "peers",
      f"{P}gossip_peers{I}", "peers", "short", 0),
     ("exec_to_bb2", "exec_chain", "batch_builder",
-     f'{P}batch_blocks{{instance=~"$instance",quantile="0.5"}}', "blocks/batch", "short", 0),
+     f'{P}batch_blocks{{{sel(quantile="0.5")}}}', "blocks/batch", "short", 0),
     ("bb2_to_chunk", "batch_builder", "chunk_builder",
      f"sum(rate({P}chunks_sealed_total{I}{RATE})) * 60", "chunks/min", "short", 1),
     ("bb2_to_life", "batch_builder", "batch_lifecycle",
      f"sum(rate({P}batches_sealed_total{I}{RATE})) * 60", "batches/min", "short", 1),
     ("chunk_to_prover", "chunk_builder", "prover",
-     f'rate({P}proof_tasks_submitted_total{{instance=~"$instance",kind="chunk"}}{RATE}) * 60', "chunks/min", "short", 1),
+     f'rate({P}proof_tasks_submitted_total{{{sel(kind="chunk")}}}{RATE}) * 60', "chunks/min", "short", 1),
     ("life_to_da", "batch_lifecycle", "da_pipeline",
-     f'{P}da_blob_bytes{{instance=~"$instance",quantile="0.5"}}', "blob p50", "bytes", 0),
+     f'{P}da_blob_bytes{{{sel(quantile="0.5")}}}', "blob p50", "bytes", 0),
     ("da_to_btc", "da_pipeline", "bitcoind",
      f"sum(rate({P}da_envelopes_submitted_total{I}{RATE})) * 120", "L1 txs/min", "short", 1),
     ("btc_to_da", "bitcoind", "da_pipeline",
-     f'{P}batch_status_seconds{{instance=~"$instance",status="da_complete",quantile="0.5"}}', "seal→DA p50", "s", 1),
+     f'{P}batch_status_seconds{{{sel(status="da_complete", quantile="0.5")}}}', "DA finality p50", "s", 1),
     ("life_to_prover", "batch_lifecycle", "prover",
-     f'{P}batch_status_seconds{{instance=~"$instance",status="proof_ready",quantile="0.5"}}', "proof wait p50", "s", 1),
+     f'rate({P}proof_tasks_submitted_total{{{sel(kind="acct")}}}{RATE}) * 60', "acct tasks/min", "short", 1),
     ("prover_to_backend", "prover", "prover_net",
      f"sum(rate({P}proof_receipts_total{I}{RATE})) * 60", "receipts/min", "short", 1),
     ("life_to_submit", "batch_lifecycle", "update_submitter",
-     f'{P}batch_status_seconds{{instance=~"$instance",status="proof_ready",quantile="0.5"}}', "proving p50", "s", 1),
+     f'{P}batch_status_seconds{{{sel(status="proof_ready", quantile="0.5")}}}', "proving p50", "s", 1),
     ("submit_to_ol", "update_submitter", "ol_node",
      f"sum(rate({P}ol_updates_submitted_total{I}{RATE})) * 60", "updates/min", "short", 1),
 ]
@@ -198,7 +212,9 @@ def service_map_panel(y):
     lanes = {s[0]: s[3] for s in SERVICES}
     elements, targets, overrides = [], [], []
     boxes = {}
-    field_by_query = {}  # one instant query per distinct expression
+    # One instant query per distinct expression: a flow whose query equals a
+    # service's shows that field, with the service's unit and decimals.
+    field_by_query = {}
     for sid, name, subtitle, lane, _, query, caption, unit, decimals in SERVICES:
         x, y0, w, h = rects[sid]
         c = LANES[lane]
@@ -304,8 +320,9 @@ def numbered(targets):
     return targets
 
 
-def target(expr, legend, instant=False, ref=None):
-    t = {"datasource": DS, "expr": expr, "legendFormat": legend, "refId": ref or legend[:40],
+def target(expr, legend, instant=False):
+    # The map keeps this legend-derived refId as its field name; numbered() renumbers the rest.
+    t = {"datasource": DS, "expr": expr, "legendFormat": legend, "refId": legend[:40],
          "instant": instant, "range": not instant, "editorMode": "code"}
     return t
 
@@ -335,14 +352,10 @@ def timeseries(title, targets, gp, unit="short", desc="", decimals=None, stack=F
                         "tooltip": {"mode": "multi", "sort": "desc"}}}
 
 
-def stat(title, targets, gp, unit="short", desc="", decimals=None, color="blue", sparkline=True,
-         thresholds=None):
+def stat(title, targets, gp, unit="short", desc="", decimals=None, color="blue", sparkline=True):
     defaults = {"unit": unit, "color": {"mode": "fixed", "fixedColor": color}}
     if decimals is not None:
         defaults["decimals"] = decimals
-    if thresholds:
-        defaults["color"] = {"mode": "thresholds"}
-        defaults["thresholds"] = {"mode": "absolute", "steps": thresholds}
     return {"type": "stat", "title": title, "id": next_id(), "description": desc,
             "gridPos": gp, "datasource": DS, "targets": numbered(targets),
             "fieldConfig": {"defaults": defaults, "overrides": []},
@@ -389,11 +402,6 @@ def row(title, y, collapsed=False, panels=None):
     r = {"type": "row", "title": title, "id": next_id(), "collapsed": collapsed,
          "gridPos": {"x": 0, "y": y, "w": 24, "h": 1}, "panels": panels or []}
     return r
-
-
-def sel(extra=""):
-    """The node selector every query starts with; the cluster target rewrites it."""
-    return 'instance=~"$instance"' + (", " + extra if extra else "")
 
 
 def q(metric_suffix, extra="", legend=None, instant=False):
@@ -447,17 +455,20 @@ def build():
 
     # --- where a batch spends its time
     panels.append(row("Where a batch spends its time", y)); y += 1
-    stage_desc = ("Seconds a batch spent in the stage it left. da_complete: sealed until the DA envelope "
-                  "finalized on L1. proof_pending: DA finalized until the account proof task was handed "
-                  "over. proof_ready: proving. The clock forgets stages a restart interrupted.")
+    stage_desc = ("Seconds a batch took to reach each status from the previous one. da_pending: sealed "
+                  "until its DA envelope was submitted. da_complete: submitted until finalized on L1. "
+                  "proof_pending: finalized until the proof tasks were handed over. proof_ready: proving. "
+                  "The clock forgets batches a restart interrupted.")
     panels.append(bargauge("Stage duration, p50", [
-        quant("batch_status_seconds", "0.5", "seal → DA finalized", 'status="da_complete"'),
+        quant("batch_status_seconds", "0.5", "seal → DA submitted", 'status="da_pending"'),
+        quant("batch_status_seconds", "0.5", "DA submitted → finalized", 'status="da_complete"'),
         quant("batch_status_seconds", "0.5", "DA → proof tasks", 'status="proof_pending"'),
         quant("batch_status_seconds", "0.5", "proving", 'status="proof_ready"'),
         quant("batch_settlement_seconds", "0.5", "whole settlement"),
     ], grid(0, y, 8, 8), unit="s", desc=stage_desc, decimals=1))
     panels.append(bargauge("Stage duration, p90", [
-        quant("batch_status_seconds", "0.9", "seal → DA finalized", 'status="da_complete"'),
+        quant("batch_status_seconds", "0.9", "seal → DA submitted", 'status="da_pending"'),
+        quant("batch_status_seconds", "0.9", "DA submitted → finalized", 'status="da_complete"'),
         quant("batch_status_seconds", "0.9", "DA → proof tasks", 'status="proof_pending"'),
         quant("batch_status_seconds", "0.9", "proving", 'status="proof_ready"'),
         quant("batch_settlement_seconds", "0.9", "whole settlement"),
@@ -529,7 +540,7 @@ def build():
     ], grid(0, y, 8, 8), desc="What the engine was last told. Safe and finalized follow OL epochs.", fill=0, decimals=0))
     panels.append(timeseries("Finality lag", [
         target(FINALITY_LAG, "head − finalized"),
-        target(f'{P}block_latest_height{{instance=~"$instance",status="head"}} - ignoring(status) {P}block_latest_height{{instance=~"$instance",status="safe"}}', "head − safe"),
+        target(f'{P}block_latest_height{{{sel(status="head")}}} - ignoring(status) {P}block_latest_height{{{sel(status="safe")}}}', "head − safe"),
     ], grid(8, y, 8, 8), desc="Blocks between the built head and the finalized / safe head.", decimals=0))
     panels.append(timeseries("OL epochs", [
         q("ol_epoch", 'status="latest"', "latest (OL)"),
@@ -560,10 +571,11 @@ def build():
         rate_q("da_envelopes_submitted_total", "submitted (empty={{empty}}) /min", mul=60, by="empty"),
         rate_q("batch_transitions_total", "DA complete /min", 'status="da_complete"', mul=60),
     ], grid(0, y, 8, 8), desc="Per minute. Each envelope is one commit and one reveal transaction.", decimals=1))
-    panels.append(timeseries("Time to DA finality", [
-        quant("batch_status_seconds", "0.5", "seal → DA finalized p50", 'status="da_complete"'),
-        quant("batch_status_seconds", "0.9", "seal → DA finalized p90", 'status="da_complete"'),
-    ], grid(8, y, 8, 8), unit="s", desc="From the batch being sealed to its envelope reaching the configured L1 confirmations.", decimals=1))
+    panels.append(timeseries("Time to DA submission and finality", [
+        quant("batch_status_seconds", "0.5", "seal → submitted p50", 'status="da_pending"'),
+        quant("batch_status_seconds", "0.5", "submitted → finalized p50", 'status="da_complete"'),
+        quant("batch_status_seconds", "0.9", "submitted → finalized p90", 'status="da_complete"'),
+    ], grid(8, y, 8, 8), unit="s", desc="Seal to envelope submission, and submission to the configured L1 confirmations.", decimals=1))
     panels.append(timeseries("Envelope status checks", [
         rate_q("da_status_checks_total", "{{status}} /min", mul=60, by="status"),
     ], grid(16, y, 8, 8), desc="What the envelope watcher found on each L1 poll, per minute.", decimals=1, stack=True))
@@ -592,7 +604,7 @@ def build():
         quant("batch_status_seconds", "0.5", "p50", 'status="proof_ready"'),
         quant("batch_status_seconds", "0.9", "p90", 'status="proof_ready"'),
         quant("batch_status_seconds", "1", "max", 'status="proof_ready"'),
-    ], grid(8, y, 8, 8), unit="s", desc="From a batch's proof tasks being submitted to its account proof being in the store. Includes waiting for the prover's next tick.", decimals=1))
+    ], grid(8, y, 8, 8), unit="s", desc="Seconds from the proof tasks being handed to the prover to the account proof being ready, as the lifecycle saw it: its poll bounds the precision, and a restart forgets batches in flight.", decimals=1))
     panels.append(timeseries("Proof status checks", [
         rate_q("proof_status_checks_total", "{{status}} /min", mul=60, by="status"),
     ], grid(16, y, 8, 8), desc="What the lifecycle found when it asked the prover about a batch, per minute.", decimals=1, stack=True))
@@ -606,8 +618,8 @@ def build():
         rate_q("ol_update_failures_total", "failed /min", mul=60),
     ], grid(0, y, 8, 7), desc="Snark account updates per minute. Resubmissions are updates sent again because the OL had not accepted them yet.", decimals=1))
     panels.append(timeseries("Submission lag", [
-        target(f'{P}batch_latest_idx{{instance=~"$instance",status="sealed"}} - ignoring(status) {P}batch_latest_idx{{instance=~"$instance",status="ol_latest"}}', "sealed − OL latest (batches)"),
-        target(f'{P}batch_latest_idx{{instance=~"$instance",status="proof_ready"}} - ignoring(status) {P}batch_latest_idx{{instance=~"$instance",status="ol_latest"}}', "proof-ready − OL latest"),
+        target(f'{P}batch_latest_idx{{{sel(status="sealed")}}} - ignoring(status) {P}batch_latest_idx{{{sel(status="ol_latest")}}}', "sealed − OL latest (batches)"),
+        target(f'{P}batch_latest_idx{{{sel(status="proof_ready")}}} - ignoring(status) {P}batch_latest_idx{{{sel(status="ol_latest")}}}', "proof-ready − OL latest"),
     ], grid(8, y, 8, 7), desc="Batches sealed but not yet submitted to the OL.", decimals=0))
     panels.append(timeseries("Update outputs and account sequence", [
         rate_q("ol_update_outputs_total", "{{kind}} outputs /min", mul=60, by="kind"),
@@ -629,6 +641,7 @@ def build():
                         grid(16, y, 8, 8), desc="Rows per table at the last sample.",
                         transformations=[
                             {"id": "labelsToFields", "options": {"keepLabels": ["env", "table"], "mode": "columns"}},
+                            {"id": "merge", "options": {}},
                             {"id": "organize", "options": {"excludeByName": {"Time": True, "instance": True, "job": True, "role": True, "__name__": True},
                                                            "renameByName": {"Value": "rows"}, "indexByName": {"env": 0, "table": 1, "rows": 2}}},
                             {"id": "sortBy", "options": {"sort": [{"field": "rows", "desc": True}]}},
@@ -636,9 +649,9 @@ def build():
     y += 8
 
     # --- logs (needs the logs profile)
-    panels.append(row("Logs (compose --profile logs: Loki + Alloy)", y, collapsed=True, panels=[
+    panels.append(row(COMPOSE_LOGS_ROW, y, collapsed=True, panels=[
         logs("Warnings and errors", '{service="alpen-client"} |~ "WARN|ERROR"', grid(0, y + 1, 12, 10),
-             desc="Container stdout shipped by Alloy. Nothing here until the logs profile runs."),
+             desc=COMPOSE_LOGS_DESC),
         logs("Batch lifecycle", '{service="alpen-client"} |~ "batch_lifecycle|update_submitter|envelope"', grid(12, y + 1, 12, 10),
              desc="Lines from the settlement tasks."),
     ]))
@@ -675,7 +688,6 @@ def build():
 
 # ------------------------------------------------------------ fleet form ---
 
-COMPOSE_SELECTOR = 'instance=~"$instance"'
 CLUSTER_SELECTOR = 'namespace="$rollup_namespace", pod=~"$pod"'
 COMPOSE_LOG_STREAM = '{service="alpen-client"}'
 CLUSTER_LOG_STREAM = '{k8s_namespace_name="$rollup_namespace", k8s_pod_name=~"$pod"}'
@@ -696,9 +708,8 @@ def _rewrite_strings(node, fn):
 def _cluster_text(text):
     return (text.replace(COMPOSE_SELECTOR, CLUSTER_SELECTOR)
                 .replace(COMPOSE_LOG_STREAM, CLUSTER_LOG_STREAM)
-                .replace("Container stdout shipped by Alloy. Nothing here until the logs profile runs.",
-                         "Container stdout, via the OTel collector and Loki.")
-                .replace("Logs (compose --profile logs: Loki + Alloy)", "Logs"))
+                .replace(COMPOSE_LOGS_DESC, "Container stdout, via the OTel collector and Loki.")
+                .replace(COMPOSE_LOGS_ROW, "Logs"))
 
 
 def to_cluster(dash, namespace):
