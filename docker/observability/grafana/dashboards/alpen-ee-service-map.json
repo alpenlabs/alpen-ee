@@ -561,7 +561,7 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "rate(reth_alpen_ee_da_envelopes_submitted_total{instance=~\"$instance\"}[$__rate_interval]) * 60",
+          "expr": "sum(rate(reth_alpen_ee_da_envelopes_submitted_total{instance=~\"$instance\"}[$__rate_interval])) * 60",
           "legendFormat": "svc_da_pipeline",
           "refId": "svc_da_pipeline",
           "instant": true,
@@ -705,7 +705,7 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "rate(reth_alpen_ee_da_envelopes_submitted_total{instance=~\"$instance\"}[$__rate_interval]) * 120",
+          "expr": "sum(rate(reth_alpen_ee_da_envelopes_submitted_total{instance=~\"$instance\"}[$__rate_interval])) * 120",
           "legendFormat": "flow_da_to_btc",
           "refId": "flow_da_to_btc",
           "instant": true,
@@ -7638,8 +7638,8 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "(rate(reth_alpen_ee_da_envelopes_submitted_total{instance=~\"$instance\"}[$__rate_interval])) * 60",
-          "legendFormat": "submitted /min",
+          "expr": "(sum by (empty) (rate(reth_alpen_ee_da_envelopes_submitted_total{instance=~\"$instance\"}[$__rate_interval]))) * 60",
+          "legendFormat": "submitted (empty={{empty}}) /min",
           "refId": "A",
           "instant": false,
           "range": true,
@@ -7653,18 +7653,6 @@
           "expr": "(rate(reth_alpen_ee_batch_transitions_total{instance=~\"$instance\", status=\"da_complete\"}[$__rate_interval])) * 60",
           "legendFormat": "DA complete /min",
           "refId": "B",
-          "instant": false,
-          "range": true,
-          "editorMode": "code"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "alpen-prometheus"
-          },
-          "expr": "(sum by (empty) (rate(reth_alpen_ee_da_blobs_built_total{instance=~\"$instance\"}[$__rate_interval]))) * 60",
-          "legendFormat": "blobs built (empty={{empty}}) /min",
-          "refId": "C",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7949,21 +7937,9 @@
             "type": "prometheus",
             "uid": "alpen-prometheus"
           },
-          "expr": "reth_alpen_ee_da_blob_blocks{instance=~\"$instance\", quantile=\"0.5\"}",
-          "legendFormat": "blocks per blob p50",
-          "refId": "A",
-          "instant": false,
-          "range": true,
-          "editorMode": "code"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "alpen-prometheus"
-          },
           "expr": "reth_alpen_ee_da_envelope_chunks{instance=~\"$instance\", quantile=\"0.5\"}",
           "legendFormat": "chunks per envelope p50",
-          "refId": "B",
+          "refId": "A",
           "instant": false,
           "range": true,
           "editorMode": "code"
@@ -7975,7 +7951,7 @@
           },
           "expr": "(rate(reth_alpen_ee_da_bytecodes_deduped_total{instance=~\"$instance\"}[$__rate_interval])) * 60",
           "legendFormat": "bytecodes deduped /min",
-          "refId": "C",
+          "refId": "B",
           "instant": false,
           "range": true,
           "editorMode": "code"
