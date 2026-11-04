@@ -108,7 +108,6 @@ where
                         warn!(
                             "Expected proof generation to have been started. Retrying proof generation"
                         );
-                        counter!(BATCH_TRANSITION_FAILURES, "status" => "proof_ready").increment(1);
 
                         ctx.prover
                             .request_proof_generation(batch_id)
