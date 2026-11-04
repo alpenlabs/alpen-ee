@@ -31,8 +31,10 @@ Prometheus one reth installs, so:
 ## Pointing Prometheus at a node
 
 Targets are in `prometheus/targets/alpen.yml`, re-read every 30 s. The default
-is the docker host at port 9001, which needs the node bound to `0.0.0.0` (a
-node bound to `127.0.0.1` is not reachable from a container). For a node that
+is the docker host at port 9001: what `docker/docker-compose-eest.yml` publishes
+(the image's entrypoint serves `--metrics` on `METRICS_ADDR`, default
+`0.0.0.0:9001`), and what a native node started with `--metrics 0.0.0.0:9001`
+serves (a node bound to `127.0.0.1` is not reachable from a container). For a node that
 runs in another compose project, attach this stack to its network and use the
 service name. A second node (a full node) is a second entry; the dashboard's
 `node` picker switches between instances.

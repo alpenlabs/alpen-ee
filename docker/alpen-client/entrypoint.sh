@@ -51,4 +51,5 @@ exec alpen-client \
     --authrpc.port "${AUTHRPC_PORT:-8551}" \
     --authrpc.jwtsecret "${JWT_SECRET:-/app/keys/jwt.hex}" \
     --txpool.minimal-protocol-fee "${TXPOOL_MIN_PROTOCOL_FEE:-0}" \
+    --metrics "${METRICS_ADDR:-0.0.0.0:9001}" \
     "$@"
