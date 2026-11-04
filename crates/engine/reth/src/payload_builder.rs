@@ -148,8 +148,12 @@ impl AlpenRethPayloadEngine {
         let build_started = Instant::now();
         debug!("requesting payload builder job");
         let mut missing_parent_retries = 0;
+        // The accept stage is recorded once, for the job that resolves: a
+        // missing-parent retry submits another job, and recording each would
+        // skew the distribution exactly when reth lags.
         let mut payload = loop {
-            let payload_id = match self
+            let attempt_started = Instant::now();
+            let (payload_id, accept_secs) = match self
                 .payload_builder_handle
                 .send_new_payload(BuildNewPayload {
                     attributes: payload_attrs.clone(),
@@ -172,9 +176,7 @@ impl AlpenRethPayloadEngine {
                         elapsed_ms = build_started.elapsed().as_millis(),
                         "payload builder accepted job"
                     );
-                    histogram!(PAYLOAD_BUILD_SECONDS, "stage" => "accept")
-                        .record(build_started.elapsed().as_secs_f64());
-                    payload_id
+                    (payload_id, attempt_started.elapsed().as_secs_f64())
                 }
                 Ok(Err(err))
                     if is_retryable_missing_parent(&err)
@@ -236,6 +238,7 @@ impl AlpenRethPayloadEngine {
                         total_elapsed_ms = build_started.elapsed().as_millis(),
                         "payload builder resolved payload"
                     );
+                    histogram!(PAYLOAD_BUILD_SECONDS, "stage" => "accept").record(accept_secs);
                     histogram!(PAYLOAD_BUILD_SECONDS, "stage" => "resolve")
                         .record(resolve_started.elapsed().as_secs_f64());
                     break payload;
