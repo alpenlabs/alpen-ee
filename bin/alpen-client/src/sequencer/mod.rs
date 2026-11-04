@@ -374,8 +374,10 @@ pub(crate) async fn run(
     let node = &handle.node;
 
     // Reth installed its Prometheus recorder while launching; describe the
-    // Alpen metrics now so their HELP lines reach the endpoint.
+    // Alpen metrics now so their HELP lines reach the endpoint, and republish
+    // the gauges set before launch, which the no-op recorder dropped.
     describe_all();
+    da_fee_rate_runtime.record_current_rate();
     spawn_store_sampler(&node.task_executor, common.mdbx_dir.clone(), {
         let node_db = common.node_db.clone();
         let sequencer_dbs = sequencer_dbs.clone();

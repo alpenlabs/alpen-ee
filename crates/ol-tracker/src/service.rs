@@ -8,7 +8,7 @@ use std::{
 
 use alpen_common::{ConsensusHeads, OLClient, OLFinalizedStatus};
 use alpen_storage_api::Storage;
-use metrics::counter;
+use metrics::{counter, gauge};
 use serde::{Deserialize, Serialize};
 use strata_service::{AsyncService, Response, Service, ServiceState};
 use tokio::sync::watch;
@@ -16,7 +16,7 @@ use tracing::{debug, error};
 
 use crate::{
     error::OLTrackerError,
-    metrics::{OL_TRACKER_ACTIONS, OL_TRACKER_FAILURES},
+    metrics::{OL_EPOCH, OL_TRACKER_ACTIONS, OL_TRACKER_FAILURES},
     reorg::handle_reorg,
     state::OLTrackerState,
     task::{handle_extend_ee_state, handle_refresh_finalized, track_ol_state, TrackOLAction},
@@ -173,6 +173,10 @@ where
                 return handle_tracker_error(error);
             }
         }
+        // Every arm above either returned or left the state as it should be,
+        // so this is the epoch the EE account state actually sits at.
+        gauge!(OL_EPOCH, "status" => "local")
+            .set(f64::from(state.tracker_state.best_ol_epoch().epoch()));
 
         Ok(Response::Continue)
     }

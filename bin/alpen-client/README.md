@@ -892,7 +892,7 @@ Every Alpen series is recorded through the `metrics` facade onto Reth's Promethe
 | `alpen_ee_batch_transition_failures_total` | C | `status` attempted | Which stage is failing and retrying? |
 | `alpen_ee_batch_status_seconds` | H | `status` entered: time to reach it from the previous one | How long does each stage take? |
 | `alpen_ee_batch_settlement_seconds` | H | | How long from sealed to proof ready? |
-| `alpen_ee_batch_reorgs_total` | C | | Are sealed batches being reverted? |
+| `alpen_ee_batch_reorgs_total` | C | `kind`: `shallow` (pending blocks reset), `batch` (latest sealed batch reverted) | Is the tip flapping under the batch builder, and are sealed batches being reverted? |
 
 **Data availability** (`alpen-da-provider`, `alpen-client`)
 

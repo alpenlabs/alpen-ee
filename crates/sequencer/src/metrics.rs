@@ -29,7 +29,9 @@ pub const BLOCK_LATEST_HEIGHT: &str = "alpen_ee_block_latest_height";
 pub const BATCHES_SEALED: &str = "alpen_ee_batches_sealed_total";
 /// Blocks per sealed batch.
 pub const BATCH_BLOCKS: &str = "alpen_ee_batch_blocks";
-/// Reorgs the batch builder reverted sealed batches for.
+/// Reorgs the batch builder handled, by `kind`: `shallow` (pending blocks and the
+/// accumulator reset, no sealed batch touched) or `batch` (the latest sealed batch
+/// reverted).
 pub const BATCH_REORGS: &str = "alpen_ee_batch_reorgs_total";
 /// Chunks sealed, by the sealing `reason`.
 pub const CHUNKS_SEALED: &str = "alpen_ee_chunks_sealed_total";
@@ -97,7 +99,7 @@ pub fn describe() {
     describe_histogram!(BATCH_BLOCKS, "Blocks per sealed batch");
     describe_counter!(
         BATCH_REORGS,
-        "Reorgs the batch builder reverted sealed batches for"
+        "Reorgs the batch builder handled, by kind (shallow, batch)"
     );
     describe_counter!(
         CHUNKS_SEALED,
