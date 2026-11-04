@@ -195,11 +195,6 @@ where
             deduped,
             "built DA blob for batch"
         );
-        counter!(DA_BLOBS_BUILT, "empty" => if state_diff.is_empty() { "true" } else { "false" })
-            .increment(1);
-        histogram!(DA_BLOB_BLOCKS).record(block_count as f64);
-        counter!(DA_BYTECODES_DEDUPED).increment(deduped as u64);
-
         // 4. Read the last block's header for chain-reconstruction metadata.
         let evm_header = self
             .header_summary
@@ -209,7 +204,12 @@ where
             .update_seq_no()
             .ok_or_else(|| eyre::eyre!("cannot build DA blob for genesis batch"))?;
 
-        // 5. Construct the DaBlob with metadata.
+        // 5. Construct the DaBlob with metadata. Nothing below can fail, so the build counts only
+        //    now: a retried build is not two blobs.
+        counter!(DA_BLOBS_BUILT, "empty" => if state_diff.is_empty() { "true" } else { "false" })
+            .increment(1);
+        histogram!(DA_BLOB_BLOCKS).record(block_count as f64);
+        counter!(DA_BYTECODES_DEDUPED).increment(deduped as u64);
         Ok(DaBlob {
             spec_version: batch.spec_version(),
             update_seq_no,

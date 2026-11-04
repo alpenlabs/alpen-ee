@@ -65,13 +65,13 @@ use strata_config::btcio::{fee_rate_to_sat_per_vb, FeePolicy, WriterConfig};
 use strata_identifiers::EpochCommitment;
 use strata_primitives::buf::Buf32;
 use tokio::sync::{mpsc, watch};
-use tracing::{error, info, info_span, Instrument};
+use tracing::{error, info, info_span, warn, Instrument};
 
 use self::sealing_policy::gas_data_provider::RethGasDataProvider;
 use crate::{
     config::SequencerMode,
     gossip::GossipConfig,
-    metrics::{describe_all, spawn_store_sampler, TableCounts},
+    metrics::{spawn_store_sampler, TableCounts},
     node::{LaunchedNode, NodeBootstrap},
     ol::OLClientKind,
     sequencer::sealing_policy::da_size::{DaBatchSizePolicy, DaSizeProvider, MaxDaSizeSealing},
@@ -373,11 +373,6 @@ pub(crate) async fn run(
 
     let node = &handle.node;
 
-    // Reth installed its Prometheus recorder while launching; describe the
-    // Alpen metrics now so their HELP lines reach the endpoint, and republish
-    // the gauges set before launch, which the no-op recorder dropped.
-    describe_all();
-    da_fee_rate_runtime.record_current_rate();
     spawn_store_sampler(&node.task_executor, common.mdbx_dir.clone(), {
         let node_db = common.node_db.clone();
         let sequencer_dbs = sequencer_dbs.clone();
@@ -388,7 +383,12 @@ pub(crate) async fn run(
                 .into_iter()
                 .map(|(table, n)| ("node", table, n))
                 .collect();
-            rows.extend(sequencer_dbs.table_counts()?);
+            match sequencer_dbs.table_counts() {
+                Ok(sequencer_rows) => rows.extend(sequencer_rows),
+                Err(error) => {
+                    warn!(%error, "sequencer table stats failed; node rows still sampled")
+                }
+            }
             Ok(rows)
         }
     });

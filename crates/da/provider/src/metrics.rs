@@ -19,8 +19,6 @@ pub const DA_ENVELOPE_CHUNKS: &str = "alpen_ee_da_envelope_chunks";
 pub const DA_ENVELOPES_SUBMITTED: &str = "alpen_ee_da_envelopes_submitted_total";
 /// Envelope status checks by the lifecycle, by the envelope's L1 `status`.
 pub const DA_STATUS_CHECKS: &str = "alpen_ee_da_status_checks_total";
-/// Envelopes found reorg-safe finalized on L1.
-pub const DA_ENVELOPES_FINALIZED: &str = "alpen_ee_da_envelopes_finalized_total";
 
 /// Registers the description and unit of every metric above.
 pub fn describe() {
@@ -46,9 +44,5 @@ pub fn describe() {
     describe_counter!(
         DA_STATUS_CHECKS,
         "Envelope status checks by the lifecycle, by L1 status"
-    );
-    describe_counter!(
-        DA_ENVELOPES_FINALIZED,
-        "Envelopes found reorg-safe finalized on L1"
     );
 }

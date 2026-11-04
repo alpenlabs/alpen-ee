@@ -104,7 +104,6 @@ impl BatchProver for PaasBatchProver {
             chunk_count = chunks.len(),
             "submitting chunk + acct proof tasks"
         );
-        note_proof_submitted(batch_id);
 
         for chunk_id in chunks {
             let task = ChunkTask(chunk_id);
@@ -133,6 +132,7 @@ impl BatchProver for PaasBatchProver {
             .await
             .map_err(|e| eyre::eyre!("submit acct task {batch_id}: {e}"))?;
         counter!(PROOF_TASKS_SUBMITTED, "kind" => "acct").increment(1);
+        note_proof_submitted(batch_id);
 
         Ok(())
     }

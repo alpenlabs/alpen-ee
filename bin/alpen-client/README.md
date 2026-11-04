@@ -904,8 +904,7 @@ Every Alpen series is recorded through the `metrics` facade onto Reth's Promethe
 | `alpen_ee_da_bytecodes_deduped_total` | C | | Is bytecode dedup saving DA? |
 | `alpen_ee_da_envelope_chunks` | H | | How many L1 transactions per envelope? |
 | `alpen_ee_da_envelopes_submitted_total` | C | | Is DA being handed to the L1 writer? |
-| `alpen_ee_da_envelopes_finalized_total` | C | | Is DA reaching finality on L1? |
-| `alpen_ee_da_status_checks_total` | C | `status` | What does the lifecycle see when it polls DA? |
+| `alpen_ee_da_status_checks_total` | C | `status` | What does the lifecycle see when it polls DA? Finality is `alpen_ee_batch_transitions_total{status="da_complete"}`, once per batch. |
 | `alpen_ee_da_txs_pending` | G | | Is Bitcoin DA publication backing up? Non-zero normally; sustained growth is the signal. |
 | `alpen_ee_da_fee_rate_wei_per_byte` | G | | What DA fee is charged? |
 | `alpen_ee_da_fee_rate_stale` | G | | Is the DA fee rate stale (`1`)? |

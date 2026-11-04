@@ -1,8 +1,9 @@
 //! Alpen metrics: this binary's own instruments, the descriptions of every
 //! Alpen metric, and the store sampler.
 //!
-//! Every Alpen crate emits through the `metrics` facade. The recorder is the
-//! Prometheus one reth installs when it launches, which prefixes every name
+//! Every Alpen crate emits through the `metrics` facade. The recorder is
+//! reth's Prometheus one, installed first thing in `main` (reth would install
+//! it at launch, too late for what starts earlier), which prefixes every name
 //! with `reth_` and serves them on reth's `--metrics <addr>` endpoint. So an
 //! instrument named `alpen_ee_blocks_built_total` here is scraped as
 //! `reth_alpen_ee_blocks_built_total`, next to reth's own metrics and the
@@ -76,14 +77,28 @@ pub(crate) const DA_TXS_PENDING: &str = "alpen_ee_da_txs_pending";
 static PROOF_SUBMITTED_AT: LazyLock<Mutex<HashMap<BatchId, Instant>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Batches the proof wait is tracked for at once. A batch whose account proof
+/// never lands (permanent prover failure, batch reorg) would otherwise stay
+/// forever; past this many, the oldest submission is forgotten.
+#[cfg(feature = "sequencer")]
+const PROOF_TIMING_MAX_BATCHES: usize = 256;
+
 /// Marks `batch_id`'s proof tasks as submitted now, unless already marked.
 #[cfg(feature = "sequencer")]
 pub(crate) fn note_proof_submitted(batch_id: BatchId) {
-    PROOF_SUBMITTED_AT
+    let mut submitted = PROOF_SUBMITTED_AT
         .lock()
-        .expect("proof timing lock poisoned")
-        .entry(batch_id)
-        .or_insert_with(Instant::now);
+        .expect("proof timing lock poisoned");
+    submitted.entry(batch_id).or_insert_with(Instant::now);
+    if submitted.len() > PROOF_TIMING_MAX_BATCHES {
+        if let Some(oldest) = submitted
+            .iter()
+            .min_by_key(|(_, started)| **started)
+            .map(|(id, _)| *id)
+        {
+            submitted.remove(&oldest);
+        }
+    }
 }
 
 /// Records the proof wait for `batch_id` if its submission was marked; a
@@ -114,8 +129,8 @@ const STORE_ENVS: [&str; 4] = ["node", "prover", "witness", "da"];
 pub(crate) type TableCounts = Vec<(&'static str, &'static str, usize)>;
 
 /// Registers the descriptions of every Alpen metric, this binary's and the
-/// crates'. Call once the reth node has launched, since reth installs the
-/// recorder then and descriptions recorded earlier are dropped.
+/// crates'. `main` calls it right after installing the recorder, since
+/// descriptions recorded before a recorder exists are dropped.
 pub(crate) fn describe_all() {
     describe_engine();
     describe_ol_tracker();

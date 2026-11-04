@@ -51,17 +51,28 @@ use reth_cli_commands::{launcher::FnLauncher, node::NodeCommand};
 use reth_cli_runner::CliRunner;
 use reth_cli_util::sigsegv_handler;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
+use reth_node_metrics::recorder::install_prometheus_recorder;
 use strata_logging::{init_logging_from_config, LoggingInitConfigRef};
 #[cfg(feature = "sequencer")]
 use tracing::error;
 use tracing::info;
 
-use crate::args::{AdditionalConfig, AlpenChainSpecParser};
 #[cfg(feature = "sequencer")]
 use crate::config::{NodeMode, ProverBackendConfig};
+use crate::{
+    args::{AdditionalConfig, AlpenChainSpecParser},
+    metrics::describe_all,
+};
 
 fn main() {
     sigsegv_handler::install();
+
+    // Install reth's Prometheus recorder before anything records. Reth would
+    // install it at launch, but the OL tracker, the DA fee rate and the engine
+    // control record earlier, and the facade drops what it sees before a
+    // recorder exists. Reth's own call at launch then finds it installed.
+    install_prometheus_recorder();
+    describe_all();
 
     // Enable backtraces unless a RUST_BACKTRACE value has already been explicitly provided.
     if env::var_os("RUST_BACKTRACE").is_none() {

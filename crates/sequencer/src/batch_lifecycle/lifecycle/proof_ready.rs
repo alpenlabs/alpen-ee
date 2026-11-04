@@ -107,7 +107,9 @@ where
         }
         BatchStatus::ProofReady { .. } => {
             // The prover's receipt hook flipped the status before this task
-            // asked, so the batch completes its last stage here.
+            // asked, so the batch completes its last stage here, including the
+            // wake-up the update submitter waits for.
+            let _ = ctx.proof_ready_tx.send(Some(batch.id()));
             state.advance_proof_ready(target_idx, batch.id());
             state.clock_mut().transition(target_idx, "proof_ready");
         }

@@ -160,6 +160,7 @@ reth-ethereum-primitives.workspace = true
 reth-network.workspace = true
 reth-network-api.workspace = true
 reth-node-builder.workspace = true
+reth-node-metrics.workspace = true
 reth-payload-builder = { workspace = true, optional = true }
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true
