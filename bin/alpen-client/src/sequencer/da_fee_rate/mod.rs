@@ -30,13 +30,26 @@ use crate::config::DaFeeRateConfig;
 #[derive(Debug)]
 pub(crate) struct DaFeeRateRuntime {
     rate_handle: DaFeeRateHandle,
-    _refresh_service: Option<DaFeeRateServiceHandle>,
+    refresh_service: Option<DaFeeRateServiceHandle>,
 }
 
 impl DaFeeRateRuntime {
     /// Returns the non-blocking rate handle consumed by payload construction.
     pub(crate) fn rate_handle(&self) -> DaFeeRateHandle {
         self.rate_handle.clone()
+    }
+
+    /// Publishes the rate and freshness gauges from the current state.
+    ///
+    /// Call once the metrics recorder is installed: [`start`] runs before reth
+    /// launches, so what it recorded went to the no-op recorder, and a fixed
+    /// rate has no refresh service to record it again.
+    pub(crate) fn record_current_rate(&self) {
+        let is_stale = self
+            .refresh_service
+            .as_ref()
+            .is_some_and(|service| service.monitor().get_current().is_stale);
+        service::record_rate(self.rate_handle.current_rate(), is_stale);
     }
 }
 
@@ -53,7 +66,7 @@ pub(crate) async fn start(
             service::record_initialized_rate(&rate_handle);
             Ok(DaFeeRateRuntime {
                 rate_handle,
-                _refresh_service: None,
+                refresh_service: None,
             })
         }
         DaFeeRateConfig::WriterBacked { config } => {
@@ -71,7 +84,7 @@ pub(crate) async fn start(
             let refresh_service = service::launch(state, executor).await?;
             Ok(DaFeeRateRuntime {
                 rate_handle: refresh_service.rate_handle(),
-                _refresh_service: Some(refresh_service),
+                refresh_service: Some(refresh_service),
             })
         }
     }
