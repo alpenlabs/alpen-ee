@@ -154,5 +154,6 @@ mod tests {
         assert_eq!(state.finalized_blockhash(), hash3);
         assert_eq!(state.finalized_blocknum(), 3);
         assert_eq!(state.tip_blockhash(), hash3);
+        assert_eq!(state.tip_blocknumhash(), BlockNumHash::new(hash3, 3));
     }
 }

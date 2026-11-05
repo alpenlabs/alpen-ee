@@ -156,14 +156,22 @@ impl ExecChainState {
     /// Removes finalized blocks and blocks that no longer extend the finalized chain,
     /// as well as old orphans at or below the finalized height.
     pub(crate) fn prune_finalized(&mut self, finalized: Hash) -> Result<(), ExecChainStateError> {
+        let prev_finalized = self.finalized_blockhash();
+        if finalized == prev_finalized {
+            return Ok(());
+        }
+
         let report = self.unfinalized.prune_finalized(finalized)?;
         let finalized_height = self
             .blocks
             .get(&finalized)
             .expect("should exist")
             .blocknum();
-        for hash in report.finalize {
-            self.blocks.remove(&hash);
+        // The report lists the new finalized block too, but it stays on as the
+        // tracker's root, so keep its record and drop the previous root's.
+        self.blocks.remove(&prev_finalized);
+        for hash in report.finalize.iter().filter(|hash| **hash != finalized) {
+            self.blocks.remove(hash);
         }
         for hash in report.remove {
             self.blocks.remove(&hash);
@@ -577,5 +585,63 @@ mod tests {
         // Tip should now be D (the finalized block, since there are no unfinalized blocks)
         assert_eq!(state.finalized_blockhash(), hash_from_u8(3));
         assert_eq!(state.tip_blockhash(), hash_from_u8(3));
+        assert_eq!(state.get_best_block().blockhash(), hash_from_u8(3));
+    }
+
+    #[test]
+    fn test_prune_finalized_tip_keeps_tip_record() {
+        // A -> B -> C (tip)
+        //
+        // Finalize C, the tip itself
+        let block_a = create_test_block(0, hash_from_u8(0), hash_from_u8(0));
+        let mut state = ExecChainState::new_empty(block_a);
+
+        let block_b = create_test_block(1, hash_from_u8(1), hash_from_u8(0));
+        let block_c = create_test_block(2, hash_from_u8(2), hash_from_u8(1));
+
+        state.append_block(block_b).unwrap();
+        state.append_block(block_c).unwrap();
+
+        state.prune_finalized(hash_from_u8(2)).unwrap();
+
+        assert_eq!(state.finalized_blockhash(), hash_from_u8(2));
+        assert_eq!(state.get_best_block().blockhash(), hash_from_u8(2));
+        assert_eq!(state.blocks.len(), 1);
+    }
+
+    #[test]
+    fn test_prune_finalized_twice_drops_previous_roots() {
+        // A -> B -> C -> D
+        //
+        // Finalize B, then D
+        let block_a = create_test_block(0, hash_from_u8(0), hash_from_u8(0));
+        let mut state = ExecChainState::new_empty(block_a);
+
+        let block_b = create_test_block(1, hash_from_u8(1), hash_from_u8(0));
+        let block_c = create_test_block(2, hash_from_u8(2), hash_from_u8(1));
+        let block_d = create_test_block(3, hash_from_u8(3), hash_from_u8(2));
+
+        state.append_block(block_b).unwrap();
+        state.append_block(block_c).unwrap();
+        state.append_block(block_d).unwrap();
+
+        state.prune_finalized(hash_from_u8(1)).unwrap();
+        state.prune_finalized(hash_from_u8(3)).unwrap();
+
+        assert_eq!(
+            state.blocks.keys().copied().collect::<Vec<_>>(),
+            vec![hash_from_u8(3)]
+        );
+        assert_eq!(state.get_best_block().blockhash(), hash_from_u8(3));
+    }
+
+    #[test]
+    fn test_prune_finalized_current_root_is_noop() {
+        let block_a = create_test_block(0, hash_from_u8(0), hash_from_u8(0));
+        let mut state = ExecChainState::new_empty(block_a);
+
+        state.prune_finalized(hash_from_u8(0)).unwrap();
+
+        assert_eq!(state.get_best_block().blockhash(), hash_from_u8(0));
     }
 }
