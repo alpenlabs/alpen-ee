@@ -58,6 +58,7 @@ tracing.workspace = true
 [dev-dependencies]
 proptest.workspace = true
 reth-storage-api.workspace = true
+secp256k1.workspace = true
 serde_json.workspace = true
 strata-ol-bridge-types.workspace = true
 strata-identifiers = { workspace = true, features = ["test-utils"] }

@@ -2,6 +2,7 @@
 
 mod connection;
 mod handler;
+mod ingress;
 mod package;
 mod protocol;
 

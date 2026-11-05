@@ -10,14 +10,15 @@ use reth_eth_wire::{
     capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol,
 };
 use reth_network::protocol::{ConnectionHandler, OnNotSupported};
-use reth_network_api::{Direction, PeerId};
+use reth_network_api::{test_utils::PeersHandle, Direction, PeerId, ReputationChangeKind};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, error, warn};
+use tracing::{debug, warn};
 
 use crate::{
     gossip::{
         handler::{AlpenGossipEvent, AlpenGossipState},
+        ingress::{GossipIngress, IngressVerdict},
         protocol::alpen_gossip_protocol,
     },
     AlpenGossipPackage,
@@ -103,7 +104,9 @@ impl ConnectionHandler for AlpenGossipConnectionHandler {
             conn,
             commands: UnboundedReceiverStream::new(rx),
             peer_id,
-            events: self.state.events.clone(),
+            events: self.state.events,
+            ingress: self.state.ingress,
+            peers: self.state.peers,
         }
     }
 }
@@ -122,6 +125,22 @@ pub struct AlpenGossipConnection {
 
     /// Event sender.
     events: mpsc::UnboundedSender<AlpenGossipEvent>,
+
+    /// Checks applied to packages from this peer.
+    ingress: GossipIngress,
+
+    /// Handle used to report this peer when it misbehaves.
+    peers: PeersHandle,
+}
+
+impl AlpenGossipConnection {
+    /// Lowers the peer's reputation and ends the stream, which closes the
+    /// whole session with the peer.
+    fn reject_peer(&self) -> Poll<Option<BytesMut>> {
+        self.peers
+            .reputation_change(self.peer_id, ReputationChangeKind::BadMessage);
+        Poll::Ready(None)
+    }
 }
 
 impl Drop for AlpenGossipConnection {
@@ -156,23 +175,37 @@ impl Stream for AlpenGossipConnection {
             let pkg = match AlpenGossipPackage::try_decode(&mut &msg[..]) {
                 Ok(msg) => msg,
                 Err(e) => {
-                    error!(
+                    warn!(
                         target: "alpen-gossip",
                         peer_id = %this.peer_id,
                         err = ?e,
                         message_len = %msg.len(),
                         "Failed to decode gossip package from peer, disconnecting"
                     );
-                    return Poll::Ready(None);
+                    return this.reject_peer();
                 }
             };
 
-            this.events
-                .send(AlpenGossipEvent::Package {
-                    peer_id: this.peer_id,
-                    package: pkg,
-                })
-                .ok();
+            match this.ingress.check(&pkg) {
+                IngressVerdict::Admit => {
+                    this.events
+                        .send(AlpenGossipEvent::Package {
+                            peer_id: this.peer_id,
+                            package: pkg,
+                        })
+                        .ok();
+                }
+                IngressVerdict::Drop => {}
+                IngressVerdict::Reject(reason) => {
+                    warn!(
+                        target: "alpen-gossip",
+                        peer_id = %this.peer_id,
+                        reason,
+                        "Rejected gossip package from peer, disconnecting"
+                    );
+                    return this.reject_peer();
+                }
+            }
         }
     }
 }
