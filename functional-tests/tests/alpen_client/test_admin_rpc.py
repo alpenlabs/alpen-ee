@@ -55,6 +55,9 @@ class TestAdminRpc(BaseTest):
             f"expected non-empty version string, got {status!r}"
         )
         assert status["sequencer"] is True, f"expected sequencer mode, got {status!r}"
+        assert status["block_production_stop_after"] is None, (
+            f"expected unbounded block production, got {status!r}"
+        )
 
         # No Authorization header at all.
         assert_unauthorized(JsonRpcClient(alpen_seq.props["admin_rpc_url"]))

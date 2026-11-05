@@ -3,7 +3,7 @@ use std::sync::Arc;
 use alpen_acct_types::EeAccountState;
 use alpen_block_assembly::{build_next_exec_block, BlockAssemblyInputs, BlockAssemblyOutputs};
 use alpen_chain_types::ExecBlockPackage;
-use alpen_common::{Clock, ExecBlockPayload, ExecBlockRecord, SystemClock};
+use alpen_common::{BlockProductionControl, Clock, ExecBlockPayload, ExecBlockRecord, SystemClock};
 use alpen_engine_api::{EnginePayload, PayloadBuilderEngine};
 use alpen_exec_chain::ExecChainHandle;
 use alpen_params::AlpenSpecId;
@@ -12,7 +12,7 @@ use eyre::Context;
 use strata_acct_types::{Hash, MessageEntry};
 use strata_identifiers::{OLBlockCommitment, OLBlockId};
 use thiserror::Error;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, trace, warn};
 
 use crate::{block_builder::BlockBuilderConfig, ol_chain_tracker::OLChainTrackerHandle};
 
@@ -22,6 +22,9 @@ enum BlockBuilderError {
     /// Timestamp constraint violated - should retry immediately without backoff.
     #[error("blocktime constraint violated")]
     BlocktimeConstraintViolated,
+    /// [`BlockProductionControl`] declined this turn - skip it.
+    #[error("block production stopped")]
+    ProductionStopped,
     /// Real error occurred - should backoff before retry.
     #[error(transparent)]
     Other(#[from] eyre::Report),
@@ -151,12 +154,14 @@ fn create_next_exec_block_record(
 pub async fn block_builder_task<
     TPayloadBuilder: PayloadBuilderEngine,
     TStorage: ExecBlockStorage,
+    TControl: BlockProductionControl,
 >(
     config: BlockBuilderConfig,
     exec_chain_handle: ExecChainHandle,
     ol_chain_handle: OLChainTrackerHandle,
     payload_builder: Arc<TPayloadBuilder>,
     storage: Arc<TStorage>,
+    block_production: Arc<TControl>,
 ) {
     let last_local_block = exec_chain_handle
         .get_best_block()
@@ -177,6 +182,7 @@ pub async fn block_builder_task<
             &ol_chain_handle,
             payload_builder.as_ref(),
             storage.as_ref(),
+            block_production.as_ref(),
             &clock,
         )
         .await
@@ -188,6 +194,10 @@ pub async fn block_builder_task<
             Err(BlockBuilderError::BlocktimeConstraintViolated) => {
                 warn!("blocktime constraint violated, retrying immediately");
             }
+            Err(BlockBuilderError::ProductionStopped) => {
+                trace!("block production stopped, skipping turn");
+                clock.sleep_ms(config.blocktime_ms()).await;
+            }
             Err(BlockBuilderError::Other(err)) => {
                 error!(?err, "failed to build block");
                 clock.sleep_ms(config.error_backoff_ms()).await;
@@ -196,6 +206,10 @@ pub async fn block_builder_task<
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "threads the builder's dependencies"
+)]
 async fn block_builder_task_inner<TEngine: PayloadBuilderEngine>(
     next_block_target: &BlockTarget,
     config: &BlockBuilderConfig,
@@ -203,6 +217,7 @@ async fn block_builder_task_inner<TEngine: PayloadBuilderEngine>(
     ol_chain_handle: &OLChainTrackerHandle,
     payload_builder: &TEngine,
     storage: &impl ExecBlockStorage,
+    block_production: &impl BlockProductionControl,
     clock: &impl Clock,
 ) -> Result<(Hash, BlockTarget), BlockBuilderError> {
     // if we are not ready, sleep
@@ -215,6 +230,7 @@ async fn block_builder_task_inner<TEngine: PayloadBuilderEngine>(
         exec_chain_handle,
         ol_chain_handle,
         payload_builder,
+        block_production,
         clock,
     )
     .await?;
@@ -274,12 +290,19 @@ async fn build_next_block<TEngine: PayloadBuilderEngine>(
     exec_chain_handle: &ExecChainHandle,
     ol_chain_handle: &OLChainTrackerHandle,
     payload_builder: &TEngine,
+    block_production: &impl BlockProductionControl,
     clock: &impl Clock,
 ) -> Result<(ExecBlockRecord, TEngine::TEnginePayload, Hash), BlockBuilderError> {
     let last_local_block = exec_chain_handle
         .get_best_block()
         .await
         .context("build_next_block: failed to get best exec block")?;
+
+    // Checked after the blocktime wait so a change made during it applies to
+    // this turn. A block already past this point still completes.
+    if !block_production.should_build_next_block(&last_local_block) {
+        return Err(BlockBuilderError::ProductionStopped);
+    }
 
     // Check the parent expected by the block target. A mismatch means another
     // builder advanced the local EE tip.
