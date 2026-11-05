@@ -3,6 +3,7 @@ use alpen_storage_api::{ExecBlockStorage, StorageError};
 use strata_acct_types::Hash;
 use thiserror::Error;
 use tokio::sync::watch;
+use tracing::debug;
 
 use crate::state::{ExecChainState, ExecChainStateError};
 
@@ -15,6 +16,13 @@ pub(crate) enum ChainTrackerError {
     /// Block not found in storage
     #[error("missing block: {0:?}")]
     MissingBlock(Hash),
+    /// OL finalized a block that is neither tracked nor on the local finalized chain.
+    ///
+    /// The sequencer only batches blocks the tracker already holds, so this means the OL
+    /// finalized a fork we never built on, or the local store lost blocks. The tracker cannot
+    /// recover from either on its own.
+    #[error("OL finalized unknown block: {0:?}")]
+    UnknownFinalizedBlock(Hash),
     /// Storage error
     #[error(transparent)]
     Storage(#[from] StorageError),
@@ -95,8 +103,17 @@ pub(crate) async fn handle_ol_update<TStorage: ExecBlockStorage>(
         return Ok(());
     }
 
+    if storage.get_finalized_height(finalized).await?.is_some() {
+        // An ancestor of our finalized block, so the update is stale.
+        debug!(
+            ?finalized,
+            "ignoring OL update for an already finalized block"
+        );
+        return Ok(());
+    }
+
     // TODO(STR-3682): we have a deep reorg beyond what we consider finalized.
-    unimplemented!("deep reorg");
+    Err(ChainTrackerError::UnknownFinalizedBlock(finalized))
 }
 
 #[cfg(test)]
@@ -155,5 +172,58 @@ mod tests {
         assert_eq!(state.finalized_blocknum(), 3);
         assert_eq!(state.tip_blockhash(), hash3);
         assert_eq!(state.tip_blocknumhash(), BlockNumHash::new(hash3, 3));
+    }
+
+    fn heads_finalizing(hash: Hash) -> ConsensusHeads {
+        ConsensusHeads {
+            confirmed: hash,
+            confirmed_epoch: 1,
+            finalized: hash,
+            finalized_epoch: 1,
+        }
+    }
+
+    #[tokio::test]
+    async fn handle_ol_update_ignores_already_finalized_ancestor() {
+        let hash0 = hash_from_u8(0);
+        let hash1 = hash_from_u8(1);
+        let block1 = create_exec_block(1, hash0, hash1, 1);
+        let mut state = ExecChainState::new_empty(block1);
+        let (preconf_tx, _preconf_rx) = watch::channel(state.tip_blocknumhash());
+
+        let mut storage = MockExecBlockStorage::new();
+        storage
+            .expect_get_finalized_height()
+            .withf(move |hash| *hash == hash0)
+            .times(1)
+            .returning(|_| Ok(Some(0)));
+
+        handle_ol_update(&mut state, heads_finalizing(hash0), &storage, &preconf_tx)
+            .await
+            .unwrap();
+
+        assert_eq!(state.finalized_blockhash(), hash1);
+    }
+
+    #[tokio::test]
+    async fn handle_ol_update_rejects_unknown_finalized_block() {
+        let hash0 = hash_from_u8(0);
+        let unknown = hash_from_u8(9);
+        let block0 = create_exec_block(0, Hash::default(), hash0, 0);
+        let mut state = ExecChainState::new_empty(block0);
+        let (preconf_tx, _preconf_rx) = watch::channel(state.tip_blocknumhash());
+
+        let mut storage = MockExecBlockStorage::new();
+        storage
+            .expect_get_finalized_height()
+            .times(1)
+            .returning(|_| Ok(None));
+
+        let err = handle_ol_update(&mut state, heads_finalizing(unknown), &storage, &preconf_tx)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, ChainTrackerError::UnknownFinalizedBlock(hash) if hash == unknown));
+        assert_eq!(state.finalized_blockhash(), hash0);
     }
 }

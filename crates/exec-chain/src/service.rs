@@ -122,6 +122,11 @@ where
                     Err(ChainTrackerError::PreconfChannelClosed) => {
                         return Err(anyhow::anyhow!("preconf head channel closed"));
                     }
+                    // Building on after the OL finalized a fork we don't have would only
+                    // produce blocks the OL rejects, so stop the service.
+                    Err(err @ ChainTrackerError::UnknownFinalizedBlock(_)) => {
+                        return Err(err.into());
+                    }
                     Err(err) => {
                         error!(?err, "failed to handle OL consensus update");
                     }
