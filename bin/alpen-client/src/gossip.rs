@@ -77,6 +77,7 @@ impl GossipConfig {
 fn handle_gossip_event(
     event: AlpenGossipEvent,
     connections: &mut HashMap<PeerId, mpsc::UnboundedSender<AlpenGossipCommand>>,
+    last_forwarded_seq_no: &mut u64,
     preconf_tx: &watch::Sender<BlockNumHash>,
 ) -> bool {
     match event {
@@ -103,23 +104,43 @@ fn handle_gossip_event(
             connections.remove(&peer_id);
             true
         }
-        AlpenGossipEvent::Package { peer_id, package } => {
-            handle_gossip_package(peer_id, package, connections, preconf_tx)
-        }
+        AlpenGossipEvent::Package { peer_id, package } => handle_gossip_package(
+            peer_id,
+            package,
+            connections,
+            last_forwarded_seq_no,
+            preconf_tx,
+        ),
     }
 }
 
 /// Handles a received gossip package.
 ///
 /// The connection that received the package has already checked its
-/// signature and dropped it if stale, so every package here is a new block.
+/// signature and dropped it if stale. Connections run in parallel, though,
+/// so two new blocks can still reach this task out of order. Checking the
+/// seq_no again here, in channel order, keeps the preconf head from moving
+/// back.
 fn handle_gossip_package(
     peer_id: PeerId,
     package: AlpenGossipPackage,
     connections: &HashMap<PeerId, mpsc::UnboundedSender<AlpenGossipCommand>>,
+    last_forwarded_seq_no: &mut u64,
     preconf_tx: &watch::Sender<BlockNumHash>,
 ) -> bool {
     let seq_no = package.message().seq_no();
+    if seq_no <= *last_forwarded_seq_no {
+        debug!(
+            target: "alpen-gossip",
+            %peer_id,
+            seq_no,
+            last_forwarded_seq_no = *last_forwarded_seq_no,
+            "Package arrived after a newer one, skipping"
+        );
+        return true;
+    }
+    *last_forwarded_seq_no = seq_no;
+
     let block_hash = package.message().header().hash_slow();
 
     info!(
@@ -253,11 +274,17 @@ pub(crate) async fn create_gossip_task(
 ) {
     let mut connections: HashMap<PeerId, mpsc::UnboundedSender<AlpenGossipCommand>> =
         HashMap::new();
+    let mut last_forwarded_seq_no: u64 = 0;
 
     loop {
         select! {
             Some(event) = gossip_rx.recv() => {
-                handle_gossip_event(event, &mut connections, &preconf_tx);
+                handle_gossip_event(
+                    event,
+                    &mut connections,
+                    &mut last_forwarded_seq_no,
+                    &preconf_tx,
+                );
             },
             res = state_events.recv() => {
                 if !handle_state_event(res, &connections, &config) {
@@ -266,5 +293,39 @@ pub(crate) async fn create_gossip_task(
             },
             else => { break; }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sequencer_package(block_number: u64) -> AlpenGossipPackage {
+        let header = Header {
+            number: block_number,
+            ..Default::default()
+        };
+        // The task trusts the connection's signature check, so the key does
+        // not matter here.
+        AlpenGossipMessage::new(header, block_number).into_package(Buf32::zero(), Buf32([1; 32]))
+    }
+
+    #[test]
+    fn test_older_package_after_newer_does_not_move_preconf_back() {
+        let (preconf_tx, preconf_rx) = watch::channel(BlockNumHash::new(Hash::zero(), 0));
+        let connections = HashMap::new();
+        let mut last_forwarded_seq_no = 0;
+
+        for block_number in [6, 5] {
+            handle_gossip_package(
+                PeerId::random(),
+                sequencer_package(block_number),
+                &connections,
+                &mut last_forwarded_seq_no,
+                &preconf_tx,
+            );
+        }
+
+        assert_eq!(preconf_rx.borrow().blocknum(), 6);
     }
 }

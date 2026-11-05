@@ -81,7 +81,9 @@ impl GossipIngress {
         }
 
         // Another connection may have admitted the same block while this one
-        // was verifying it.
+        // was verifying it. This only filters out repeats. Two connections
+        // can still admit consecutive blocks and deliver them out of order,
+        // so the gossip task checks the order again.
         if highest_seq_no.fetch_max(seq_no, Ordering::Relaxed) >= seq_no {
             return IngressVerdict::Drop;
         }
