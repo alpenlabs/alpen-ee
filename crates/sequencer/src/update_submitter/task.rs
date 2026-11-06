@@ -11,7 +11,7 @@ use tokio::{sync::watch, time};
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    batch_lifecycle::BATCH_LATEST_IDX_METRIC,
+    metrics::{BATCH_LATEST_IDX, OL_UPDATES_SUBMITTED, OL_UPDATE_FAILURES, OL_UPDATE_OUTPUTS},
     update_submitter::update_builder::build_update_from_batch,
 };
 
@@ -20,19 +20,20 @@ const DEFAULT_UPDATE_CACHE_MAX_SIZE: usize = 64;
 /// Polling interval to process batches regardless of events.
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(60);
 
-/// Counts failed update submitter passes, including OL account state reads, in errors.
-const UPDATE_SUBMITTER_ERRORS_METRIC: &str = "alpen_ee_update_submitter_errors_total";
-
 /// Cache for built updates, keyed by BatchId.
 /// Stores (batch_idx, update) to allow eviction based on sequence number.
 struct UpdateCache {
     entries: HashMap<BatchId, (u64, SnarkAccountUpdate)>,
+    /// Batches whose update the OL received at least once, by index. Kept
+    /// apart from `entries`, which is bounded and may not hold the update.
+    submitted: HashMap<BatchId, u64>,
 }
 
 impl UpdateCache {
     fn new() -> Self {
         Self {
             entries: HashMap::new(),
+            submitted: HashMap::new(),
         }
     }
 
@@ -52,6 +53,17 @@ impl UpdateCache {
     /// Evict entries for batches that have been accepted (batch_idx < current_seq_no).
     fn evict_accepted(&mut self, current_seq_no: u64) {
         self.entries.retain(|_, (idx, _)| *idx >= current_seq_no);
+        self.submitted.retain(|_, idx| *idx >= current_seq_no);
+    }
+
+    /// Whether an update for `batch_id` was handed to the OL at least once.
+    fn was_submitted(&self, batch_id: &BatchId) -> bool {
+        self.submitted.contains_key(batch_id)
+    }
+
+    /// Records that an update for `batch_id` (at `batch_idx`) reached the OL.
+    fn mark_submitted(&mut self, batch_id: BatchId, batch_idx: u64) {
+        self.submitted.insert(batch_id, batch_idx);
     }
 }
 
@@ -89,7 +101,7 @@ pub async fn create_update_submitter_task<C, S, ES, P>(
     )
     .await
     {
-        counter!(UPDATE_SUBMITTER_ERRORS_METRIC).increment(1);
+        counter!(OL_UPDATE_FAILURES).increment(1);
         error!(error = %e, "Update submitter error");
     }
 
@@ -124,7 +136,7 @@ pub async fn create_update_submitter_task<C, S, ES, P>(
         )
         .await
         {
-            counter!(UPDATE_SUBMITTER_ERRORS_METRIC).increment(1);
+            counter!(OL_UPDATE_FAILURES).increment(1);
             error!(error = %e, "Update submitter error");
         }
     }
@@ -148,7 +160,7 @@ async fn process_ready_batches(
     let next_sequence_no = *account_state.seq_no.inner();
     // Batch `n` carries update seq_no `n - 1`, so the OL tip includes batches up to
     // `next_sequence_no`.
-    gauge!(BATCH_LATEST_IDX_METRIC, "status" => "ol_latest").set(next_sequence_no as f64);
+    gauge!(BATCH_LATEST_IDX, "status" => "ol_latest").set(next_sequence_no as f64);
     // NOTE: ensure batch 0 (genesis batch) is never sent in an update.
     let next_batch_idx = next_sequence_no
         .checked_add(1)
@@ -176,6 +188,7 @@ async fn process_ready_batches(
 
         // Get update from cache or build it
         let batch_id = batch.id();
+        let resubmission = update_cache.was_submitted(&batch_id);
         let update = if let Some(cached) = update_cache.get(&batch_id) {
             cached.clone()
         } else {
@@ -195,6 +208,14 @@ async fn process_ready_batches(
             .map(|message| message.payload().value().to_sat())
             .sum();
         let txid = ol_client.submit_update(update).await?;
+        update_cache.mark_submitted(batch_id, batch_idx);
+        counter!(OL_UPDATES_SUBMITTED, "kind" => if resubmission { "retry" } else { "first" })
+            .increment(1);
+        if !resubmission {
+            counter!(OL_UPDATE_OUTPUTS, "kind" => "transfer")
+                .increment(output_transfer_count as u64);
+            counter!(OL_UPDATE_OUTPUTS, "kind" => "message").increment(output_message_count as u64);
+        }
 
         info!(
             component = "alpen_ee_update_submitter",

@@ -3,7 +3,7 @@ use std::{path::Path, sync::Arc};
 use alloy_primitives::{Address, B256, KECCAK256_EMPTY as KECCAK_EMPTY};
 use alpen_reth_statediff::BlockStateChanges;
 use alpen_storage_api::{DaContext, StateDiffProvider, StateDiffStore};
-use alpen_storage_mdbx::{DbError as MdbxError, MdbxConfig, MdbxEnv};
+use alpen_storage_mdbx::{DbError as MdbxError, DbResult as MdbxResult, MdbxConfig, MdbxEnv};
 use strata_db_types::{errors::DbError, DbResult};
 use tracing::warn;
 
@@ -27,6 +27,12 @@ impl WitnessDbMdbx {
     /// tables.
     pub fn new(env: Arc<MdbxEnv>) -> Self {
         Self { env }
+    }
+
+    /// Row counts of every witness-environment table, as `(table, rows)`, each O(1)
+    /// through MDBX's table stat.
+    pub fn table_counts(&self) -> MdbxResult<Vec<(&'static str, usize)>> {
+        self.env.table_counts(&witness_tables())
     }
 
     /// Opens a standalone environment at `path` with just the state-diff tables.

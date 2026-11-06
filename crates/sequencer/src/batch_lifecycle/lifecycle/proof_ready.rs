@@ -1,9 +1,13 @@
 use alpen_common::{Batch, BatchDaProvider, BatchProver, BatchStatus, ProofGenerationStatus};
 use alpen_storage_api::BatchStorage;
 use eyre::Result;
+use metrics::counter;
 use tracing::{debug, debug_span, error, warn, Instrument};
 
-use crate::batch_lifecycle::{ctx::BatchLifecycleCtx, state::BatchLifecycleState};
+use crate::{
+    batch_lifecycle::{ctx::BatchLifecycleCtx, state::BatchLifecycleState},
+    metrics::BATCH_TRANSITION_FAILURES,
+};
 
 /// Try to complete proof for the next batch (ProofPending → ProofReady).
 pub(crate) async fn try_advance_proof_ready<D, P, S>(
@@ -24,7 +28,14 @@ where
         return Ok(());
     }
 
-    let Some((batch, status)) = ctx.batch_storage.get_batch_by_idx(target_idx).await? else {
+    let Some((batch, status)) = ctx
+        .batch_storage
+        .get_batch_by_idx(target_idx)
+        .await
+        .inspect_err(|_| {
+            counter!(BATCH_TRANSITION_FAILURES, "status" => "proof_ready").increment(1);
+        })?
+    else {
         return Ok(()); // Batch doesn't exist yet
     };
 
@@ -44,7 +55,14 @@ where
 
             async {
                 // Check proof status
-                match ctx.prover.check_proof_status(batch_id).await? {
+                let proof_status = ctx
+                    .prover
+                    .check_proof_status(batch_id)
+                    .await
+                    .inspect_err(|_| {
+                        counter!(BATCH_TRANSITION_FAILURES, "status" => "proof_ready").increment(1);
+                    })?;
+                match proof_status {
                     ProofGenerationStatus::Ready { proof_id } => {
                         debug!(proof_id = %proof_id, "Proof ready");
 
@@ -56,12 +74,17 @@ where
                                     proof: proof_id,
                                 },
                             )
-                            .await?;
+                            .await
+                            .inspect_err(|_| {
+                                counter!(BATCH_TRANSITION_FAILURES, "status" => "proof_ready")
+                                    .increment(1);
+                            })?;
 
                         // Notify watchers
                         let _ = ctx.proof_ready_tx.send(Some(batch_id));
 
                         state.advance_proof_ready(target_idx, batch_id);
+                        state.clock_mut().transition(batch_id, "proof_ready");
                     }
 
                     ProofGenerationStatus::Failed { reason } => {
@@ -71,7 +94,8 @@ where
                             "CRITICAL: Proof generation failed - manual intervention required. \
                              Batch is stuck in ProofPending state."
                         );
-                        // Stay at frontier - manual intervention required
+                        // Not a retried transition: the frontier stays, which the
+                        // batch_latest_idx gap shows, until someone intervenes.
                     }
 
                     ProofGenerationStatus::Pending => {
@@ -85,7 +109,13 @@ where
                             "Expected proof generation to have been started. Retrying proof generation"
                         );
 
-                        ctx.prover.request_proof_generation(batch_id).await?;
+                        ctx.prover
+                            .request_proof_generation(batch_id)
+                            .await
+                            .inspect_err(|_| {
+                                counter!(BATCH_TRANSITION_FAILURES, "status" => "proof_ready")
+                                    .increment(1);
+                            })?;
                     }
                 }
 
@@ -94,7 +124,15 @@ where
             .instrument(proof_ready_span)
             .await?;
         }
-        BatchStatus::ProofReady { .. } | BatchStatus::Genesis => {
+        BatchStatus::ProofReady { .. } => {
+            // The prover's receipt hook flipped the status before this task
+            // asked, so the batch completes its last stage here, including the
+            // wake-up the update submitter waits for.
+            let _ = ctx.proof_ready_tx.send(Some(batch.id()));
+            state.advance_proof_ready(target_idx, batch.id());
+            state.clock_mut().transition(batch.id(), "proof_ready");
+        }
+        BatchStatus::Genesis => {
             // Already complete, advance frontier
             state.advance_proof_ready(target_idx, batch.id());
         }

@@ -19,6 +19,7 @@ strata-snark-acct-runtime.workspace = true
 strata-snark-acct-types.workspace = true
 
 anyhow.workspace = true
+metrics.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

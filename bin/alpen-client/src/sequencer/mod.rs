@@ -43,7 +43,7 @@ use alpen_sequencer::{
     OLChainTrackerState,
 };
 use alpen_storage_api::{require_latest_batch, ExecBlockStorage};
-use alpen_storage_store::{NodeStorage, SequencerDatabases, Stores};
+use alpen_storage_store::{NodeStorage, SequencerDatabases, Stores, ENV_NODE};
 use bitcoind_async_client::{
     corepc_types::bitcoin::{
         key::Keypair,
@@ -65,12 +65,13 @@ use strata_config::btcio::{fee_rate_to_sat_per_vb, FeePolicy, WriterConfig};
 use strata_identifiers::EpochCommitment;
 use strata_primitives::buf::Buf32;
 use tokio::sync::{mpsc, watch};
-use tracing::{error, info, info_span, Instrument};
+use tracing::{error, info, info_span, warn, Instrument};
 
 use self::sealing_policy::gas_data_provider::RethGasDataProvider;
 use crate::{
     config::SequencerMode,
     gossip::GossipConfig,
+    metrics::{spawn_store_sampler, TableCounts},
     node::{LaunchedNode, NodeBootstrap},
     ol::OLClientKind,
     sequencer::sealing_policy::da_size::{DaBatchSizePolicy, DaSizeProvider, MaxDaSizeSealing},
@@ -246,11 +247,12 @@ pub(crate) async fn run(
 ) -> eyre::Result<()> {
     // Creating these also creates their MDBX environments, which is why it happens
     // here and not in bootstrap: a full node should never materialize them.
-    let sequencer_dbs = common
+    let sequencer_dbs: Arc<SequencerDatabases> = common
         .sequencer
         .db
         .sequencer_databases()
-        .context("failed to open sequencer databases")?;
+        .context("failed to open sequencer databases")?
+        .into();
 
     // Account-state genesis is common to every node and already done during
     // bootstrap; exec-chain and batch genesis only matter once a sequencer
@@ -370,6 +372,31 @@ pub(crate) async fn run(
     info!(target: "alpen-client", component = "alpen", "installed AccessedStateGenerator exex (account-proof range witness)");
 
     let node = &handle.node;
+
+    spawn_store_sampler(&node.task_executor, common.mdbx_dir.clone(), {
+        let node_db = common.node_db.clone();
+        let sequencer_dbs = sequencer_dbs.clone();
+        move || {
+            // Every environment is sampled on its own: the one whose stats
+            // fail is logged and goes stale alone, the others keep reporting.
+            let mut rows = TableCounts::new();
+            match node_db.table_counts() {
+                Ok(node_rows) => {
+                    rows.extend(node_rows.into_iter().map(|(table, n)| (ENV_NODE, table, n)))
+                }
+                Err(error) => {
+                    warn!(%error, env = ENV_NODE, "table stats failed; environment skipped")
+                }
+            }
+            match sequencer_dbs.table_counts() {
+                Ok(sequencer_rows) => rows.extend(sequencer_rows),
+                Err(error) => {
+                    warn!(%error, "sequencer table stats failed; node rows still sampled")
+                }
+            }
+            Ok(rows)
+        }
+    });
 
     // Sync chainstate to engine before starting other tasks
     let engine = AlpenRethExecEngine::new(node.beacon_engine_handle.clone());

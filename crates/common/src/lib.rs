@@ -3,6 +3,7 @@
 #[cfg(test)]
 use mockall as _;
 
+pub mod metrics;
 mod traits;
 mod types;
 mod utils;

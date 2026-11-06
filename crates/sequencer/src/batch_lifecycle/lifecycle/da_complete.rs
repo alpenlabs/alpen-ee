@@ -1,9 +1,13 @@
 use alpen_common::{Batch, BatchDaProvider, BatchProver, BatchStatus, DaStatus};
 use alpen_storage_api::BatchStorage;
 use eyre::Result;
+use metrics::counter;
 use tracing::{debug, error, warn};
 
-use crate::batch_lifecycle::{ctx::BatchLifecycleCtx, state::BatchLifecycleState};
+use crate::{
+    batch_lifecycle::{ctx::BatchLifecycleCtx, state::BatchLifecycleState},
+    metrics::BATCH_TRANSITION_FAILURES,
+};
 
 /// Marks DA complete for as many batches as possible (DaPending → DaComplete).
 ///
@@ -27,7 +31,14 @@ where
             return Ok(());
         }
 
-        let Some((batch, status)) = ctx.batch_storage.get_batch_by_idx(target_idx).await? else {
+        let Some((batch, status)) = ctx
+            .batch_storage
+            .get_batch_by_idx(target_idx)
+            .await
+            .inspect_err(|_| {
+                counter!(BATCH_TRANSITION_FAILURES, "status" => "da_complete").increment(1);
+            })?
+        else {
             return Ok(());
         };
 
@@ -39,7 +50,10 @@ where
                 let da_status = ctx
                     .da_provider
                     .check_da_status(batch.id(), envelope_idx)
-                    .await?;
+                    .await
+                    .inspect_err(|_| {
+                        counter!(BATCH_TRANSITION_FAILURES, "status" => "da_complete").increment(1);
+                    })?;
                 debug!(?da_status, "checking da status");
                 match da_status {
                     DaStatus::Pending => {
@@ -54,6 +68,8 @@ where
                                 "failed to confirm DA complete; \
                                  leaving batch in DaPending and retrying next lifecycle tick"
                             );
+                            counter!(BATCH_TRANSITION_FAILURES, "status" => "da_complete")
+                                .increment(1);
                             return Ok(());
                         }
 
@@ -62,9 +78,14 @@ where
                                 batch.id(),
                                 BatchStatus::DaComplete { da: da_refs },
                             )
-                            .await?;
+                            .await
+                            .inspect_err(|_| {
+                                counter!(BATCH_TRANSITION_FAILURES, "status" => "da_complete")
+                                    .increment(1);
+                            })?;
 
                         state.advance_da_complete(target_idx, batch.id());
+                        state.clock_mut().transition(batch.id(), "da_complete");
                     }
                     DaStatus::NotRequested => {
                         warn!(
@@ -83,6 +104,8 @@ where
                                     error = %e,
                                     "failed to restart DA posting; will retry next lifecycle tick"
                                 );
+                                counter!(BATCH_TRANSITION_FAILURES, "status" => "da_pending")
+                                    .increment(1);
                                 return Ok(());
                             }
                         };
@@ -93,7 +116,11 @@ where
                                     envelope_idx: new_envelope_idx,
                                 },
                             )
-                            .await?;
+                            .await
+                            .inspect_err(|_| {
+                                counter!(BATCH_TRANSITION_FAILURES, "status" => "da_pending")
+                                    .increment(1);
+                            })?;
                         return Ok(());
                     }
                     DaStatus::Failed { reason } => {
@@ -104,6 +131,8 @@ where
                             "CRITICAL: DA posting failed - manual intervention required. \
                              Batch is stuck in DaPending state."
                         );
+                        // Not a retried transition: the frontier stays, which the
+                        // batch_latest_idx gap shows, until someone intervenes.
                         return Ok(());
                     }
                 };

@@ -1,9 +1,13 @@
 use alpen_common::{Batch, BatchDaProvider, BatchProver, BatchStatus};
 use alpen_storage_api::BatchStorage;
 use eyre::Result;
+use metrics::counter;
 use tracing::debug;
 
-use crate::batch_lifecycle::{ctx::BatchLifecycleCtx, state::BatchLifecycleState};
+use crate::{
+    batch_lifecycle::{ctx::BatchLifecycleCtx, state::BatchLifecycleState},
+    metrics::BATCH_TRANSITION_FAILURES,
+};
 
 /// Try to request proof for the next batch (DaComplete → ProofPending).
 pub(crate) async fn try_advance_proof_pending<D, P, S>(
@@ -24,7 +28,14 @@ where
         return Ok(());
     }
 
-    let Some((batch, status)) = ctx.batch_storage.get_batch_by_idx(target_idx).await? else {
+    let Some((batch, status)) = ctx
+        .batch_storage
+        .get_batch_by_idx(target_idx)
+        .await
+        .inspect_err(|_| {
+            counter!(BATCH_TRANSITION_FAILURES, "status" => "proof_pending").increment(1);
+        })?
+    else {
         return Ok(()); // Batch doesn't exist yet
     };
 
@@ -36,13 +47,22 @@ where
             // Request proof generation. If this fails, we retry in the next cycle.
             debug!(batch_idx = target_idx, batch_id = ?batch.id(), "Requesting proof");
 
-            ctx.prover.request_proof_generation(batch.id()).await?;
+            ctx.prover
+                .request_proof_generation(batch.id())
+                .await
+                .inspect_err(|_| {
+                    counter!(BATCH_TRANSITION_FAILURES, "status" => "proof_pending").increment(1);
+                })?;
 
             ctx.batch_storage
                 .update_batch_status(batch.id(), BatchStatus::ProofPending { da })
-                .await?;
+                .await
+                .inspect_err(|_| {
+                    counter!(BATCH_TRANSITION_FAILURES, "status" => "proof_pending").increment(1);
+                })?;
 
             state.advance_proof_pending(target_idx, batch.id());
+            state.clock_mut().transition(batch.id(), "proof_pending");
         }
         BatchStatus::ProofPending { .. }
         | BatchStatus::ProofReady { .. }

@@ -188,6 +188,17 @@ impl MdbxEnv {
         f(&Reader { txn: &txn })
     }
 
+    /// Row counts of `tables`, as `(table, rows)`, each O(1) through MDBX's
+    /// table stat.
+    pub fn table_counts(&self, tables: &[TableSpec]) -> DbResult<Vec<(&'static str, usize)>> {
+        self.view(|reader| {
+            tables
+                .iter()
+                .map(|table| Ok((table.name, reader.count_table(table.name)?)))
+                .collect()
+        })
+    }
+
     /// Runs `f` inside a read-write transaction. If `f` returns `Ok`, the
     /// transaction is committed atomically; if it returns `Err`, the
     /// transaction is aborted and no changes are persisted.
@@ -427,6 +438,14 @@ impl<'txn> Reader<'txn> {
     /// Returns the number of entries in the table (O(1) via MDBX stat).
     pub fn count<S: Schema>(&self) -> DbResult<usize> {
         count_in::<S, _>(self.txn)
+    }
+
+    /// Returns the number of entries in the table named `table` (O(1) via
+    /// MDBX stat), for callers that hold a [`TableSpec`] rather than its
+    /// schema type.
+    pub fn count_table(&self, table: &str) -> DbResult<usize> {
+        let db = self.txn.open_db(Some(table))?;
+        Ok(self.txn.db_stat(&db)?.entries())
     }
 
     /// Walks the table's raw entries from `start` in `direction` until `f`

@@ -15,6 +15,20 @@ use std::{
 
 use alpen_storage_mdbx::{MdbxConfig, MdbxEnv};
 use eyre::{eyre, Result};
+use tracing::warn;
+
+/// The MDBX directory under the datadir.
+pub const MDBX_DIR: &str = "mdbx";
+/// The node environment's directory under [`MDBX_DIR`].
+pub const ENV_NODE: &str = "node";
+/// The prover environment's directory under [`MDBX_DIR`].
+pub const ENV_PROVER: &str = "prover";
+/// The witness environment's directory under [`MDBX_DIR`].
+pub const ENV_WITNESS: &str = "witness";
+/// The DA pipeline environment's directory under [`MDBX_DIR`].
+pub const ENV_DA: &str = "da";
+/// Every environment's directory name, in the order they are opened.
+pub const MDBX_ENVS: [&str; 4] = [ENV_NODE, ENV_PROVER, ENV_WITNESS, ENV_DA];
 /// Re-export the async ops proxies so callers do not need `strata-storage`.
 pub use strata_db_types::chunked_envelope::L1ChunkedEnvelopeDatabaseProxy as ChunkedEnvelopeOps;
 pub use strata_db_types::l1_broadcast::L1BroadcastDatabaseProxy as BroadcastDbOps;
@@ -68,10 +82,10 @@ pub fn open_stores(datadir: &Path, _db_retry_count: u16) -> Result<Stores> {
 /// migration itself, which is the one caller that creates `mdbx/` next to
 /// `sled/` on purpose.
 fn open_stores_unchecked(datadir: &Path) -> Result<Stores> {
-    let mdbx_dir = datadir.join("mdbx");
+    let mdbx_dir = datadir.join(MDBX_DIR);
     let config = MdbxConfig::default();
     let node_db = Arc::new(
-        NodeDbMdbx::open(&mdbx_dir.join("node"), &config)
+        NodeDbMdbx::open(&mdbx_dir.join(ENV_NODE), &config)
             .map_err(|e| eyre!("failed to open EE node db: {e}"))?,
     );
     Ok(Stores {
@@ -98,18 +112,28 @@ impl Stores {
         Ok(NodeStorage::new(handle, self.node_db.clone()))
     }
 
+    /// The directory holding the MDBX environments (`<datadir>/mdbx`).
+    pub fn mdbx_dir(&self) -> &Path {
+        &self.mdbx_dir
+    }
+
+    /// The node environment's database, for row-count sampling.
+    pub fn node_db(&self) -> Arc<NodeDbMdbx> {
+        self.node_db.clone()
+    }
+
     /// Opens and returns the databases only a sequencer uses.
     ///
     /// A full node should not call this, so its environments are never created.
     pub fn sequencer_databases(&self) -> Result<SequencerDatabases> {
         let prover_db = Arc::new(
-            ProverDbMdbx::open(&self.mdbx_dir.join("prover"), &self.config)
+            ProverDbMdbx::open(&self.mdbx_dir.join(ENV_PROVER), &self.config)
                 .map_err(|e| eyre!("failed to open EE prover db: {e}"))?,
         );
 
         let witness_env = Arc::new(
             MdbxEnv::open(
-                &self.mdbx_dir.join("witness"),
+                &self.mdbx_dir.join(ENV_WITNESS),
                 &self.config,
                 &witness_tables(),
             )
@@ -120,7 +144,7 @@ impl Stores {
 
         // L1 broadcast + chunked-envelope share one DA environment.
         let da_env = Arc::new(
-            MdbxEnv::open(&self.mdbx_dir.join("da"), &self.config, &da_tables())
+            MdbxEnv::open(&self.mdbx_dir.join(ENV_DA), &self.config, &da_tables())
                 .map_err(|e| eyre!("failed to open EE DA env: {e}"))?,
         );
         let broadcast_db = Arc::new(L1BroadcastDbMdbx::new(da_env.clone()));
@@ -157,6 +181,25 @@ pub struct SequencerDatabases {
 }
 
 impl SequencerDatabases {
+    /// Row counts of every sequencer-only table, as `(environment, table,
+    /// rows)`. An environment whose stats fail is logged and left out.
+    pub fn table_counts(&self) -> Result<Vec<(&'static str, &'static str, usize)>> {
+        let mut rows = Vec::new();
+        // One environment's stats failing leaves the others' rows in place: the
+        // caller samples what it can and the failed environment goes stale alone.
+        for (env, counts) in [
+            (ENV_PROVER, self.prover_db.table_counts()),
+            (ENV_WITNESS, self.witness_db.table_counts()),
+            (ENV_DA, self.chunked_envelope_db.table_counts()),
+        ] {
+            match counts {
+                Ok(counts) => rows.extend(counts.into_iter().map(|(table, n)| (env, table, n))),
+                Err(error) => warn!(%error, env, "table stats failed; environment skipped"),
+            }
+        }
+        Ok(rows)
+    }
+
     /// Returns a clone of the witness database.
     pub fn witness_db(&self) -> Arc<WitnessDbMdbx> {
         self.witness_db.clone()
@@ -193,7 +236,7 @@ impl SequencerDatabases {
 pub fn open_da_ops(datadir: &Path, handle: Handle) -> Result<(BroadcastDbOps, ChunkedEnvelopeOps)> {
     let da_env = Arc::new(
         MdbxEnv::open(
-            &datadir.join("mdbx").join("da"),
+            &datadir.join(MDBX_DIR).join(ENV_DA),
             &MdbxConfig::default(),
             &da_tables(),
         )

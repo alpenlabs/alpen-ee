@@ -8,6 +8,7 @@
 use alpen_common::{BatchId, BlockNumHash, Chunk};
 use alpen_storage_api::{BatchStorage, ChunkStorage, ExecBlockStorage};
 use eyre::{eyre, Result};
+use metrics::counter;
 use strata_acct_types::Hash;
 use tracing::{debug, warn};
 
@@ -15,7 +16,10 @@ use super::{
     recovery,
     state::{ChunkBuilderState, PendingEntry},
 };
-use crate::sealing_policy::{AccumulationPolicy, BlockDataProvider, SealReason, SealingPolicy};
+use crate::{
+    metrics::CHUNKS_SEALED,
+    sealing_policy::{AccumulationPolicy, BlockDataProvider, SealReason, SealingPolicy},
+};
 
 /// [`SealReason`] for a chunk closed because its batch ended.
 const SEAL_REASON_BATCH_BOUNDARY: SealReason = "batch_boundary";
@@ -297,6 +301,7 @@ async fn seal_chunk<P: AccumulationPolicy>(
         .save_next_chunk(chunk)
         .await
         .map_err(|e| eyre!("save_next_chunk: {e}"))?;
+    counter!(CHUNKS_SEALED, "reason" => reason).increment(1);
 
     // The chunk is durable, so the blocks it covers can go. `advance_chunk`
     // doesn't touch the accumulator, unlike its batch-level counterpart.
