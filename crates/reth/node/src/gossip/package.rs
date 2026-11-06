@@ -4,6 +4,7 @@
 
 use std::mem;
 
+use alloy_consensus::constants::MAXIMUM_EXTRA_DATA_SIZE;
 use alloy_primitives::{
     bytes::{Buf, BufMut, BytesMut},
     eip191_hash_message,
@@ -95,6 +96,16 @@ impl AlpenGossipMessage {
         // Header::decode already advances the buffer during RLP decoding
         let header = Header::decode(buf).map_err(|e| eyre!("failed to decode RLP header: {e}"))?;
 
+        // `extra_data` is the only header field without a fixed size, and RLP
+        // decoding accepts any length. Consensus would reject a longer one at
+        // block import, so capping it here bounds the whole header to a size
+        // a real block can have.
+        ensure!(
+            header.extra_data.len() <= MAXIMUM_EXTRA_DATA_SIZE,
+            "extra_data too long: max {MAXIMUM_EXTRA_DATA_SIZE} bytes, have {}",
+            header.extra_data.len()
+        );
+
         // Check we have enough bytes for seq_no (u64 = 8 bytes)
         ensure!(
             buf.remaining() >= SEQ_NO_SIZE,
@@ -176,10 +187,11 @@ impl AlpenGossipPackage {
 
         let message = AlpenGossipMessage::try_decode(buf)?;
 
-        // Check we have enough bytes for public key and signature
+        // Exactly a public key and signature must remain. Trailing bytes are
+        // never sent by an honest peer.
         ensure!(
-            buf.remaining() >= Buf32::LEN + Buf64::LEN,
-            "buffer too short for public key and signature: need {} bytes, have {}",
+            buf.remaining() == Buf32::LEN + Buf64::LEN,
+            "wrong length for public key and signature: need {} bytes, have {}",
             Buf32::LEN + Buf64::LEN,
             buf.remaining()
         );
@@ -348,5 +360,44 @@ mod tests {
             let encoded2 = pkg.encode();
             prop_assert_eq!(encoded1, encoded2, "encoding should be deterministic");
         }
+    }
+
+    fn package_with_extra_data(len: usize) -> AlpenGossipPackage {
+        let header = Header {
+            extra_data: vec![0u8; len].into(),
+            ..Header::default()
+        };
+        AlpenGossipPackage::new(
+            AlpenGossipMessage::new(header, 1),
+            Buf32::zero(),
+            Buf64::zero(),
+        )
+    }
+
+    #[test]
+    fn test_package_try_decode_accepts_max_extra_data() {
+        let encoded = package_with_extra_data(MAXIMUM_EXTRA_DATA_SIZE).encode();
+        AlpenGossipPackage::try_decode(&mut &encoded[..]).expect("decode should succeed");
+    }
+
+    #[test]
+    fn test_package_try_decode_rejects_oversized_extra_data() {
+        let encoded = package_with_extra_data(MAXIMUM_EXTRA_DATA_SIZE + 1).encode();
+        let result = AlpenGossipPackage::try_decode(&mut &encoded[..]);
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("extra_data too long"));
+    }
+
+    #[test]
+    fn test_package_try_decode_rejects_trailing_bytes() {
+        let mut encoded = package_with_extra_data(0).encode();
+        encoded.extend_from_slice(&[0u8]);
+        let result = AlpenGossipPackage::try_decode(&mut &encoded[..]);
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("wrong length for public key and signature"));
     }
 }
