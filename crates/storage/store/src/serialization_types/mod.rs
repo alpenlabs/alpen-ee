@@ -2,6 +2,7 @@ mod account_state;
 mod batch;
 mod exec_block;
 mod olblockid;
+mod recovered_da;
 mod task_key;
 
 pub use account_state::{DBAccountStateAtEpoch, DBEeAccountState};
@@ -13,6 +14,7 @@ pub use exec_block::DBExecBlockRecord;
 #[cfg(feature = "migration")]
 pub use exec_block::{package_from_sled_era, package_to_sled_era};
 pub use olblockid::DBOLBlockId;
+pub(crate) use recovered_da::{DBRecoveredDaBlob, RecoveredDaKey};
 pub(crate) use task_key::{decode_versioned_range, encode_versioned_range};
 pub use task_key::{BatchTaskKey, ChunkTaskKey};
 

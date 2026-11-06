@@ -1,0 +1,47 @@
+# Runs the standalone EE DA verifier against staging-v2 through local RPC port
+# forwards. The mounted config must use host.docker.internal:62744 for Bitcoin
+# RPC and host.docker.internal:57708 for OL RPC; localhost would resolve inside
+# this container.
+#
+# Required environment variables:
+#   DA_VERIFIER_CONFIG_FILE  Host path to the staging-v2 verifier TOML config.
+#   ALPEN_PARAMS_FILE        Host path to staging-v2 alpen-params.json.
+#   BITCOIND_RPC_USER        Bitcoin RPC username.
+#   BITCOIND_RPC_PASSWORD    Bitcoin RPC password.
+# Optional environment variables:
+#   GENESIS_L1_HEIGHT        Staging-v2 L1 recovery floor (default: 20919).
+
+services:
+  alpen-da-verifier:
+    build:
+      context: ..
+      dockerfile: docker/alpen-da-verifier/Dockerfile
+    image: alpen-da-verifier:latest
+    container_name: alpen_da_verifier
+    environment:
+      RUST_LOG: ${DA_VERIFIER_RUST_LOG:-info}
+      VERIFIER_CONFIG_PATH: /app/configs/da-verifier.toml
+      ALPEN_PARAMS_PATH: /app/configs/generated/alpen-params.json
+      DATADIR: /app/data
+      SNAPSHOT_PATH: /app/data/reconstruction.snapshot
+      GENESIS_L1_HEIGHT: ${GENESIS_L1_HEIGHT:-20919}
+      BITCOIND_RPC_USER: ${BITCOIND_RPC_USER:?set BITCOIND_RPC_USER}
+      BITCOIND_RPC_PASSWORD: ${BITCOIND_RPC_PASSWORD:?set BITCOIND_RPC_PASSWORD}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - type: bind
+        source: ${DA_VERIFIER_CONFIG_FILE:?set DA_VERIFIER_CONFIG_FILE}
+        target: /app/configs/da-verifier.toml
+        read_only: true
+      - type: bind
+        source: ${ALPEN_PARAMS_FILE:?set ALPEN_PARAMS_FILE}
+        target: /app/configs/generated/alpen-params.json
+        read_only: true
+      - type: volume
+        source: da-verifier-data
+        target: /app/data
+    stop_grace_period: 35s
+
+volumes:
+  da-verifier-data:
