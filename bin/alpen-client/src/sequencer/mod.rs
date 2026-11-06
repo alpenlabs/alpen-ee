@@ -377,12 +377,17 @@ pub(crate) async fn run(
         let node_db = common.node_db.clone();
         let sequencer_dbs = sequencer_dbs.clone();
         move || {
-            let mut rows: TableCounts = node_db
-                .table_counts()
-                .map_err(|e| eyre::eyre!("node table stats: {e}"))?
-                .into_iter()
-                .map(|(table, n)| (ENV_NODE, table, n))
-                .collect();
+            // Every environment is sampled on its own: the one whose stats
+            // fail is logged and goes stale alone, the others keep reporting.
+            let mut rows = TableCounts::new();
+            match node_db.table_counts() {
+                Ok(node_rows) => {
+                    rows.extend(node_rows.into_iter().map(|(table, n)| (ENV_NODE, table, n)))
+                }
+                Err(error) => {
+                    warn!(%error, env = ENV_NODE, "table stats failed; environment skipped")
+                }
+            }
             match sequencer_dbs.table_counts() {
                 Ok(sequencer_rows) => rows.extend(sequencer_rows),
                 Err(error) => {
