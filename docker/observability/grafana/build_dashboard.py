@@ -38,6 +38,9 @@ DS = {"type": "prometheus", "uid": "alpen-prometheus"}
 LOKI = {"type": "loki", "uid": "alpen-loki"}
 P = "reth_alpen_ee_"  # every Alpen metric as the reth recorder exposes it
 COMPOSE_SELECTOR = 'instance=~"$instance"'  # the node picked at the top of the dashboard
+# Loki streams carry the compose service and container, not the scrape
+# instance, so the log panels have their own picker.
+COMPOSE_LOG_SELECTOR = '{service="alpen-client", container=~"$container"}'
 I = "{" + COMPOSE_SELECTOR + "}"
 RATE = "[$__rate_interval]"
 
@@ -650,9 +653,9 @@ def build():
 
     # --- logs (needs the logs profile)
     panels.append(row(COMPOSE_LOGS_ROW, y, collapsed=True, panels=[
-        logs("Warnings and errors", '{service="alpen-client"} |~ "WARN|ERROR"', grid(0, y + 1, 12, 10),
+        logs("Warnings and errors", f'{COMPOSE_LOG_SELECTOR} |~ "WARN|ERROR"', grid(0, y + 1, 12, 10),
              desc=COMPOSE_LOGS_DESC),
-        logs("Batch lifecycle", '{service="alpen-client"} |~ "batch_lifecycle|update_submitter|envelope"', grid(12, y + 1, 12, 10),
+        logs("Batch lifecycle", f'{COMPOSE_LOG_SELECTOR} |~ "batch_lifecycle|update_submitter|envelope"', grid(12, y + 1, 12, 10),
              desc="Lines from the settlement tasks."),
     ]))
     y += 1
@@ -676,6 +679,12 @@ def build():
             "definition": 'label_values(up{job="alpen-client"}, instance)',
             "refresh": 2, "includeAll": False, "multi": False, "sort": 1,
             "current": {}, "options": [],
+        }, {
+            "name": "container", "label": "log container", "type": "query", "datasource": LOKI,
+            "query": {"label": "container", "stream": '{service="alpen-client"}', "type": 1, "refId": "var"},
+            "definition": 'label_values({service="alpen-client"}, container)',
+            "refresh": 2, "includeAll": True, "allValue": ".*", "multi": False, "sort": 1,
+            "current": {"text": "All", "value": "$__all"}, "options": [],
         }]},
         "annotations": {"list": [{
             "builtIn": 1, "datasource": {"type": "grafana", "uid": "-- Grafana --"},
@@ -689,7 +698,7 @@ def build():
 # ------------------------------------------------------------ fleet form ---
 
 CLUSTER_SELECTOR = 'namespace="$rollup_namespace", pod=~"$pod"'
-COMPOSE_LOG_STREAM = '{service="alpen-client"}'
+COMPOSE_LOG_STREAM = COMPOSE_LOG_SELECTOR
 CLUSTER_LOG_STREAM = '{k8s_namespace_name="$rollup_namespace", k8s_pod_name=~"$pod"}'
 # Labels the PodMonitor adds to every series; dropped from the table views.
 CLUSTER_TABLE_LABELS = ("namespace", "pod", "container", "endpoint", "job", "instance")
