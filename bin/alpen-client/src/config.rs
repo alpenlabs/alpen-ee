@@ -659,6 +659,62 @@ pub(crate) struct SequencerConfig {
     fee_bumping: FeeBumpingOverrides,
     /// `[sequencer.da_fee_rate]` — policy selection and service timing.
     pub(crate) da_fee_rate: DaFeeRateConfig,
+    /// `[sequencer.pruning]` — what the sequencer deletes once finality
+    /// makes it dead weight.
+    #[serde(default)]
+    pub(crate) pruning: PruningConfig,
+}
+
+/// `[sequencer.pruning]`: one subsection per kind of row the sequencer
+/// prunes below finality. `witness` is the only kind so far.
+///
+/// A kind is pruned iff its subsection is present. When the whole
+/// `[sequencer.pruning]` table is absent every kind runs with its defaults;
+/// a `[sequencer.pruning]` table that leaves a subsection out turns that
+/// kind off.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct PruningConfig {
+    /// `[sequencer.pruning.witness]` — per-block proof witnesses and
+    /// accessed-state records. `None` keeps every row forever, the
+    /// behaviour before the pruner existed.
+    pub(crate) witness: Option<WitnessPruningConfig>,
+}
+
+impl Default for PruningConfig {
+    fn default() -> Self {
+        Self {
+            witness: Some(WitnessPruningConfig::default()),
+        }
+    }
+}
+
+/// `[sequencer.pruning.witness]`: when and how the sequencer deletes the
+/// per-block proof witnesses and accessed-state records of finalized blocks.
+/// See `sequencer::witness_pruner`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub(crate) struct WitnessPruningConfig {
+    /// Blocks below the finalized height that keep their rows. Finality is
+    /// already the conservative bound; the margin is for comfort.
+    pub(crate) keep_blocks: u64,
+    /// Seconds between passes.
+    pub(crate) interval_secs: NonZeroU64,
+    /// Heights deleted per write transaction, which bounds how long the
+    /// store's single writer is held.
+    pub(crate) heights_per_txn: NonZeroU64,
+    /// Transactions per pass, which bounds a pass on a store with a backlog.
+    pub(crate) max_txns_per_tick: NonZeroU64,
+}
+
+impl Default for WitnessPruningConfig {
+    fn default() -> Self {
+        Self {
+            keep_blocks: 1_000,
+            interval_secs: NonZeroU64::new(60).expect("non-zero"),
+            heights_per_txn: NonZeroU64::new(1_000).expect("non-zero"),
+            max_txns_per_tick: NonZeroU64::new(20).expect("non-zero"),
+        }
+    }
 }
 
 // Only the sequencer path calls these, so they can be gated even though the
@@ -1178,6 +1234,40 @@ mod tests {
     }
 
     #[cfg(feature = "sequencer")]
+    #[test]
+    fn pruning_witness_defaults_and_overrides_parse() {
+        let defaults: WitnessPruningConfig = toml::from_str("").unwrap();
+        assert_eq!(defaults.keep_blocks, 1_000);
+        assert_eq!(defaults.interval_secs.get(), 60);
+        assert_eq!(defaults.heights_per_txn.get(), 1_000);
+        assert_eq!(defaults.max_txns_per_tick.get(), 20);
+
+        let partial: WitnessPruningConfig = toml::from_str("keep_blocks = 50").unwrap();
+        assert_eq!(partial.keep_blocks, 50);
+        assert_eq!(
+            partial.interval_secs.get(),
+            60,
+            "untouched keys keep their defaults"
+        );
+
+        assert!(toml::from_str::<WitnessPruningConfig>("interval_secs = 0").is_err());
+
+        let nested: PruningConfig = toml::from_str("[witness]\nkeep_blocks = 7").unwrap();
+        assert_eq!(nested.witness.as_ref().unwrap().keep_blocks, 7);
+
+        // The table absent: the defaults, pruning on. The table present
+        // without the subsection: pruning off.
+        let absent = PruningConfig::default();
+        assert_eq!(absent.witness.as_ref().unwrap().keep_blocks, 1_000);
+        let empty_table: PruningConfig = toml::from_str("").unwrap();
+        assert!(empty_table.witness.is_none());
+        let file: AlpenClientConfigFile =
+            toml::from_str(&format!("{SEQUENCER_TOML}\n[sequencer.pruning]\n")).unwrap();
+        assert!(file.sequencer.unwrap().pruning.witness.is_none());
+        let file: AlpenClientConfigFile = toml::from_str(SEQUENCER_TOML).unwrap();
+        assert!(file.sequencer.unwrap().pruning.witness.is_some());
+    }
+
     #[test]
     fn fee_bumping_overrides_parse() {
         assert_eq!(

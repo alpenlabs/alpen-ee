@@ -16,7 +16,7 @@ use strata_storage_common::cache::CacheTable;
 use tokio::runtime::Handle;
 
 use crate::{
-    database::{ops, NodeDb},
+    database::{ops, NodeDb, PrunedWitnesses},
     DbError,
 };
 
@@ -43,6 +43,20 @@ impl NodeStorage {
             blockid_cache,
             account_state_cache,
         }
+    }
+
+    /// Deletes the proof witness and the accessed-state record of every
+    /// block at a height in `from_height..to_height`. Both are proving inputs
+    /// that a finalized block no longer needs; the block records stay.
+    pub async fn prune_proof_witnesses(
+        &self,
+        from_height: u64,
+        to_height: u64,
+    ) -> Result<PrunedWitnesses, StorageError> {
+        self.ops
+            .prune_proof_witnesses_async(from_height, to_height)
+            .await
+            .map_err(Into::into)
     }
 }
 

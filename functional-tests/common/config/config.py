@@ -216,6 +216,33 @@ class AlpenProverConfig:
 
 
 @dataclass
+class AlpenWitnessPruningConfig:
+    """``[sequencer.pruning.witness]`` table.
+
+    Mirrors the Rust ``WitnessPruningConfig``; unset keys keep the node's
+    defaults, so a test only names the knobs it tightens.
+    """
+
+    keep_blocks: int | None = field(default=None)
+    interval_secs: int | None = field(default=None)
+    heights_per_txn: int | None = field(default=None)
+    max_txns_per_tick: int | None = field(default=None)
+
+
+@dataclass
+class AlpenPruningConfig:
+    """``[sequencer.pruning]`` table: one subsection per kind of row the
+    sequencer prunes below finality.
+
+    A kind is pruned iff its subsection is set: ``AlpenPruningConfig()`` emits
+    an empty ``[sequencer.pruning]`` table, which turns witness pruning off,
+    while leaving the sequencer's ``pruning`` unset keeps the node's defaults.
+    """
+
+    witness: AlpenWitnessPruningConfig | None = field(default=None)
+
+
+@dataclass
 class AlpenSequencerConfig:
     """``[sequencer]`` table; present iff ``mode = "sequencer"``."""
 
@@ -231,6 +258,7 @@ class AlpenSequencerConfig:
     l1_fee_policy: AlpenL1FeePolicyConfig = field(default_factory=AlpenL1FeePolicyConfig)
     broadcaster: BroadcasterConfig = field(default_factory=BroadcasterConfig)
     da_fee_rate: AlpenDaFeeRateConfig = field(default_factory=AlpenDaFeeRateConfig)
+    pruning: AlpenPruningConfig | None = field(default=None)
 
 
 @dataclass

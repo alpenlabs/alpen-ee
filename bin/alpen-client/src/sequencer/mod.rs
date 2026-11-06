@@ -16,6 +16,7 @@ mod prover;
 mod provers;
 mod sealing_policy;
 mod services;
+mod witness_pruner;
 
 use std::sync::Arc;
 
@@ -665,6 +666,12 @@ where
         "ee_update_submitter",
         update_submitter_task.instrument(info_span!("ee_update_submitter", component = "alpen")),
     );
+    if let Some(witness_pruning) = &sequencer_config.pruning.witness {
+        task_executor.spawn_task(
+            witness_pruner::run(storage.clone(), witness_pruning.clone())
+                .instrument(info_span!("ee_witness_pruner", component = "alpen")),
+        );
+    }
 
     Ok(())
 }

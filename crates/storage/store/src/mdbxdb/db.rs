@@ -17,7 +17,7 @@ use super::schema::{
     ExecBlockSchema, ExecBlocksAtHeightSchema, OLBlockAtEpochSchema,
 };
 use crate::{
-    database::NodeDb,
+    database::{NodeDb, PrunedWitnesses},
     serialization_types::{
         DBAccountStateAtEpoch, DBBatchId, DBBatchWithStatus, DBChunkId, DBChunkWithStatus,
         DBExecBlockRecord, DBOLBlockId,
@@ -321,6 +321,26 @@ impl NodeDb for NodeDbMdbx {
                 w.delete::<ExecBlocksAtHeightSchema>(height)?;
             }
             Ok(())
+        })
+    }
+
+    fn prune_proof_witnesses(&self, from_height: u64, to_height: u64) -> DbResult<PrunedWitnesses> {
+        self.env.update(|w| {
+            let mut pruned = PrunedWitnesses::default();
+            for height in from_height..to_height {
+                let Some(hashes) = w.get::<ExecBlocksAtHeightSchema>(&height)? else {
+                    continue;
+                };
+                for hash in hashes {
+                    if w.delete::<BlockWitnessSchema>(&hash)? {
+                        pruned.witnesses += 1;
+                    }
+                    if w.delete::<BlockAccessedStateSchema>(&hash)? {
+                        pruned.accessed_states += 1;
+                    }
+                }
+            }
+            Ok(pruned)
         })
     }
 
