@@ -46,6 +46,32 @@
         "sort": 1,
         "current": {},
         "options": []
+      },
+      {
+        "name": "container",
+        "label": "log container",
+        "type": "query",
+        "datasource": {
+          "type": "loki",
+          "uid": "alpen-loki"
+        },
+        "query": {
+          "label": "container",
+          "stream": "{service=\"alpen-client\"}",
+          "type": 1,
+          "refId": "var"
+        },
+        "definition": "label_values({service=\"alpen-client\"}, container)",
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": false,
+        "sort": 1,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": []
       }
     ]
   },
@@ -8888,7 +8914,7 @@
                 "type": "loki",
                 "uid": "alpen-loki"
               },
-              "expr": "{service=\"alpen-client\"} |~ \"WARN|ERROR\"",
+              "expr": "{service=\"alpen-client\", container=~\"$container\"} |~ \"WARN|ERROR\"",
               "refId": "A",
               "queryType": "range"
             }
@@ -8925,7 +8951,7 @@
                 "type": "loki",
                 "uid": "alpen-loki"
               },
-              "expr": "{service=\"alpen-client\"} |~ \"batch_lifecycle|update_submitter|envelope\"",
+              "expr": "{service=\"alpen-client\", container=~\"$container\"} |~ \"batch_lifecycle|update_submitter|envelope\"",
               "refId": "A",
               "queryType": "range"
             }

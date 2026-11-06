@@ -9,7 +9,10 @@ docker compose -f docker/observability/compose.yml --profile logs up -d   # with
 ```
 
 Grafana: http://localhost:3000 (admin / admin), opening on the **Alpen EE
-Service Map**. Prometheus: http://localhost:9090.
+Service Map**. Prometheus: http://localhost:9090. The stack has no
+authentication (Loki none, Grafana the default admin login), so its ports are
+published on loopback only; set `OBS_BIND_ADDR=0.0.0.0` to reach it from
+another machine, behind something that limits who can.
 
 ## What the node exposes
 

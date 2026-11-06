@@ -31,7 +31,7 @@ services:
       - ./prometheus/targets:/etc/prometheus/targets:ro
       - prometheus-data:/prometheus
     ports:
-      - "${PROMETHEUS_PORT:-9090}:9090"
+      - "${OBS_BIND_ADDR:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090"
     networks:
       - observability
 
@@ -50,7 +50,7 @@ services:
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     ports:
-      - "${GRAFANA_PORT:-3000}:3000"
+      - "${OBS_BIND_ADDR:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000"
     networks:
       - observability
 
@@ -63,7 +63,7 @@ services:
       - ./loki/loki.yml:/etc/loki/loki.yml:ro
       - loki-data:/loki
     ports:
-      - "${LOKI_PORT:-3100}:3100"
+      - "${OBS_BIND_ADDR:-127.0.0.1}:${LOKI_PORT:-3100}:3100"
     networks:
       - observability
 
