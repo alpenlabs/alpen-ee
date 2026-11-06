@@ -28,3 +28,4 @@ serde_json.workspace = true
 
 [features]
 serde = []
+test-utils = []
