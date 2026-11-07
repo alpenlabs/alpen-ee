@@ -46,10 +46,7 @@ pub struct Stores {
 /// Returns a handle from which each role takes the databases it needs:
 /// [`Stores::node_storage`] for chain state, and [`Stores::sequencer_databases`] for
 /// the DA and prover databases only a sequencer uses.
-///
-/// `_db_retry_count` is unused: MDBX serializes writers, so there is no
-/// optimistic-retry backoff.
-pub fn open_stores(datadir: &Path, _db_retry_count: u16) -> Result<Stores> {
+pub fn open_stores(datadir: &Path) -> Result<Stores> {
     let mdbx_dir = datadir.join("mdbx");
     let config = MdbxConfig::default();
     let node_db = Arc::new(
