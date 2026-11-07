@@ -1208,6 +1208,7 @@ dependencies = [
  "strata-ol-bridge-types",
  "strata-ol-msg-types",
  "strata-predicate",
+ "thiserror 2.0.20",
  "tokio",
  "tracing",
 ]

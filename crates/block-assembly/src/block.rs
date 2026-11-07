@@ -11,6 +11,7 @@ use strata_acct_types::{AccountId, Hash, MessageEntry};
 use crate::{
     package::build_block_package,
     payload::{build_exec_payload, extract_consumed_inputs, ConsumedInputs},
+    program_registry::ProgramRegistry,
 };
 
 /// All inputs that control the next built block.
@@ -33,6 +34,9 @@ pub struct BlockAssemblyInputs<'a> {
     pub next_deposit_idx: u64,
     /// Alpen spec version governing this block.
     pub spec_version: AlpenSpecId,
+    /// The version each prover program's key proves, which decides the
+    /// version a consumed rotation activates.
+    pub program_registry: &'a ProgramRegistry,
 }
 
 /// Outputs from block assembly
@@ -48,8 +52,9 @@ pub struct BlockAssemblyOutputs<P> {
     pub next_deposit_idx: u64,
     /// Alpen spec version governing the *next* block. Equal to this block's
     /// own `spec_version` unless this block consumed a queued predicate
-    /// rotation, in which case it's that rotation's successor — this block
-    /// itself was still built under the predecessor version.
+    /// rotation, in which case it's the version of the program the rotation's
+    /// key belongs to. That can be this block's own version. This block itself
+    /// was still built under its own version.
     pub next_spec_version: AlpenSpecId,
 }
 
@@ -67,6 +72,7 @@ pub async fn build_next_exec_block<E: PayloadBuilderEngine>(
         bridge_gateway_account_id,
         next_deposit_idx,
         spec_version,
+        program_registry,
     } = inputs;
 
     // 1. apply new inbox messages to account state
@@ -92,20 +98,18 @@ pub async fn build_next_exec_block<E: PayloadBuilderEngine>(
 
     // 3. resolve the version the *next* block runs under
     //
-    // A consumed rotation activates its successor version; this block itself is
-    // still built under `spec_version`. If this software doesn't know that
-    // successor it has to stop, and it stops here rather than after the build:
-    // `build_exec_payload` persists a block witness before it returns, and a
-    // block that fails afterwards is never saved. The builder retries on a
-    // short backoff while the node waits to be upgraded, and nothing prunes
-    // witnesses, so failing late would orphan one per attempt.
-    let next_spec_version = if new_predicate.is_some() {
-        spec_version
-            .successor()
-            .map_err(|id| eyre::eyre!("consumed a rotation to unknown spec version {id}"))
-            .context("build_next_exec_block: cannot honor discovered spec activation")?
-    } else {
-        spec_version
+    // A consumed rotation activates the version of the program its key belongs
+    // to; this block itself is still built under `spec_version`. If no program
+    // has that key, the sequencer has to stop, and it stops here rather than
+    // after the build: `build_exec_payload` persists a block witness before it
+    // returns, and a block that fails afterwards is never saved. The builder
+    // retries on a short backoff while the operator adds the program, and
+    // nothing prunes witnesses, so failing late would orphan one per attempt.
+    let next_spec_version = match &new_predicate {
+        Some(key) => program_registry
+            .activated_version(key, spec_version)
+            .context("build_next_exec_block: cannot honor consumed predicate rotation")?,
+        None => spec_version,
     };
 
     // 4. build exec block payload
@@ -218,10 +222,11 @@ mod tests {
         }
     }
 
-    fn assembly_inputs(
+    fn assembly_inputs<'a>(
         account_state: EeAccountState,
         spec_version: AlpenSpecId,
-    ) -> BlockAssemblyInputs<'static> {
+        program_registry: &'a ProgramRegistry,
+    ) -> BlockAssemblyInputs<'a> {
         BlockAssemblyInputs {
             account_state,
             inbox_messages: &[],
@@ -231,36 +236,63 @@ mod tests {
             bridge_gateway_account_id: AccountId::from([0u8; 32]),
             next_deposit_idx: 0,
             spec_version,
+            program_registry,
         }
     }
 
-    /// A node that doesn't know the version a queued rotation activates must
-    /// stop before requesting a payload. Requesting one persists a witness for
-    /// a block that is never saved, and since the builder retries on a short
-    /// backoff and nothing prunes witnesses, failing later would orphan one per
-    /// attempt for as long as the node waits to be upgraded.
-    #[tokio::test]
-    async fn unknown_successor_fails_before_requesting_a_payload() {
-        // V2 is the highest version this binary knows, so its successor is not
-        // one it can execute.
-        let account_state = EeAccountState::new(
+    fn rotating_to(key: PredicateKey) -> EeAccountState {
+        EeAccountState::new(
             Hash::zero(),
             Hash::zero(),
-            vec![PendingInputEntry::PredicateRotation(
-                PredicateKey::always_accept(),
-            )],
+            vec![PendingInputEntry::PredicateRotation(key)],
             vec![],
-        );
+        )
+    }
+
+    /// A node that can't honor a queued rotation must stop before requesting
+    /// a payload. Requesting one persists a witness for a block that is never
+    /// saved, and since the builder retries on a short backoff and nothing
+    /// prunes witnesses, failing later would orphan one per attempt for as
+    /// long as the node waits for the missing program.
+    #[tokio::test]
+    async fn rotation_to_a_key_with_no_program_fails_before_requesting_a_payload() {
+        let registry = ProgramRegistry::default();
 
         let err = build_next_exec_block(
-            assembly_inputs(account_state, AlpenSpecId::V2),
+            assembly_inputs(
+                rotating_to(PredicateKey::always_accept()),
+                AlpenSpecId::V2,
+                &registry,
+            ),
             &NeverBuildsEngine,
         )
         .await
-        .expect_err("an unknown successor version must stop block building");
+        .expect_err("a rotation to a key with no program must stop block building");
 
         assert!(
-            err.to_string().contains("spec activation"),
+            err.to_string().contains("consumed predicate rotation"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn rotation_to_an_older_version_fails_before_requesting_a_payload() {
+        let registry =
+            ProgramRegistry::new([(PredicateKey::always_accept(), AlpenSpecId::V1)]).unwrap();
+
+        let err = build_next_exec_block(
+            assembly_inputs(
+                rotating_to(PredicateKey::always_accept()),
+                AlpenSpecId::V2,
+                &registry,
+            ),
+            &NeverBuildsEngine,
+        )
+        .await
+        .expect_err("a rotation back to an older version must stop block building");
+
+        assert!(
+            err.to_string().contains("consumed predicate rotation"),
             "unexpected error: {err}"
         );
     }

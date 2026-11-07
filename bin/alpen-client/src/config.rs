@@ -312,6 +312,13 @@ pub(crate) struct SequencerMode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ProverProgramConfig {
     /// The spec version whose blocks the program proves.
+    ///
+    /// It has to match the version built into the program's guest. The
+    /// sequencer doesn't check that: a rotation to the program's key moves the
+    /// chain to the version written here. The proof does check it, since the
+    /// guest rejects blocks stamped with any other version. So a wrong value
+    /// can't finalize, but the blocks after the rotation stall and have to be
+    /// dropped.
     pub(crate) spec_version: AlpenSpecId,
     pub(crate) chunk_path: PathBuf,
     pub(crate) acct_path: PathBuf,

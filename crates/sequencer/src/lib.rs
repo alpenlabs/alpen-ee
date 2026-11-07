@@ -19,7 +19,9 @@ pub use batch_builder::{
 pub use batch_lifecycle::{
     create_batch_lifecycle_task, init_lifecycle_state, BatchLifecycleHandle, BatchLifecycleState,
 };
-pub use block_builder::{block_builder_task, BlockBuilderConfig, DEFAULT_BLOCKTIME_MS};
+pub use block_builder::{
+    block_builder_task, BlockBuilderConfig, ProgramRegistry, DEFAULT_BLOCKTIME_MS,
+};
 pub use ol_chain_tracker::{
     build_ol_chain_tracker, init_ol_chain_tracker_state, InboxMessages, OLChainTrackerHandle,
     OLChainTrackerState,

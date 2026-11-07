@@ -3,13 +3,13 @@
 Verifies the Alpen snark account's `update_vk` rotates via an admin
 `PredicateUpdate`, and that the sequencer's prover actually switches to the
 rotated VK's program for everything proved after the rotation (no restart).
-Every consumed rotation advances to the successor spec version, and the chain
-launches on V1. So the rotation (V1 -> V2) must settle normally, and a further
-update after it must also settle -- proved under the *new* VK, not the stale
-pre-rotation one.
+A consumed rotation activates the spec version of the program its key belongs
+to, and the chain launches on V1. So the rotation to the V2 program's key must
+settle normally, and a further update after it must also settle -- proved
+under the *new* VK, not the stale pre-rotation one.
 
-`test_ee_predicate_unknown_spec_version` covers a rotation past V2, which
-this binary must refuse.
+`test_ee_predicate_unknown_key` covers a rotation to a key no program has,
+which the sequencer must refuse.
 """
 
 import logging

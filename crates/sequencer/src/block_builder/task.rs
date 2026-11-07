@@ -119,7 +119,7 @@ fn create_block_assembly_inputs<'a>(
     last_local_block: &ExecBlockRecord,
     inbox_messages: &'a [MessageEntry],
     timestamp_ms: u64,
-    config: &BlockBuilderConfig,
+    config: &'a BlockBuilderConfig,
     spec_version: AlpenSpecId,
 ) -> BlockAssemblyInputs<'a> {
     BlockAssemblyInputs {
@@ -131,6 +131,7 @@ fn create_block_assembly_inputs<'a>(
         bridge_gateway_account_id: config.bridge_gateway_account_id(),
         next_deposit_idx: last_local_block.next_deposit_idx(),
         spec_version,
+        program_registry: config.program_registry(),
     }
 }
 

@@ -25,10 +25,10 @@ POST_ADMIN_UPDATE_L1_BLOCKS = 5
 HISTORICAL_EE_BLOCKS_AFTER_ROTATION = 8
 FRESH_EE_BLOCKS_AFTER_LATE_JOIN = 3
 
-# This test rotates the predicate, so it launches the chain a version back:
-# consuming a rotation advances to the successor spec version, and there has
-# to be one this binary knows. `PROVER` owns the genesis predicate that goes
-# with the version it launches on.
+# This test rotates the predicate to the next version's program, so it
+# launches the chain a version back, where there is a next version this binary
+# knows. `PROVER` owns the genesis predicate that goes with the version it
+# launches on.
 PROVER = resolve_prover_backend(ROTATION_SPEC_VERSIONS)
 
 # Blocks on the rotation's proof, so it scales with the backend.
@@ -85,7 +85,7 @@ class TestEePredicateFullnodeSync(BaseTest):
 
         self._apply_predicate_update(
             seq_no=1,
-            target="NeverAccept",
+            target=PROVER.rotation_target_predicate,
             admin_xpriv=admin_xpriv,
             btc_url=btc_url,
             btc_user=btc_user,

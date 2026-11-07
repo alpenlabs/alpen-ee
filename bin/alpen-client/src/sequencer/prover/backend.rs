@@ -6,9 +6,10 @@
 //! launched [`ProverProgram`], keyed by that entry's spec version, and
 //! hard-fails unless one of them derives the account predicate key the OL
 //! expects as its `update_vk`, warning when that match isn't the program
-//! governing current batches. Routing a given batch to the right resident
-//! program (by that batch's own governing spec version) is
-//! [`PaasBatchProver`]'s job, not this module's.
+//! governing current batches. It also hands back each program's key with its
+//! version, which the block builder needs to resolve a rotation. Routing a
+//! given batch to the right resident program (by that batch's own governing
+//! spec version) is [`PaasBatchProver`]'s job, not this module's.
 
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc, time::Duration};
 
@@ -16,6 +17,7 @@ use alpen_common::SequencerOLClient;
 use alpen_params::{AlpenParams, AlpenSpecId};
 use alpen_proof_acct::process_ee_acct_update_native;
 use alpen_proof_chunk::process_ee_chunk_native;
+use alpen_sequencer::ProgramRegistry;
 use alpen_storage_api::{BatchStorage, ChunkStorage};
 use eyre::Context;
 use k256::schnorr::SigningKey;
@@ -67,6 +69,13 @@ struct EeProvers {
     account: Prover<AcctSpec>,
 }
 
+/// The launched batch prover, and the version each of its programs' keys
+/// proves.
+pub(crate) struct LaunchedEeProver {
+    pub(crate) batch_prover: Arc<PaasBatchProver>,
+    pub(crate) program_registry: ProgramRegistry,
+}
+
 /// Picks a prover backend, builds every resident
 /// `[[sequencer.prover.programs]]` entry into launched provers,
 /// and hard-fails unless one of them derives the account predicate key the
@@ -78,13 +87,13 @@ pub(crate) async fn launch_validated_ee_batch_prover(
     stores: EeProverStores,
     backend: ProverBackendConfig,
     params: Arc<AlpenParams>,
-) -> eyre::Result<Arc<PaasBatchProver>> {
+) -> eyre::Result<LaunchedEeProver> {
     let ol_account_update_vk = ol_client
         .get_latest_account_update_vk()
         .await
         .context("failed to fetch OL account update_vk for prover validation")?;
     let governing_version = governing_spec_version(stores.batch_storage.as_ref(), &params).await?;
-    let provers = build_ee_provers(
+    let (provers, program_registry) = build_ee_provers(
         &builders,
         backend,
         params,
@@ -95,18 +104,23 @@ pub(crate) async fn launch_validated_ee_batch_prover(
 
     let programs = launch_ee_prover_services(service_executor, provers).await?;
 
-    Ok(Arc::new(PaasBatchProver::new(
+    let batch_prover = Arc::new(PaasBatchProver::new(
         programs,
         stores.chunk_storage,
         stores.batch_storage,
         stores.batch_proofs,
-    )))
+    ));
+    Ok(LaunchedEeProver {
+        batch_prover,
+        program_registry,
+    })
 }
 
 /// Builds every configured program, keyed by the `AlpenSpecId` it is
 /// configured under, and hard-fails unless one of them matches
 /// `ol_account_update_vk`, warning when that match isn't the program keyed
-/// under `governing_version`.
+/// under `governing_version`. Also returns each program's account predicate
+/// key with its version.
 ///
 /// `backend` may carry several programs (see
 /// [`ProverProgramConfig`](crate::config::ProverProgramConfig)'s doc comment):
@@ -123,8 +137,9 @@ async fn build_ee_provers(
     params: Arc<AlpenParams>,
     ol_account_update_vk: &PredicateKey,
     governing_version: AlpenSpecId,
-) -> eyre::Result<BTreeMap<AlpenSpecId, EeProvers>> {
+) -> eyre::Result<(BTreeMap<AlpenSpecId, EeProvers>, ProgramRegistry)> {
     let mut provers = BTreeMap::new();
+    let mut program_keys: Vec<(PredicateKey, AlpenSpecId)> = Vec::new();
     let mut matched_versions: Vec<AlpenSpecId> = Vec::new();
 
     match backend {
@@ -140,6 +155,7 @@ async fn build_ee_provers(
                 if &account_predicate_key == ol_account_update_vk {
                     matched_versions.push(*spec_version);
                 }
+                program_keys.push((account_predicate_key, *spec_version));
 
                 let chunk_predicate_key = schnorr_predicate_key(&chunk_signing_key);
                 let chunk_host = {
@@ -208,6 +224,7 @@ async fn build_ee_provers(
                 if &account_predicate_key == ol_account_update_vk {
                     matched_versions.push(*spec_version);
                 }
+                program_keys.push((account_predicate_key, *spec_version));
 
                 let chunk = (builders.chunk)(*spec_version).remote(chunk_host);
                 let account = (builders.account)(*spec_version).remote(acct_host);
@@ -231,7 +248,10 @@ async fn build_ee_provers(
         ol_account_update_vk,
     )?;
 
-    Ok(provers)
+    let program_registry = ProgramRegistry::new(program_keys)
+        .context("prover programs don't each name one spec version")?;
+
+    Ok((provers, program_registry))
 }
 
 /// Resolves the spec version governing the batches being proved right now:

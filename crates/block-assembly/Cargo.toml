@@ -25,6 +25,7 @@ strata-predicate.workspace = true
 alloy-primitives.workspace = true
 bitcoin-bosd.workspace = true
 eyre.workspace = true
+thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]

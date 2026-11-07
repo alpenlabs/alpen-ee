@@ -440,6 +440,8 @@ DA and proof failures are non-fatal; the task retries on each poll.
 
 **Programs**: each `[[sequencer.prover.programs]]` entry is one resident program: the `spec_version` it proves, and its `chunk_path` / `acct_path` pair. At most one entry may name a version. Every entry is built and validated at startup, and each batch's proof request is routed to whichever entry's version matches that batch's own governing spec version. Configuring both sides of an `update_vk` rotation ahead of time therefore lets the sequencer keep proving across it without a restart. Startup still fails unless at least one entry matches the OL's live `update_vk`.
 
+**Rotations**: a consumed rotation activates the spec version of the entry whose acct key it names. A rotation to a key that no entry has stops block building before the consuming block is built, until that program is configured and the sequencer restarts.
+
 **Input layouts**: a guest reads its private inputs in the layout of the release it was built from, so the prover builds each version's inputs in the layout of the guest released for that version. `v1` inputs take the `v0.4.0` layout, so under `sp1` the `v1` entry must be the `v0.4.0` release guests. `v2` inputs take the layout of this source. The `native` backend runs this source's checks for every version, but reads each version's layout, so both backends get the same inputs.
 
 Proofs and prover tasks live in a dedicated MDBX instance, separate from OL storage.

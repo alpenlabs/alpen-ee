@@ -1,10 +1,10 @@
-"""EE refuses a rotation to an unknown spec version.
+"""EE refuses a rotation to a key it has no prover program for.
 
-Every consumed `update_vk` rotation advances the EE to the successor spec
-version. This binary supports V0 to V2, and the chain launches on V2, so an
-admin `PredicateUpdate` names a V3 that has no `AlpenSpecId` variant. The
-sequencer must refuse to build a block that consumes it rather than build one
-under a version it doesn't know, and `update_vk` must stay where it was.
+A consumed `update_vk` rotation activates the spec version of the program its
+key belongs to. Here an admin `PredicateUpdate` names a key that none of the
+sequencer's programs has, so the sequencer can't tell which version comes next
+and couldn't prove anything after it. It must refuse to build a block that
+consumes the rotation, and `update_vk` must stay where it was.
 
 No proof is needed to see the refusal, so this always runs on the native
 prover.
@@ -33,11 +33,10 @@ UNSUPPORTED_ROTATION_TIMEOUT_SECONDS = 120
 
 GENESIS_ACCT_PREDICATE = NATIVE_BACKEND.genesis_predicate
 
-# Stands in for spec version V3's predicate. Any predicate would do: the
-# refusal comes from the version the rotation activates, not from the key.
-V3_ACCOUNT_PREDICATE = "NeverAccept"
+# A key no resident program has. Any such key would do.
+UNKNOWN_ACCOUNT_PREDICATE = "NeverAccept"
 
-UNHONORABLE_ROTATION_LOG_PATTERN = r"consumed a rotation to unknown spec version"
+UNHONORABLE_ROTATION_LOG_PATTERN = r"no prover program has the rotation's key"
 
 # Service logs include tracing ANSI colour codes even when written to file.
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -63,7 +62,7 @@ def _count_log_matches(log_path: Path, pattern: str, after_offset: int = 0) -> i
 
 
 @flexitest.register
-class TestEePredicateUnknownSpecVersion(BaseTest):
+class TestEePredicateUnknownKey(BaseTest):
     def __init__(self, ctx: flexitest.InitContext):
         ctx.set_env(
             EeOLEnv(
@@ -111,13 +110,13 @@ class TestEePredicateUnknownSpecVersion(BaseTest):
 
         result = create_ee_predicate_update(
             seq_no=1,
-            predicate=V3_ACCOUNT_PREDICATE,
+            predicate=UNKNOWN_ACCOUNT_PREDICATE,
             admin_xpriv=admin_xpriv,
             btc_url=bitcoin.props["rpc_url"],
             btc_user=bitcoin.props["rpc_user"],
             btc_password=bitcoin.props["rpc_password"],
         )
-        logger.info("Applied %s update (seq 1): %s", V3_ACCOUNT_PREDICATE, result)
+        logger.info("Applied %s update (seq 1): %s", UNKNOWN_ACCOUNT_PREDICATE, result)
 
         def mine_and_count_refused_rotations() -> int:
             btc_rpc.proxy.generatetoaddress(1, mine_addr)
@@ -129,11 +128,11 @@ class TestEePredicateUnknownSpecVersion(BaseTest):
             mine_and_count_refused_rotations,
             lambda count: count > 0,
             error_with=(
-                f"EE sequencer did not refuse the unhonorable V2 -> V3 rotation (log: {log_path})"
+                f"EE sequencer did not refuse the rotation to an unknown key (log: {log_path})"
             ),
             timeout=UNSUPPORTED_ROTATION_TIMEOUT_SECONDS,
         )
-        logger.info("EE sequencer correctly refused the unhonorable V2 -> V3 rotation")
+        logger.info("EE sequencer correctly refused the rotation to an unknown key")
 
         # The refused rotation was never consumed by a built block, so
         # update_vk must still sit at the genesis predicate.
