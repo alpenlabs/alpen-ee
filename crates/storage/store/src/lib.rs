@@ -17,9 +17,7 @@ pub use database::PrunedWitnesses;
 pub use error::{DbError, DbResult};
 #[cfg(feature = "test-utils")]
 pub use init::open_da_ops;
-pub use init::{
-    create_ee_envs, open_stores, BroadcastDbOps, ChunkedEnvelopeOps, SequencerDatabases, Stores,
-};
+pub use init::{open_stores, BroadcastDbOps, ChunkedEnvelopeOps, SequencerDatabases, Stores};
 pub use mdbxdb::{DaContextDbMdbx, NodeDbMdbx, ProverDbMdbx, ProverTaskKey, WitnessDbMdbx};
 pub use serialization_types::{BatchTaskKey, ChunkTaskKey};
 pub use storage::NodeStorage;

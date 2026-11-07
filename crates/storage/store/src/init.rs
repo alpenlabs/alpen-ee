@@ -1,9 +1,9 @@
 //! EE database initialization.
 //!
-//! Opens the EE stores under `<datadir>/mdbx` as MDBX environments, mirroring
-//! the role split of the previous layout: every node opens the node store
-//! via [`Stores::node_storage`], and only a sequencer additionally opens the
-//! DA/witness/prover stores via [`Stores::sequencer_databases`]. Each store is an
+//! Opens the EE stores under `<datadir>/mdbx` as MDBX environments, split by
+//! role: every node opens the node store via [`Stores::node_storage`], and only
+//! a sequencer additionally opens the DA/witness/prover stores via
+//! [`Stores::sequencer_databases`]. Each store is an
 //! isolated environment (independent write-locks); the DA-context filter shares
 //! the witness environment, and the L1 broadcast and chunked-envelope stores
 //! share the DA environment.
@@ -47,27 +47,9 @@ pub struct Stores {
 /// [`Stores::node_storage`] for chain state, and [`Stores::sequencer_databases`] for
 /// the DA and prover databases only a sequencer uses.
 ///
-/// `_db_retry_count` is accepted for compatibility with the previous layout but
-/// unused: MDBX serializes writers, so there is no optimistic-retry backoff.
+/// `_db_retry_count` is unused: MDBX serializes writers, so there is no
+/// optimistic-retry backoff.
 pub fn open_stores(datadir: &Path, _db_retry_count: u16) -> Result<Stores> {
-    // A datadir the sled binary wrote and the MDBX binary has not yet migrated.
-    // Starting empty next to a month of history is the one mistake this
-    // upgrade must make impossible, so refuse and say what to run.
-    if datadir.join("sled").is_dir() && !datadir.join("mdbx").is_dir() {
-        return Err(eyre!(
-            "{} holds a sled store and no MDBX store; run `dbconsole migrate-sled --datadir {}` \
-             with the node stopped before starting this version",
-            datadir.display(),
-            datadir.display()
-        ));
-    }
-    open_stores_unchecked(datadir)
-}
-
-/// Opens the environments without the unmigrated-datadir check, for the
-/// migration itself, which is the one caller that creates `mdbx/` next to
-/// `sled/` on purpose.
-fn open_stores_unchecked(datadir: &Path) -> Result<Stores> {
     let mdbx_dir = datadir.join("mdbx");
     let config = MdbxConfig::default();
     let node_db = Arc::new(
@@ -79,14 +61,6 @@ fn open_stores_unchecked(datadir: &Path) -> Result<Stores> {
         config,
         node_db,
     })
-}
-
-/// Creates every EE environment and table under `<datadir>/mdbx`, empty, for a
-/// tool that fills a fresh store from another one.
-pub fn create_ee_envs(datadir: &Path) -> Result<()> {
-    let db = open_stores_unchecked(datadir)?;
-    db.sequencer_databases()?;
-    Ok(())
 }
 
 impl Stores {
