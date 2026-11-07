@@ -147,7 +147,7 @@ The MDBX engine is generic infrastructure; the traits, the store and the console
 | `storage/api` | Storage traits the node services read and write through, and `StorageError`; its `test-utils` feature adds the trait mocks, `InMemoryStorage`, the batch and chunk suites every store must pass, and exec block fixtures |
 | `storage/mdbx` | Generic MDBX typed table store: environments, codecs, versioned values; knows nothing of the EE |
 | `storage/store` | The EE store: node, prover, witness and DA-pipeline tables, the trait impls and store opening; its `schema` and `records` modules publish the on-disk model for tooling |
-| `storage/console` | Operator console core: table registry, row reflection through the production codecs, staged writes, the sled migration rules; `bin/dbconsole` is its shell |
+| `storage/console` | Operator console core: table registry, row reflection through the production codecs, staged writes; `bin/dbconsole` is its shell |
 
 ### Protocol Types and Runtimes (`crates/`)
 

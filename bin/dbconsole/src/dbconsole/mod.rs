@@ -11,25 +11,23 @@ use std::{
 };
 
 use alpen_storage_console::{AttachMode, ConsoleDb};
-use clap::Args;
+use clap::Parser;
 use signal_hook::{consts::SIGINT, flag};
 
 mod engine;
 mod handle;
-pub(crate) mod recipes;
-pub(crate) mod repl;
-pub(crate) mod session;
+mod recipes;
+mod repl;
+mod session;
 mod value;
 
-/// Arguments for the console itself.
-#[derive(Debug, Args)]
+/// A console over the EE MDBX store.
+#[derive(Debug, Parser)]
+#[command(name = "dbconsole", version, about)]
 pub(crate) struct DbconsoleArgs {
     /// EE data directory (the one containing `mdbx/`).
-    ///
-    /// Required for the console; `main` enforces it, because clap does not
-    /// lift a flattened requirement when a subcommand is given.
     #[arg(long)]
-    pub(crate) datadir: Option<PathBuf>,
+    datadir: PathBuf,
 
     /// Allow write verbs.
     ///
@@ -49,14 +47,10 @@ pub(crate) struct DbconsoleArgs {
 
 /// Runs the console command.
 pub(crate) fn run(args: DbconsoleArgs) -> eyre::Result<()> {
-    let datadir = args
-        .datadir
-        .as_deref()
-        .expect("main checks --datadir before running the console");
     let db = if args.allow_writes {
-        ConsoleDb::attach_readwrite(datadir)?
+        ConsoleDb::attach_readwrite(&args.datadir)?
     } else {
-        ConsoleDb::attach_readonly(datadir)?
+        ConsoleDb::attach_readonly(&args.datadir)?
     };
     let mode = match db.mode() {
         AttachMode::ReadOnly => "ro",

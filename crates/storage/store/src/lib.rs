@@ -48,8 +48,6 @@ pub mod schema {
 /// The database representations of the node's types, exactly as the tables
 /// store them. Public for the same reason as [`schema`].
 pub mod records {
-    #[cfg(feature = "migration")]
-    pub use crate::serialization_types::{package_from_sled_era, package_to_sled_era};
     pub use crate::serialization_types::{
         BatchTaskKey, ChunkTaskKey, DBAccountStateAtEpoch, DBBatch, DBBatchId, DBBatchStatus,
         DBBatchWithStatus, DBChunk, DBChunkId, DBChunkStatus, DBChunkWithStatus, DBEeAccountState,
