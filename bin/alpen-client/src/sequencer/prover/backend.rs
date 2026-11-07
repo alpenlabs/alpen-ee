@@ -19,6 +19,7 @@ use alpen_proof_acct::process_ee_acct_update_native;
 use alpen_proof_chunk::process_ee_chunk_native;
 use alpen_sequencer::ProgramRegistry;
 use alpen_storage_api::{BatchStorage, ChunkStorage};
+use alpen_storage_store::{BatchTaskKey, ChunkTaskKey, ProgramScope, ProverDbMdbx, ProverTaskKey};
 use eyre::Context;
 use k256::schnorr::SigningKey;
 use strata_paas::{Prover, ProverBuilder, ProverServiceBuilder};
@@ -43,28 +44,38 @@ use crate::{config::ProverBackendConfig, service_executor::ServiceExecutor};
 #[cfg(feature = "sp1")]
 const DEFAULT_SP1_DEADLINE_SECS: u64 = 4 * 60 * 60;
 
+/// Builds the chunk prover of the program with the given scope.
+pub(crate) type ChunkProverFactory =
+    Box<dyn Fn(&ProgramScope) -> ProverBuilder<ChunkSpec> + Send + Sync>;
+
+/// Builds the acct prover of the program with the given scope.
+pub(crate) type AcctProverFactory =
+    Box<dyn Fn(&ProgramScope) -> ProverBuilder<AcctSpec> + Send + Sync>;
+
 /// Builds a fresh, unconfigured-for-any-particular-candidate
 /// `ProverBuilder<ChunkSpec>`/`ProverBuilder<AcctSpec>` on demand, scoped to
-/// one resident spec version. A `ProverBuilder` is single-use
+/// one resident program. A `ProverBuilder` is single-use
 /// (`.native(host)`/`.remote(host)` consume it), but every resident
 /// candidate needs its own, so the caller hands over factories instead of
 /// pre-built builders. Each factory must give its builder an
 /// [`EeTaskStore`](super::storage::EeTaskStore) scoped to the passed
-/// `AlpenSpecId` — see that type's doc comment for why sharing one task
-/// store across simultaneously-live versions would be unsafe.
+/// [`ProgramScope`] — see that type's doc comment for why sharing one task
+/// store across simultaneously-live programs would be unsafe.
 pub(crate) struct EeProverBuilders {
-    pub(crate) chunk: Box<dyn Fn(AlpenSpecId) -> ProverBuilder<ChunkSpec> + Send + Sync>,
-    pub(crate) account: Box<dyn Fn(AlpenSpecId) -> ProverBuilder<AcctSpec> + Send + Sync>,
+    pub(crate) chunk: ChunkProverFactory,
+    pub(crate) account: AcctProverFactory,
 }
 
 pub(crate) struct EeProverStores {
     pub(crate) chunk_storage: Arc<dyn ChunkStorage>,
     pub(crate) batch_storage: Arc<dyn BatchStorage>,
     pub(crate) batch_proofs: Arc<EeBatchProofDbManager>,
+    pub(crate) prover_db: Arc<ProverDbMdbx>,
 }
 
 /// One resident candidate's built, not-yet-launched chunk + acct provers.
 struct EeProvers {
+    account_key: PredicateKey,
     chunk: Prover<ChunkSpec>,
     account: Prover<AcctSpec>,
 }
@@ -101,6 +112,7 @@ pub(crate) async fn launch_validated_ee_batch_prover(
         governing_version,
     )
     .await?;
+    adopt_legacy_tasks(&stores.prover_db, &provers)?;
 
     let programs = launch_ee_prover_services(service_executor, provers).await?;
 
@@ -155,7 +167,8 @@ async fn build_ee_provers(
                 if &account_predicate_key == ol_account_update_vk {
                     matched_versions.push(*spec_version);
                 }
-                program_keys.push((account_predicate_key, *spec_version));
+                let scope = ProgramScope::new(*spec_version, account_predicate_key.clone());
+                program_keys.push((account_predicate_key.clone(), *spec_version));
 
                 let chunk_predicate_key = schnorr_predicate_key(&chunk_signing_key);
                 let chunk_host = {
@@ -165,7 +178,7 @@ async fn build_ee_provers(
                         process_ee_chunk_native(zkvm, &chunk_params, spec_version)
                     })
                 };
-                let chunk = (builders.chunk)(*spec_version).native(chunk_host);
+                let chunk = (builders.chunk)(&scope).native(chunk_host);
 
                 let acct_host = {
                     let spec_version = *spec_version;
@@ -173,9 +186,16 @@ async fn build_ee_provers(
                         process_ee_acct_update_native(zkvm, spec_version, &chunk_predicate_key)
                     })
                 };
-                let account = (builders.account)(*spec_version).native(acct_host);
+                let account = (builders.account)(&scope).native(acct_host);
 
-                provers.insert(*spec_version, EeProvers { chunk, account });
+                provers.insert(
+                    *spec_version,
+                    EeProvers {
+                        account_key: account_predicate_key,
+                        chunk,
+                        account,
+                    },
+                );
             }
         }
         #[cfg(feature = "sp1")]
@@ -224,12 +244,20 @@ async fn build_ee_provers(
                 if &account_predicate_key == ol_account_update_vk {
                     matched_versions.push(*spec_version);
                 }
-                program_keys.push((account_predicate_key, *spec_version));
+                let scope = ProgramScope::new(*spec_version, account_predicate_key.clone());
+                program_keys.push((account_predicate_key.clone(), *spec_version));
 
-                let chunk = (builders.chunk)(*spec_version).remote(chunk_host);
-                let account = (builders.account)(*spec_version).remote(acct_host);
+                let chunk = (builders.chunk)(&scope).remote(chunk_host);
+                let account = (builders.account)(&scope).remote(acct_host);
 
-                provers.insert(*spec_version, EeProvers { chunk, account });
+                provers.insert(
+                    *spec_version,
+                    EeProvers {
+                        account_key: account_predicate_key,
+                        chunk,
+                        account,
+                    },
+                );
             }
         }
         #[cfg(not(feature = "sp1"))]
@@ -252,6 +280,42 @@ async fn build_ee_provers(
         .context("prover programs don't each name one spec version")?;
 
     Ok((provers, program_registry))
+}
+
+/// Gives each version's legacy tasks, chunk and acct, to that version's
+/// program. The config allows one program per version.
+///
+/// A legacy task was stored before tasks recorded their program, and no
+/// program works on one until it is adopted. paas re-spawns unfinished tasks
+/// when its prover launches, so this has to run before that.
+fn adopt_legacy_tasks(
+    prover_db: &ProverDbMdbx,
+    provers: &BTreeMap<AlpenSpecId, EeProvers>,
+) -> eyre::Result<()> {
+    for (spec_version, prover) in provers {
+        let spec_version = *spec_version;
+        let scope = ProgramScope::new(spec_version, prover.account_key.clone());
+        let adopted = adopt_legacy_tasks_of::<ChunkTaskKey>(prover_db, &scope)?
+            + adopt_legacy_tasks_of::<BatchTaskKey>(prover_db, &scope)?;
+        if adopted > 0 {
+            info!(
+                target: "alpen-client",
+                %spec_version,
+                adopted,
+                "gave prover tasks stored before tasks recorded their program to the version's program"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn adopt_legacy_tasks_of<K: ProverTaskKey>(
+    prover_db: &ProverDbMdbx,
+    scope: &ProgramScope,
+) -> eyre::Result<usize> {
+    prover_db
+        .adopt_legacy_tasks::<K>(scope)
+        .context("failed to adopt legacy prover tasks")
 }
 
 /// Resolves the spec version governing the batches being proved right now:

@@ -35,7 +35,8 @@ mod spec_chunk;
 mod storage;
 
 pub(crate) use backend::{
-    launch_validated_ee_batch_prover, EeProverBuilders, EeProverStores, LaunchedEeProver,
+    launch_validated_ee_batch_prover, AcctProverFactory, ChunkProverFactory, EeProverBuilders,
+    EeProverStores, LaunchedEeProver,
 };
 pub(crate) use batch_prover::{PaasBatchProver, ProverProgram};
 pub(crate) use hooks::{AcctReceiptHook, ChunkReceiptHook};

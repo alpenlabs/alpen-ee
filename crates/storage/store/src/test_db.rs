@@ -45,7 +45,7 @@ use crate::{
         AcctProverTaskSchema, ChunkProofReceiptSchema, ChunkProverTaskSchema, DaContextDbMdbx,
         L1BroadcastDbMdbx, L1ChunkedEnvelopeDbMdbx, NodeDbMdbx, WitnessDbMdbx,
     },
-    serialization_types::{BatchTaskKey, ChunkTaskKey, DBBatchId, DBChunkId},
+    serialization_types::{BatchTaskKey, ChunkTaskKey, DBBatchId, DBChunkId, DBProverTask},
 };
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -177,7 +177,7 @@ pub fn seed_prover(datadir: &Path) {
     let (h0, h1, h2) = (hash(1), hash(2), hash(3));
     let batch_id = Batch::new_genesis_batch(h0, 0).unwrap().id();
     let chunk_id = Chunk::new(0, h0, h2, 2, 0, vec![h1, h2]).id();
-    let pending = TaskRecordData::new(TaskStatus::Pending);
+    let pending = DBProverTask::new(None, &TaskRecordData::new(TaskStatus::Pending));
     env.update(|w| {
         w.put::<ChunkProverTaskSchema>(&ChunkTaskKey::new(AlpenSpecId::V0, chunk_id), &pending)?;
         w.put::<AcctProverTaskSchema>(&BatchTaskKey::new(AlpenSpecId::V0, batch_id), &pending)?;

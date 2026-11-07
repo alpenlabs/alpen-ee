@@ -301,7 +301,7 @@ db> .schema ChunkProverTaskSchema
   table: ChunkProverTaskSchema
   env:   prover
   key:   ChunkTaskKey: spec version (u16 BE) then prev_block, last_block (66 bytes -> hex)
-  value: TaskRecordData { status, updated_at_secs, retry_after_secs, metadata }
+  value: DBProverTask { program_key, status, updated_at_secs, retry_after_secs, metadata }
 ```
 
 Every verb takes a table name bare or as `env/Table`; the two are
@@ -927,7 +927,7 @@ console_tables! {
     pub(crate) fn prover_env_tables() {
         ChunkProverTaskSchema => {
             key: "ChunkTaskKey: spec version (u16 BE) then prev_block, last_block (66 bytes -> hex)",
-            value: "TaskRecordData { status, updated_at_secs, … }",
+            value: "DBProverTask { program_key, status, updated_at_secs, … }",
         },
         // a table whose value no strategy can read yet:
         AwkwardSchema => {
