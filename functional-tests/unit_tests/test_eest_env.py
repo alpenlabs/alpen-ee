@@ -63,9 +63,9 @@ class EestEnvironmentTests(unittest.TestCase):
         self.assertEqual(prover.genesis_predicate, "Sp1Groth16:test-predicate")
         config = prover.prover_config(self.artifacts)
         self.assertEqual(config.deadline_secs, 14400)
-        self.assertEqual(set(config.programs), {"v2"})
-        self.assertEqual(config.programs["v2"].chunk_path, str(prover_backend.CHUNK_ELF))
-        self.assertEqual(config.programs["v2"].acct_path, str(prover_backend.ACCT_ELF))
+        self.assertEqual([program.spec_version for program in config.programs], ["v2"])
+        self.assertEqual(config.programs[0].chunk_path, str(prover_backend.CHUNK_ELF))
+        self.assertEqual(config.programs[0].acct_path, str(prover_backend.ACCT_ELF))
         self.assertEqual(prover.genesis_spec_schedule, {"v0": 0, "v1": 0, "v2": 0})
 
     def test_sp1_without_deadline_preserves_client_default(self):
@@ -102,7 +102,7 @@ class EestEnvironmentTests(unittest.TestCase):
         self.assertEqual(prover.genesis_predicate, "Sp1Groth16:v1")
         self.assertEqual(prover.rotation_target_predicate, "Sp1Groth16:test-predicate")
         config = prover.prover_config(self.artifacts)
-        self.assertEqual(set(config.programs), {"v1", "v2"})
+        self.assertEqual([program.spec_version for program in config.programs], ["v1", "v2"])
         self.assertEqual(config.deadline_secs, 14400)
 
     def test_eest_guest_params_match_live_params(self):

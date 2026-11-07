@@ -77,9 +77,9 @@ impl AlpenSpecId {
 ///
 /// Written out rather than derived because a derived unit-variant impl
 /// serializes through `serialize_unit_variant`, which TOML refuses as a
-/// table key. Config files key their per-version tables by this type (see
-/// `[sequencer.prover.programs.<spec_version>]`), so it has to serialize as
-/// a plain string.
+/// table key. Maps keyed by this type, like
+/// [`SpecVersioned`](crate::SpecVersioned), have to serialize it as a plain
+/// string.
 impl Serialize for AlpenSpecId {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.collect_str(self)

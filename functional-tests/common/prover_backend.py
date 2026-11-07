@@ -156,8 +156,7 @@ class ProverBackend(ABC):
     @abstractmethod
     def prover_config(self, datadir: Path) -> AlpenProverConfig:
         """Builds the ``[sequencer.prover]`` table, writing any files it needs
-        into ``datadir``, with one
-        ``[sequencer.prover.programs.<spec_version>]`` entry per
+        into ``datadir``, with one ``[[sequencer.prover.programs]]`` entry per
         [`spec_versions`]."""
 
     @property
@@ -212,16 +211,19 @@ class NativeBackend(ProverBackend):
     ee_params_path: None = None
 
     def prover_config(self, datadir: Path) -> AlpenProverConfig:
-        entries = {}
+        entries = []
         for spec_version in self.spec_versions:
             chunk_hex, acct_hex = _NATIVE_SIGNING_KEYS[spec_version]
             chunk_key_path = datadir / f"native-chunk-signing-key-{spec_version}.hex"
             acct_key_path = datadir / f"native-acct-signing-key-{spec_version}.hex"
             chunk_key_path.write_text(chunk_hex)
             acct_key_path.write_text(acct_hex)
-            entries[spec_version] = AlpenProverProgram(
-                chunk_path=str(chunk_key_path),
-                acct_path=str(acct_key_path),
+            entries.append(
+                AlpenProverProgram(
+                    spec_version=spec_version,
+                    chunk_path=str(chunk_key_path),
+                    acct_path=str(acct_key_path),
+                )
             )
         return AlpenProverConfig(backend=self.backend, programs=entries)
 
@@ -259,13 +261,14 @@ class Sp1Backend(ProverBackend):
         return AlpenProverConfig(
             backend=self.backend,
             deadline_secs=self.deadline_secs,
-            programs={
-                spec_version: AlpenProverProgram(
+            programs=[
+                AlpenProverProgram(
+                    spec_version=spec_version,
                     chunk_path=str(chunk_elf),
                     acct_path=str(acct_elf),
                 )
                 for spec_version, (chunk_elf, acct_elf) in self.programs.items()
-            },
+            ],
         )
 
     @property

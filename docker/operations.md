@@ -74,8 +74,7 @@ The image does not ship the SP1 guest ELFs. Each network's guests bake in its
 params, so one set of ELFs cannot serve every network. A sequencer with
 `sequencer.prover.backend = "sp1"` takes them from a GitHub Release (see
 [`docs/releasing.md`](../docs/releasing.md#what-a-release-publishes)) and
-mounts them at the paths its `[sequencer.prover.programs.<version>]` entries
-name.
+mounts them at the paths its `[[sequencer.prover.programs]]` entries name.
 
 Take the guests from the release the network was rolled out with, not from the
 release the node now runs. A later release of the same line can change the

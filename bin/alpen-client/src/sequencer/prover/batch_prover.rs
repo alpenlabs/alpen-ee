@@ -33,7 +33,7 @@ use super::{
 use crate::metrics::{PROOF_STATUS_CHECKS, PROOF_TASKS_SUBMITTED};
 
 /// One resident `--prover-program` candidate's launched chunk + acct prover
-/// handles. Named to mirror the config-side `ProverProgramPaths` it was
+/// handles. Named to mirror the config-side `ProverProgramConfig` it was
 /// resolved from.
 pub(crate) struct ProverProgram {
     pub(crate) chunk_handle: ProverHandle<ChunkSpec>,

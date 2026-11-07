@@ -2,7 +2,7 @@
 //!
 //! [`launch_validated_ee_batch_prover`] is the entry point: it picks a
 //! backend (`sequencer.prover.backend`, native or sp1), builds every
-//! configured `[sequencer.prover.programs.<spec_version>]` entry into a
+//! configured `[[sequencer.prover.programs]]` entry into a
 //! launched [`ProverProgram`], keyed by that entry's spec version, and
 //! hard-fails unless one of them derives the account predicate key the OL
 //! expects as its `update_vk`, warning when that match isn't the program
@@ -68,7 +68,7 @@ struct EeProvers {
 }
 
 /// Picks a prover backend, builds every resident
-/// `[sequencer.prover.programs.<spec_version>]` entry into launched provers,
+/// `[[sequencer.prover.programs]]` entry into launched provers,
 /// and hard-fails unless one of them derives the account predicate key the
 /// OL expects as its `update_vk`.
 pub(crate) async fn launch_validated_ee_batch_prover(
@@ -109,7 +109,7 @@ pub(crate) async fn launch_validated_ee_batch_prover(
 /// under `governing_version`.
 ///
 /// `backend` may carry several programs (see
-/// [`ProverProgramPaths`](crate::config::ProverProgramPaths)'s doc comment):
+/// [`ProverProgramConfig`](crate::config::ProverProgramConfig)'s doc comment):
 /// an operator straddling a VK rotation configures both the currently-active
 /// and the not-yet-active program ahead of time, so the sequencer doesn't
 /// need restarting once the rotation lands — as long as the successor
@@ -131,7 +131,8 @@ async fn build_ee_provers(
         ProverBackendConfig::Native { programs } => {
             info!(target: "alpen-client", "EE chunk + acct provers: native host");
 
-            for (spec_version, program) in &programs {
+            for program in &programs {
+                let spec_version = &program.spec_version;
                 let chunk_signing_key = native_schnorr_signing_key_from_file(&program.chunk_path)?;
                 let acct_signing_key = native_schnorr_signing_key_from_file(&program.acct_path)?;
 
@@ -170,7 +171,8 @@ async fn build_ee_provers(
             let deadline = Duration::from_secs(deadline_secs);
             let sp1_config = SP1HostConfig::default().with_deadline(deadline);
 
-            for (spec_version, program) in &programs {
+            for program in &programs {
+                let spec_version = &program.spec_version;
                 info!(
                     target: "alpen-client",
                     deadline_secs,
@@ -192,7 +194,7 @@ async fn build_ee_provers(
                         program.acct_path.display()
                     )
                 })?;
-                // `ProverProgramPaths` only guarantees these two paths were
+                // `ProverProgramConfig` only guarantees these two paths were
                 // configured together in one table, not that they're
                 // actually a matched build output. There's no way to
                 // introspect an ELF's compiled-in chunk-VK dependency from
@@ -272,9 +274,9 @@ async fn governing_spec_version(
 /// Failing startup on either window would wedge the node: nothing else runs,
 /// so the very state the check is waiting on can never advance, and the node
 /// restart-loops. A warning naming both versions is what this can soundly
-/// assert — it still surfaces transposed
-/// `[sequencer.prover.programs.<version>]` keys, which is the case worth
-/// catching, without being able to stall a healthy node.
+/// assert — it still surfaces `[[sequencer.prover.programs]]` entries whose
+/// `spec_version`s were swapped, which is the case worth catching, without
+/// being able to stall a healthy node.
 fn validate_live_vk_match(
     matched_versions: &[AlpenSpecId],
     governing_version: AlpenSpecId,
@@ -298,9 +300,9 @@ fn validate_live_vk_match(
             target: "alpen-client",
             %governing_version,
             matched_versions = %matched,
-            "the prover program matching OL's live account update_vk is not the one keyed \
-             under the version governing current batches; expected during a rotation, but \
-             check the [sequencer.prover.programs.<version>] keys are not transposed"
+            "the prover program matching OL's live account update_vk is not the one built \
+             for the version governing current batches; expected during a rotation, but \
+             check the spec_version of each [[sequencer.prover.programs]] entry"
         );
     }
 

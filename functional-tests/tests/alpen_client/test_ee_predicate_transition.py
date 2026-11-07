@@ -61,8 +61,8 @@ class TestEePredicateTransition(BaseTest):
                 admin_confirmation_depth=2,
                 fund_test_cli_wallet=True,
                 batch_sealing_block_count=BATCH_SEALING_BLOCK_COUNT,
-                # Two resident programs, keyed by the AlpenSpecId each is
-                # built for (see ProverProgramPaths in
+                # Two resident programs, each naming the AlpenSpecId it is
+                # built for (see ProverProgramConfig in
                 # bin/alpen-client/src/config.rs): v2's acct key is the
                 # rotation target, v1's is the genesis-matching key. Both are
                 # validated and loaded at startup; the sequencer routes each
