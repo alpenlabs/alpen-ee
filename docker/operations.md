@@ -84,6 +84,21 @@ the OL rejects account proofs from guests whose key it doesn't hold. Before you
 mount them, check that the release's `<network>-alpen-acct.predicate` matches
 the account's `update_vk` on the OL.
 
+To move to a later release's guests, add them as a second program for the
+same `spec_version`, keep the current one, and restart. Then the admin rotates
+the account to the new key. The sequencer proves each batch with the program
+whose key the OL checks it against, so the old guests prove the batches up to
+the rotation and the new ones the batches after it. Drop the old program once
+the OL has accepted the rotation.
+
+On a node coming from a release that keyed programs by version
+(`[sequencer.prover.programs.v2]`), add the second program on a later restart,
+not during the upgrade itself. Prover tasks saved by those releases don't
+record which program they belong to. A version's only program takes them over,
+but two programs can't tell whose they are. So startup refuses two programs for
+a version while one of those tasks is unfinished. Upgrade with one program, and
+add the second once the proofs that were running at the upgrade have finished.
+
 Environment variables the entrypoint reads:
 
 | Variable | Default |

@@ -25,13 +25,29 @@ later release of the line must accept the same blocks and reach the same state
 from them. A change to that goes in the next line. The rcs before `vX.Y.0` can
 still change it. Review enforces this. CI does not check it.
 
-The guests' verifying keys can change within a line. A refactor, a moved
-line, a dependency bump in a guest's lockfile or an SP1 bump is enough to
-change them, and that is fine. The guests prove the full node's rules, so
-while the rules stay the same, the guests a network was rolled out with still
-prove them. So a network keeps those guests when it updates its node within
-the line. It only needs new guests for a security fix in the guests. Moving to
-a new key takes a rotation to a new spec version.
+A spec version names one set of full node rules. A line that changes the
+rules adds a version, and its rcs can still change that version's rules. At
+`vX.Y.0` the version freezes with the rest of the line's full node behavior. A
+line that keeps the rules adds no version.
+
+The guests' verifying keys can change within a line, and within a version. A
+refactor, a moved line, a dependency bump in a guest's lockfile, an SP1 bump
+or a guest fix is enough to change them. The guests prove the full node's
+rules, so while the rules stay the same, the guests a network was rolled out
+with still prove them. So a network keeps those guests when it updates its
+node within the line. It only needs new guests for a fix in the guests.
+
+A network moves to a new key when its admin rotates it there. The rotation
+activates the spec version of the program the key belongs to, so a new key
+for the same version changes no rules. Only the sequencer has to load the new
+guests, and full nodes need no upgrade. That is how a patch release ships a
+guest fix. A network that skips a line rotates straight to the version of the
+line it takes. The new guests must then read the last block of the version
+the network is on, so test that before a network skips one.
+
+A version fixes the guests' input layout too. The node builds one layout per
+version, so every program of a version has to read the same one. A guest
+change that needs a new layout needs a new version.
 
 The guests bake in each network's params, so each network has its own keys.
 To see whether a release changed a network's key, compare that network's
@@ -39,25 +55,34 @@ program ID in the two releases' notes.
 
 ## Cutting a release
 
-1. Tag `vX.Y.0-rc.1` on `main` and push the tag. Fixes land on `main` and go
-   out in the next rc.
-2. Cut `releases/vX.Y.x` at the commit of the rc you want to ship. Cut it
-   earlier if `main` starts taking work for the next line while the line
-   still needs rcs. After that, land fixes on `main` first, cherry-pick them
-   onto the branch through a PR, and tag the next rc from the branch.
-3. Once testnet or mainnet runs an rc, tag `vX.Y.0` at that same commit, so
-   the final release names the build that network runs.
+1. Tag `vX.Y.0-rc.1` on `main` and push the tag. Staging takes it. Fixes
+   land on `main` and go out in the next rc, which staging takes in turn.
+2. Once staging is satisfied with an rc, cut `releases/vX.Y.x` at that rc's
+   commit, then tag `vX.Y.0` on the same commit. The final release's guests
+   then come from the code staging ran. Cut the branch earlier if
+   `main` starts taking work for the next line while the line still needs
+   rcs. After that, land fixes on `main` first, cherry-pick them onto the
+   branch through a PR, and tag the next rc from the branch.
+3. Testnet, then mainnet, take `vX.Y.0`. If the line changes a network's
+   key, that network's admin rotates it to the key the release notes give for
+   it.
 4. Tag patch releases from the branch. They must not change full node
-   behavior.
+   behavior. A network that needs a patch's new guests has its admin rotate
+   it to their key, under the same spec version.
 
 Each rc tagged on `main` takes everything merged since the last one. So while
 a line takes rcs from `main`, keep work for the next line out of `main`, or
 cut the branch.
 
-Staging takes the rcs first. If a later rc only changes the guests' keys,
-staging keeps proving with the guests it has. If it changes full node
-behavior, staging needs a chain reset to take it, because its guests no longer
-prove the new rules and a new key always means a new spec version.
+Staging takes every rc. When an rc changes staging's key, the admin rotates
+staging to it, with the earlier rc's program still configured beside the new
+one so the batches before the rotation can still be proved. The rotation
+keeps the spec version, so staging runs the guest code the other networks
+will get, and gains no version they lack. If the rc also changes the
+version's rules, the blocks staging built under the earlier rc no longer
+replay under the new binary. Restore staging's EE nodes from a snapshot
+rather than syncing them from genesis. If the rc changes a header, DA or
+guest input layout of the version, staging needs a chain reset.
 
 The tag does not build the `alpen-client` image. To build it, run the
 "CI — Build and Push Images" workflow by hand with the tag as `ref`.
