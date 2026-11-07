@@ -288,7 +288,6 @@ class AlpenClientConfig:
     sequencer: AlpenSequencerConfig | None = field(default=None)
     health_check_host: str = field(default="127.0.0.1")
     health_check_port: int = field(default=0)
-    db_retry_count: int = field(default=3)
     l1_reorg_safe_depth: int = field(default=6)
     genesis_l1_height: int = field(default=0)
 

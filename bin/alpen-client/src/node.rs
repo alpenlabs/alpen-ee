@@ -194,8 +194,7 @@ async fn bootstrap_node(
     // MDBX locks its directory exclusively, so this is the one place the
     // instance is opened. A sequencer takes its extra databases off the same
     // handle in `sequencer::run`; a full node never creates those trees.
-    let db = open_stores(&datadir, alpen_config.db_retry_count)
-        .context("failed to load alpen database")?;
+    let db = open_stores(&datadir).context("failed to load alpen database")?;
 
     let storage: Arc<_> = db
         .node_storage(Handle::current())
