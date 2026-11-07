@@ -1451,8 +1451,6 @@ dependencies = [
  "rhai",
  "rustyline",
  "signal-hook 0.4.5",
- "sled",
- "tracing-subscriber 0.3.23",
 ]
 
 [[package]]
@@ -2010,24 +2008,18 @@ name = "alpen-storage-console"
 version = "0.3.0-alpha.1"
 dependencies = [
  "alloy-primitives",
- "alpen-chain-types",
  "alpen-common",
  "alpen-params",
- "alpen-reth-statediff",
  "alpen-storage-mdbx",
  "alpen-storage-store",
- "borsh",
- "ciborium",
  "eyre",
  "hex",
  "proptest",
  "serde",
  "serde_bytes",
- "ssz",
  "strata-acct-types",
  "strata-db-types",
  "strata-identifiers",
- "strata-l1-txfmt",
  "strata-paas",
  "thiserror 2.0.20",
  "zkaleido",
@@ -2068,8 +2060,6 @@ dependencies = [
  "serde",
  "serde_bytes",
  "ssz",
- "ssz_derive",
- "ssz_types",
  "strata-acct-types",
  "strata-db-macros",
  "strata-db-tests",

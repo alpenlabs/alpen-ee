@@ -10,8 +10,6 @@ pub use batch::{
     DBChunkWithStatus, DBL1DaBlockRef, DBTxidPair,
 };
 pub use exec_block::DBExecBlockRecord;
-#[cfg(feature = "migration")]
-pub use exec_block::{package_from_sled_era, package_to_sled_era};
 pub use olblockid::DBOLBlockId;
 pub(crate) use task_key::{decode_versioned_range, encode_versioned_range};
 pub use task_key::{BatchTaskKey, ChunkTaskKey};
