@@ -181,6 +181,11 @@ pub async fn block_builder_task<
     let last_hash = last_local_block.parent_blockhash();
     debug!(%last_hash, "last local block parent");
 
+    // Seed the head height from the restored chain: until the next block
+    // completes nothing else writes it, and a node that cannot build after a
+    // restart would otherwise report no head at all.
+    gauge!(BLOCK_LATEST_HEIGHT, "status" => "head").set(last_local_block.blocknum() as f64);
+
     let mut next_block_target = compute_next_block_target(&last_local_block, &config);
     debug!(?next_block_target, "next block target");
 

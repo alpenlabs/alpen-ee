@@ -199,6 +199,11 @@ async fn engine_control_task_inner<C, E, T>(
     // The head of the last update sent to reth.
     let mut head_block_hash = chain.head_hash();
 
+    // Seed the preconf height from the current tip: it is otherwise written only when the next
+    // tip is sent, so a restarted node would report no preconf height until it built a block.
+    // The startup chainstate sync already made this tip reth's head.
+    gauge!(BLOCK_LATEST_HEIGHT, "status" => "preconf").set(preconf_rx.borrow().blocknum() as f64);
+
     // The watch channel counts its current value as seen. Without this, a node that restarts
     // after the OL tracker caught up would not resend the OL heads until the next OL update.
     consensus_rx.mark_changed();
