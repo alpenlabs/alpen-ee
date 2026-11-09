@@ -124,6 +124,7 @@ impl SequencerOLClient for DummyOLClient {
         Ok(OLAccountStateView {
             seq_no,
             proof_state,
+            update_vk: EeAcctProgram::test_predicate_key(),
         })
     }
 

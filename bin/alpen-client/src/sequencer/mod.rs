@@ -67,7 +67,7 @@ use strata_primitives::buf::Buf32;
 use tokio::sync::{mpsc, watch};
 use tracing::{error, info, info_span, warn, Instrument};
 
-use self::{prover::LaunchedEeProver, sealing_policy::gas_data_provider::RethGasDataProvider};
+use self::sealing_policy::gas_data_provider::RethGasDataProvider;
 use crate::{
     config::SequencerMode,
     gossip::GossipConfig,
@@ -591,13 +591,10 @@ where
     )
     .await?;
 
-    let LaunchedEeProver {
-        batch_prover,
-        program_registry,
-    } = provers::launch(
+    let batch_prover = provers::launch(
         service_executor,
         sequencer_dbs,
-        ol_client.as_ref(),
+        ol_client.clone(),
         provers::EeProverInputs {
             storage: storage.clone(),
             node_provider: node_provider.clone(),
@@ -609,7 +606,8 @@ where
     .await?;
     // A consumed rotation activates the version of its key's program, so the
     // block builder needs the keys of the programs it can be proved by.
-    let block_builder_config = block_builder_config.with_program_registry(program_registry);
+    let block_builder_config =
+        block_builder_config.with_program_registry(batch_prover.program_registry());
 
     let batch_da_provider = da_pipeline.batch_da_provider;
 

@@ -224,6 +224,20 @@ impl ProverDbMdbx {
             .map_err(to_db_error)
     }
 
+    /// Counts `K`'s legacy tasks of `spec_version` that have not reached a
+    /// terminal status. A legacy task was stored before tasks recorded their
+    /// program.
+    pub fn count_legacy_open_tasks<K: ProverTaskKey>(
+        &self,
+        spec_version: AlpenSpecId,
+    ) -> DbResult<usize> {
+        self.count_tasks_where::<K>(|key, task| {
+            key.spec_version() == spec_version
+                && task.program_key().is_none()
+                && !task.status().is_terminal()
+        })
+    }
+
     /// Lists every task in `K`'s table, for every spec version and program.
     pub fn list_all_tasks<K: ProverTaskKey>(&self) -> DbResult<Vec<(K, DBProverTask)>> {
         self.list_tasks_where::<K>(|_, _| true)
@@ -686,5 +700,37 @@ mod tests {
 
         // A second pass finds nothing left to adopt.
         assert_eq!(db.adopt_legacy_tasks::<ChunkTaskKey>(&scope).unwrap(), 0);
+    }
+
+    /// Only the unfinished legacy tasks of one version count: those are what
+    /// no program can take once two share the version.
+    #[test]
+    fn legacy_open_tasks_are_counted_per_version() {
+        let db = setup_db();
+        let tagged = ProgramScope::new(AlpenSpecId::V2, predicate_key(1));
+        let legacy = |record: &TaskRecordData| DBProverTask::new(None, record);
+
+        db.insert_task(&chunk_key(AlpenSpecId::V2, 1), legacy(&pending()))
+            .unwrap();
+        db.insert_task(
+            &chunk_key(AlpenSpecId::V2, 3),
+            legacy(&TaskRecordData::new(TaskStatus::Completed)),
+        )
+        .unwrap();
+        db.insert_task(&chunk_key(AlpenSpecId::V2, 5), tagged.tag(&pending()))
+            .unwrap();
+        db.insert_task(&chunk_key(AlpenSpecId::V1, 7), legacy(&pending()))
+            .unwrap();
+
+        assert_eq!(
+            db.count_legacy_open_tasks::<ChunkTaskKey>(AlpenSpecId::V2)
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            db.count_legacy_open_tasks::<BatchTaskKey>(AlpenSpecId::V2)
+                .unwrap(),
+            0
+        );
     }
 }

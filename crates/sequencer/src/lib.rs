@@ -10,6 +10,7 @@ pub mod sealing_policy;
 
 #[cfg(test)]
 pub(crate) mod test_utils;
+mod update_key;
 mod update_submitter;
 
 pub use batch_builder::{
@@ -26,4 +27,5 @@ pub use ol_chain_tracker::{
     build_ol_chain_tracker, init_ol_chain_tracker_state, InboxMessages, OLChainTrackerHandle,
     OLChainTrackerState,
 };
+pub use update_key::update_key_for_batch;
 pub use update_submitter::create_update_submitter_task;

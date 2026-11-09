@@ -99,8 +99,11 @@ impl UpConvert<DBProverTask> for TaskRecordData {
     }
 }
 
-/// The tasks one prover program works on: those of its spec version that
-/// record its key.
+/// One prover program: the spec version it proves and its account predicate
+/// key.
+///
+/// It also picks the tasks the program works on: those of its spec version
+/// that record its key.
 #[derive(Debug, Clone)]
 pub struct ProgramScope {
     spec_version: AlpenSpecId,

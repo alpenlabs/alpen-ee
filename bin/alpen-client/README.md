@@ -438,7 +438,9 @@ DA and proof failures are non-fatal; the task retries on each poll.
 - **`sp1`** — production (`sp1` feature); each program's paths are compiled guest ELFs; deadline via `deadline_secs`
 - **`native`** — skips real Groth16 proving, signing proofs with a Schnorr key instead. Each program's paths are hex-encoded key files. The acct key must match whatever the OL genesis `update_vk` expects, or the account prover predicate validation at startup fails — see `crates/proof/acct`'s `test_signing_key`
 
-**Programs**: each `[[sequencer.prover.programs]]` entry is one resident program: the `spec_version` it proves, and its `chunk_path` / `acct_path` pair. At most one entry may name a version. Every entry is built and validated at startup, and each batch's proof request is routed to whichever entry's version matches that batch's own governing spec version. Configuring both sides of an `update_vk` rotation ahead of time therefore lets the sequencer keep proving across it without a restart. Startup still fails unless at least one entry matches the OL's live `update_vk`.
+**Programs**: each `[[sequencer.prover.programs]]` entry is one resident program: the `spec_version` it proves, and its `chunk_path` / `acct_path` pair. Several entries may name the same version, since a guest fix that keeps the rules gets a new key, not a new version. Every entry is built and validated at startup, and each batch's proof request goes to the entry whose acct key the OL will check that batch's update against: the OL's current `update_vk`, changed by each rotation consumed in a batch the OL has not accepted yet. Configuring both sides of an `update_vk` rotation ahead of time therefore lets the sequencer keep proving across it without a restart. Startup fails unless at least one entry matches the OL's live `update_vk`, or when two entries derive the same key.
+
+Each prover task row records the key of the program that proves it. Rows written before that are legacy rows. At startup, a version's only program adopts them by writing its key on them. A version with two programs can't tell whose they are, so startup also fails while a legacy row is unfinished and its version has two programs. Run with one program for that version until those tasks finish.
 
 **Rotations**: a consumed rotation activates the spec version of the entry whose acct key it names. A rotation to a key that no entry has stops block building before the consuming block is built, until that program is configured and the sequencer restarts.
 
@@ -793,9 +795,9 @@ blocktime_ms = 5000
 backend = "sp1"
 
 # One entry per resident program, naming the spec version it proves; at least
-# one is required. Each batch's proof request is routed to whichever entry
-# matches that batch's own governing version, so the chain stalls if no entry
-# covers the version it is on. The guests built from this tree are v2.
+# one is required. Each batch's proof request goes to the entry whose acct key
+# the OL will check that batch against, so the chain stalls if no entry has
+# that key. The guests built from this tree are v2.
 [[sequencer.prover.programs]]
 spec_version = "v2"
 chunk_path = "/app/elfs/sp1/guest-alpen-chunk.elf"

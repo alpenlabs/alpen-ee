@@ -10,7 +10,6 @@
 #[cfg(feature = "sequencer")]
 use std::time::Duration;
 use std::{
-    collections::BTreeSet,
     net::{IpAddr, Ipv4Addr},
     num::{NonZeroU32, NonZeroU64, NonZeroUsize},
     path::{Path, PathBuf},
@@ -363,37 +362,23 @@ pub(crate) enum ProverBackendConfig {
 
 impl ProverBackendConfig {
     /// The resident programs, whichever backend was selected.
-    fn programs(&self) -> &[ProverProgramConfig] {
+    pub(crate) fn programs(&self) -> &[ProverProgramConfig] {
         match self {
             Self::Native { programs } | Self::Sp1 { programs, .. } => programs,
         }
     }
 
-    /// Rejects a program set that can't route every batch: an empty one, or
-    /// one with two programs for the same spec version.
+    /// Rejects an empty program set, which can't route any batch.
     ///
     /// Checked here rather than at prover startup so a bad config fails
-    /// before any node, DB, or DA work begins. Only the versions are checked,
-    /// not that the paths exist or parse — reading them is left to whoever
-    /// actually builds the backend.
+    /// before any node, DB, or DA work begins. The paths aren't checked —
+    /// reading them is left to whoever actually builds the backend, which
+    /// also refuses two programs that derive the same key.
     fn validate(&self) -> eyre::Result<()> {
-        let programs = self.programs();
-        if programs.is_empty() {
+        if self.programs().is_empty() {
             return Err(eyre::eyre!(
                 "sequencer.prover needs at least one [[sequencer.prover.programs]] entry"
             ));
-        }
-
-        // The prover routes each batch by its spec version, so a second
-        // program for one version would leave the route ambiguous.
-        let mut seen = BTreeSet::new();
-        for program in programs {
-            if !seen.insert(program.spec_version) {
-                return Err(eyre::eyre!(
-                    "sequencer.prover has more than one program for spec version {}",
-                    program.spec_version
-                ));
-            }
         }
 
         Ok(())
@@ -1665,7 +1650,7 @@ mod tests {
     /// parsed, not later at prover startup.
     #[cfg(feature = "sequencer")]
     #[test]
-    fn prover_programs_must_be_non_empty_and_uniquely_versioned() {
+    fn prover_programs_must_be_non_empty() {
         fn sequencer_toml(programs: &str) -> String {
             format!(
                 r#"
@@ -1693,7 +1678,9 @@ mod tests {
         let err = AlpenClientConfig::from_toml_str(&sequencer_toml("programs = []")).unwrap_err();
         assert!(err.to_string().contains("at least one"), "{err}");
 
-        let err = AlpenClientConfig::from_toml_str(&sequencer_toml(
+        // Two programs for one version are what a guest fix that keeps the
+        // rules looks like: a new key, not a new version.
+        AlpenClientConfig::from_toml_str(&sequencer_toml(
             r#"
             [[sequencer.prover.programs]]
             spec_version = "v0"
@@ -1705,12 +1692,7 @@ mod tests {
             acct_path = "/tmp/acct-b.key"
             "#,
         ))
-        .unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("more than one program for spec version v0"),
-            "{err}"
-        );
+        .unwrap();
 
         // Two versions resident at once is the point: it's what lets the
         // sequencer keep proving across a rotation without a restart.

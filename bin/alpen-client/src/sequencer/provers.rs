@@ -33,7 +33,7 @@ use super::prover::{
     launch_validated_ee_batch_prover, AcctProverFactory, AcctReceiptHook, AcctSpec,
     AcctStateReader, ChunkProverFactory, ChunkReceiptHook, ChunkSpec, EeAcctTaskStore,
     EeBatchProofDbManager, EeChunkReceiptStore, EeChunkTaskStore, EeProverBuilders, EeProverStores,
-    LaunchedEeProver,
+    PaasBatchProver,
 };
 use crate::{config::ProverBackendConfig, service_executor::ServiceExecutor};
 
@@ -49,14 +49,13 @@ pub(crate) struct EeProverInputs<P> {
 
 /// Builds the chunk + acct `ProverBuilder`s, picks a backend, validates the
 /// resulting account predicate key against the OL's expected `update_vk`,
-/// and launches both prover services. Also returns the version each
-/// program's key proves, for the block builder to resolve rotations with.
+/// and launches both prover services.
 pub(crate) async fn launch<P>(
     service_executor: &ServiceExecutor,
     dbs: &SequencerDatabases,
-    ol_client: &(impl SequencerOLClient + Send + Sync),
+    ol_client: Arc<dyn SequencerOLClient + Send + Sync>,
     inputs: EeProverInputs<P>,
-) -> eyre::Result<LaunchedEeProver>
+) -> eyre::Result<Arc<PaasBatchProver>>
 where
     P: StateProviderFactory + BlockReader<Block = Block> + Send + Sync + 'static,
 {
@@ -141,7 +140,7 @@ where
         })
     };
 
-    let launched = launch_validated_ee_batch_prover(
+    let batch_prover = launch_validated_ee_batch_prover(
         ol_client,
         service_executor,
         EeProverBuilders {
@@ -151,8 +150,9 @@ where
         EeProverStores {
             chunk_storage: chunk_storage_dyn,
             batch_storage: batch_storage_dyn,
+            exec_storage: storage.clone(),
             batch_proofs,
-            prover_db,
+            prover_db: prover_db.clone(),
         },
         backend,
         params,
@@ -165,7 +165,7 @@ where
         "EE chunk + acct paas provers started"
     );
 
-    Ok(launched)
+    Ok(batch_prover)
 }
 
 impl<F, S> AcctStateReader for RangeWitnessExtractor<F, S>

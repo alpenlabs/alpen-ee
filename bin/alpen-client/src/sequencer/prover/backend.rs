@@ -2,14 +2,12 @@
 //!
 //! [`launch_validated_ee_batch_prover`] is the entry point: it picks a
 //! backend (`sequencer.prover.backend`, native or sp1), builds every
-//! configured `[[sequencer.prover.programs]]` entry into a
-//! launched [`ProverProgram`], keyed by that entry's spec version, and
-//! hard-fails unless one of them derives the account predicate key the OL
-//! expects as its `update_vk`, warning when that match isn't the program
-//! governing current batches. It also hands back each program's key with its
-//! version, which the block builder needs to resolve a rotation. Routing a
-//! given batch to the right resident program (by that batch's own governing
-//! spec version) is [`PaasBatchProver`]'s job, not this module's.
+//! configured `[[sequencer.prover.programs]]` entry into a launched
+//! [`ProverProgram`] with the account predicate key it derives, and hard-fails
+//! unless one of them derives the key the OL expects as its `update_vk`.
+//! Routing a given batch to the right resident program (by the key the OL
+//! checks that batch against) is [`PaasBatchProver`]'s job, not this
+//! module's.
 
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc, time::Duration};
 
@@ -17,15 +15,14 @@ use alpen_common::SequencerOLClient;
 use alpen_params::{AlpenParams, AlpenSpecId};
 use alpen_proof_acct::process_ee_acct_update_native;
 use alpen_proof_chunk::process_ee_chunk_native;
-use alpen_sequencer::ProgramRegistry;
-use alpen_storage_api::{BatchStorage, ChunkStorage};
+use alpen_storage_api::{BatchStorage, ChunkStorage, ExecBlockStorage};
 use alpen_storage_store::{BatchTaskKey, ChunkTaskKey, ProgramScope, ProverDbMdbx, ProverTaskKey};
 use eyre::Context;
 use k256::schnorr::SigningKey;
 use strata_paas::{Prover, ProverBuilder, ProverServiceBuilder};
 use strata_predicate::{PredicateKey, PredicateTypeId};
 use strata_primitives::buf::Buf32;
-use tracing::{info, warn};
+use tracing::info;
 #[cfg(feature = "sp1")]
 use zkaleido::ZkVmExecutor;
 use zkaleido_native_adapter::NativeHost;
@@ -34,7 +31,9 @@ use zkaleido_sp1_groth16_verifier::SP1Groth16Verifier;
 #[cfg(feature = "sp1")]
 use zkaleido_sp1_host::{SP1Host, SP1HostConfig};
 
-use super::{AcctSpec, ChunkSpec, EeBatchProofDbManager, PaasBatchProver, ProverProgram};
+use super::{
+    AcctSpec, BatchProverSources, ChunkSpec, EeBatchProofDbManager, PaasBatchProver, ProverProgram,
+};
 use crate::{config::ProverBackendConfig, service_executor::ServiceExecutor};
 
 /// Default end-to-end deadline applied to the SP1 prover network for the EE
@@ -43,6 +42,9 @@ use crate::{config::ProverBackendConfig, service_executor::ServiceExecutor};
 /// requests.
 #[cfg(feature = "sp1")]
 const DEFAULT_SP1_DEADLINE_SECS: u64 = 4 * 60 * 60;
+
+/// How often each launched prover service polls for work.
+const PROVER_TICK: Duration = Duration::from_secs(5);
 
 /// Builds the chunk prover of the program with the given scope.
 pub(crate) type ChunkProverFactory =
@@ -69,22 +71,36 @@ pub(crate) struct EeProverBuilders {
 pub(crate) struct EeProverStores {
     pub(crate) chunk_storage: Arc<dyn ChunkStorage>,
     pub(crate) batch_storage: Arc<dyn BatchStorage>,
+    pub(crate) exec_storage: Arc<dyn ExecBlockStorage>,
     pub(crate) batch_proofs: Arc<EeBatchProofDbManager>,
     pub(crate) prover_db: Arc<ProverDbMdbx>,
 }
 
-/// One resident candidate's built, not-yet-launched chunk + acct provers.
-struct EeProvers {
-    account_key: PredicateKey,
-    chunk: Prover<ChunkSpec>,
-    account: Prover<AcctSpec>,
-}
+/// A resident program whose chunk + acct provers are built but not yet
+/// launched.
+type BuiltProgram = ProverProgram<Prover<ChunkSpec>, Prover<AcctSpec>>;
 
-/// The launched batch prover, and the version each of its programs' keys
-/// proves.
-pub(crate) struct LaunchedEeProver {
-    pub(crate) batch_prover: Arc<PaasBatchProver>,
-    pub(crate) program_registry: ProgramRegistry,
+impl BuiltProgram {
+    /// Launches the chunk and acct provers into paas services.
+    async fn launch(self, service_executor: &ServiceExecutor) -> eyre::Result<ProverProgram> {
+        let spec_version = self.scope.spec_version();
+        let chunk = ProverServiceBuilder::new(self.chunk)
+            .tick_interval(PROVER_TICK)
+            .launch(service_executor)
+            .await
+            .map_err(|e| eyre::eyre!("launching chunk prover service for {spec_version}: {e}"))?;
+        let acct = ProverServiceBuilder::new(self.acct)
+            .tick_interval(PROVER_TICK)
+            .launch(service_executor)
+            .await
+            .map_err(|e| eyre::eyre!("launching acct prover service for {spec_version}: {e}"))?;
+
+        Ok(ProverProgram {
+            scope: self.scope,
+            chunk,
+            acct,
+        })
+    }
 }
 
 /// Picks a prover backend, builds every resident
@@ -92,67 +108,149 @@ pub(crate) struct LaunchedEeProver {
 /// and hard-fails unless one of them derives the account predicate key the
 /// OL expects as its `update_vk`.
 pub(crate) async fn launch_validated_ee_batch_prover(
-    ol_client: &(impl SequencerOLClient + Send + Sync),
+    ol_client: Arc<dyn SequencerOLClient + Send + Sync>,
     service_executor: &ServiceExecutor,
     builders: EeProverBuilders,
     stores: EeProverStores,
     backend: ProverBackendConfig,
     params: Arc<AlpenParams>,
-) -> eyre::Result<LaunchedEeProver> {
+) -> eyre::Result<Arc<PaasBatchProver>> {
     let ol_account_update_vk = ol_client
         .get_latest_account_update_vk()
         .await
         .context("failed to fetch OL account update_vk for prover validation")?;
-    let governing_version = governing_spec_version(stores.batch_storage.as_ref(), &params).await?;
-    let (provers, program_registry) = build_ee_provers(
-        &builders,
-        backend,
-        params,
-        &ol_account_update_vk,
-        governing_version,
-    )
-    .await?;
-    adopt_legacy_tasks(&stores.prover_db, &provers)?;
 
-    let programs = launch_ee_prover_services(service_executor, provers).await?;
+    let programs_per_version = count_programs_per_version(&backend);
+    ensure_no_legacy_open_tasks(&stores.prover_db, &programs_per_version)?;
 
-    let batch_prover = Arc::new(PaasBatchProver::new(
+    let built = build_programs(&builders, backend, params, &ol_account_update_vk).await?;
+    adopt_legacy_tasks(&stores.prover_db, &built, &programs_per_version)?;
+
+    let mut programs = Vec::with_capacity(built.len());
+    for program in built {
+        programs.push(program.launch(service_executor).await?);
+    }
+
+    Ok(Arc::new(PaasBatchProver::new(
         programs,
-        stores.chunk_storage,
-        stores.batch_storage,
-        stores.batch_proofs,
-    ));
-    Ok(LaunchedEeProver {
-        batch_prover,
-        program_registry,
-    })
+        BatchProverSources {
+            ol_client,
+            chunk_storage: stores.chunk_storage,
+            batch_storage: stores.batch_storage,
+            exec_storage: stores.exec_storage,
+            batch_proofs: stores.batch_proofs,
+        },
+    )))
 }
 
-/// Builds every configured program, keyed by the `AlpenSpecId` it is
-/// configured under, and hard-fails unless one of them matches
-/// `ol_account_update_vk`, warning when that match isn't the program keyed
-/// under `governing_version`. Also returns each program's account predicate
-/// key with its version.
+/// How many configured programs prove each spec version.
+fn count_programs_per_version(backend: &ProverBackendConfig) -> BTreeMap<AlpenSpecId, usize> {
+    let mut counts = BTreeMap::new();
+    for program in backend.programs() {
+        *counts.entry(program.spec_version).or_insert(0) += 1;
+    }
+    counts
+}
+
+/// Fails when a spec version with more than one program has an unfinished
+/// legacy task.
+///
+/// A legacy task was stored before tasks recorded their program. A version's
+/// only program adopts those, but with two programs neither can tell whether
+/// the task is its own, so no prover would ever pick it up and its batch would
+/// stall. Running with one program for that version until they finish lets
+/// that program adopt them.
+fn ensure_no_legacy_open_tasks(
+    prover_db: &ProverDbMdbx,
+    programs_per_version: &BTreeMap<AlpenSpecId, usize>,
+) -> eyre::Result<()> {
+    for (spec_version, count) in programs_per_version {
+        if *count < 2 {
+            continue;
+        }
+        let open = count_legacy_open_tasks::<ChunkTaskKey>(prover_db, *spec_version)?
+            + count_legacy_open_tasks::<BatchTaskKey>(prover_db, *spec_version)?;
+        if open > 0 {
+            return Err(eyre::eyre!(
+                "{open} unfinished prover task(s) of spec version {spec_version} were stored \
+                 before tasks recorded their program, and {count} programs are configured for \
+                 {spec_version}; start with one {spec_version} program until they finish"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn count_legacy_open_tasks<K: ProverTaskKey>(
+    prover_db: &ProverDbMdbx,
+    spec_version: AlpenSpecId,
+) -> eyre::Result<usize> {
+    prover_db
+        .count_legacy_open_tasks::<K>(spec_version)
+        .context("failed to read the prover task tables")
+}
+
+/// Gives each version's legacy tasks, chunk and acct, to that version's
+/// program when it has only one.
+///
+/// A legacy task was stored before tasks recorded their program, and no
+/// program works on one until it is adopted. A version with two programs
+/// keeps its legacy tasks, which [`ensure_no_legacy_open_tasks`] has already
+/// checked are all finished. paas re-spawns unfinished tasks when its prover
+/// launches, so this has to run before that.
+fn adopt_legacy_tasks(
+    prover_db: &ProverDbMdbx,
+    programs: &[BuiltProgram],
+    programs_per_version: &BTreeMap<AlpenSpecId, usize>,
+) -> eyre::Result<()> {
+    for program in programs {
+        let scope = &program.scope;
+        let spec_version = scope.spec_version();
+        if programs_per_version.get(&spec_version) != Some(&1) {
+            continue;
+        }
+        let adopted = adopt_legacy_tasks_of::<ChunkTaskKey>(prover_db, scope)?
+            + adopt_legacy_tasks_of::<BatchTaskKey>(prover_db, scope)?;
+        if adopted > 0 {
+            info!(
+                target: "alpen-client",
+                %spec_version,
+                adopted,
+                "gave prover tasks stored before tasks recorded their program to the version's program"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn adopt_legacy_tasks_of<K: ProverTaskKey>(
+    prover_db: &ProverDbMdbx,
+    scope: &ProgramScope,
+) -> eyre::Result<usize> {
+    prover_db
+        .adopt_legacy_tasks::<K>(scope)
+        .context("failed to adopt legacy prover tasks")
+}
+
+/// Builds every configured program, and hard-fails unless one of them
+/// matches `ol_account_update_vk` and no two share a key.
 ///
 /// `backend` may carry several programs (see
 /// [`ProverProgramConfig`](crate::config::ProverProgramConfig)'s doc comment):
 /// an operator straddling a VK rotation configures both the currently-active
 /// and the not-yet-active program ahead of time, so the sequencer doesn't
-/// need restarting once the rotation lands — as long as the successor
-/// version's program was already resident. Every program is built (not just
-/// whichever is active right now), since [`PaasBatchProver`] routes each
-/// batch's proof request by that batch's own governing spec version, not by
-/// whatever's active at this moment.
-async fn build_ee_provers(
+/// need restarting once the rotation lands — as long as the target program
+/// was already resident. Every program is built (not just whichever is active
+/// right now), since [`PaasBatchProver`] routes each batch's proof request by
+/// the key the OL checks that batch against, not by whatever's active at this
+/// moment.
+async fn build_programs(
     builders: &EeProverBuilders,
     backend: ProverBackendConfig,
     params: Arc<AlpenParams>,
     ol_account_update_vk: &PredicateKey,
-    governing_version: AlpenSpecId,
-) -> eyre::Result<(BTreeMap<AlpenSpecId, EeProvers>, ProgramRegistry)> {
-    let mut provers = BTreeMap::new();
-    let mut program_keys: Vec<(PredicateKey, AlpenSpecId)> = Vec::new();
-    let mut matched_versions: Vec<AlpenSpecId> = Vec::new();
+) -> eyre::Result<Vec<BuiltProgram>> {
+    let mut built = Vec::new();
 
     match backend {
         ProverBackendConfig::Native { programs } => {
@@ -164,11 +262,7 @@ async fn build_ee_provers(
                 let acct_signing_key = native_schnorr_signing_key_from_file(&program.acct_path)?;
 
                 let account_predicate_key = schnorr_predicate_key(&acct_signing_key);
-                if &account_predicate_key == ol_account_update_vk {
-                    matched_versions.push(*spec_version);
-                }
-                let scope = ProgramScope::new(*spec_version, account_predicate_key.clone());
-                program_keys.push((account_predicate_key.clone(), *spec_version));
+                let scope = ProgramScope::new(*spec_version, account_predicate_key);
 
                 let chunk_predicate_key = schnorr_predicate_key(&chunk_signing_key);
                 let chunk_host = {
@@ -186,16 +280,9 @@ async fn build_ee_provers(
                         process_ee_acct_update_native(zkvm, spec_version, &chunk_predicate_key)
                     })
                 };
-                let account = (builders.account)(&scope).native(acct_host);
+                let acct = (builders.account)(&scope).native(acct_host);
 
-                provers.insert(
-                    *spec_version,
-                    EeProvers {
-                        account_key: account_predicate_key,
-                        chunk,
-                        account,
-                    },
-                );
+                built.push(BuiltProgram { scope, chunk, acct });
             }
         }
         #[cfg(feature = "sp1")]
@@ -241,23 +328,12 @@ async fn build_ee_provers(
                 let account_predicate_key = sp1_groth16_predicate_key(acct_host.program_id().0)
                     .context("failed to derive local SP1 account prover predicate key")?;
 
-                if &account_predicate_key == ol_account_update_vk {
-                    matched_versions.push(*spec_version);
-                }
-                let scope = ProgramScope::new(*spec_version, account_predicate_key.clone());
-                program_keys.push((account_predicate_key.clone(), *spec_version));
+                let scope = ProgramScope::new(*spec_version, account_predicate_key);
 
                 let chunk = (builders.chunk)(&scope).remote(chunk_host);
-                let account = (builders.account)(&scope).remote(acct_host);
+                let acct = (builders.account)(&scope).remote(acct_host);
 
-                provers.insert(
-                    *spec_version,
-                    EeProvers {
-                        account_key: account_predicate_key,
-                        chunk,
-                        account,
-                    },
-                );
+                built.push(BuiltProgram { scope, chunk, acct });
             }
         }
         #[cfg(not(feature = "sp1"))]
@@ -269,127 +345,45 @@ async fn build_ee_provers(
         }
     }
 
-    validate_live_vk_match(
-        &matched_versions,
-        governing_version,
-        provers.len(),
-        ol_account_update_vk,
-    )?;
+    let program_keys: Vec<&PredicateKey> = built.iter().map(|p| p.scope.key()).collect();
+    validate_live_vk_match(&program_keys, ol_account_update_vk)?;
+    ensure_distinct_keys(&program_keys)?;
 
-    let program_registry = ProgramRegistry::new(program_keys)
-        .context("prover programs don't each name one spec version")?;
-
-    Ok((provers, program_registry))
+    Ok(built)
 }
 
-/// Gives each version's legacy tasks, chunk and acct, to that version's
-/// program. The config allows one program per version.
+/// Fails when two resident programs derive the same key.
 ///
-/// A legacy task was stored before tasks recorded their program, and no
-/// program works on one until it is adopted. paas re-spawns unfinished tasks
-/// when its prover launches, so this has to run before that.
-fn adopt_legacy_tasks(
-    prover_db: &ProverDbMdbx,
-    provers: &BTreeMap<AlpenSpecId, EeProvers>,
-) -> eyre::Result<()> {
-    for (spec_version, prover) in provers {
-        let spec_version = *spec_version;
-        let scope = ProgramScope::new(spec_version, prover.account_key.clone());
-        let adopted = adopt_legacy_tasks_of::<ChunkTaskKey>(prover_db, &scope)?
-            + adopt_legacy_tasks_of::<BatchTaskKey>(prover_db, &scope)?;
-        if adopted > 0 {
-            info!(
-                target: "alpen-client",
-                %spec_version,
-                adopted,
-                "gave prover tasks stored before tasks recorded their program to the version's program"
-            );
+/// The OL tells programs apart only by key, so a batch's key would match both,
+/// and the block builder could not tell which version a rotation to that key
+/// activates. Checked before the prover services start, so they never run
+/// with an ambiguous key.
+fn ensure_distinct_keys(program_keys: &[&PredicateKey]) -> eyre::Result<()> {
+    for (idx, key) in program_keys.iter().enumerate() {
+        if program_keys[..idx].contains(key) {
+            return Err(eyre::eyre!("two prover programs derive the same key {key}"));
         }
     }
     Ok(())
 }
 
-fn adopt_legacy_tasks_of<K: ProverTaskKey>(
-    prover_db: &ProverDbMdbx,
-    scope: &ProgramScope,
-) -> eyre::Result<usize> {
-    prover_db
-        .adopt_legacy_tasks::<K>(scope)
-        .context("failed to adopt legacy prover tasks")
-}
-
-/// Resolves the spec version governing the batches being proved right now:
-/// the one stamped on the most recently sealed batch, which is exactly what
-/// [`PaasBatchProver::program_for`] routes on.
-///
-/// A node with no batch sealed yet is at genesis, where the schedule names
-/// the version outright.
-async fn governing_spec_version(
-    batch_storage: &dyn BatchStorage,
-    params: &AlpenParams,
-) -> eyre::Result<AlpenSpecId> {
-    let latest = batch_storage
-        .get_latest_batch()
-        .await
-        .context("failed to read the latest batch for prover validation")?;
-
-    Ok(match latest {
-        Some((batch, _status)) => batch.spec_version(),
-        None => params.spec_schedule().active_at(0),
-    })
-}
-
 /// Checks the resident programs against the OL's live `update_vk`.
 ///
-/// Fatal only when *no* resident program derives the live key: that node can
-/// never produce an account proof OL accepts, whatever version it ends up
-/// proving.
-///
-/// A match under a version other than `governing_version` only warns, and
-/// deliberately so. The two inputs are read at different freshness and move
-/// independently, so they disagree during any rotation, in both directions:
-///
-/// - `get_latest_account_update_vk` reads OL's `Latest` tag, so the live key flips as soon as the
-///   update carrying a rotation lands at the OL tip, while batches keep being sealed under the old
-///   version until the rotation-consuming block's batch is sealed.
-/// - The sequencer builds ahead of OL, so it can seal batches under the new version before the
-///   update that rotates OL's key has been accepted.
-///
-/// Failing startup on either window would wedge the node: nothing else runs,
-/// so the very state the check is waiting on can never advance, and the node
-/// restart-loops. A warning naming both versions is what this can soundly
-/// assert — it still surfaces `[[sequencer.prover.programs]]` entries whose
-/// `spec_version`s were swapped, which is the case worth catching, without
-/// being able to stall a healthy node.
+/// Fatal when no resident program derives the live key. The next update the
+/// OL accepts is checked against that key, so that node could never produce
+/// an account proof the OL accepts. Which batch each program proves is decided
+/// per batch, by [`PaasBatchProver`].
 fn validate_live_vk_match(
-    matched_versions: &[AlpenSpecId],
-    governing_version: AlpenSpecId,
-    program_count: usize,
+    program_keys: &[&PredicateKey],
     ol_account_update_vk: &PredicateKey,
 ) -> eyre::Result<()> {
-    if matched_versions.is_empty() {
+    if !program_keys.contains(&ol_account_update_vk) {
         return Err(eyre::eyre!(
-            "none of the {program_count} resident prover program(s) match \
-             OL's expected account update_vk {ol_account_update_vk:?}"
+            "none of the {} resident prover program(s) match \
+             OL's expected account update_vk {ol_account_update_vk:?}",
+            program_keys.len()
         ));
     }
-
-    if !matched_versions.contains(&governing_version) {
-        let matched = matched_versions
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join(", ");
-        warn!(
-            target: "alpen-client",
-            %governing_version,
-            matched_versions = %matched,
-            "the prover program matching OL's live account update_vk is not the one built \
-             for the version governing current batches; expected during a rotation, but \
-             check the spec_version of each [[sequencer.prover.programs]] entry"
-        );
-    }
-
     Ok(())
 }
 
@@ -441,38 +435,6 @@ fn sp1_groth16_predicate_key(program_id: [u8; 32]) -> eyre::Result<PredicateKey>
     .map_err(|e| eyre::eyre!("SP1 Groth16 verifier does not fit in a predicate key: {e}"))
 }
 
-/// Launches every resident candidate's built provers into paas services,
-/// keyed by the same `AlpenSpecId` [`build_ee_provers`] indexed them by.
-async fn launch_ee_prover_services(
-    service_executor: &ServiceExecutor,
-    provers: BTreeMap<AlpenSpecId, EeProvers>,
-) -> eyre::Result<BTreeMap<AlpenSpecId, ProverProgram>> {
-    let prover_tick = Duration::from_secs(5);
-    let mut programs = BTreeMap::new();
-    for (spec_version, provers) in provers {
-        let chunk_handle = ProverServiceBuilder::new(provers.chunk)
-            .tick_interval(prover_tick)
-            .launch(service_executor)
-            .await
-            .map_err(|e| eyre::eyre!("launching chunk prover service for {spec_version}: {e}"))?;
-        let acct_handle = ProverServiceBuilder::new(provers.account)
-            .tick_interval(prover_tick)
-            .launch(service_executor)
-            .await
-            .map_err(|e| eyre::eyre!("launching acct prover service for {spec_version}: {e}"))?;
-
-        programs.insert(
-            spec_version,
-            ProverProgram {
-                chunk_handle,
-                acct_handle,
-            },
-        );
-    }
-
-    Ok(programs)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -498,29 +460,39 @@ mod tests {
         assert!(parse_native_schnorr_signing_key(&hex).is_err());
     }
 
-    fn live_vk() -> PredicateKey {
-        schnorr_predicate_key(&parse_native_schnorr_signing_key(&"11".repeat(32)).unwrap())
+    fn signing_key_predicate(byte: &str) -> PredicateKey {
+        schnorr_predicate_key(&parse_native_schnorr_signing_key(&byte.repeat(32)).unwrap())
     }
 
     #[test]
-    fn live_vk_match_at_the_governing_version_is_accepted() {
-        validate_live_vk_match(&[AlpenSpecId::V0], AlpenSpecId::V0, 2, &live_vk()).unwrap();
-    }
-
-    #[test]
-    fn live_vk_match_off_the_governing_version_only_warns() {
-        // Both rotation windows land here, in either direction: OL's live key
-        // flips at its own tip while batches still seal under the old
-        // version, and the sequencer seals under the new version before the
-        // rotating update is accepted. Neither may fail startup.
-        validate_live_vk_match(&[AlpenSpecId::V1], AlpenSpecId::V0, 2, &live_vk()).unwrap();
-        validate_live_vk_match(&[AlpenSpecId::V0], AlpenSpecId::V1, 2, &live_vk()).unwrap();
+    fn a_program_matching_the_live_vk_is_accepted() {
+        let live = signing_key_predicate("11");
+        let other = signing_key_predicate("22");
+        validate_live_vk_match(&[&other, &live], &live).unwrap();
     }
 
     #[test]
     fn no_live_vk_match_is_rejected() {
-        let err = validate_live_vk_match(&[], AlpenSpecId::V0, 2, &live_vk())
+        let live = signing_key_predicate("11");
+        let other = signing_key_predicate("22");
+        let err = validate_live_vk_match(&[&other, &other], &live)
             .expect_err("no matching program must fail startup");
         assert!(err.to_string().contains("none of the 2 resident"));
+    }
+
+    #[test]
+    fn programs_with_distinct_keys_are_accepted() {
+        let first = signing_key_predicate("11");
+        let second = signing_key_predicate("22");
+        ensure_distinct_keys(&[&first, &second]).unwrap();
+    }
+
+    #[test]
+    fn two_programs_with_one_key_are_rejected() {
+        let first = signing_key_predicate("11");
+        let second = signing_key_predicate("22");
+        let err = ensure_distinct_keys(&[&first, &second, &first])
+            .expect_err("a shared key must fail startup");
+        assert!(err.to_string().contains("derive the same key"));
     }
 }

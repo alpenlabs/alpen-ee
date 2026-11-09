@@ -66,9 +66,9 @@ class TestEePredicateTransition(BaseTest):
                 # bin/alpen-client/src/config.rs): v2's acct key is the
                 # rotation target, v1's is the genesis-matching key. Both are
                 # validated and loaded at startup; the sequencer routes each
-                # batch's proof request to whichever program's version matches
-                # that batch's own governing spec version (see PaasBatchProver
-                # in bin/alpen-client/src/sequencer/prover/batch_prover.rs), so
+                # batch's proof request to the program whose key the OL will
+                # check that batch against (see PaasBatchProver in
+                # bin/alpen-client/src/sequencer/prover/batch_prover.rs), so
                 # proving keeps working across the V1 -> V2 rotation below
                 # without a restart.
                 prover=PROVER,

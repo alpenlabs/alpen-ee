@@ -7,21 +7,25 @@
 //!
 //! `check_proof_status(batch_id)` peeks the typed
 //! [`EeBatchProofDbManager`] first (proof present → `Ready`); on miss
-//! it maps `acct_handle.get_status(BatchTask)` to
+//! it maps the acct prover's `get_status(BatchTask)` to
 //! [`ProofGenerationStatus`].
 //!
-//! Both route through [`PaasBatchProver::program_for`] first: a batch never
-//! straddles a VK rotation (the sequencer force-seals right after any
-//! rotation-consuming block), so each batch has exactly one governing
-//! `AlpenSpecId`, stamped on it at seal time and read back here via
-//! `batch_storage` — that version picks which resident [`ProverProgram`]
-//! actually proves it.
+//! Both route through [`PaasBatchProver::program_for`] first. When the
+//! batch's spec version has one resident [`ProverProgram`], that program
+//! proves it. A version has several while it rotates to a new key, and then
+//! the batch goes to the one whose key the OL will check its update against.
+//! A batch never straddles a VK rotation (the sequencer force-seals right
+//! after any rotation-consuming block), so that is one key, which
+//! [`update_key_for_batch`] works out.
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
-use alpen_common::{BatchId, BatchProver, ChunkStatus, Proof, ProofGenerationStatus, ProofId};
-use alpen_params::AlpenSpecId;
-use alpen_storage_api::{BatchStorage, ChunkStorage};
+use alpen_common::{
+    BatchId, BatchProver, ChunkStatus, Proof, ProofGenerationStatus, ProofId, SequencerOLClient,
+};
+use alpen_sequencer::{update_key_for_batch, ProgramRegistry};
+use alpen_storage_api::{BatchStorage, ChunkStorage, ExecBlockStorage};
+use alpen_storage_store::ProgramScope;
 use async_trait::async_trait;
 use metrics::counter;
 use strata_paas::{ProverError as PaasError, ProverHandle, TaskStatus};
@@ -32,43 +36,75 @@ use super::{
 };
 use crate::metrics::{PROOF_STATUS_CHECKS, PROOF_TASKS_SUBMITTED};
 
-/// One resident `--prover-program` candidate's launched chunk + acct prover
-/// handles. Named to mirror the config-side `ProverProgramConfig` it was
-/// resolved from.
-pub(crate) struct ProverProgram {
-    pub(crate) chunk_handle: ProverHandle<ChunkSpec>,
-    pub(crate) acct_handle: ProverHandle<AcctSpec>,
+/// One resident `[[sequencer.prover.programs]]` entry's chunk + acct provers.
+/// Named to mirror the config-side `ProverProgramConfig` it was resolved from.
+///
+/// `C` and `A` are what the program holds for its chunk and acct provers.
+/// Startup builds the provers first and launches them after, so a program
+/// holds built provers until then. The defaults are the launched handles,
+/// which [`PaasBatchProver`] routes batches to.
+pub(crate) struct ProverProgram<C = ProverHandle<ChunkSpec>, A = ProverHandle<AcctSpec>> {
+    pub(crate) scope: ProgramScope,
+    pub(crate) chunk: C,
+    pub(crate) acct: A,
+}
+
+/// Where [`PaasBatchProver`] reads what it needs to prove a batch and to pick
+/// its program.
+pub(crate) struct BatchProverSources {
+    pub(crate) ol_client: Arc<dyn SequencerOLClient + Send + Sync>,
+    pub(crate) chunk_storage: Arc<dyn ChunkStorage>,
+    pub(crate) batch_storage: Arc<dyn BatchStorage>,
+    pub(crate) exec_storage: Arc<dyn ExecBlockStorage>,
+    pub(crate) batch_proofs: Arc<EeBatchProofDbManager>,
 }
 
 /// New-paas-backed [`BatchProver`].
 ///
-/// Holds every resident [`ProverProgram`], keyed by the `AlpenSpecId` its
-/// candidate declared. See the module doc for how a batch's own version
-/// picks which one proves it.
+/// Holds every resident [`ProverProgram`]. See the module doc for how a
+/// batch picks which one proves it.
 pub(crate) struct PaasBatchProver {
-    programs: BTreeMap<AlpenSpecId, ProverProgram>,
+    programs: Vec<ProverProgram>,
+    ol_client: Arc<dyn SequencerOLClient + Send + Sync>,
     chunk_storage: Arc<dyn ChunkStorage>,
     batch_storage: Arc<dyn BatchStorage>,
+    exec_storage: Arc<dyn ExecBlockStorage>,
     batch_proofs: Arc<EeBatchProofDbManager>,
 }
 
 impl PaasBatchProver {
-    pub(crate) fn new(
-        programs: BTreeMap<AlpenSpecId, ProverProgram>,
-        chunk_storage: Arc<dyn ChunkStorage>,
-        batch_storage: Arc<dyn BatchStorage>,
-        batch_proofs: Arc<EeBatchProofDbManager>,
-    ) -> Self {
-        Self {
-            programs,
+    pub(crate) fn new(programs: Vec<ProverProgram>, sources: BatchProverSources) -> Self {
+        let BatchProverSources {
+            ol_client,
             chunk_storage,
             batch_storage,
+            exec_storage,
+            batch_proofs,
+        } = sources;
+        Self {
+            programs,
+            ol_client,
+            chunk_storage,
+            batch_storage,
+            exec_storage,
             batch_proofs,
         }
     }
 
-    /// Resolves which resident program proves `batch_id`, by the spec
-    /// version stamped on it at seal time.
+    /// The key and spec version of each resident program, for the block
+    /// builder to resolve rotations with. Built from the programs this prover
+    /// holds, so the block builder only honors a rotation that it can prove.
+    pub(crate) fn program_registry(&self) -> ProgramRegistry {
+        ProgramRegistry::new(
+            self.programs
+                .iter()
+                .map(|program| (program.scope.key().clone(), program.scope.spec_version())),
+        )
+        .expect("launch rejects two programs with the same key")
+    }
+
+    /// Resolves which resident program proves `batch_id`: the one whose key
+    /// the OL will check the batch's update against.
     async fn program_for(&self, batch_id: BatchId) -> eyre::Result<&ProverProgram> {
         let (batch, _status) = self
             .batch_storage
@@ -76,13 +112,54 @@ impl PaasBatchProver {
             .await?
             .ok_or_else(|| eyre::eyre!("no batch stored for {batch_id}"))?;
         let spec_version = batch.spec_version();
-        self.programs.get(&spec_version).ok_or_else(|| {
-            eyre::eyre!(
-                "no resident prover program for spec version {spec_version} (batch {batch_id}); \
-                 resident versions: {:?}",
-                self.programs.keys().collect::<Vec<_>>()
-            )
-        })
+
+        // The OL only accepts a proof made with the key it checks the batch
+        // against. If one program proves the version, it has to be that key,
+        // so working the key out would pick the same program.
+        let mut of_version = self
+            .programs
+            .iter()
+            .filter(|program| program.scope.spec_version() == spec_version);
+        match (of_version.next(), of_version.next()) {
+            (None, _) => {
+                return Err(eyre::eyre!(
+                    "no resident prover program for spec version {spec_version} (batch \
+                     {batch_id})"
+                ))
+            }
+            (Some(only), None) => return Ok(only),
+            (Some(_), Some(_)) => {}
+        }
+
+        let key = update_key_for_batch(
+            self.ol_client.as_ref(),
+            self.batch_storage.as_ref(),
+            self.exec_storage.as_ref(),
+            &batch,
+        )
+        .await?;
+
+        let program = self
+            .programs
+            .iter()
+            .find(|program| *program.scope.key() == key)
+            .ok_or_else(|| {
+                eyre::eyre!(
+                    "no resident prover program has the key {key} the OL checks batch \
+                     {batch_id} against"
+                )
+            })?;
+        // Only the config entry says which version a program proves, so a
+        // mislabeled entry shows up here.
+        if program.scope.spec_version() != spec_version {
+            return Err(eyre::eyre!(
+                "batch {batch_id} runs under {spec_version}, but the program with its key \
+                 {key} is configured for {}",
+                program.scope.spec_version()
+            ));
+        }
+
+        Ok(program)
     }
 }
 
@@ -106,7 +183,7 @@ impl BatchProver for PaasBatchProver {
         for chunk_id in chunks {
             let task = ChunkTask(chunk_id);
             program
-                .chunk_handle
+                .chunk
                 .submit(task)
                 .await
                 .map_err(|e| eyre::eyre!("submit chunk task {chunk_id:?}: {e}"))?;
@@ -125,7 +202,7 @@ impl BatchProver for PaasBatchProver {
         }
 
         program
-            .acct_handle
+            .acct
             .submit(BatchTask(batch_id))
             .await
             .map_err(|e| eyre::eyre!("submit acct task {batch_id}: {e}"))?;
@@ -149,7 +226,7 @@ impl BatchProver for PaasBatchProver {
         // Else map paas's task lifecycle status. `TaskNotFound` ⇒ NotStarted
         // (we never submitted, or we're in a fresh process and haven't yet
         // recovered).
-        let status = program.acct_handle.get_status(&BatchTask(batch_id));
+        let status = program.acct.get_status(&BatchTask(batch_id));
         let (status_name, result) = match status {
             Ok(TaskStatus::Completed) => {
                 // Completed but not in the proof DB? Hook hasn't fired yet
@@ -172,7 +249,7 @@ impl BatchProver for PaasBatchProver {
                 ("not_started", Ok(ProofGenerationStatus::NotStarted))
             }
             Err(e) => {
-                warn!(%batch_id, %e, "acct_handle.get_status failed");
+                warn!(%batch_id, %e, "acct prover get_status failed");
                 ("error", Err(eyre::eyre!("get_status({batch_id}): {e}")))
             }
         };
