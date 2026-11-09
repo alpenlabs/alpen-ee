@@ -10,6 +10,13 @@ if [ "${1-}" = "help" ] || [ "${1-}" = "--help" ] || [ "${1-}" = "-h" ]; then
     exec alpen-client --help
 fi
 
+# Reth's Prometheus endpoint. reth accepts --metrics once, and the fleet passes
+# it in the container args, so it is only added when the args do not carry it.
+case " $* " in
+    *" --metrics "* | *" --metrics="*) ;;
+    *) set -- --metrics "${METRICS_ADDR:-0.0.0.0:9001}" "$@" ;;
+esac
+
 # Thin launcher. Both Alpen inputs are files the operator supplies and mounts
 # into the container: the node's own TOML config (--alpen-config) and the
 # chain params artifact (--alpen-params). Neither is built here -- one config

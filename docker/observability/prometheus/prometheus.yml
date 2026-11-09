@@ -1,0 +1,25 @@
+# Scrapes alpen-client nodes' `--metrics` endpoints: reth's own metrics plus
+# every `reth_alpen_ee_*` series.
+#
+# Targets live in targets/alpen.yml (file-based discovery, re-read every 30 s
+# without a restart): the default is a node on the docker host started with
+# `--metrics 0.0.0.0:9001` or the docker entrypoint's METRICS_ADDR. Add a
+# second target for a full node; the dashboard's node picker is the `instance`
+# label, `role` only annotates the target.
+global:
+  scrape_interval: 5s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: alpen-client
+    file_sd_configs:
+      - files: ["/etc/prometheus/targets/*.yml"]
+        refresh_interval: 30s
+    # A real node exposes ~4,600 series, of which ~210 are Alpen's. Over a
+    # third are reth's per-RPC-method latency summaries, which nothing here
+    # reads; dropping them trims the TSDB by about the same share. Comment
+    # this out to keep them.
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: reth_rpc_server_calls_time_seconds(_sum|_count)?
+        action: drop
