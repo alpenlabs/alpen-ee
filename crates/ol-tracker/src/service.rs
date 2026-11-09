@@ -178,11 +178,13 @@ where
         }
         .await;
 
-        // `tracker_state` is the epoch the EE account state sits at on every
-        // path: an extension that fails halfway has already persisted and
-        // applied the earlier epochs, and a fatal error is about to stop the
-        // service with no later tick to publish them. So publish before
-        // handing the outcome back.
+        // `tracker_state` is the epoch the EE account state is persisted at
+        // on every path: an extension that fails halfway has already stored
+        // and applied the earlier epochs, and a fatal error is about to stop
+        // the service with no later tick to publish them. So publish before
+        // handing the outcome back. Watchers are only notified on success, so
+        // while an extension keeps failing this gauge runs ahead of the heads
+        // they were last given.
         gauge!(OL_EPOCH, "status" => "local")
             .set(f64::from(state.tracker_state.best_ol_epoch().epoch()));
 

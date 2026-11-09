@@ -18,7 +18,8 @@ pub const PAYLOAD_BUILD_RETRIES: &str = "alpen_ee_payload_build_retries_total";
 /// and `persist` (witness store write failed).
 pub const PAYLOAD_BUILD_FAILURES: &str = "alpen_ee_payload_build_failures_total";
 /// Fork-choice updates sent to reth, by `kind`: `preconf` (new head),
-/// `consensus` (OL safe and finalized heads) and `catchup` (resent heads).
+/// `consensus` (OL safe and finalized heads), `catchup` (resent heads) and
+/// `sync` (the startup sync of stored blocks into reth).
 pub const FORKCHOICE_UPDATES: &str = "alpen_ee_forkchoice_updates_total";
 /// Fork-choice updates reth rejected (`Invalid`) or that failed after the
 /// engine's retries, from every sender.
@@ -41,7 +42,7 @@ pub fn describe() {
     );
     describe_counter!(
         FORKCHOICE_UPDATES,
-        "Fork-choice updates sent to reth, by kind (preconf, consensus, catchup)"
+        "Fork-choice updates sent to reth, by kind (preconf, consensus, catchup, sync)"
     );
     describe_counter!(
         FORKCHOICE_FAILURES,

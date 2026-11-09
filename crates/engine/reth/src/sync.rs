@@ -6,6 +6,7 @@ use alloy_primitives::B256;
 use alloy_rpc_types_engine::ForkchoiceState;
 use alpen_engine_api::{EnginePayload, ExecutionEngine};
 use alpen_storage_api::ExecBlockStorage;
+use metrics::counter;
 use reth_node_builder::NodeTypesWithDB;
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
@@ -16,6 +17,7 @@ use strata_retry::retry_with_backoff_async;
 use tracing::{debug, info};
 
 use crate::{
+    metrics::FORKCHOICE_UPDATES,
     retry::{engine_call_backoff, ENGINE_CALL_MAX_RETRIES},
     SyncError,
 };
@@ -194,6 +196,7 @@ where
                 B256::from_slice(blockhash.as_ref())
             },
         };
+        counter!(FORKCHOICE_UPDATES, "kind" => "sync").increment(1);
         engine.update_consensus_state(forkchoice_state).await?;
 
         debug!(height = %height, ?blockhash, "block synced successfully");
@@ -309,6 +312,7 @@ where
             safe_block_hash: B256::ZERO,
             finalized_block_hash: B256::ZERO,
         };
+        counter!(FORKCHOICE_UPDATES, "kind" => "sync").increment(1);
         engine.update_consensus_state(forkchoice_state).await?;
 
         debug!(height = %block.blocknum(), ?hash, "unfinalized block synced successfully");

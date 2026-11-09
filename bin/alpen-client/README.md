@@ -877,7 +877,7 @@ Every Alpen series is recorded through the `metrics` facade onto Reth's Promethe
 | `alpen_ee_payload_build_seconds` | H | `stage`: `accept`, `resolve`, `persist` (witness stored), `total` | Where does a payload build spend its time? |
 | `alpen_ee_payload_build_retries_total` | C | | Is reth lagging behind the sequencer's parent? |
 | `alpen_ee_payload_build_failures_total` | C | `reason`: `missing` (parent not in reth after the retries), `rejected`, `communication`, `resolve_failed`, `no_payload`, `witness_missing`, `persist` | Why do payload builds fail? |
-| `alpen_ee_forkchoice_updates_total` | C | `kind`: `preconf`, `consensus`, `catchup` | Is reth being driven? |
+| `alpen_ee_forkchoice_updates_total` | C | `kind`: `preconf`, `consensus`, `catchup`, `sync` | Is reth being driven? |
 | `alpen_ee_forkchoice_failures_total` | C | | Is reth rejecting heads? |
 
 **Batches and chunks** (`alpen-sequencer`)
@@ -923,7 +923,7 @@ Every Alpen series is recorded through the `metrics` facade onto Reth's Promethe
 | `alpen_ee_ol_updates_submitted_total` | C | `kind`: `first`, `retry` | Are updates going out, and how often are they resent? Submission memory is per process: after a restart an unaccepted batch counts as `first` again. |
 | `alpen_ee_ol_update_failures_total` | C | | Can the sequencer read OL state and submit? Counted per failed submitter pass. |
 | `alpen_ee_ol_update_outputs_total` | C | `kind`: `transfer`, `message` | Are withdrawals and messages leaving the EE? Counted on first submissions, so a restart can count an unaccepted batch's outputs again. |
-| `alpen_ee_ol_epoch` | G | `status`: `local`, `confirmed`, `finalized`, `latest` | Is the node keeping up with the OL? |
+| `alpen_ee_ol_epoch` | G | `status`: `local`, `confirmed`, `finalized`, `latest` | Is the node keeping up with the OL? `local` is the epoch the EE account state is persisted at; while an extension keeps failing partway it runs ahead of the heads the tracker has broadcast. |
 | `alpen_ee_ol_epochs_applied_total` | C | | Is the tracker applying epochs? |
 | `alpen_ee_ol_tracker_actions_total` | C | `action`: `extend`, `refresh_finalized`, `reorg`, `noop` | What does the tracker do on each poll? |
 | `alpen_ee_ol_tracker_failures_total` | C | `fatal` | Is the OL link failing? |
