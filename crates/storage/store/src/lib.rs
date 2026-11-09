@@ -18,8 +18,8 @@ pub use error::{DbError, DbResult};
 #[cfg(feature = "test-utils")]
 pub use init::open_da_ops;
 pub use init::{
-    create_ee_envs, open_stores, BroadcastDbOps, ChunkedEnvelopeOps, SequencerDatabases, Stores,
-    ENV_DA, ENV_NODE, ENV_PROVER, ENV_WITNESS, MDBX_DIR, MDBX_ENVS,
+    open_stores, BroadcastDbOps, ChunkedEnvelopeOps, SequencerDatabases, Stores, ENV_DA, ENV_NODE,
+    ENV_PROVER, ENV_WITNESS, MDBX_DIR, MDBX_ENVS,
 };
 pub use mdbxdb::{DaContextDbMdbx, NodeDbMdbx, ProverDbMdbx, ProverTaskKey, WitnessDbMdbx};
 pub use serialization_types::{BatchTaskKey, ChunkTaskKey};
@@ -49,8 +49,6 @@ pub mod schema {
 /// The database representations of the node's types, exactly as the tables
 /// store them. Public for the same reason as [`schema`].
 pub mod records {
-    #[cfg(feature = "migration")]
-    pub use crate::serialization_types::{package_from_sled_era, package_to_sled_era};
     pub use crate::serialization_types::{
         BatchTaskKey, ChunkTaskKey, DBAccountStateAtEpoch, DBBatch, DBBatchId, DBBatchStatus,
         DBBatchWithStatus, DBChunk, DBChunkId, DBChunkStatus, DBChunkWithStatus, DBEeAccountState,

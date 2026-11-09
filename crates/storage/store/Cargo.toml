@@ -9,9 +9,6 @@ repository.workspace = true
 workspace = true
 
 [features]
-# The sled-era layouts the offline migration decodes and the test exporter
-# writes; enabled by alpen-storage-console, which holds the migration rules.
-migration = ["dep:ssz_derive", "dep:ssz_types"]
 # Exposes helpers for constructing and seeding EE stores in downstream tests.
 test-utils = ["alpen-storage-api/test-utils", "dep:strata-l1-txfmt"]
 
@@ -44,8 +41,6 @@ borsh.workspace = true
 ciborium.workspace = true
 eyre.workspace = true
 ssz.workspace = true
-ssz_derive = { workspace = true, optional = true }
-ssz_types = { workspace = true, optional = true }
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

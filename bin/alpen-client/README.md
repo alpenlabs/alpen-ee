@@ -756,7 +756,6 @@ Every field except `mode`, `[ol]`, and the mode-specific table has a default. Tw
 ```toml
 health_check_host = "0.0.0.0"
 health_check_port = 8080
-db_retry_count = 3
 l1_reorg_safe_depth = 6
 genesis_l1_height = 0
 mode = "full_node"

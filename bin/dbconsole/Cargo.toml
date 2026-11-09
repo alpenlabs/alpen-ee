@@ -14,7 +14,6 @@ path = "src/main.rs"
 
 [dependencies]
 alpen-storage-console.workspace = true
-alpen-storage-store.workspace = true
 
 clap = { workspace = true, features = [
   "derive",
@@ -27,14 +26,11 @@ clap = { workspace = true, features = [
 ] }
 dirs.workspace = true
 eyre.workspace = true
-hex.workspace = true
 libc.workspace = true
 rhai = { workspace = true, features = ["metadata"] }
 rustyline = { workspace = true, features = ["derive"] }
 signal-hook.workspace = true
-sled.workspace = true
-tracing-subscriber.workspace = true
 
 [dev-dependencies]
-alpen-storage-console = { workspace = true, features = ["test-utils"] }
 alpen-storage-store = { workspace = true, features = ["test-utils"] }
+hex.workspace = true

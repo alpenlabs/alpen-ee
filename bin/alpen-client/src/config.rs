@@ -37,7 +37,6 @@ const DEFAULT_BENEFICIARY_ADDRESS: Address = address!("5400000000000000000000000
 const DEFAULT_L1_REORG_SAFE_DEPTH: u32 = 6;
 const DEFAULT_BATCH_SEALING_BLOCK_COUNT: u64 = 100;
 const DEFAULT_BATCH_SEALING_DA_SIZE_BYTES: u64 = 200 * 1024; // # 200 KiB
-const DEFAULT_DB_RETRY_COUNT: u16 = 5;
 const DEFAULT_BLOCKTIME_MS: NonZeroU64 = NonZeroU64::new(5_000).expect("5000 is always NonZero");
 const DEFAULT_BATCH_EVENT_CHANNEL_CAPACITY: NonZeroUsize =
     NonZeroUsize::new(64).expect("64 is always NonZero");
@@ -55,10 +54,6 @@ fn default_health_check_host() -> String {
 
 fn default_health_check_port() -> u16 {
     DEFAULT_HEALTH_CHECK_PORT
-}
-
-fn default_db_retry_count() -> u16 {
-    DEFAULT_DB_RETRY_COUNT
 }
 
 fn default_l1_reorg_safe_depth() -> u32 {
@@ -174,8 +169,6 @@ struct AlpenClientConfigFile {
     health_check_host: String,
     #[serde(default = "default_health_check_port")]
     health_check_port: u16,
-    #[serde(default = "default_db_retry_count")]
-    db_retry_count: u16,
 
     // Rollup-to-L1 facts, not sequencer *preferences*: every honest participant needs the
     // same values — unlike batch_sealing_block_count etc., not a sequencer-operator tuning
@@ -270,7 +263,6 @@ impl AdminRpcConfig {
 pub(crate) struct AlpenClientConfig {
     pub(crate) health_check_host: String,
     pub(crate) health_check_port: u16,
-    pub(crate) db_retry_count: u16,
     pub(crate) ol: OlConfig,
     pub(crate) admin_rpc: Option<AdminRpcConfig>,
     pub(crate) mode: NodeMode,
@@ -841,7 +833,6 @@ impl TryFrom<AlpenClientConfigFile> for AlpenClientConfig {
         Ok(Self {
             health_check_host: raw.health_check_host,
             health_check_port: raw.health_check_port,
-            db_retry_count: raw.db_retry_count,
             ol: raw.ol,
             admin_rpc: raw.admin_rpc,
             mode,
@@ -1079,9 +1070,9 @@ mod tests {
 
     #[test]
     fn unknown_top_level_field_is_rejected() {
-        let toml = FULL_NODE_TOML.replace("db_retry_count", "db_retry_counts");
+        let toml = FULL_NODE_TOML.replace("health_check_port", "health_check_ports");
         let err = AlpenClientConfig::from_toml_str(&toml).unwrap_err();
-        assert!(err.to_string().contains("db_retry_counts"));
+        assert!(err.to_string().contains("health_check_ports"));
     }
 
     #[test]
