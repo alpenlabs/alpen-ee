@@ -5,6 +5,7 @@ use std::time::Duration;
 use alpen_common::{Batch, BatchId, BlockNumHash};
 use alpen_storage_api::{BatchStorage, ExecBlockStorage};
 use eyre::{eyre, Result};
+use metrics::{counter, gauge, histogram};
 use strata_acct_types::Hash;
 use tokio::{sync::mpsc, time};
 use tracing::{debug, error, warn};
@@ -12,6 +13,7 @@ use tracing::{debug, error, warn};
 use super::{ctx::BatchBuilderCtx, events::BatchBuilderEvent, BatchBuilderState};
 use crate::{
     batch_builder::reorg::{check_and_handle_reorg, ReorgReport},
+    metrics::{BATCHES_SEALED, BATCH_BLOCKS, BATCH_LATEST_IDX, BATCH_REORGS},
     sealing_policy::{AccumulationPolicy, BlockDataProvider, SealReason, SealingPolicy},
 };
 
@@ -111,6 +113,7 @@ async fn seal_batch<P: AccumulationPolicy>(
         })?
         .next_spec_version();
 
+    let block_count = inner_blocks.len() + 1;
     let batch_idx = state.next_batch_idx();
     let batch = Batch::new(
         batch_idx,
@@ -133,6 +136,9 @@ async fn seal_batch<P: AccumulationPolicy>(
     );
 
     storage.save_next_batch(batch).await?;
+    counter!(BATCHES_SEALED, "reason" => reason).increment(1);
+    histogram!(BATCH_BLOCKS).record(block_count as f64);
+    gauge!(BATCH_LATEST_IDX, "status" => "sealed").set(batch_idx as f64);
 
     // The batch is durable, so the blocks it covers can go.
     // `advance_batch` resets the accumulator.
@@ -260,6 +266,7 @@ where
         ReorgReport::ShallowReorg => {
             // Shallow reorg. Pending blocks and accumulator reset.
             // Latest sealed batch has not changed.
+            counter!(BATCH_REORGS, "kind" => "shallow").increment(1);
             emit_event(
                 &ctx.event_tx,
                 BatchBuilderEvent::reorg(
@@ -274,6 +281,9 @@ where
             // Latest batch reverted. Pending blocks and accumulator reset.
             // State is already reset by check_and_handle_reorg;
             let _ = ctx.latest_batch_tx.send(batch_id);
+            counter!(BATCH_REORGS, "kind" => "batch").increment(1);
+            gauge!(BATCH_LATEST_IDX, "status" => "sealed")
+                .set(state.next_batch_idx().saturating_sub(1) as f64);
             emit_event(
                 &ctx.event_tx,
                 BatchBuilderEvent::reorg(

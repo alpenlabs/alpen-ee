@@ -8,9 +8,10 @@ use alpen_da_types::DaBlob;
 use alpen_reth_statediff::{AccountChange, BatchBuilder, BatchStateDiff};
 use alpen_storage_api::{BatchStorage, DaContext, StateDiffProvider};
 use async_trait::async_trait;
+use metrics::counter;
 use tracing::*;
 
-use crate::DaBlobSource;
+use crate::{metrics::DA_BYTECODES_DEDUPED, DaBlobSource};
 
 /// [`DaBlobSource`] that builds encoded DA blobs from Reth state diffs.
 ///
@@ -191,7 +192,6 @@ where
             deduped,
             "built DA blob for batch"
         );
-
         // 4. Read the last block's header for chain-reconstruction metadata.
         let evm_header = self
             .header_summary
@@ -202,6 +202,7 @@ where
             .ok_or_else(|| eyre::eyre!("cannot build DA blob for genesis batch"))?;
 
         // 5. Construct the DaBlob with metadata.
+        counter!(DA_BYTECODES_DEDUPED).increment(deduped as u64);
         Ok(DaBlob {
             spec_version: batch.spec_version(),
             update_seq_no,

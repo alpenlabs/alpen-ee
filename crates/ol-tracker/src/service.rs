@@ -8,6 +8,7 @@ use std::{
 
 use alpen_common::{ConsensusHeads, OLClient, OLFinalizedStatus};
 use alpen_storage_api::Storage;
+use metrics::{counter, gauge};
 use serde::{Deserialize, Serialize};
 use strata_service::{AsyncService, Response, Service, ServiceState};
 use tokio::sync::watch;
@@ -15,6 +16,7 @@ use tracing::{debug, error};
 
 use crate::{
     error::OLTrackerError,
+    metrics::{OL_EPOCH, OL_TRACKER_ACTIONS, OL_TRACKER_FAILURES},
     reorg::handle_reorg,
     state::OLTrackerState,
     task::{handle_extend_ee_state, handle_refresh_finalized, track_ol_state, TrackOLAction},
@@ -111,64 +113,82 @@ where
     TOLClient: OLClient + 'static,
 {
     async fn process_input(state: &mut Self::State, _input: ()) -> anyhow::Result<Response> {
-        match track_ol_state(
-            &state.tracker_state,
-            state.ol_client.as_ref(),
-            state.max_epochs_fetch,
-            state.tracking_mode,
-        )
-        .await
-        {
-            Ok(TrackOLAction::Extend(epoch_operations, chain_status)) => {
-                debug!(?epoch_operations, ?chain_status, "received track action");
-                if let Err(error) = handle_extend_ee_state(
-                    &epoch_operations,
-                    &chain_status,
-                    &mut state.tracker_state,
-                    state.storage.as_ref(),
-                )
-                .await
-                {
+        let outcome: anyhow::Result<Response> = async {
+            match track_ol_state(
+                &state.tracker_state,
+                state.ol_client.as_ref(),
+                state.max_epochs_fetch,
+                state.tracking_mode,
+            )
+            .await
+            {
+                Ok(TrackOLAction::Extend(epoch_operations, chain_status)) => {
+                    debug!(?epoch_operations, ?chain_status, "received track action");
+                    counter!(OL_TRACKER_ACTIONS, "action" => "extend").increment(1);
+                    if let Err(error) = handle_extend_ee_state(
+                        &epoch_operations,
+                        &chain_status,
+                        &mut state.tracker_state,
+                        state.storage.as_ref(),
+                    )
+                    .await
+                    {
+                        return handle_tracker_error(error);
+                    }
+                    state.notify_watchers();
+                }
+                Ok(TrackOLAction::RefreshFinalized(chain_status)) => {
+                    debug!(?chain_status, "received finalized refresh action");
+                    counter!(OL_TRACKER_ACTIONS, "action" => "refresh_finalized").increment(1);
+                    if let Err(error) = handle_refresh_finalized(
+                        &chain_status,
+                        &mut state.tracker_state,
+                        state.storage.as_ref(),
+                    )
+                    .await
+                    {
+                        return handle_tracker_error(error);
+                    }
+                    state.notify_watchers();
+                }
+                Ok(TrackOLAction::Reorg) => {
+                    debug!("received reorg action");
+                    counter!(OL_TRACKER_ACTIONS, "action" => "reorg").increment(1);
+                    if let Err(error) = handle_reorg(
+                        &mut state.tracker_state,
+                        state.storage.as_ref(),
+                        state.ol_client.as_ref(),
+                        state.genesis_epoch,
+                    )
+                    .await
+                    {
+                        return handle_tracker_error(error);
+                    }
+                    state.notify_watchers();
+                }
+                Ok(TrackOLAction::Noop) => {
+                    debug!("received noop action");
+                    counter!(OL_TRACKER_ACTIONS, "action" => "noop").increment(1);
+                }
+                Err(error) => {
                     return handle_tracker_error(error);
                 }
-                state.notify_watchers();
             }
-            Ok(TrackOLAction::RefreshFinalized(chain_status)) => {
-                debug!(?chain_status, "received finalized refresh action");
-                if let Err(error) = handle_refresh_finalized(
-                    &chain_status,
-                    &mut state.tracker_state,
-                    state.storage.as_ref(),
-                )
-                .await
-                {
-                    return handle_tracker_error(error);
-                }
-                state.notify_watchers();
-            }
-            Ok(TrackOLAction::Reorg) => {
-                debug!("received reorg action");
-                if let Err(error) = handle_reorg(
-                    &mut state.tracker_state,
-                    state.storage.as_ref(),
-                    state.ol_client.as_ref(),
-                    state.genesis_epoch,
-                )
-                .await
-                {
-                    return handle_tracker_error(error);
-                }
-                state.notify_watchers();
-            }
-            Ok(TrackOLAction::Noop) => {
-                debug!("received noop action");
-            }
-            Err(error) => {
-                return handle_tracker_error(error);
-            }
+            Ok(Response::Continue)
         }
+        .await;
 
-        Ok(Response::Continue)
+        // `tracker_state` is the epoch the EE account state is persisted at
+        // on every path: an extension that fails halfway has already stored
+        // and applied the earlier epochs, and a fatal error is about to stop
+        // the service with no later tick to publish them. So publish before
+        // handing the outcome back. Watchers are only notified on success, so
+        // while an extension keeps failing this gauge runs ahead of the heads
+        // they were last given.
+        gauge!(OL_EPOCH, "status" => "local")
+            .set(f64::from(state.tracker_state.best_ol_epoch().epoch()));
+
+        outcome
     }
 }
 
@@ -179,6 +199,8 @@ where
 /// `Ok(Continue)` to retry on the next tick.
 fn handle_tracker_error(error: impl Into<OLTrackerError>) -> anyhow::Result<Response> {
     let error = error.into();
+    counter!(OL_TRACKER_FAILURES, "fatal" => if error.is_fatal() { "true" } else { "false" })
+        .increment(1);
 
     if error.is_fatal() {
         Err(anyhow::anyhow!("{}", error.panic_message()))

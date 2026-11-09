@@ -12,6 +12,7 @@ use alpen_reth_node::{
 };
 use alpen_reth_rpc::AlpenFeeApiServer;
 use alpen_rpc_server::{AlpenEeRpcServer, EeRpcServer};
+use alpen_storage_store::ENV_NODE;
 use reth_chainspec::ChainSpec;
 use reth_network::{protocol::IntoRlpxSubProtocol, NetworkProtocols};
 use reth_network_api::test_utils::PeersHandleProvider;
@@ -22,6 +23,7 @@ use tracing::info;
 use crate::{
     config::FullNodeConfig,
     gossip::GossipConfig,
+    metrics::spawn_store_sampler,
     node::{LaunchedNode, NodeBootstrap},
 };
 
@@ -92,6 +94,18 @@ pub(crate) async fn run(
         })
         .launch()
         .await?;
+
+    spawn_store_sampler(&handle.node.task_executor, common.mdbx_dir.clone(), {
+        let node_db = common.node_db.clone();
+        move || {
+            Ok(node_db
+                .table_counts()
+                .map_err(|e| eyre::eyre!("node table stats: {e}"))?
+                .into_iter()
+                .map(|(table, n)| (ENV_NODE, table, n))
+                .collect())
+        }
+    });
 
     LaunchedNode {
         provider: handle.node.provider.clone(),

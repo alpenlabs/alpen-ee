@@ -19,6 +19,7 @@ async-trait.workspace = true
 bitcoin.workspace = true
 bitcoind-async-client.workspace = true
 eyre.workspace = true
+metrics.workspace = true
 strata-btc-types.workspace = true
 strata-btcio.workspace = true
 strata-codec.workspace = true

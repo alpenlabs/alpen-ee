@@ -217,6 +217,7 @@ reth-network-api = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0"
 reth-node-api = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
 reth-node-builder = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
 reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-node-metrics = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
 reth-payload-builder = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
 reth-primitives-traits = { version = "0.3.2", default-features = false }
 reth-provider = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }

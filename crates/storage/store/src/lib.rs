@@ -19,6 +19,7 @@ pub use error::{DbError, DbResult};
 pub use init::open_da_ops;
 pub use init::{
     create_ee_envs, open_stores, BroadcastDbOps, ChunkedEnvelopeOps, SequencerDatabases, Stores,
+    ENV_DA, ENV_NODE, ENV_PROVER, ENV_WITNESS, MDBX_DIR, MDBX_ENVS,
 };
 pub use mdbxdb::{DaContextDbMdbx, NodeDbMdbx, ProverDbMdbx, ProverTaskKey, WitnessDbMdbx};
 pub use serialization_types::{BatchTaskKey, ChunkTaskKey};
