@@ -28,6 +28,13 @@ from common.datatool import generate_ee_params
 from common.prover_backend import NATIVE_BACKEND, ProverBackend
 from common.services import AlpenClientProps, AlpenClientService
 
+# Raw transactions enter the pool as `External`, the origin of public-RPC
+# ingress, so reth's hard cap of 16 pending transactions per sender applies to
+# the test accounts. Tests burst well past that from one key without waiting
+# for receipts (the prover-pipeline test sends 30 in a row), so the harness
+# raises the cap. Deployments size it for their own bursty senders.
+TXPOOL_MAX_ACCOUNT_SLOTS = 128
+
 
 def generate_p2p_secret_key() -> str:
     """Generate a random 32-byte hex-encoded P2P secret key."""
@@ -217,6 +224,7 @@ class AlpenClientFactory(flexitest.Factory):
             "--http.api", "eth,net,admin,debug,alpen",
             "--authrpc.port", str(authrpc_port),
             "--p2p-secret-key", str(p2p_secret_key_file),
+            "--txpool.max-account-slots", str(TXPOOL_MAX_ACCOUNT_SLOTS),
             "-vvvv",
         ]
         # fmt: on
@@ -387,6 +395,7 @@ class AlpenClientFactory(flexitest.Factory):
             "--http.api", "eth,net,admin,debug,alpen",
             "--authrpc.port", str(authrpc_port),
             "--p2p-secret-key", str(p2p_secret_key_file),
+            "--txpool.max-account-slots", str(TXPOOL_MAX_ACCOUNT_SLOTS),
             "-vvvv",
         ]
         # fmt: on

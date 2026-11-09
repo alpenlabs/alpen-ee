@@ -65,11 +65,19 @@ where
         Ok(hash)
     }
 
-    /// Decodes and recovers the transaction and submits it with a
-    /// [`TransactionOrigin::Local`] origin via [`Self::send_transaction`].
+    /// Decodes and recovers the transaction and submits it via
+    /// [`Self::send_transaction`] as [`TransactionOrigin::External`].
+    ///
+    /// The RPC is public ingress, so the transaction is as untrusted as one a
+    /// peer gossiped. `Local` is the origin for the operator's own
+    /// transactions (`eth_sendTransaction` with a node signer keeps it): the
+    /// pool exempts those from the per-sender slot cap and the minimum
+    /// priority fee, evicts them last, lets the operator keep them out of
+    /// gossip, and backs them up to disk. Submitting as `Local` here handed
+    /// all of that to anyone who could reach the RPC.
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
         let recovered = recover_raw_transaction::<PoolPooledTx<Self::Pool>>(&tx)?;
-        self.send_transaction(TransactionOrigin::Local, WithEncoded::new(tx, recovered))
+        self.send_transaction(TransactionOrigin::External, WithEncoded::new(tx, recovered))
             .await
     }
 }
