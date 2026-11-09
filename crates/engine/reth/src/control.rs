@@ -17,7 +17,7 @@ use tokio::{
 };
 use tracing::{debug, error, warn};
 
-use crate::metrics::{FORKCHOICE_FAILURES, FORKCHOICE_UPDATES};
+use crate::metrics::FORKCHOICE_UPDATES;
 
 /// How often the engine control task checks for safe and finalized blocks reth is missing.
 ///
@@ -156,10 +156,11 @@ fn pending_hash<C: CanonicalChain>(
 }
 
 /// Sends `update` to the engine and returns whether it went through.
+///
+/// The engine counts the failure, together with the heads reth rejects.
 async fn send_forkchoice_update<E: ExecutionEngine>(engine: &E, update: ForkchoiceState) -> bool {
     if let Err(err) = engine.update_consensus_state(update).await {
         warn!(?err, "forkchoice_update failed");
-        counter!(FORKCHOICE_FAILURES).increment(1);
         return false;
     }
     true

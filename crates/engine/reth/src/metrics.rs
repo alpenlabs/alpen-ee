@@ -20,7 +20,8 @@ pub const PAYLOAD_BUILD_FAILURES: &str = "alpen_ee_payload_build_failures_total"
 /// Fork-choice updates sent to reth, by `kind`: `preconf` (new head),
 /// `consensus` (OL safe and finalized heads) and `catchup` (resent heads).
 pub const FORKCHOICE_UPDATES: &str = "alpen_ee_forkchoice_updates_total";
-/// Fork-choice updates reth rejected or that failed.
+/// Fork-choice updates reth rejected (`Invalid`) or that failed after the
+/// engine's retries, from every sender.
 pub const FORKCHOICE_FAILURES: &str = "alpen_ee_forkchoice_failures_total";
 
 /// Registers the description and unit of every metric above.

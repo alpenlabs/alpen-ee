@@ -3,11 +3,15 @@ use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatus, PayloadStatusEnum};
 use alpen_engine_api::{ExecutionEngine, ExecutionEngineError};
 use alpen_reth_node::{AlpenBuiltPayload, AlpenEngineTypes};
 use async_trait::async_trait;
+use metrics::counter;
 use reth_node_builder::{BuiltPayload, ConsensusEngineHandle, PayloadTypes};
 use strata_retry::retry_with_backoff_async;
 use tracing::{debug, info, warn};
 
-use crate::retry::{engine_call_backoff, ENGINE_CALL_MAX_RETRIES};
+use crate::{
+    metrics::FORKCHOICE_FAILURES,
+    retry::{engine_call_backoff, ENGINE_CALL_MAX_RETRIES},
+};
 
 /// Logs a forkchoice update that reth did not apply.
 ///
@@ -86,7 +90,7 @@ impl ExecutionEngine for AlpenRethExecEngine {
         &self,
         state: ForkchoiceState,
     ) -> Result<(), ExecutionEngineError> {
-        retry_with_backoff_async(
+        let result = retry_with_backoff_async(
             "exec_engine_update_consensus_state",
             ENGINE_CALL_MAX_RETRIES,
             &engine_call_backoff(),
@@ -98,9 +102,23 @@ impl ExecutionEngine for AlpenRethExecEngine {
                     .await
                     .map_err(|e| ExecutionEngineError::fork_choice_update(e.to_string()))?;
                 log_forkchoice_status(&state, &updated.payload_status);
+                // Reth refuses a head with an `Invalid` status, not an error, and
+                // the call stays `Ok` because retrying the same head cannot help.
+                // Count the rejection here, where it is visible.
+                if matches!(
+                    updated.payload_status.status,
+                    PayloadStatusEnum::Invalid { .. }
+                ) {
+                    counter!(FORKCHOICE_FAILURES).increment(1);
+                }
                 Ok(())
             },
         )
-        .await
+        .await;
+        // One count per update that failed, after the retries, from every sender.
+        if result.is_err() {
+            counter!(FORKCHOICE_FAILURES).increment(1);
+        }
+        result
     }
 }
