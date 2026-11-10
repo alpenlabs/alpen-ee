@@ -5,8 +5,11 @@
 //! the witnesses of a chunk's blocks, the account proof reads the accessed
 //! state of a batch's range. A block at or below the finalized height sits in
 //! an update the OL accepted with its proof, and the node never reorgs below
-//! it, so its rows are dead weight. Nothing else deletes them, and on a busy
-//! chain they are most of the store's growth.
+//! it, so its rows are dead weight. Pruning a height also frees the rows of
+//! the forks at it, which is how a reorged-out block's rows are freed (a
+//! block that reorgs back needs its witness, so the revert leaves them);
+//! deleting a block through the store frees its rows with it. Nothing else
+//! does, and on a busy chain these rows are most of the store's growth.
 //!
 //! The task wakes on an interval, reads the finalized height, keeps
 //! `keep_blocks` of margin below it, and deletes the rows of every height

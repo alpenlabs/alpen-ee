@@ -821,6 +821,19 @@ async fn test_prune_block_data() {
         storage.extend_finalized_chain(hashes[i]).await.unwrap();
     }
 
+    // Every block also carries a proof witness and an accessed-state record,
+    // keyed by hash in their own tables.
+    for (i, hash) in hashes.iter().enumerate() {
+        storage
+            .put_block_witness(*hash, vec![i as u8; 8])
+            .await
+            .unwrap();
+        storage
+            .put_block_accessed_state(*hash, AccessedStateRecord::new(vec![], vec![], vec![]))
+            .await
+            .unwrap();
+    }
+
     // Verify all blocks and payloads exist before pruning
     for hash in hashes.iter().take(5) {
         assert!(storage.get_exec_block(*hash).await.unwrap().is_some());
@@ -829,6 +842,25 @@ async fn test_prune_block_data() {
 
     // Prune blocks below height 3
     storage.prune_block_data(3).await.unwrap();
+
+    // Their witnesses and accessed states go with them, and the kept blocks'
+    // stay.
+    for hash in &hashes[..3] {
+        assert!(storage.get_block_witness(*hash).await.unwrap().is_none());
+        assert!(storage
+            .get_block_accessed_state(*hash)
+            .await
+            .unwrap()
+            .is_none());
+    }
+    for hash in &hashes[3..] {
+        assert!(storage.get_block_witness(*hash).await.unwrap().is_some());
+        assert!(storage
+            .get_block_accessed_state(*hash)
+            .await
+            .unwrap()
+            .is_some());
+    }
 
     // Blocks 0, 1, 2 should be deleted
     assert!(storage.get_exec_block(hashes[0]).await.unwrap().is_none());
@@ -903,6 +935,13 @@ async fn test_delete_unfinalized_block() {
         .await
         .unwrap();
 
+    storage.put_block_witness(hash2, vec![2; 8]).await.unwrap();
+    storage
+        .put_block_accessed_state(hash2, AccessedStateRecord::new(vec![], vec![], vec![]))
+        .await
+        .unwrap();
+    storage.put_block_witness(hash1, vec![1; 8]).await.unwrap();
+
     // Verify block 2 exists
     assert!(storage.get_exec_block(hash2).await.unwrap().is_some());
     assert!(storage.get_block_payload(hash2).await.unwrap().is_some());
@@ -910,9 +949,17 @@ async fn test_delete_unfinalized_block() {
     // Delete the unfinalized block
     storage.delete_exec_block(hash2).await.unwrap();
 
-    // Verify block 2 is deleted
+    // Verify block 2 is deleted, with its witness and accessed state
     assert!(storage.get_exec_block(hash2).await.unwrap().is_none());
     assert!(storage.get_block_payload(hash2).await.unwrap().is_none());
+    assert!(storage.get_block_witness(hash2).await.unwrap().is_none());
+    assert!(storage
+        .get_block_accessed_state(hash2)
+        .await
+        .unwrap()
+        .is_none());
+    // The finalized block's witness is untouched
+    assert!(storage.get_block_witness(hash1).await.unwrap().is_some());
 
     // Verify finalized blocks still exist
     assert!(storage.get_exec_block(hash0).await.unwrap().is_some());
@@ -941,6 +988,12 @@ async fn test_delete_finalized_block_fails() {
         .unwrap();
     storage.extend_finalized_chain(hash1).await.unwrap();
 
+    storage.put_block_witness(hash1, vec![1; 8]).await.unwrap();
+    storage
+        .put_block_accessed_state(hash1, AccessedStateRecord::new(vec![], vec![], vec![]))
+        .await
+        .unwrap();
+
     // Attempt to delete finalized block 0 - should fail
     let result = storage.delete_exec_block(hash0).await;
     assert!(result.is_err());
@@ -949,9 +1002,66 @@ async fn test_delete_finalized_block_fails() {
     let result = storage.delete_exec_block(hash1).await;
     assert!(result.is_err());
 
-    // Verify both blocks still exist
+    // Verify both blocks still exist, and the refused delete touched none of
+    // block 1's rows
     assert!(storage.get_exec_block(hash0).await.unwrap().is_some());
     assert!(storage.get_exec_block(hash1).await.unwrap().is_some());
+    assert!(storage.get_block_witness(hash1).await.unwrap().is_some());
+    assert!(storage
+        .get_block_accessed_state(hash1)
+        .await
+        .unwrap()
+        .is_some());
+}
+
+/// Pruning a height with a fork removes the proving rows of every block at it.
+#[tokio::test]
+async fn test_prune_block_data_covers_forks() {
+    let storage = &setup_storage();
+    let hash0 = hash_from_u8(0);
+    storage
+        .save_exec_block(
+            create_exec_block(0, Hash::default(), hash0, 0),
+            ExecBlockPayload::from_bytes(vec![0]),
+        )
+        .await
+        .unwrap();
+    storage.init_finalized_chain(hash0).await.unwrap();
+    // Two blocks at height 1: the canonical one and a fork.
+    let (hash1, fork1) = (hash_from_u8(1), hash_from_u8(11));
+    for h in [hash1, fork1] {
+        storage
+            .save_exec_block(
+                create_exec_block(1, hash0, h, 1),
+                ExecBlockPayload::from_bytes(vec![1]),
+            )
+            .await
+            .unwrap();
+        storage.put_block_witness(h, vec![1; 8]).await.unwrap();
+        storage
+            .put_block_accessed_state(h, AccessedStateRecord::new(vec![], vec![], vec![]))
+            .await
+            .unwrap();
+    }
+    storage.extend_finalized_chain(hash1).await.unwrap();
+    let hash2 = hash_from_u8(2);
+    storage
+        .save_exec_block(
+            create_exec_block(2, hash1, hash2, 2),
+            ExecBlockPayload::from_bytes(vec![2]),
+        )
+        .await
+        .unwrap();
+    storage.extend_finalized_chain(hash2).await.unwrap();
+
+    storage.prune_block_data(2).await.unwrap();
+
+    for h in [hash1, fork1] {
+        assert!(storage.get_exec_block(h).await.unwrap().is_none());
+        assert!(storage.get_block_witness(h).await.unwrap().is_none());
+        assert!(storage.get_block_accessed_state(h).await.unwrap().is_none());
+    }
+    assert!(storage.get_exec_block(hash2).await.unwrap().is_some());
 }
 
 /// Test deleting a non-existent block (should be idempotent)

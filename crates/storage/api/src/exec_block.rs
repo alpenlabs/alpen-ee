@@ -43,10 +43,10 @@ pub trait ExecBlockStorage: Send + Sync {
     /// Block data is preserved. Fails if chain is empty.
     async fn revert_finalized_chain(&self, to_height: u64) -> Result<(), StorageError>;
 
-    /// Permanently delete all block data and payloads below the specified height.
+    /// Permanently delete all block data below the specified height.
     ///
-    /// Removes blocks and their payloads at heights < `to_height`. Block data cannot be recovered
-    /// after pruning.
+    /// Removes blocks, their payloads, and their proof witnesses and accessed-state records at
+    /// heights < `to_height`. Block data cannot be recovered after pruning.
     async fn prune_block_data(&self, to_height: u64) -> Result<(), StorageError>;
 
     /// Get the highest block in the finalized chain.
@@ -87,9 +87,10 @@ pub trait ExecBlockStorage: Send + Sync {
     async fn get_block_payload(&self, hash: Hash)
         -> Result<Option<ExecBlockPayload>, StorageError>;
 
-    /// Delete a single block and its payload by hash.
+    /// Delete a single block by hash, with everything keyed by it.
     ///
-    /// Removes the block data, payload, and updates the height index. Returns an error if the
-    /// block is in the finalized chain. Returns `Ok(())` if the block doesn't exist (idempotent).
+    /// Removes the block data, payload, proof witness and accessed-state record, and updates the
+    /// height index. Returns an error if the block is in the finalized chain. Returns `Ok(())` if
+    /// the block doesn't exist (idempotent).
     async fn delete_exec_block(&self, hash: Hash) -> Result<(), StorageError>;
 }

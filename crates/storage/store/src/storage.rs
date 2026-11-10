@@ -164,7 +164,7 @@ impl ExecBlockStorage for NodeStorage {
             .map_err(Into::into)
     }
 
-    /// Remove all block data below specified height
+    /// Remove all block data below specified height, proof witnesses and accessed state included
     async fn prune_block_data(&self, to_height: u64) -> Result<(), StorageError> {
         self.ops
             .prune_block_data_async(to_height)
@@ -227,7 +227,7 @@ impl ExecBlockStorage for NodeStorage {
             .map_err(Into::into)
     }
 
-    /// Delete a single block and its payload by hash.
+    /// Delete a single block by hash: data, payload, proof witness and accessed state.
     async fn delete_exec_block(&self, hash: Hash) -> Result<(), StorageError> {
         self.ops
             .delete_exec_block_async(hash)
