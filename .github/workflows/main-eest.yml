@@ -192,7 +192,7 @@ jobs:
         env:
           EEST_PROOF_TIMEOUT: ${{ github.event.inputs.proof_timeout || '3600' }}
         run: |
-          SEQUENCER_DATADIR="$(ls -d functional-tests/_dd/*/alpen_eest/ee_sequencer | head -n 1)"
+          SEQUENCER_DATADIR="$(find functional-tests/_dd -mindepth 3 -maxdepth 3 -type d -path '*/alpen_eest/ee_sequencer' | head -n 1)"
           if ! ./contrib/assert-eest-prover-pipeline.sh \
               --sequencer-datadir "${SEQUENCER_DATADIR}" \
               --bitcoin-rpc-url http://user:password@localhost:18444 \
