@@ -49,16 +49,25 @@ pub async fn start_authenticated_rpc_server(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use alpen_rpc_api::{AlpenAdminRpcClient, AlpenAdminRpcServer as _};
+    use alpen_storage_api::testing::InMemoryStorage;
     use http::{header::AUTHORIZATION, HeaderMap};
     use jsonrpsee::http_client::{HttpClient, HttpClientBuilder};
     use reth_rpc_layer::secret_to_bearer_header;
 
     use super::*;
-    use crate::AdminRpcServer;
+    use crate::{AdminRpcServer, CanonicalChainSlot};
 
     async fn spawn_admin_server(secret: JwtSecret) -> (SocketAddr, ServerHandle) {
-        let module = AdminRpcServer::new("test-version", None).into_rpc();
+        let module = AdminRpcServer::new(
+            "test-version",
+            None,
+            Arc::new(InMemoryStorage::new_empty()),
+            Arc::new(CanonicalChainSlot::new()),
+        )
+        .into_rpc();
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
         start_authenticated_rpc_server(addr, secret, module)
             .await

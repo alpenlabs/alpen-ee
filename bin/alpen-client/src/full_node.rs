@@ -6,6 +6,8 @@
 //! genesis work beyond what [`crate::node`] already did, no ExExes, and no
 //! services past the two every node runs.
 
+use std::sync::Arc;
+
 use alpen_common::BlockNumHash;
 use alpen_reth_node::{
     AlpenEthereumNode, AlpenGossipProtocolHandler, AlpenNodeMode, DaFeeRateHandle,
@@ -76,12 +78,7 @@ pub(crate) async fn run(
             let storage = common.storage.clone();
             move |ctx| {
                 let provider = ctx.provider().clone();
-                let ee_rpc_server = EeRpcServer::new(
-                    provider,
-                    consensus_watcher,
-                    storage.clone(),
-                    storage.clone(),
-                );
+                let ee_rpc_server = EeRpcServer::new(provider, consensus_watcher, storage.clone());
                 ctx.modules.merge_configured(ee_rpc_server.into_rpc())?;
 
                 // Register `alpen_estimateFees` (execution + DA fee quote) on the
@@ -94,6 +91,11 @@ pub(crate) async fn run(
         })
         .launch()
         .await?;
+
+    // Reth is up: give the admin RPC its canonical-chain lookup.
+    let _ = common
+        .canonical_chain
+        .set(Arc::new(handle.node.provider.clone()));
 
     spawn_store_sampler(&handle.node.task_executor, common.mdbx_dir.clone(), {
         let node_db = common.node_db.clone();

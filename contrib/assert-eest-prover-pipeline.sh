@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RPC_ENDPOINT=""
+SEQUENCER_DATADIR=""
 START_BLOCK=1
 END_BLOCK=""
 BITCOIN_RPC_URL=""
@@ -17,7 +17,7 @@ die() {
 
 while (($#)); do
     case "$1" in
-        --rpc-endpoint) RPC_ENDPOINT="${2:?}"; shift 2 ;;
+        --sequencer-datadir) SEQUENCER_DATADIR="${2:?}"; shift 2 ;;
         --start-block) START_BLOCK="${2:?}"; shift 2 ;;
         --end-block) END_BLOCK="${2:?}"; shift 2 ;;
         --bitcoin-rpc-url) BITCOIN_RPC_URL="${2:?}"; shift 2 ;;
@@ -29,18 +29,24 @@ while (($#)); do
     esac
 done
 
-[[ -n "${RPC_ENDPOINT}" ]] || die "--rpc-endpoint is required"
+[[ -n "${SEQUENCER_DATADIR}" ]] || die "--sequencer-datadir is required"
+[[ -f "${SEQUENCER_DATADIR}/alpen-config.toml" && -f "${SEQUENCER_DATADIR}/admin-jwt.hex" ]] \
+    || die "no alpen-config.toml and admin-jwt.hex under ${SEQUENCER_DATADIR}"
 [[ -n "${END_BLOCK}" ]] || die "--end-block is required"
 [[ "${START_BLOCK}" =~ ^[0-9]+$ && "${END_BLOCK}" =~ ^[0-9]+$ ]] || die "block bounds must be decimal integers"
 ((START_BLOCK >= 1 && END_BLOCK >= START_BLOCK)) || die "invalid block range ${START_BLOCK}..${END_BLOCK}"
 [[ "${BITCOIN_BLOCKS_PER_POLL}" =~ ^[0-9]+$ && "${BITCOIN_BLOCKS_PER_POLL}" -gt 0 ]] || die "--bitcoin-blocks must be positive"
 
+# `bearer`, when given, is sent as the Authorization token: the coverage method
+# lives on the node's JWT-authenticated admin endpoint.
 post_json() {
-    local url="$1" version="$2" method="$3" params="${4:-[]}" response
+    local url="$1" version="$2" method="$3" params="${4:-[]}" bearer="${5:-}" response
+    local -a auth=()
+    [[ -n "${bearer}" ]] && auth=(-H "Authorization: Bearer ${bearer}")
     for _ in {1..5}; do
         if response="$(
             curl -sf -X POST "${url}" \
-                -H "Content-Type: application/json" \
+                -H "Content-Type: application/json" "${auth[@]}" \
                 -d "{\"jsonrpc\":\"${version}\",\"method\":\"${method}\",\"params\":${params},\"id\":1}"
         )" && [[ -n "${response}" ]]; then
             printf '%s\n' "${response}"
@@ -85,11 +91,45 @@ print("EEST chunk proof coverage: requested={}..{} covered={} first_uncovered={}
 sys.exit(0 if c["covered"] else 1)'
 }
 
+# The admin endpoint's address comes from the sequencer's config and its
+# bearer token from the JWT secret beside it, minted the way the functional
+# harness mints them (HS256 over an `iat` claim).
+admin_endpoint() {
+    python3 - "${SEQUENCER_DATADIR}/alpen-config.toml" <<'PY'
+import re, sys
+text = open(sys.argv[1]).read()
+section = re.search(r"^\[admin_rpc\]\n((?:(?!^\[).*\n?)*)", text, re.M)
+if not section:
+    sys.exit("no [admin_rpc] section in the sequencer config")
+body = section.group(1)
+port = re.search(r"^port\s*=\s*(\d+)", body, re.M)
+host = re.search(r'^host\s*=\s*"([^"]+)"', body, re.M)
+if not port:
+    sys.exit("no admin_rpc.port in the sequencer config")
+print(f"http://{host.group(1) if host else '127.0.0.1'}:{port.group(1)}")
+PY
+}
+
+admin_token() {
+    python3 - "${SEQUENCER_DATADIR}/admin-jwt.hex" <<'PY'
+import base64, hashlib, hmac, json, sys, time
+def b64(b): return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+header = b64(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
+claims = b64(json.dumps({"iat": int(time.time())}).encode())
+secret = bytes.fromhex(open(sys.argv[1]).read().strip().removeprefix("0x"))
+sig = b64(hmac.new(secret, f"{header}.{claims}".encode(), hashlib.sha256).digest())
+print(f"{header}.{claims}.{sig}")
+PY
+}
+
+ADMIN_ENDPOINT="$(admin_endpoint)" || die "cannot resolve the admin RPC endpoint"
+
 echo "waiting for EE chunk proofs to cover EEST block range ${START_BLOCK}..${END_BLOCK}"
 START_SECONDS="$(date +%s)"
 
 while true; do
-    if COVERAGE="$(post_json "${RPC_ENDPOINT}" "2.0" alpen_getChunkProofCoverage "[${START_BLOCK},${END_BLOCK}]" | json_result)"; then
+    # A fresh token each poll: the server accepts an `iat` within a minute.
+    if COVERAGE="$(post_json "${ADMIN_ENDPOINT}" "2.0" alpenadmin_getChunkProofCoverage "[${START_BLOCK},${END_BLOCK}]" "$(admin_token)" | json_result)"; then
         if SUMMARY="$(printf '%s\n' "${COVERAGE}" | coverage_summary)"; then
             echo "${SUMMARY}"
             echo "EEST block range is covered by EE chunk proofs"

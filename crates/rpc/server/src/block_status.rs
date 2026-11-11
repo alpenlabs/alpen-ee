@@ -3,11 +3,9 @@
 use std::{fmt, future::Future, sync::Arc};
 
 use alloy_primitives::B256;
-use alpen_common::{ChunkStatus, ConsensusHeads};
-use alpen_rpc_api::{
-    AlpenEeRpcServer, BlockStatus, BlockStatusResponse, ChunkProofCoverageResponse,
-};
-use alpen_storage_api::{ChunkStorage, OLBlockOrEpoch, Storage};
+use alpen_common::ConsensusHeads;
+use alpen_rpc_api::{AlpenEeRpcServer, BlockStatus, BlockStatusResponse};
+use alpen_storage_api::{OLBlockOrEpoch, Storage};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_node_builder::NodeTypesWithDB;
@@ -18,14 +16,14 @@ use reth_provider::{
 use strata_identifiers::Epoch;
 use tokio::sync::watch;
 
-use crate::errors::{block_not_found_error, internal_error, invalid_params_error};
+use crate::errors::{block_not_found_error, internal_error};
 
 /// Resolve `block_hash` to its canonical block number on `provider`.
 ///
 /// Returns `Ok(Some(n))` only when `block_hash` is the canonical hash at
 /// height `n`. A hash that is known to the provider but belongs to an
 /// orphaned / non-canonical branch returns `Ok(None)`.
-fn fetch_canonical_block_number<N: NodeTypesWithDB + ProviderNodeTypes>(
+pub(crate) fn fetch_canonical_block_number<N: NodeTypesWithDB + ProviderNodeTypes>(
     provider: &BlockchainProvider<N>,
     block_hash: B256,
 ) -> ProviderResult<Option<u64>> {
@@ -114,7 +112,6 @@ where
 pub struct EeRpcServer<N: NodeTypesWithDB + ProviderNodeTypes> {
     provider: BlockchainProvider<N>,
     consensus_rx: watch::Receiver<ConsensusHeads>,
-    chunk_storage: Arc<dyn ChunkStorage>,
     account_storage: Arc<dyn Storage>,
 }
 
@@ -128,13 +125,11 @@ impl<N: NodeTypesWithDB + ProviderNodeTypes> EeRpcServer<N> {
     pub fn new(
         provider: BlockchainProvider<N>,
         consensus_rx: watch::Receiver<ConsensusHeads>,
-        chunk_storage: Arc<dyn ChunkStorage>,
         account_storage: Arc<dyn Storage>,
     ) -> Self {
         Self {
             provider,
             consensus_rx,
-            chunk_storage,
             account_storage,
         }
     }
@@ -228,92 +223,6 @@ where
         Ok(BlockStatusResponse {
             status: BlockStatus::Pending,
             checkpoint_epoch: None,
-        })
-    }
-
-    async fn get_chunk_proof_coverage(
-        &self,
-        start_block: u64,
-        end_block: u64,
-    ) -> RpcResult<ChunkProofCoverageResponse> {
-        if start_block == 0 || start_block > end_block {
-            return Err(invalid_params_error(
-                "start_block must be non-zero and less than or equal to end_block",
-            ));
-        }
-
-        let latest_chunk = self
-            .chunk_storage
-            .get_latest_chunk()
-            .await
-            .map_err(|e| internal_error(e.to_string()))?;
-
-        let Some((latest_chunk, _)) = latest_chunk else {
-            return Ok(ChunkProofCoverageResponse {
-                start_block,
-                end_block,
-                covered: false,
-                first_uncovered_block: Some(start_block),
-            });
-        };
-
-        let mut first_uncovered_block = start_block;
-
-        for chunk_idx in 0..=latest_chunk.idx() {
-            let Some((chunk, status)) = self
-                .chunk_storage
-                .get_chunk_by_idx(chunk_idx)
-                .await
-                .map_err(|e| internal_error(e.to_string()))?
-            else {
-                continue;
-            };
-
-            let prev_block_num = match fetch_canonical_block_number(
-                &self.provider,
-                hash_to_b256(chunk.prev_block().as_slice()),
-            ) {
-                Ok(Some(n)) => n,
-                Ok(None) => continue,
-                Err(e) => return Err(internal_error(e.to_string())),
-            };
-            let last_block_num = match fetch_canonical_block_number(
-                &self.provider,
-                hash_to_b256(chunk.last_block().as_slice()),
-            ) {
-                Ok(Some(n)) => n,
-                Ok(None) => continue,
-                Err(e) => return Err(internal_error(e.to_string())),
-            };
-
-            let chunk_start_block = prev_block_num.saturating_add(1);
-            if last_block_num < first_uncovered_block {
-                continue;
-            }
-            if chunk_start_block > end_block {
-                break;
-            }
-            if chunk_start_block > first_uncovered_block
-                || !matches!(status, ChunkStatus::ProofReady(_))
-            {
-                continue;
-            }
-            if last_block_num >= end_block {
-                return Ok(ChunkProofCoverageResponse {
-                    start_block,
-                    end_block,
-                    covered: true,
-                    first_uncovered_block: None,
-                });
-            }
-            first_uncovered_block = last_block_num + 1;
-        }
-
-        Ok(ChunkProofCoverageResponse {
-            start_block,
-            end_block,
-            covered: false,
-            first_uncovered_block: Some(first_uncovered_block),
         })
     }
 }

@@ -25,6 +25,7 @@ tower.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+alpen-storage-api = { workspace = true, features = ["test-utils"] }
 alpen-rpc-api = { workspace = true, features = ["client"] }
 http.workspace = true
 jsonrpsee = { workspace = true, features = ["http-client"] }
