@@ -34,11 +34,11 @@ from common.datatool import (
 from common.prover_backend import NATIVE_BACKEND, ProverBackend
 from common.services import StrataProps, StrataService
 
-# ASM execution params for the OL node: trust the always-accept predicate at
-# genesis and run it with the spec 0 ASM. Same as alpen's
+# ASM execution params for the OL node: start the chain under the spec 0 ASM
+# and trust the always-accept predicate to run it. Same as alpen's
 # `docker/configs/dev/asm-execution-params.json`.
 DEV_ASM_EXECUTION_PARAMS = {
-    "genesis_predicate": "AlwaysAccept",
+    "genesis_spec_id": 0,
     "targets": [{"predicate": "AlwaysAccept", "spec_id": 0}],
 }
 

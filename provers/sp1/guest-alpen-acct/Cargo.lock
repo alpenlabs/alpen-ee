@@ -4861,7 +4861,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 [[package]]
 name = "strata-acct-types"
 version = "0.1.0"
-source = "git+https://github.com/alpenlabs/alpen.git?tag=v0.4.0-rc.1#d65b7cc8945437c7f23f1c4340d55d367989d6d1"
+source = "git+https://github.com/alpenlabs/alpen.git?tag=v0.5.0-rc.2#2853de3408bd5d865bb83844ac026a1aa3c379d5"
 dependencies = [
  "digest 0.10.7",
  "sha2",
@@ -4882,7 +4882,7 @@ dependencies = [
 [[package]]
 name = "strata-asm-bridge-types"
 version = "0.1.0"
-source = "git+https://github.com/alpenlabs/asm?tag=v0.4.0#af03330ede9200f38bd9242d42399bea94136dcd"
+source = "git+https://github.com/alpenlabs/asm?tag=v0.5.0-rc.1#7ada090580ac12af9cd411254415090725efcec1"
 dependencies = [
  "arbitrary",
  "bitcoin-bosd",
@@ -4900,7 +4900,7 @@ dependencies = [
 [[package]]
 name = "strata-bridge-params"
 version = "0.1.0"
-source = "git+https://github.com/alpenlabs/alpen.git?tag=v0.4.0-rc.1#d65b7cc8945437c7f23f1c4340d55d367989d6d1"
+source = "git+https://github.com/alpenlabs/alpen.git?tag=v0.5.0-rc.2#2853de3408bd5d865bb83844ac026a1aa3c379d5"
 dependencies = [
  "serde",
  "ssz",
@@ -4984,7 +4984,7 @@ dependencies = [
 [[package]]
 name = "strata-da-framework"
 version = "0.1.0"
-source = "git+https://github.com/alpenlabs/alpen.git?tag=v0.4.0-rc.1#d65b7cc8945437c7f23f1c4340d55d367989d6d1"
+source = "git+https://github.com/alpenlabs/alpen.git?tag=v0.5.0-rc.2#2853de3408bd5d865bb83844ac026a1aa3c379d5"
 dependencies = [
  "strata-codec",
  "thiserror 2.0.18",
@@ -5063,7 +5063,7 @@ dependencies = [
 [[package]]
 name = "strata-ol-bridge-types"
 version = "0.3.0-alpha.1"
-source = "git+https://github.com/alpenlabs/alpen.git?tag=v0.4.0-rc.1#d65b7cc8945437c7f23f1c4340d55d367989d6d1"
+source = "git+https://github.com/alpenlabs/alpen.git?tag=v0.5.0-rc.2#2853de3408bd5d865bb83844ac026a1aa3c379d5"
 dependencies = [
  "arbitrary",
  "strata-asm-bridge-types",
@@ -5075,7 +5075,7 @@ dependencies = [
 [[package]]
 name = "strata-ol-msg-types"
 version = "0.1.0"
-source = "git+https://github.com/alpenlabs/alpen.git?tag=v0.4.0-rc.1#d65b7cc8945437c7f23f1c4340d55d367989d6d1"
+source = "git+https://github.com/alpenlabs/alpen.git?tag=v0.5.0-rc.2#2853de3408bd5d865bb83844ac026a1aa3c379d5"
 dependencies = [
  "strata-codec",
  "strata-identifiers",
@@ -5105,7 +5105,7 @@ dependencies = [
 [[package]]
 name = "strata-primitives"
 version = "0.3.0-alpha.1"
-source = "git+https://github.com/alpenlabs/alpen.git?tag=v0.4.0-rc.1#d65b7cc8945437c7f23f1c4340d55d367989d6d1"
+source = "git+https://github.com/alpenlabs/alpen.git?tag=v0.5.0-rc.2#2853de3408bd5d865bb83844ac026a1aa3c379d5"
 dependencies = [
  "bitcoin",
  "bitcoin-bosd",
@@ -5119,7 +5119,7 @@ dependencies = [
 [[package]]
 name = "strata-snark-acct-runtime"
 version = "0.1.0"
-source = "git+https://github.com/alpenlabs/alpen.git?tag=v0.4.0-rc.1#d65b7cc8945437c7f23f1c4340d55d367989d6d1"
+source = "git+https://github.com/alpenlabs/alpen.git?tag=v0.5.0-rc.2#2853de3408bd5d865bb83844ac026a1aa3c379d5"
 dependencies = [
  "rkyv",
  "rkyv_impl 0.3.0",
@@ -5133,7 +5133,7 @@ dependencies = [
 [[package]]
 name = "strata-snark-acct-types"
 version = "0.1.0"
-source = "git+https://github.com/alpenlabs/alpen.git?tag=v0.4.0-rc.1#d65b7cc8945437c7f23f1c4340d55d367989d6d1"
+source = "git+https://github.com/alpenlabs/alpen.git?tag=v0.5.0-rc.2#2853de3408bd5d865bb83844ac026a1aa3c379d5"
 dependencies = [
  "ssz",
  "ssz_codegen",
