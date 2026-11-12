@@ -68,7 +68,7 @@ pub(crate) trait NodeDb: Send + Sync + 'static {
     /// Revert local view of canonical chain to specified height
     fn revert_finalized_chain(&self, to_height: u64) -> DbResult<()>;
 
-    /// Remove all block data below specified height
+    /// Remove all block data below specified height, proof witnesses and accessed state included
     fn prune_block_data(&self, to_height: u64) -> DbResult<()>;
 
     /// Deletes the proof witness and the accessed-state record of every
@@ -95,7 +95,7 @@ pub(crate) trait NodeDb: Send + Sync + 'static {
     /// Get block payload for a specified block, if it exists.
     fn get_block_payload(&self, hash: Hash) -> DbResult<Option<Vec<u8>>>;
 
-    /// Delete a single block and its payload by hash.
+    /// Delete a single block by hash: data, payload, proof witness and accessed state.
     fn delete_exec_block(&self, hash: Hash) -> DbResult<()>;
 
     // Batch storage operations

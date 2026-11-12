@@ -5,7 +5,7 @@ use alpen_common::{
     AccessedStateRecord, Batch, BatchId, BatchStatus, Chunk, ChunkId, ChunkStatus,
     EeAccountStateAtEpoch, ExecBlockRecord,
 };
-use alpen_storage_mdbx::{DbResult as MdbxResult, MdbxConfig, MdbxEnv};
+use alpen_storage_mdbx::{DbResult as MdbxResult, MdbxConfig, MdbxEnv, Writer};
 use strata_acct_types::Hash;
 use strata_identifiers::{EpochCommitment, OLBlockId};
 use tracing::{error, trace, warn};
@@ -58,6 +58,18 @@ fn decode_block(db_block: DBExecBlockRecord) -> DbResult<ExecBlockRecord> {
     db_block
         .try_into()
         .map_err(|err| DbError::Other(format!("Failed to decode block: {err:?}")))
+}
+
+/// Deletes the proof witness and the accessed-state record of `hash`, the
+/// per-block proving rows keyed by block hash in their own tables, and
+/// reports which of the two existed. Every store path that discards a block,
+/// or prunes its proving inputs, goes through here so the two tables stay in
+/// lockstep.
+fn delete_block_proving_rows(w: &Writer<'_>, hash: &Hash) -> DbResult<PrunedWitnesses> {
+    Ok(PrunedWitnesses {
+        witnesses: usize::from(w.delete::<BlockWitnessSchema>(hash)?),
+        accessed_states: usize::from(w.delete::<BlockAccessedStateSchema>(hash)?),
+    })
 }
 
 impl NodeDb for NodeDbMdbx {
@@ -322,6 +334,9 @@ impl NodeDb for NodeDbMdbx {
             for hash in &hashes_to_prune {
                 w.delete::<ExecBlockSchema>(hash)?;
                 w.delete::<ExecBlockPayloadSchema>(hash)?;
+                // Once the block is gone nothing can reach its proving rows,
+                // so they go in the same write.
+                delete_block_proving_rows(w, hash)?;
             }
             for height in &heights_to_remove {
                 w.delete::<ExecBlocksAtHeightSchema>(height)?;
@@ -338,12 +353,7 @@ impl NodeDb for NodeDbMdbx {
                     continue;
                 };
                 for hash in hashes {
-                    if w.delete::<BlockWitnessSchema>(&hash)? {
-                        pruned.witnesses += 1;
-                    }
-                    if w.delete::<BlockAccessedStateSchema>(&hash)? {
-                        pruned.accessed_states += 1;
-                    }
+                    pruned += delete_block_proving_rows(w, &hash)?;
                 }
             }
             Ok(pruned)
@@ -436,6 +446,9 @@ impl NodeDb for NodeDbMdbx {
 
             w.delete::<ExecBlockSchema>(&hash)?;
             w.delete::<ExecBlockPayloadSchema>(&hash)?;
+            // Same as pruning: the proving rows would otherwise outlive the
+            // block they belong to.
+            delete_block_proving_rows(w, &hash)?;
 
             if let Some(mut hashes_at_height) = w.get::<ExecBlocksAtHeightSchema>(&height)? {
                 hashes_at_height.retain(|&h| h != hash);
