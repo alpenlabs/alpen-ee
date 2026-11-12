@@ -1182,7 +1182,7 @@ dependencies = [
  "strata-ol-msg-types",
  "strata-predicate",
  "strata-snark-acct-runtime",
- "strata-test-utils-ssz",
+ "strata-ssz-tests",
  "thiserror 2.0.20",
  "tree_hash 0.17.0",
  "tree_hash_derive 0.17.0",
@@ -1225,7 +1225,7 @@ dependencies = [
  "strata-acct-types",
  "strata-identifiers",
  "strata-predicate",
- "strata-test-utils-ssz",
+ "strata-ssz-tests",
  "thiserror 2.0.20",
  "tree_hash 0.17.0",
  "tree_hash_derive 0.17.0",
@@ -16137,6 +16137,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "strata-ssz-tests"
+version = "0.1.0"
+source = "git+https://github.com/alpenlabs/strata-common?tag=v0.4.0#fc71f121d8990af0e56c2da436754b0b1fd304e0"
+dependencies = [
+ "proptest",
+ "ssz",
+ "tree_hash 0.17.0",
+]
+
+[[package]]
 name = "strata-status"
 version = "0.3.0-alpha.1"
 source = "git+https://github.com/alpenlabs/alpen.git?tag=v0.4.0-rc.1#d65b7cc8945437c7f23f1c4340d55d367989d6d1"
@@ -16208,16 +16218,6 @@ source = "git+https://github.com/alpenlabs/alpen.git?tag=v0.4.0-rc.1#d65b7cc8945
 dependencies = [
  "arbitrary",
  "rand_core 0.6.4",
-]
-
-[[package]]
-name = "strata-test-utils-ssz"
-version = "0.1.0"
-source = "git+https://github.com/alpenlabs/alpen.git?tag=v0.4.0-rc.1#d65b7cc8945437c7f23f1c4340d55d367989d6d1"
-dependencies = [
- "proptest",
- "ssz",
- "tree_hash 0.17.0",
 ]
 
 [[package]]

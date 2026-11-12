@@ -167,7 +167,7 @@ mod tests {
     use proptest::prelude::*;
     use strata_acct_types::{BitcoinAmount, SubjectId};
     use strata_predicate::{PredicateKey, PredicateTypeId};
-    use strata_test_utils_ssz::ssz_proptest;
+    use strata_ssz_tests::ssz_proptest;
 
     use crate::ssz_generated::ssz::state::{EeAccountState, PendingFinclEntry, PendingInputEntry};
 

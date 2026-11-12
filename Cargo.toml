@@ -128,7 +128,6 @@ strata-primitives = { git = "https://github.com/alpenlabs/alpen.git", tag = "v0.
 strata-snark-acct-runtime = { git = "https://github.com/alpenlabs/alpen.git", tag = "v0.4.0-rc.1" }
 strata-snark-acct-types = { git = "https://github.com/alpenlabs/alpen.git", tag = "v0.4.0-rc.1" }
 strata-storage-common = { git = "https://github.com/alpenlabs/alpen.git", tag = "v0.4.0-rc.1" }
-strata-test-utils-ssz = { git = "https://github.com/alpenlabs/alpen.git", tag = "v0.4.0-rc.1" }
 
 # strata-common
 strata-btc-types = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.4.0" }
@@ -148,6 +147,7 @@ strata-predicate = { git = "https://github.com/alpenlabs/strata-common", feature
 ], tag = "v0.4.0" }
 strata-retry = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.4.0" }
 strata-service = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.4.0" }
+strata-ssz-tests = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.4.0" }
 
 # zkaleido
 zkaleido = { git = "https://github.com/alpenlabs/zkaleido", features = [
