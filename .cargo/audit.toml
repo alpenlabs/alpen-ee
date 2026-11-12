@@ -10,10 +10,19 @@ ignore = [
   "RUSTSEC-2025-0055",
 
   # hickory-proto 0.25.2, pinned by `hickory-resolver = "0.25.0"` in reth v2.2.0
-  # (reth-dns-discovery). There is no 0.25.x backport, so both need the reth tag
-  # to move to a release that takes hickory 0.26.
+  # (reth-dns-discovery). There is no 0.25.x backport, so these need the reth
+  # tag to move to v2.3.0 or later, which takes hickory 0.26.
   "RUSTSEC-2026-0118", # NSEC3 unbounded loop; no patched release yet
   "RUSTSEC-2026-0119", # O(n^2) name compression; patched in 0.26.1
+  # Zone-file text parsing; a resolver never parses zone files. Patched in 0.26.2.
+  "RUSTSEC-2026-0487", # panic on a malformed SVCB/HTTPS `alpn` value
+  "RUSTSEC-2026-0489", # panic on an SVCB/HTTPS value that is a single quote
+  "RUSTSEC-2026-0490", # panic on a zone-file token of 4096+ characters
+  # A forged record count in a DNS reply makes the decoder reserve up to ~18 MB.
+  # reth only sends DNS queries for an ENR tree, and it only sets a default tree
+  # for named Ethereum chains. Alpen's chain ids are not named, so the node sends
+  # none unless an operator configures a tree. Patched in 0.26.2.
+  "RUSTSEC-2026-0491",
 
   # RUSTSEC-2026-0344 (ruzstd 0.8.3)
   # Reached through object 0.37, which sp1-core-executor 6.8.1 pins with default
