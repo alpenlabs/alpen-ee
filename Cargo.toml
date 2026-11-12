@@ -123,7 +123,6 @@ strata-ol-msg-types = { git = "https://github.com/alpenlabs/alpen.git", tag = "v
 strata-ol-rpc-api = { git = "https://github.com/alpenlabs/alpen.git", tag = "v0.5.0-rc.2" }
 strata-ol-rpc-types = { git = "https://github.com/alpenlabs/alpen.git", tag = "v0.5.0-rc.2" }
 strata-open-rpc = { git = "https://github.com/alpenlabs/alpen.git", tag = "v0.5.0-rc.2" }
-strata-paas = { git = "https://github.com/alpenlabs/alpen.git", tag = "v0.5.0-rc.2" }
 strata-primitives = { git = "https://github.com/alpenlabs/alpen.git", tag = "v0.5.0-rc.2" }
 strata-snark-acct-runtime = { git = "https://github.com/alpenlabs/alpen.git", tag = "v0.5.0-rc.2" }
 strata-snark-acct-types = { git = "https://github.com/alpenlabs/alpen.git", tag = "v0.5.0-rc.2" }
@@ -148,6 +147,12 @@ strata-predicate = { git = "https://github.com/alpenlabs/strata-common", feature
 strata-retry = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.4.0" }
 strata-service = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.4.0" }
 strata-ssz-tests = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.4.0" }
+
+# strata-common-services, pinned by commit. The services shared between the
+# stacks live here; their closure (strata-prover-core, strata-service,
+# zkaleido) has no other strata crate in it, so the pin can move ahead of the
+# alpen tag.
+strata-paas = { git = "https://github.com/alpenlabs/strata-common-services", rev = "64e6ddb04b0d0ed3adbc9cbc632c6b6a7c445f06" }
 
 # zkaleido
 zkaleido = { git = "https://github.com/alpenlabs/zkaleido", features = [

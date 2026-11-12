@@ -142,6 +142,19 @@ impl<K: ProverTaskKey> TaskStore for EeTaskStore<K> {
         self.modify(key, |d| d.set_retry_after_secs(Some(when_secs)))
     }
 
+    /// One `put`, so the status and its timestamp land together.
+    fn schedule_rescan(
+        &self,
+        key: &[u8],
+        status: TaskStatus,
+        retry_after_secs: u64,
+    ) -> ProverResult<()> {
+        self.modify(key, |d| {
+            d.set_retry_after_secs(Some(retry_after_secs));
+            d.set_status(status);
+        })
+    }
+
     fn set_metadata(&self, key: &[u8], data: Vec<u8>) -> ProverResult<()> {
         self.modify(key, |d| d.set_metadata(Some(data)))
     }
@@ -244,5 +257,63 @@ impl EeBatchProofDbManager {
         Some(Proof::from_vec(
             receipt.receipt().proof().as_bytes().to_vec(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{env, process};
+
+    use alpen_common::ChunkId;
+    use alpen_params::AlpenSpecId;
+    use alpen_storage_mdbx::MdbxConfig;
+    use strata_acct_types::Hash;
+    use strata_paas::AttemptCounts;
+    use strata_predicate::{PredicateKey, PredicateTypeId};
+
+    use super::*;
+
+    fn chunk_store() -> EeChunkTaskStore {
+        let mut path = env::temp_dir();
+        path.push(format!("ee-task-store-test-{}", process::id()));
+        let db = ProverDbMdbx::open(&path, &MdbxConfig::small()).unwrap();
+        let key = PredicateKey::try_new(PredicateTypeId::Bip340Schnorr, vec![7u8; 32]).unwrap();
+        EeTaskStore::new(Arc::new(db), ProgramScope::new(AlpenSpecId::V0, key))
+    }
+
+    #[test]
+    fn schedule_rescan_lands_the_status_and_its_timestamp_in_one_write() {
+        let store = chunk_store();
+        let key = ChunkTaskKey::new(
+            AlpenSpecId::V0,
+            ChunkId::from_parts(Hash::from([1u8; 32]), Hash::from([2u8; 32])),
+        )
+        .task_bytes();
+        store
+            .insert(TaskRecord::from_parts(
+                key.clone(),
+                TaskRecordData::new(TaskStatus::Pending),
+            ))
+            .unwrap();
+        store
+            .update_status(
+                &key,
+                TaskStatus::Proving {
+                    counts: AttemptCounts::default(),
+                },
+            )
+            .unwrap();
+
+        let status = TaskStatus::TransientFailure {
+            counts: AttemptCounts::default(),
+            error: "boom".to_string(),
+        };
+        store.schedule_rescan(&key, status.clone(), 42).unwrap();
+
+        let record = store.get(&key).unwrap().unwrap();
+        assert_eq!(record.data().status(), &status);
+        assert_eq!(record.data().retry_after_secs(), Some(42));
+        assert!(store.list_retriable(41).unwrap().is_empty());
+        assert_eq!(store.list_retriable(42).unwrap().len(), 1);
     }
 }

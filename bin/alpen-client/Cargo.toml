@@ -175,5 +175,6 @@ tracing.workspace = true
 zkaleido-sp1-groth16-verifier = { workspace = true, optional = true }
 
 [dev-dependencies]
+alpen-storage-mdbx.workspace = true
 proptest.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
