@@ -69,6 +69,9 @@ pub struct OLAccountStateView {
     pub seq_no: Seqno,
     /// State stored in Account in OL.
     pub proof_state: ProofState,
+    /// The predicate key the OL checks the next update against. Read with
+    /// `seq_no`, so the two describe the same account state.
+    pub update_vk: PredicateKey,
 }
 
 /// Client interface for sequencer-specific OL chain interactions.

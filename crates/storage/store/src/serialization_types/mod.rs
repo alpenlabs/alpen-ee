@@ -2,6 +2,7 @@ mod account_state;
 mod batch;
 mod exec_block;
 mod olblockid;
+mod prover_task;
 mod task_key;
 
 pub use account_state::{DBAccountStateAtEpoch, DBEeAccountState};
@@ -11,6 +12,7 @@ pub use batch::{
 };
 pub use exec_block::DBExecBlockRecord;
 pub use olblockid::DBOLBlockId;
+pub use prover_task::{DBProverTask, ProgramScope};
 pub(crate) use task_key::{decode_versioned_range, encode_versioned_range};
 pub use task_key::{BatchTaskKey, ChunkTaskKey};
 

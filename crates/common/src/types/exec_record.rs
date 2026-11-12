@@ -41,8 +41,9 @@ struct ExecPackageMetadata {
     /// block.
     ///
     /// The block that *consumes* a queued predicate rotation ends with this
-    /// already bumped to the successor, even though that same block was
-    /// itself still built under the predecessor version.
+    /// already set to the version of the program the rotation's key belongs
+    /// to, even though that same block was itself still built under the
+    /// version before it. The two can be the same version.
     next_spec_version: AlpenSpecId,
 }
 

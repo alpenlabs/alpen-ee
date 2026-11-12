@@ -709,11 +709,11 @@ console_tables! {
     pub(crate) fn prover_env_tables() in "prover" {
         ChunkProverTaskSchema => {
             key: "ChunkTaskKey: spec version (u16 BE) then prev_block, last_block (66 bytes -> hex)",
-            value: "TaskRecordData { status, updated_at_secs, retry_after_secs, metadata }",
+            value: "DBProverTask { program_key, status, updated_at_secs, retry_after_secs, metadata }",
         },
         AcctProverTaskSchema => {
             key: "BatchTaskKey: spec version (u16 BE) then prev_block, last_block (66 bytes -> hex)",
-            value: "TaskRecordData { status, updated_at_secs, retry_after_secs, metadata }",
+            value: "DBProverTask { program_key, status, updated_at_secs, retry_after_secs, metadata }",
         },
         ChunkProofReceiptSchema => {
             key: "DBChunkId (prev_block:last_block hex pair)",

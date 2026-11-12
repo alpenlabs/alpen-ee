@@ -3,13 +3,13 @@
 Verifies the Alpen snark account's `update_vk` rotates via an admin
 `PredicateUpdate`, and that the sequencer's prover actually switches to the
 rotated VK's program for everything proved after the rotation (no restart).
-Every consumed rotation advances to the successor spec version, and the chain
-launches on V1. So the rotation (V1 -> V2) must settle normally, and a further
-update after it must also settle -- proved under the *new* VK, not the stale
-pre-rotation one.
+A consumed rotation activates the spec version of the program its key belongs
+to, and the chain launches on V1. So the rotation to the V2 program's key must
+settle normally, and a further update after it must also settle -- proved
+under the *new* VK, not the stale pre-rotation one.
 
-`test_ee_predicate_unknown_spec_version` covers a rotation past V2, which
-this binary must refuse.
+`test_ee_predicate_unknown_key` covers a rotation to a key no program has,
+which the sequencer must refuse.
 """
 
 import logging
@@ -61,14 +61,14 @@ class TestEePredicateTransition(BaseTest):
                 admin_confirmation_depth=2,
                 fund_test_cli_wallet=True,
                 batch_sealing_block_count=BATCH_SEALING_BLOCK_COUNT,
-                # Two resident programs, keyed by the AlpenSpecId each is
-                # built for (see ProverProgramPaths in
+                # Two resident programs, each naming the AlpenSpecId it is
+                # built for (see ProverProgramConfig in
                 # bin/alpen-client/src/config.rs): v2's acct key is the
                 # rotation target, v1's is the genesis-matching key. Both are
                 # validated and loaded at startup; the sequencer routes each
-                # batch's proof request to whichever program's version matches
-                # that batch's own governing spec version (see PaasBatchProver
-                # in bin/alpen-client/src/sequencer/prover/batch_prover.rs), so
+                # batch's proof request to the program whose key the OL will
+                # check that batch against (see PaasBatchProver in
+                # bin/alpen-client/src/sequencer/prover/batch_prover.rs), so
                 # proving keeps working across the V1 -> V2 rotation below
                 # without a restart.
                 prover=PROVER,

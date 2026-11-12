@@ -22,7 +22,7 @@ pub use init::{
     ENV_PROVER, ENV_WITNESS, MDBX_DIR, MDBX_ENVS,
 };
 pub use mdbxdb::{DaContextDbMdbx, NodeDbMdbx, ProverDbMdbx, ProverTaskKey, WitnessDbMdbx};
-pub use serialization_types::{BatchTaskKey, ChunkTaskKey};
+pub use serialization_types::{BatchTaskKey, ChunkTaskKey, DBProverTask, ProgramScope};
 pub use storage::NodeStorage;
 
 /// The store's on-disk model, for tooling and tests: every table marker and
@@ -52,6 +52,6 @@ pub mod records {
     pub use crate::serialization_types::{
         BatchTaskKey, ChunkTaskKey, DBAccountStateAtEpoch, DBBatch, DBBatchId, DBBatchStatus,
         DBBatchWithStatus, DBChunk, DBChunkId, DBChunkStatus, DBChunkWithStatus, DBEeAccountState,
-        DBExecBlockRecord, DBL1DaBlockRef, DBOLBlockId, DBTxidPair,
+        DBExecBlockRecord, DBL1DaBlockRef, DBOLBlockId, DBProverTask, DBTxidPair,
     };
 }

@@ -40,7 +40,7 @@ use zkaleido::ProofReceiptWithMetadata;
 use crate::serialization_types::{
     decode_versioned_range, encode_versioned_range, BatchTaskKey, ChunkTaskKey,
     DBAccountStateAtEpoch, DBBatchId, DBBatchWithStatus, DBChunkId, DBChunkWithStatus,
-    DBExecBlockRecord, DBOLBlockId,
+    DBExecBlockRecord, DBOLBlockId, DBProverTask,
 };
 
 /// Raw 32-byte [`KeyCodec`] for [`TxNodeId`], which is a newtype over a hash
@@ -167,21 +167,31 @@ define_table_borsh! {
 
 define_table! {
     /// Chunk prover tasks, keyed by [`ChunkTaskKey`]: the resident spec version
-    /// that owns the task, then the chunk's block range.
+    /// that owns the task, then the chunk's block range. The value records which
+    /// of that version's programs proves it.
     ///
-    /// The record is serde-only, hence the CBOR payload.
-    (pub ChunkProverTaskSchema) ChunkTaskKey => TaskRecordData
+    /// The record is serde-only, hence the CBOR payload. Version 1 was the bare
+    /// paas record, with no program key.
+    (pub ChunkProverTaskSchema) ChunkTaskKey => DBProverTask
 }
-impl_versioned_value_codec!(ChunkProverTaskSchema { 1 => TaskRecordData as cbor });
+impl_versioned_value_codec!(ChunkProverTaskSchema {
+    1 => TaskRecordData as cbor,
+    2 => DBProverTask as cbor,
+});
 
 define_table! {
     /// Acct prover tasks, keyed by [`BatchTaskKey`]: the resident spec version
-    /// that owns the task, then the batch's block range.
+    /// that owns the task, then the batch's block range. The value records which
+    /// of that version's programs proves it.
     ///
-    /// The record is serde-only, hence the CBOR payload.
-    (pub AcctProverTaskSchema) BatchTaskKey => TaskRecordData
+    /// The record is serde-only, hence the CBOR payload. Version 1 was the bare
+    /// paas record, with no program key.
+    (pub AcctProverTaskSchema) BatchTaskKey => DBProverTask
 }
-impl_versioned_value_codec!(AcctProverTaskSchema { 1 => TaskRecordData as cbor });
+impl_versioned_value_codec!(AcctProverTaskSchema {
+    1 => TaskRecordData as cbor,
+    2 => DBProverTask as cbor,
+});
 
 impl KeyCodec<ChunkProverTaskSchema> for ChunkTaskKey {
     // The version is big-endian and the hashes are raw, so byte order is key

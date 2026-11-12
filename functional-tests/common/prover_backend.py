@@ -84,6 +84,28 @@ ROTATION_SPEC_VERSIONS = ("v1", "v2")
 #: fork activating at the boundary has to cross from v0 to v1.
 OSAKA_ROTATION_SPEC_VERSIONS = ("v0", "v1")
 
+#: A second v2 program: the same rules under a new key, the way a guest fix
+#: that keeps the rules ships. Native only, since a build produces one v2
+#: guest pair.
+V2_REKEYED = "v2-rekeyed"
+
+#: A rotation that keeps the spec version: from the v2 program to a second v2
+#: program with another key.
+SAME_VERSION_ROTATION_PROGRAMS = ("v2", V2_REKEYED)
+
+#: The spec version each program name proves. A name is its own version,
+#: except for an extra program of a version.
+_PROGRAM_SPEC_VERSIONS: dict[str, str] = {
+    **{spec_version: spec_version for spec_version in SPEC_VERSIONS},
+    V2_REKEYED: "v2",
+}
+
+
+def spec_version_of(program: str) -> str:
+    """The spec version the program named `program` proves."""
+    return _PROGRAM_SPEC_VERSIONS[program]
+
+
 # The native provers sign proofs with these Schnorr keys instead of doing real
 # ZK proving. Signing with a different key still produces a validly-signed
 # proof, but OL checks it against the registered predicate and rejects it, so
@@ -106,6 +128,7 @@ NATIVE_CHUNK_SIGNING_KEY_HEX = "03" * 32
 NATIVE_V0_ACCT_SIGNING_KEY_HEX = "04" * 32
 NATIVE_V1_ACCT_SIGNING_KEY_HEX = "05" * 32
 NATIVE_V2_ACCT_SIGNING_KEY_HEX = "02" * 32
+NATIVE_V2_REKEYED_ACCT_SIGNING_KEY_HEX = "06" * 32
 
 # The `Bip340Schnorr` predicate each acct key above is bound to. Pinned rather
 # than derived: deriving one here would need a BIP340 implementation in the
@@ -119,12 +142,16 @@ NATIVE_V1_ACCT_PREDICATE = (
 NATIVE_V2_ACCT_PREDICATE = (
     "Bip340Schnorr:4d4b6cd1361032ca9bd2aeb9d900aa4d45d9ead80ac9423374c451a7254d0766"
 )
+NATIVE_V2_REKEYED_ACCT_PREDICATE = (
+    "Bip340Schnorr:f006a18d5653c4edf5391ff23a61f03ff83d237e880ee61187fa9f379a028e0a"
+)
 
-#: Signing-key pair the native backend runs for each spec version.
+#: Signing-key pair the native backend runs for each program.
 _NATIVE_SIGNING_KEYS: dict[str, tuple[str, str]] = {
     "v0": (NATIVE_CHUNK_SIGNING_KEY_HEX, NATIVE_V0_ACCT_SIGNING_KEY_HEX),
     "v1": (NATIVE_CHUNK_SIGNING_KEY_HEX, NATIVE_V1_ACCT_SIGNING_KEY_HEX),
     "v2": (NATIVE_CHUNK_SIGNING_KEY_HEX, NATIVE_V2_ACCT_SIGNING_KEY_HEX),
+    V2_REKEYED: (NATIVE_CHUNK_SIGNING_KEY_HEX, NATIVE_V2_REKEYED_ACCT_SIGNING_KEY_HEX),
 }
 
 #: Predicate each native program's proofs are signed under.
@@ -132,6 +159,7 @@ _NATIVE_PREDICATES: dict[str, str] = {
     "v0": NATIVE_V0_ACCT_PREDICATE,
     "v1": NATIVE_V1_ACCT_PREDICATE,
     "v2": NATIVE_V2_ACCT_PREDICATE,
+    V2_REKEYED: NATIVE_V2_REKEYED_ACCT_PREDICATE,
 }
 
 
@@ -141,8 +169,10 @@ class ProverBackend(ABC):
     backend: ClassVar[str]
 
     spec_versions: tuple[str, ...]
-    """Spec versions this backend has a resident program for. The first is the
-    genesis version; a rotation targets the one after it."""
+    """The programs this backend has resident, by name. A name is the spec
+    version the program proves, or an extra program of a version (see
+    `spec_version_of`). The first is the genesis program; a rotation targets
+    the one after it."""
 
     genesis_predicate: str
     """Predicate OL genesis registers for the EE account. Has to match what
@@ -156,8 +186,7 @@ class ProverBackend(ABC):
     @abstractmethod
     def prover_config(self, datadir: Path) -> AlpenProverConfig:
         """Builds the ``[sequencer.prover]`` table, writing any files it needs
-        into ``datadir``, with one
-        ``[sequencer.prover.programs.<spec_version>]`` entry per
+        into ``datadir``, with one ``[[sequencer.prover.programs]]`` entry per
         [`spec_versions`]."""
 
     @property
@@ -179,7 +208,7 @@ class ProverBackend(ABC):
         unscheduled. So the chain launches on ``spec_versions[0]``, and the
         batches it stamps name a version this backend has a program for.
         """
-        genesis_version = self.spec_versions[0]
+        genesis_version = spec_version_of(self.spec_versions[0])
         launched = SPEC_VERSIONS[: SPEC_VERSIONS.index(genesis_version) + 1]
         return {spec_version: 0 for spec_version in launched}
 
@@ -212,16 +241,19 @@ class NativeBackend(ProverBackend):
     ee_params_path: None = None
 
     def prover_config(self, datadir: Path) -> AlpenProverConfig:
-        entries = {}
-        for spec_version in self.spec_versions:
-            chunk_hex, acct_hex = _NATIVE_SIGNING_KEYS[spec_version]
-            chunk_key_path = datadir / f"native-chunk-signing-key-{spec_version}.hex"
-            acct_key_path = datadir / f"native-acct-signing-key-{spec_version}.hex"
+        entries = []
+        for program in self.spec_versions:
+            chunk_hex, acct_hex = _NATIVE_SIGNING_KEYS[program]
+            chunk_key_path = datadir / f"native-chunk-signing-key-{program}.hex"
+            acct_key_path = datadir / f"native-acct-signing-key-{program}.hex"
             chunk_key_path.write_text(chunk_hex)
             acct_key_path.write_text(acct_hex)
-            entries[spec_version] = AlpenProverProgram(
-                chunk_path=str(chunk_key_path),
-                acct_path=str(acct_key_path),
+            entries.append(
+                AlpenProverProgram(
+                    spec_version=spec_version_of(program),
+                    chunk_path=str(chunk_key_path),
+                    acct_path=str(acct_key_path),
+                )
             )
         return AlpenProverConfig(backend=self.backend, programs=entries)
 
@@ -259,13 +291,14 @@ class Sp1Backend(ProverBackend):
         return AlpenProverConfig(
             backend=self.backend,
             deadline_secs=self.deadline_secs,
-            programs={
-                spec_version: AlpenProverProgram(
+            programs=[
+                AlpenProverProgram(
+                    spec_version=spec_version,
                     chunk_path=str(chunk_elf),
                     acct_path=str(acct_elf),
                 )
                 for spec_version, (chunk_elf, acct_elf) in self.programs.items()
-            },
+            ],
         )
 
     @property

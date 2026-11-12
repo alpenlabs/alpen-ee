@@ -2,7 +2,7 @@
 //!
 //! Three managers, all wrapping the shared [`ProverDbMdbx`]:
 //!
-//! - [`EeTaskStore`] — impls `paas::TaskStore` over one task table for one resident spec version.
+//! - [`EeTaskStore`] — impls `paas::TaskStore` over one task table for one resident prover program.
 //!   The chunk prover gets an [`EeChunkTaskStore`], the acct prover an [`EeAcctTaskStore`].
 //! - [`EeChunkReceiptStore`] — impls `paas::ReceiptStore`. The chunk prover writes here; the acct
 //!   `fetch_input` reads from here.
@@ -23,8 +23,7 @@
 use std::{marker::PhantomData, sync::Arc};
 
 use alpen_common::{decode_chunk_task_key, BatchId, Proof, ProofId};
-use alpen_params::AlpenSpecId;
-use alpen_storage_store::{BatchTaskKey, ChunkTaskKey, ProverDbMdbx, ProverTaskKey};
+use alpen_storage_store::{BatchTaskKey, ChunkTaskKey, ProgramScope, ProverDbMdbx, ProverTaskKey};
 use strata_db_types::errors::DbError;
 use strata_paas::{
     ProverError, ProverResult, ReceiptStore, TaskRecord, TaskRecordData, TaskStatus, TaskStore,
@@ -38,19 +37,20 @@ fn db_err(e: DbError) -> ProverError {
     }
 }
 
-/// Task store of one prover kind for one resident spec version.
+/// Task store of one prover kind for one resident prover program.
 ///
 /// paas hands over the bare task bytes its `Task::into()` produced; this
-/// store adds the version to select the row, so `tick`/`recover` in
-/// `strata-paas`, which re-spawn work by listing the store, only ever see
-/// the tasks this version's prover submitted. Without that scoping, one
-/// resident version's poll loop could claim and sign a task meant for
-/// another, proving it with the wrong VK. `K` selects the table, so a chunk
+/// store adds the program's spec version to select the row, and reads and
+/// lists only the rows in the program's [`ProgramScope`]. So
+/// `tick`/`recover` in `strata-paas`, which re-spawn work by listing the
+/// store, only ever see the tasks this program submitted. Without that
+/// scoping, one resident program's poll loop could claim and sign a task meant
+/// for another, proving it with the wrong VK. `K` selects the table, so a chunk
 /// store never lists acct tasks and vice versa.
 #[derive(Debug)]
 pub(crate) struct EeTaskStore<K> {
     db: Arc<ProverDbMdbx>,
-    spec_version: AlpenSpecId,
+    scope: ProgramScope,
     _key: PhantomData<K>,
 }
 
@@ -64,28 +64,41 @@ impl<K> Clone for EeTaskStore<K> {
     fn clone(&self) -> Self {
         Self {
             db: self.db.clone(),
-            spec_version: self.spec_version,
+            scope: self.scope.clone(),
             _key: PhantomData,
         }
     }
 }
 
 impl<K: ProverTaskKey> EeTaskStore<K> {
-    pub(crate) fn new(db: Arc<ProverDbMdbx>, spec_version: AlpenSpecId) -> Self {
+    pub(crate) fn new(db: Arc<ProverDbMdbx>, scope: ProgramScope) -> Self {
         Self {
             db,
-            spec_version,
+            scope,
             _key: PhantomData,
         }
     }
 
     fn key(&self, bytes: &[u8]) -> ProverResult<K> {
-        K::from_task_bytes(self.spec_version, bytes)
+        K::from_task_bytes(self.scope.spec_version(), bytes)
             .map_err(|e| ProverError::Storage(format!("task key {bytes:?}: {e}")))
     }
 
     fn record(key: K, data: TaskRecordData) -> TaskRecord {
         TaskRecord::from_parts(key.task_bytes(), data)
+    }
+
+    /// Reads the task under `key` if it is in this program's scope.
+    fn get_in_scope(&self, key: &K) -> ProverResult<Option<TaskRecordData>> {
+        let Some(task) = self.db.get_task(key).map_err(db_err)? else {
+            return Ok(None);
+        };
+        if !self.scope.includes(&task) {
+            return Ok(None);
+        }
+        task.record()
+            .map(Some)
+            .map_err(|e| ProverError::Storage(e.to_string()))
     }
 
     fn modify<F>(&self, bytes: &[u8], f: F) -> ProverResult<()>
@@ -94,25 +107,25 @@ impl<K: ProverTaskKey> EeTaskStore<K> {
     {
         let key = self.key(bytes)?;
         let mut data = self
-            .db
-            .get_task(&key)
-            .map_err(db_err)?
+            .get_in_scope(&key)?
             .ok_or_else(|| ProverError::TaskNotFound(format!("{bytes:?}")))?;
         f(&mut data);
-        self.db.put_task(&key, data).map_err(db_err)
+        self.db
+            .put_task(&key, self.scope.tag(&data))
+            .map_err(db_err)
     }
 }
 
 impl<K: ProverTaskKey> TaskStore for EeTaskStore<K> {
     fn get(&self, key: &[u8]) -> ProverResult<Option<TaskRecord>> {
-        let stored = self.db.get_task(&self.key(key)?).map_err(db_err)?;
+        let stored = self.get_in_scope(&self.key(key)?)?;
         Ok(stored.map(|data| TaskRecord::from_parts(key.to_vec(), data)))
     }
 
     fn insert(&self, record: TaskRecord) -> ProverResult<()> {
         let key = self.key(record.key())?;
         self.db
-            .insert_task(&key, record.data().clone())
+            .insert_task(&key, self.scope.tag(record.data()))
             .map_err(|e| match e {
                 DbError::EntryAlreadyExists => {
                     ProverError::TaskAlreadyExists(format!("{:?}", record.key()))
@@ -140,7 +153,7 @@ impl<K: ProverTaskKey> TaskStore for EeTaskStore<K> {
     fn list_retriable(&self, now_secs: u64) -> ProverResult<Vec<TaskRecord>> {
         let items = self
             .db
-            .list_retriable_tasks::<K>(self.spec_version, now_secs)
+            .list_retriable_tasks::<K>(&self.scope, now_secs)
             .map_err(db_err)?;
         Ok(items.into_iter().map(|(k, d)| Self::record(k, d)).collect())
     }
@@ -148,13 +161,13 @@ impl<K: ProverTaskKey> TaskStore for EeTaskStore<K> {
     fn list_unfinished(&self) -> ProverResult<Vec<TaskRecord>> {
         let items = self
             .db
-            .list_unfinished_tasks::<K>(self.spec_version)
+            .list_unfinished_tasks::<K>(&self.scope)
             .map_err(db_err)?;
         Ok(items.into_iter().map(|(k, d)| Self::record(k, d)).collect())
     }
 
     fn count(&self) -> ProverResult<usize> {
-        self.db.count_tasks::<K>(self.spec_version).map_err(db_err)
+        self.db.count_tasks::<K>(&self.scope).map_err(db_err)
     }
 }
 

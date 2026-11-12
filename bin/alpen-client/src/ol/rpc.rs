@@ -370,6 +370,7 @@ impl SequencerOLClient for RpcOLClient {
                 snark_account_state.inner_state().0.into(),
                 snark_account_state.next_inbox_msg_idx(),
             ),
+            update_vk: snark_account_state.update_vk().clone(),
         })
     }
 

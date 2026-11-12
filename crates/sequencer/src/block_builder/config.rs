@@ -1,5 +1,6 @@
 use std::num::NonZeroU8;
 
+use alpen_block_assembly::ProgramRegistry;
 use strata_acct_types::{AccountId, BRIDGE_GATEWAY_ACCT_ID};
 
 /// Default target blocktime in millis
@@ -19,6 +20,10 @@ pub struct BlockBuilderConfig {
     bridge_gateway_account_id: AccountId,
     /// Base backoff time to delay on errors during block building.
     error_backoff_ms: u64,
+    /// The version each prover program's key proves. A consumed rotation
+    /// activates the version of its key's program, so a rotation to a key
+    /// missing here stops block building.
+    program_registry: ProgramRegistry,
 }
 
 impl Default for BlockBuilderConfig {
@@ -28,6 +33,7 @@ impl Default for BlockBuilderConfig {
             max_deposits_per_block: DEFAULT_DEPOSITS_PER_BLOCK,
             bridge_gateway_account_id: BRIDGE_GATEWAY_ACCT_ID,
             error_backoff_ms: DEFAULT_ERROR_BACKOFF_MS,
+            program_registry: ProgramRegistry::default(),
         }
     }
 }
@@ -56,6 +62,11 @@ impl BlockBuilderConfig {
         self
     }
 
+    pub fn with_program_registry(mut self, program_registry: ProgramRegistry) -> Self {
+        self.program_registry = program_registry;
+        self
+    }
+
     pub fn blocktime_ms(&self) -> u64 {
         self.blocktime_ms
     }
@@ -70,5 +81,9 @@ impl BlockBuilderConfig {
 
     pub fn error_backoff_ms(&self) -> u64 {
         self.error_backoff_ms
+    }
+
+    pub fn program_registry(&self) -> &ProgramRegistry {
+        &self.program_registry
     }
 }

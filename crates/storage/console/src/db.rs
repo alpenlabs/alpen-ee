@@ -795,7 +795,7 @@ mod tests {
     use alpen_storage_store::{
         schema::{ChunkProverTaskSchema, ExecBlockFinalizedSchema},
         test_db::TempDatadir,
-        ChunkTaskKey,
+        ChunkTaskKey, DBProverTask,
     };
     use strata_acct_types::Hash;
     use strata_paas::{TaskRecordData, TaskStatus};
@@ -824,6 +824,11 @@ mod tests {
         task(prev, last).render()
     }
 
+    /// A legacy task, stored before tasks recorded their program.
+    fn legacy(record: TaskRecordData) -> DBProverTask {
+        DBProverTask::new(None, &record)
+    }
+
     /// Creates a prover env with two tasks: a pending one and a permanently
     /// failed one. The env handle is dropped before returning so the console can
     /// attach read-only in the same process.
@@ -846,13 +851,13 @@ mod tests {
         env.update(|writer| {
             writer.put::<ChunkProverTaskSchema>(
                 &task(1, 2),
-                &TaskRecordData::new(TaskStatus::Pending),
+                &legacy(TaskRecordData::new(TaskStatus::Pending)),
             )?;
             writer.put::<ChunkProverTaskSchema>(
                 &task(4, 5),
-                &TaskRecordData::new(TaskStatus::PermanentFailure {
+                &legacy(TaskRecordData::new(TaskStatus::PermanentFailure {
                     error: "boom".to_owned(),
-                }),
+                })),
             )?;
             Ok::<_, DbError>(())
         })
@@ -1937,8 +1942,10 @@ mod tests {
             .collect();
         env.update(|writer| {
             for key in &keys {
-                writer
-                    .put::<ChunkProverTaskSchema>(key, &TaskRecordData::new(TaskStatus::Pending))?;
+                writer.put::<ChunkProverTaskSchema>(
+                    key,
+                    &legacy(TaskRecordData::new(TaskStatus::Pending)),
+                )?;
             }
             Ok::<_, DbError>(())
         })
