@@ -173,7 +173,12 @@ impl ProverDbMdbx {
     }
 
     /// Lists `spec_version`'s tasks that want a rescan and whose retry time
-    /// has passed.
+    /// has passed or was never written.
+    ///
+    /// A rescan status with no `retry_after` is a record whose scheduling
+    /// write did not land after the status did. The scanner selects on the
+    /// timestamp and startup recovery only takes `Pending` and `Proving`, so
+    /// treating it as due is the only thing that ever re-spawns the task.
     pub fn list_retriable_tasks<K: ProverTaskKey>(
         &self,
         spec_version: AlpenSpecId,
@@ -182,7 +187,7 @@ impl ProverDbMdbx {
         self.list_tasks_where::<K>(|key, record| {
             key.spec_version() == spec_version
                 && record.status().wants_rescan()
-                && record.retry_after_secs().is_some_and(|t| t <= now_secs)
+                && record.retry_after_secs().is_none_or(|t| t <= now_secs)
         })
     }
 
@@ -507,6 +512,29 @@ mod tests {
             .list_retriable_tasks::<ChunkTaskKey>(AlpenSpecId::V1, 5)
             .unwrap()
             .is_empty());
+
+        // A transient failure whose retry_after never landed is due at any time.
+        let stranded = chunk_key(AlpenSpecId::V1, 2);
+        db.insert_task(
+            &stranded,
+            TaskRecordData::new(TaskStatus::TransientFailure {
+                counts: AttemptCounts::default(),
+                error: "retry_after write failed".to_string(),
+            }),
+        )
+        .unwrap();
+        let retriable = db
+            .list_retriable_tasks::<ChunkTaskKey>(AlpenSpecId::V1, 0)
+            .unwrap();
+        assert_eq!(retriable.len(), 1);
+        assert_eq!(retriable[0].0, stranded);
+        assert_eq!(
+            db.list_retriable_tasks::<ChunkTaskKey>(AlpenSpecId::V1, 100)
+                .unwrap()
+                .len(),
+            2
+        );
+        assert!(db.delete_task(&stranded).unwrap());
 
         assert_eq!(db.count_tasks::<ChunkTaskKey>(AlpenSpecId::V0).unwrap(), 1);
         assert_eq!(db.count_tasks::<ChunkTaskKey>(AlpenSpecId::V1).unwrap(), 1);
