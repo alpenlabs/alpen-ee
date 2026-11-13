@@ -21,7 +21,7 @@ use reth_node_builder::{
 };
 use reth_node_core::args::{DiscoveryArgs, NetworkArgs};
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// The discv5 protocol identity of Alpen nodes.
 ///
@@ -161,13 +161,20 @@ fn discv5_on_rlpx_port(discovery: &DiscoveryArgs, rlpx_port: u16) -> DiscoveryAr
 ///
 /// The IP only goes in when discv5 listens on the unspecified address of the
 /// same family. A specific listen address is already in the record, and a
-/// family discv5 doesn't listen on has no socket to reach.
+/// family discv5 doesn't listen on has no socket to reach. It warns when a
+/// `--nat` setting the operator chose can't go in.
 fn with_external_ip(mut config: Discv5Config, nat: Option<&NatResolver>) -> Discv5Config {
     let Some(nat) = nat else {
         return config;
     };
     let (ipv4, ipv6) = unspecified_listen_ports(&config.discv5_config_mut().listen_config);
     let Some(port) = ipv4.or(ipv6) else {
+        if matches!(
+            nat,
+            NatResolver::ExternalIp(_) | NatResolver::ExternalAddr(_)
+        ) {
+            warn!(%nat, "ignoring --nat for discv5, which advertises its specific listen address");
+        }
         return config;
     };
 
@@ -175,7 +182,28 @@ fn with_external_ip(mut config: Discv5Config, nat: Option<&NatResolver>) -> Disc
     let (key, ip): (&'static [u8], _) = match nat.clone().as_external_ip(port) {
         Some(IpAddr::V4(ip)) if ipv4.is_some() => (b"ip", ip.octets().to_vec()),
         Some(IpAddr::V6(ip)) if ipv6.is_some() => (b"ip6", ip.octets().to_vec()),
-        _ => return config,
+        Some(ip) => {
+            warn!(
+                %nat, %ip,
+                "discv5 doesn't listen on this IP family, so its record has no external IP"
+            );
+            return config;
+        }
+        None => {
+            match nat {
+                NatResolver::ExternalAddr(_) => {
+                    warn!(%nat, "couldn't resolve --nat, so the discv5 record has no external IP");
+                }
+                NatResolver::Upnp | NatResolver::PublicIp | NatResolver::NetIf => {
+                    warn!(
+                        %nat,
+                        "discv5 only takes --nat extip or extaddr, so its record has no external IP"
+                    );
+                }
+                _ => debug!(%nat, "the discv5 record has no external IP"),
+            }
+            return config;
+        }
     };
     let value = Bytes::from(alloy_rlp::encode(ip.as_slice()));
     let config = Discv5ConfigBuilder::new_from(config)
