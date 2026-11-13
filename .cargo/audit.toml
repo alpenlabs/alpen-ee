@@ -23,6 +23,14 @@ ignore = [
   # for named Ethereum chains. Alpen's chain ids are not named, so the node sends
   # none unless an operator configures a tree. Patched in 0.26.2.
   "RUSTSEC-2026-0491",
+  # DNSSEC validation. It only compiles behind hickory's `dnssec-ring` or
+  # `dnssec-aws-lc-rs` feature, and reth-dns-discovery enables neither, so
+  # none of this code is in the binary. Patched in hickory-net 0.26.2.
+  "RUSTSEC-2026-0504", # inverted NSEC3 comparison
+  "RUSTSEC-2026-0505", # NSEC3 owner name not checked against the zone
+  "RUSTSEC-2026-0511", # NXDOMAIN accepted for an empty non-terminal
+  "RUSTSEC-2026-0512", # unrelated signed RRset accepted as the answer
+  "RUSTSEC-2026-0514", # lookups returned records that failed validation
 
   # RUSTSEC-2026-0344 (ruzstd 0.8.3)
   # Reached through object 0.37, which sp1-core-executor 6.8.1 pins with default
