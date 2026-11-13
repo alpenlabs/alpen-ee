@@ -145,7 +145,7 @@ with `mode = "full_node"`.
 | Flag | Description |
 |------|-------------|
 | `--p2p-secret-key <file>` | Path to file containing 32-byte hex private key (no `0x` prefix). This key determines the node's enode identity. If the file doesn't exist, Reth auto-generates one. |
-| `--port <port>` | P2P TCP listen port. Default: `30303`. |
+| `--port <port>` | P2P listen port: TCP for peer connections, and UDP for discv5 unless `--discovery.v5.port` moves it. Default: `30303`. |
 | `--addr <ip>` | P2P listen address. Use `0.0.0.0` for all interfaces, `127.0.0.1` for loopback only. |
 | `--nat <method>` | NAT traversal. Use `extip:<your-public-ip>` so the enode URL advertises the correct IP. Other options: `any`, `none`, `upnp`. |
 | `--disable-discovery` | Disable DHT-based peer discovery. Peers must be configured statically. Recommended for controlled deployments. |
@@ -242,14 +242,13 @@ Nodes discover each other via the discv5 protocol using bootnodes as entry point
 
 ```
 --nat extip:<public-ip>
---discovery.v5.port 9200
---bootnodes enode://<bootnode-pubkey>@<bootnode-host>:30303?discport=9200
+--bootnodes enode://<bootnode-pubkey>@<bootnode-host>:30303
 ```
 
-- discv5 is on by default. `--discovery.v5.port` sets the UDP port it listens on. The default is `9200`. Open it inbound.
+- discv5 is on by default. It listens on UDP at the same port as `--port` (TCP), so open that port inbound for both TCP and UDP. `--discovery.v5.port` moves it to another port. Setting it to `9200`, reth's usual default, has no effect: alpen-client can't tell that apart from leaving it unset.
 - `--nat extip:<public-ip>` puts the IP other nodes can reach in both the enode and the discv5 record. Without it, a node listening on `0.0.0.0` may advertise no IP in its discv5 record, and other nodes can't reach it through discovery. If you set `--discovery.v5.addr` to a specific address, the record carries that address and ignores `--nat`, so only use one other nodes can reach.
 - alpen-client never runs discv4, so `--disable-discv4-discovery` and other discv4 flags have no effect.
-- `--bootnodes` is a comma-separated list of enode URLs to start discovery from, typically the sequencer's or a fullnode's. Copy each enode from the bootnode's `admin_nodeInfo`, which already carries its discv5 port as `discport`. If you write one by hand, add `?discport=<discv5 port>`. Without it, discovery contacts the TCP port and never reaches the bootnode.
+- `--bootnodes` is a comma-separated list of enode URLs to start discovery from, typically the sequencer's or a fullnode's. Copying each enode from the bootnode's `admin_nodeInfo` is safest. If you write one by hand and the bootnode sets `--discovery.v5.port`, add `?discport=<that port>`. Without it, discovery contacts the TCP port and never reaches the bootnode.
 - Without `--bootnodes` the node only finds peers that contact it first. It never falls back to Ethereum's bootnodes.
 
 Nodes will automatically discover and connect to other peers reachable through the bootnode graph. This forms a mesh topology — fullnodes connect to each other, not just to the sequencer.
@@ -315,7 +314,7 @@ If peer count is `0x0`:
 - Verify enode URLs are correct (check public key and host/port).
 - Verify nodes are on the same network and the P2P port is reachable.
 - Verify `--nat` is set correctly — the advertised IP in the enode must be reachable by the other node.
-- Check firewall rules on the P2P port (TCP), and on the discv5 port (UDP) if you use discovery.
+- Check firewall rules on the P2P port: TCP, plus UDP if you use discovery (or the `--discovery.v5.port` port, if set).
 
 ### 3. Check gossip connections established
 

@@ -7,6 +7,7 @@ use reth_chainspec::{ForkId, Hardforks};
 use reth_discv5::{
     discv5::{ListenConfig, ProtocolIdentity},
     Config as Discv5Config, ConfigBuilder as Discv5ConfigBuilder, NetworkStackId,
+    DEFAULT_DISCOVERY_V5_PORT,
 };
 use reth_network::{
     primitives::BasicNetworkPrimitives, types::NatResolver, NetworkConfig, NetworkHandle,
@@ -18,7 +19,7 @@ use reth_node_builder::{
     node::{FullNodeTypes, NodeTypes},
     BuilderContext,
 };
-use reth_node_core::args::NetworkArgs;
+use reth_node_core::args::{DiscoveryArgs, NetworkArgs};
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use tracing::{info, warn};
 
@@ -116,8 +117,7 @@ fn isolate_discovery<C, N: NetworkPrimitives>(
     if config.discovery_v5_config.is_some() {
         // Rebuilt rather than patched, so it doesn't keep the bootnodes reth
         // already put in it. The network manager adds `config.boot_nodes`.
-        let builder = args
-            .discovery
+        let builder = discv5_on_rlpx_port(&args.discovery, config.listener_addr.port())
             .discovery_v5_builder(config.listener_addr, Vec::new());
         let discv5 = alpen_discv5_config(builder, config.fork_filter.current());
         let nat = (!args.discovery.disable_nat).then_some(&args.nat);
@@ -125,6 +125,27 @@ fn isolate_discovery<C, N: NetworkPrimitives>(
     }
 
     config
+}
+
+/// Moves discv5 onto the RLPx port, in place of reth's default UDP port.
+///
+/// An enode without `?discport=` sends discovery to its TCP port. With discv5
+/// on reth's default port, a hand-written bootnode enode that leaves out
+/// `?discport=` reaches nothing, and nothing logs it. discv4 is off, so the
+/// RLPx port is free on UDP. geth also runs discovery on its RLPx port by
+/// default.
+///
+/// Reth can't tell a port left at its default from one set to the same value,
+/// so an explicit `--discovery.v5.port` equal to reth's default moves too.
+fn discv5_on_rlpx_port(discovery: &DiscoveryArgs, rlpx_port: u16) -> DiscoveryArgs {
+    let mut discovery = discovery.clone();
+    if discovery.discv5_port == DEFAULT_DISCOVERY_V5_PORT {
+        discovery.discv5_port = rlpx_port;
+    }
+    if discovery.discv5_port_ipv6 == DEFAULT_DISCOVERY_V5_PORT {
+        discovery.discv5_port_ipv6 = rlpx_port;
+    }
+    discovery
 }
 
 /// Puts the `--nat` external IP in the discv5 record, before discv5 starts.
@@ -279,6 +300,41 @@ mod tests {
 
         assert!(config.discovery_v4_config.is_none());
         assert!(config.discovery_v5_config.is_none());
+    }
+
+    /// Returns the IPv4 port discv5 listens on.
+    fn discv5_ipv4_port(config: &mut Discv5Config) -> Option<u16> {
+        match config.discv5_config_mut().listen_config {
+            ListenConfig::Ipv4 { port, .. } => Some(port),
+            ListenConfig::DualStack { ipv4_port, .. } => Some(ipv4_port),
+            _ => None,
+        }
+    }
+
+    #[tokio::test]
+    async fn isolate_discovery_puts_discv5_on_the_rlpx_port_by_default() {
+        let args = NetworkArgs::default();
+        let mut config = isolate_discovery(stock_config(&args, true), &args);
+
+        let rlpx_port = config.listener_addr.port();
+        let discv5 = config
+            .discovery_v5_config
+            .as_mut()
+            .expect("discv5 stays on");
+        assert_eq!(discv5_ipv4_port(discv5), Some(rlpx_port));
+    }
+
+    #[tokio::test]
+    async fn isolate_discovery_keeps_an_explicit_discv5_port() {
+        let mut args = NetworkArgs::default();
+        args.discovery.discv5_port = 9300;
+        let mut config = isolate_discovery(stock_config(&args, true), &args);
+
+        let discv5 = config
+            .discovery_v5_config
+            .as_mut()
+            .expect("discv5 stays on");
+        assert_eq!(discv5_ipv4_port(discv5), Some(9300));
     }
 
     fn unused_udp_port() -> u16 {
