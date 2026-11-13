@@ -27,7 +27,7 @@ use alpen_params::AlpenParams;
 use alpen_reth_node::{AlpenEngineTypes, AlpenGossipEvent};
 use alpen_rpc_server::{
     get_or_create_jwt_secret, start_authenticated_rpc_server, AdminRpcServer, AlpenAdminRpcServer,
-    RpcBlockProductionControl,
+    CanonicalChainSlot, RpcBlockProductionControl,
 };
 use alpen_storage_store::{open_stores, NodeDbMdbx, NodeStorage};
 use eyre::Context;
@@ -121,6 +121,9 @@ pub(crate) struct NodeBootstrap {
     /// Kept alive for the node's lifetime: dropping it stops the admin RPC
     /// server. `None` when `[admin_rpc]` is not configured.
     _admin_rpc_handle: Option<ServerHandle>,
+    /// The admin RPC's canonical-chain lookup; the mode fills it with reth's
+    /// provider once the node is launched.
+    pub(crate) canonical_chain: Arc<CanonicalChainSlot>,
     pub(crate) params: Arc<AlpenParams>,
     pub(crate) storage: Arc<NodeStorage>,
     /// Kept as the handle (not pre-extracted watchers) so each mode pulls
@@ -168,22 +171,6 @@ async fn bootstrap_node(
     let block_production = Arc::new(RpcBlockProductionControl::default());
     let sequencer = !matches!(alpen_config.mode, NodeMode::FullNode(_));
 
-    // Admin RPC: JWT-authenticated, on its own port, enabled only when
-    // `[admin_rpc]` is configured. Independent of reth's RPC and of the node
-    // mode, so it comes up here alongside the health check server rather than
-    // on either mode-specific path.
-    let _admin_rpc_handle = match &alpen_config.admin_rpc {
-        Some(admin_rpc_config) => Some(
-            start_admin_rpc(
-                admin_rpc_config,
-                &datadir,
-                sequencer.then(|| block_production.clone()),
-            )
-            .await?,
-        ),
-        None => None,
-    };
-
     // OL client resolution validates the OL config synchronously before its
     // one network call, so a missing/invalid setting also fails here, before
     // the database is touched below.
@@ -200,6 +187,26 @@ async fn bootstrap_node(
         .node_storage(Handle::current())
         .context("failed to open EE node storage")?
         .into();
+
+    // Admin RPC: JWT-authenticated, on its own port, enabled only when
+    // `[admin_rpc]` is configured. Independent of reth's RPC and of the node
+    // mode, so it comes up here rather than on either mode-specific path; it
+    // reads chunks from the store opened above, and each mode hands it the
+    // canonical-chain lookup once reth is launched.
+    let canonical_chain = Arc::new(CanonicalChainSlot::new());
+    let _admin_rpc_handle = match &alpen_config.admin_rpc {
+        Some(admin_rpc_config) => Some(
+            start_admin_rpc(
+                admin_rpc_config,
+                &datadir,
+                sequencer.then(|| block_production.clone()),
+                storage.clone(),
+                canonical_chain.clone(),
+            )
+            .await?,
+        ),
+        None => None,
+    };
 
     ensure_genesis_ee_account_state(params.as_ref(), &genesis_epoch, storage.as_ref())
         .instrument(info_span!("ensure_genesis", component = "alpen"))
@@ -231,6 +238,7 @@ async fn bootstrap_node(
         health_check_state,
         _health_check_handle,
         _admin_rpc_handle,
+        canonical_chain,
         params: params.clone(),
         storage,
         ol_tracker,
@@ -341,11 +349,19 @@ async fn start_admin_rpc(
     config: &AdminRpcConfig,
     datadir: &Path,
     block_production: Option<Arc<RpcBlockProductionControl>>,
+    chunk_storage: Arc<NodeStorage>,
+    canonical_chain: Arc<CanonicalChainSlot>,
 ) -> eyre::Result<ServerHandle> {
     let jwt_path = config.jwtsecret_path(datadir);
     let secret = get_or_create_jwt_secret(&jwt_path)
         .map_err(|e| eyre::eyre!("failed to load admin RPC JWT secret from {jwt_path:?}: {e}"))?;
-    let admin_module = AdminRpcServer::new(env!("CARGO_PKG_VERSION"), block_production).into_rpc();
+    let admin_module = AdminRpcServer::new(
+        env!("CARGO_PKG_VERSION"),
+        block_production,
+        chunk_storage,
+        canonical_chain,
+    )
+    .into_rpc();
     let (admin_addr, admin_handle) = start_authenticated_rpc_server(
         SocketAddr::new(config.host, config.port),
         secret,

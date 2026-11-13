@@ -15,14 +15,6 @@ pub trait AlpenEeRpc {
     /// Returns the L1 finalization status for an EE block.
     #[method(name = "getBlockStatus")]
     async fn get_block_status(&self, block_hash: B256) -> RpcResult<BlockStatusResponse>;
-
-    /// Reports whether proof-ready chunks cover the requested EE block interval.
-    #[method(name = "getChunkProofCoverage")]
-    async fn get_chunk_proof_coverage(
-        &self,
-        start_block: u64,
-        end_block: u64,
-    ) -> RpcResult<ChunkProofCoverageResponse>;
 }
 
 /// Administrative RPC methods exposed by Alpen EE nodes.
@@ -44,6 +36,18 @@ pub trait AlpenAdminRpc {
     /// or immediately when omitted.
     #[method(name = "stopBlockProduction")]
     async fn stop_block_production(&self, after_block: Option<u64>) -> RpcResult<()>;
+
+    /// Reports whether proof-ready chunks cover the requested EE block interval.
+    ///
+    /// For tests and internal scripts only, which is why it is served on the
+    /// authenticated admin endpoint and not on the public RPC: it walks the
+    /// node's chunk history, and nothing user-facing needs the answer.
+    #[method(name = "getChunkProofCoverage")]
+    async fn get_chunk_proof_coverage(
+        &self,
+        start_block: u64,
+        end_block: u64,
+    ) -> RpcResult<ChunkProofCoverageResponse>;
 }
 
 struct RpcB256;
@@ -84,28 +88,6 @@ impl AlpenEeRpcOpenRpc {
             inputs,
             result,
             "Returns the L1 finalization status for an EE block.",
-            Some("Alpen EE".to_string()),
-            false,
-        );
-
-        let inputs = vec![
-            builder.create_content_descriptor::<u64>("start_block", None, None, true),
-            builder.create_content_descriptor::<u64>("end_block", None, None, true),
-        ];
-        let result = Some(
-            builder.create_content_descriptor::<ChunkProofCoverageResponse>(
-                "ChunkProofCoverageResponse",
-                None,
-                None,
-                true,
-            ),
-        );
-        builder.add_method(
-            "alpen",
-            "getChunkProofCoverage",
-            inputs,
-            result,
-            "Reports whether proof-ready chunks cover the requested EE block interval.",
             Some("Alpen EE".to_string()),
             false,
         );
@@ -156,6 +138,27 @@ impl AlpenAdminRpcOpenRpc {
             inputs,
             None,
             "Stops sequencer block production once the tip reaches after_block, or immediately when omitted.",
+            Some("Alpen EE Admin".to_string()),
+            false,
+        );
+        let inputs = vec![
+            builder.create_content_descriptor::<u64>("start_block", None, None, true),
+            builder.create_content_descriptor::<u64>("end_block", None, None, true),
+        ];
+        let result = Some(
+            builder.create_content_descriptor::<ChunkProofCoverageResponse>(
+                "ChunkProofCoverageResponse",
+                None,
+                None,
+                true,
+            ),
+        );
+        builder.add_method(
+            "alpenadmin",
+            "getChunkProofCoverage",
+            inputs,
+            result,
+            "Reports whether proof-ready chunks cover the requested EE block interval. For tests and internal scripts; served on the authenticated admin endpoint.",
             Some("Alpen EE Admin".to_string()),
             false,
         );

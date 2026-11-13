@@ -350,12 +350,7 @@ pub(crate) async fn run(
             let storage = common.storage.clone();
             move |ctx| {
                 let provider = ctx.provider().clone();
-                let ee_rpc_server = EeRpcServer::new(
-                    provider,
-                    consensus_watcher,
-                    storage.clone(),
-                    storage.clone(),
-                );
+                let ee_rpc_server = EeRpcServer::new(provider, consensus_watcher, storage.clone());
                 ctx.modules.merge_configured(ee_rpc_server.into_rpc())?;
 
                 // Register `alpen_estimateFees` (execution + DA fee quote) on the
@@ -370,6 +365,11 @@ pub(crate) async fn run(
         .await?;
     info!(target: "alpen-client", component = "alpen", "installed StateDiffGenerator exex for DA");
     info!(target: "alpen-client", component = "alpen", "installed AccessedStateGenerator exex (account-proof range witness)");
+
+    // Reth is up: give the admin RPC its canonical-chain lookup.
+    let _ = common
+        .canonical_chain
+        .set(Arc::new(handle.node.provider.clone()));
 
     let node = &handle.node;
 

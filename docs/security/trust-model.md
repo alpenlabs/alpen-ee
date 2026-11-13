@@ -197,7 +197,7 @@ unless the higher impact can be concretely demonstrated.
 ### In scope (examples)
 
 - Panic in an SPS-51 envelope or DA payload decoder on a crafted Bitcoin transaction.
-- `eth_call` or `alpen_getChunkProofCoverage` with parameters that trigger unbounded work.
+- `eth_call` with parameters that trigger unbounded work on the public RPC. (`alpenadmin_getChunkProofCoverage` walks the chunk history by design; it is served only on the authenticated admin endpoint, for tests and internal scripts.)
 - A gossiped block that fails re-execution but is still marked canonical.
 - A precompile that mis-charges gas or panics on specific calldata.
 - The bridge-out precompile creating an intent for more than it burned, or burning without

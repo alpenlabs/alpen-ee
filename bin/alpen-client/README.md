@@ -858,7 +858,7 @@ Two secrets are read from the environment instead of the config file, both seque
 - **Standard Reth RPC** — the full Ethereum JSON-RPC surface.
 - **Alpen EE RPC** — a custom `alpen` namespace ([crates/rpc/](../../crates/rpc/)):
   - `alpen_getBlockStatus` — L1 finalization status for an EE block
-  - `alpen_getChunkProofCoverage` — whether proof-ready chunks cover a block interval
+- **Alpen EE admin RPC** — the `alpenadmin` namespace on the JWT-authenticated `[admin_rpc]` endpoint, loopback by default. Besides block production control it serves `alpenadmin_getChunkProofCoverage`, whether proof-ready chunks cover a block interval; that method exists for the functional tests and internal scripts such as the EEST pipeline check, walks the node's chunk history, and is not meant for public use.
 - **Health check** — an HTTP endpoint that reports readiness once startup completes.
 - **Tracing & metrics** — structured `tracing` logs, optional OTLP export, and Reth's native Prometheus metrics (via Reth's `--metrics`).
 
