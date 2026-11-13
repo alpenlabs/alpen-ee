@@ -241,19 +241,20 @@ Can be combined with `--trusted-peers` for a baseline set of peers plus dynamic 
 Nodes discover each other via the discv5 protocol using bootnodes as entry points.
 
 ```
---disable-discv4-discovery
---enable-discv5-discovery
---discovery.v5.addr 0.0.0.0
---discovery.v5.port 30304
---bootnodes enode://<bootnode-pubkey>@<bootnode-host>:30303
+--nat extip:<public-ip>
+--discovery.v5.port 9200
+--bootnodes enode://<bootnode-pubkey>@<bootnode-host>:30303?discport=9200
 ```
 
-- `--disable-discv4-discovery` disables the legacy discv4 protocol (only use discv5).
-- `--enable-discv5-discovery` activates discv5.
-- `--discovery.v5.addr` / `--discovery.v5.port` bind address/port for discv5 UDP.
-- `--bootnodes` comma-separated enode URLs to bootstrap discovery. Typically the sequencer's enode.
+- discv5 is on by default. `--discovery.v5.port` sets the UDP port it listens on. The default is `9200`. Open it inbound.
+- `--nat extip:<public-ip>` puts the IP other nodes can reach in both the enode and the discv5 record. Without it, a node listening on `0.0.0.0` may advertise no IP in its discv5 record, and other nodes can't reach it through discovery. If you set `--discovery.v5.addr` to a specific address, the record carries that address and ignores `--nat`, so only use one other nodes can reach.
+- alpen-client never runs discv4, so `--disable-discv4-discovery` and other discv4 flags have no effect.
+- `--bootnodes` is a comma-separated list of enode URLs to start discovery from, typically the sequencer's or a fullnode's. Copy each enode from the bootnode's `admin_nodeInfo`, which already carries its discv5 port as `discport`. If you write one by hand, add `?discport=<discv5 port>`. Without it, discovery contacts the TCP port and never reaches the bootnode.
+- Without `--bootnodes` the node only finds peers that contact it first. It never falls back to Ethereum's bootnodes.
 
 Nodes will automatically discover and connect to other peers reachable through the bootnode graph. This forms a mesh topology — fullnodes connect to each other, not just to the sequencer.
+
+alpen-client keeps discovery apart from Ethereum's. It runs discv5 under its own protocol ID, so it never finds Ethereum nodes and they never find it. It also skips discovered nodes whose fork ID doesn't match its own, such as nodes on another Alpen network. Older alpen-client releases use the standard discv5 protocol ID, so they and newer releases can't discover each other. Connect them with `--trusted-peers` while you upgrade.
 
 **When to use**: Larger deployments where manual peer management is impractical, or when you want automatic mesh formation.
 
@@ -314,7 +315,7 @@ If peer count is `0x0`:
 - Verify enode URLs are correct (check public key and host/port).
 - Verify nodes are on the same network and the P2P port is reachable.
 - Verify `--nat` is set correctly — the advertised IP in the enode must be reachable by the other node.
-- Check firewall rules on the P2P port (TCP).
+- Check firewall rules on the P2P port (TCP), and on the discv5 port (UDP) if you use discovery.
 
 ### 3. Check gossip connections established
 
@@ -382,6 +383,8 @@ The binary was built without the `sequencer` cargo feature. Rebuild with `cargo 
 - `--nat` not set or set to wrong IP — the advertised enode IP must be reachable from the other node.
 - Firewall blocking the P2P TCP port.
 - If using `--disable-discovery` without `--trusted-peers`, no peers will be found. Use `admin_addPeer` or add `--trusted-peers`.
+- With discv5 discovery: the bootnode's discv5 UDP port is blocked, or the `--bootnodes` enode is missing the right `?discport=`.
+- With discv5 discovery: the other node runs an older alpen-client, which uses a different discv5 protocol ID. Connect it with `--trusted-peers`.
 
 **"Peer does not support alpen_gossip protocol, disconnecting"**
 The other node is vanilla Reth or an alpen-client built without gossip. All peers must run alpen-client with gossip support.
