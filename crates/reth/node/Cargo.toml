@@ -27,6 +27,7 @@ reth-basic-payload-builder.workspace = true
 reth-chainspec.workspace = true
 reth-consensus.workspace = true
 reth-consensus-common.workspace = true
+reth-discv5.workspace = true
 reth-errors.workspace = true
 reth-eth-wire.workspace = true
 reth-ethereum-engine-primitives.workspace = true
@@ -37,6 +38,7 @@ reth-network.workspace = true
 reth-network-api.workspace = true
 reth-node-api.workspace = true
 reth-node-builder.workspace = true
+reth-node-core.workspace = true
 reth-node-ethereum.workspace = true
 reth-payload-builder.workspace = true
 reth-primitives-traits.workspace = true
@@ -55,5 +57,6 @@ tracing.workspace = true
 [dev-dependencies]
 proptest.workspace = true
 reth-storage-api.workspace = true
+reth-tasks.workspace = true
 serde_json.workspace = true
 strata-identifiers = { workspace = true, features = ["test-utils"] }
