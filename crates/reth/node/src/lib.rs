@@ -7,6 +7,7 @@ mod engine;
 mod evm;
 mod evm_config;
 mod gossip;
+mod network;
 mod node;
 mod payload;
 mod payload_builder;
@@ -22,6 +23,7 @@ pub use gossip::{
     AlpenGossipCommand, AlpenGossipConnection, AlpenGossipConnectionHandler, AlpenGossipEvent,
     AlpenGossipMessage, AlpenGossipPackage, AlpenGossipProtocolHandler, AlpenGossipState,
 };
+pub use network::{AlpenNetworkBuilder, ALPEN_DISCV5_PROTOCOL};
 pub use node::{AlpenEthereumNode, AlpenNodeMode};
 pub use payload::{
     AlpenBuiltPayload, AlpenExecutionPayloadEnvelopeV2, AlpenExecutionPayloadEnvelopeV4,

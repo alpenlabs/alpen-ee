@@ -240,6 +240,7 @@ reth-cli-util = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
 reth-consensus = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0", default-features = false }
 reth-consensus-common = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
 reth-db = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+reth-discv5 = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
 reth-engine-local = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
 reth-engine-primitives = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
 reth-errors = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
