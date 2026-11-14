@@ -1791,6 +1791,7 @@ dependencies = [
  "reth-basic-payload-builder",
  "reth-chainspec",
  "reth-consensus",
+ "reth-discv5",
  "reth-errors",
  "reth-eth-wire",
  "reth-ethereum-engine-primitives",
@@ -1801,13 +1802,14 @@ dependencies = [
  "reth-network-api",
  "reth-node-api",
  "reth-node-builder",
- "reth-node-ethereum",
+ "reth-node-core",
  "reth-payload-builder",
  "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
  "reth-rpc-eth-types",
  "reth-storage-api",
+ "reth-tasks",
  "reth-transaction-pool",
  "reth-trie",
  "revm",
@@ -11240,44 +11242,6 @@ dependencies = [
  "url",
  "vergen",
  "vergen-git2",
-]
-
-[[package]]
-name = "reth-node-ethereum"
-version = "2.2.0"
-source = "git+https://github.com/paradigmxyz/reth?tag=v2.2.0#88505c7fcbfdebfd3b56d88c86b62e950043c6c4"
-dependencies = [
- "alloy-eips 2.0.4",
- "alloy-network 2.0.4",
- "alloy-rpc-types-engine",
- "alloy-rpc-types-eth 2.0.4",
- "eyre",
- "reth-chainspec",
- "reth-engine-local",
- "reth-engine-primitives",
- "reth-ethereum-consensus",
- "reth-ethereum-engine-primitives",
- "reth-ethereum-payload-builder",
- "reth-ethereum-primitives",
- "reth-evm",
- "reth-evm-ethereum",
- "reth-network",
- "reth-node-api",
- "reth-node-builder",
- "reth-payload-primitives",
- "reth-primitives-traits",
- "reth-provider",
- "reth-revm",
- "reth-rpc",
- "reth-rpc-api",
- "reth-rpc-builder",
- "reth-rpc-eth-api",
- "reth-rpc-eth-types",
- "reth-rpc-server-types",
- "reth-tracing",
- "reth-transaction-pool",
- "revm",
- "tokio",
 ]
 
 [[package]]

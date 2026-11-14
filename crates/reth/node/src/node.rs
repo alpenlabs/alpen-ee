@@ -19,15 +19,15 @@ use reth_node_builder::{
     },
     Node, NodeAdapter, NodeComponentsBuilder,
 };
-use reth_node_ethereum::node::EthereumNetworkBuilder;
 use reth_provider::EthStorage;
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use revm::context::TxEnv;
 
 use crate::{
     consensus::AlpenConsensusBuilder, engine::AlpenEngineValidatorBuilder,
-    evm::AlpenExecutorBuilder, payload_builder::AlpenPayloadBuilderBuilder,
-    pool::AlpenEthereumPoolBuilder, AlpenEngineTypes, DaFeeRateHandle,
+    evm::AlpenExecutorBuilder, network::AlpenNetworkBuilder,
+    payload_builder::AlpenPayloadBuilderBuilder, pool::AlpenEthereumPoolBuilder, AlpenEngineTypes,
+    DaFeeRateHandle,
 };
 
 /// Which role the node plays on the network.
@@ -134,7 +134,7 @@ where
         N,
         AlpenEthereumPoolBuilder,
         BasicPayloadServiceBuilder<AlpenPayloadBuilderBuilder>,
-        EthereumNetworkBuilder,
+        AlpenNetworkBuilder,
         AlpenExecutorBuilder,
         AlpenConsensusBuilder,
     >;
@@ -156,7 +156,7 @@ where
                     fee_spec: self.params.fee_spec().clone(),
                 },
             ))
-            .network(EthereumNetworkBuilder::default())
+            .network(AlpenNetworkBuilder)
             .consensus(AlpenConsensusBuilder::new(
                 self.params.evm_spec().clone(),
                 self.params.fee_spec().clone(),
