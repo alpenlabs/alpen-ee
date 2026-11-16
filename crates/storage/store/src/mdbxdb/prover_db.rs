@@ -174,13 +174,13 @@ impl ProverDbMdbx {
             .map_err(to_db_error)
     }
 
-    /// Lists the tasks in `scope` that want a rescan and whose retry time has
-    /// passed or was never written.
-    ///
-    /// A rescan status with no `retry_after` is a record whose scheduling
-    /// write did not land after the status did. The scanner selects on the
-    /// timestamp and startup recovery only takes `Pending` and `Proving`, so
-    /// treating it as due is the only thing that ever re-spawns the task.
+    /// Lists the tasks in `scope` that are due for a rescan at `now_secs`:
+    /// exactly the records for which `TaskRecordData::is_due_for_rescan`
+    /// holds, as `TaskStore::list_retriable` requires. The stored projection
+    /// carries the status and the timestamp, so the predicate is evaluated
+    /// here without rebuilding the record. A rescan status with no
+    /// `retry_after` is a record whose scheduling write did not land after
+    /// the status did, and it is due at once.
     pub fn list_retriable_tasks<K: ProverTaskKey>(
         &self,
         scope: &ProgramScope,
