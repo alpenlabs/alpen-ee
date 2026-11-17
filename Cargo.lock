@@ -1323,7 +1323,7 @@ dependencies = [
  "strata-logging",
  "strata-ol-rpc-api",
  "strata-ol-rpc-types",
- "strata-paas 0.1.0 (git+https://github.com/alpenlabs/strata-common-services?rev=64e6ddb04b0d0ed3adbc9cbc632c6b6a7c445f06)",
+ "strata-paas 0.1.0 (git+https://github.com/alpenlabs/strata-common-services?rev=ffa45657abd155ed4be8c5d3d5c47f8c47aae3b4)",
  "strata-predicate",
  "strata-primitives",
  "strata-retry",
@@ -2034,7 +2034,7 @@ dependencies = [
  "strata-acct-types",
  "strata-db-types",
  "strata-identifiers",
- "strata-paas 0.1.0 (git+https://github.com/alpenlabs/strata-common-services?rev=64e6ddb04b0d0ed3adbc9cbc632c6b6a7c445f06)",
+ "strata-paas 0.1.0 (git+https://github.com/alpenlabs/strata-common-services?rev=ffa45657abd155ed4be8c5d3d5c47f8c47aae3b4)",
  "thiserror 2.0.20",
  "zkaleido",
 ]
@@ -2080,7 +2080,7 @@ dependencies = [
  "strata-db-types",
  "strata-identifiers",
  "strata-l1-txfmt",
- "strata-paas 0.1.0 (git+https://github.com/alpenlabs/strata-common-services?rev=64e6ddb04b0d0ed3adbc9cbc632c6b6a7c445f06)",
+ "strata-paas 0.1.0 (git+https://github.com/alpenlabs/strata-common-services?rev=ffa45657abd155ed4be8c5d3d5c47f8c47aae3b4)",
  "strata-predicate",
  "strata-storage-common",
  "thiserror 2.0.20",
@@ -16000,11 +16000,11 @@ dependencies = [
 [[package]]
 name = "strata-paas"
 version = "0.1.0"
-source = "git+https://github.com/alpenlabs/strata-common-services?rev=64e6ddb04b0d0ed3adbc9cbc632c6b6a7c445f06#64e6ddb04b0d0ed3adbc9cbc632c6b6a7c445f06"
+source = "git+https://github.com/alpenlabs/strata-common-services?rev=ffa45657abd155ed4be8c5d3d5c47f8c47aae3b4#ffa45657abd155ed4be8c5d3d5c47f8c47aae3b4"
 dependencies = [
  "anyhow",
  "serde",
- "strata-prover-core 0.1.0 (git+https://github.com/alpenlabs/strata-common-services?rev=64e6ddb04b0d0ed3adbc9cbc632c6b6a7c445f06)",
+ "strata-prover-core 0.1.0 (git+https://github.com/alpenlabs/strata-common-services?rev=ffa45657abd155ed4be8c5d3d5c47f8c47aae3b4)",
  "strata-service",
  "tokio",
  "tracing",
@@ -16064,7 +16064,7 @@ dependencies = [
 [[package]]
 name = "strata-prover-core"
 version = "0.1.0"
-source = "git+https://github.com/alpenlabs/strata-common-services?rev=64e6ddb04b0d0ed3adbc9cbc632c6b6a7c445f06#64e6ddb04b0d0ed3adbc9cbc632c6b6a7c445f06"
+source = "git+https://github.com/alpenlabs/strata-common-services?rev=ffa45657abd155ed4be8c5d3d5c47f8c47aae3b4#ffa45657abd155ed4be8c5d3d5c47f8c47aae3b4"
 dependencies = [
  "async-trait",
  "parking_lot 0.12.5",
