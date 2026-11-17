@@ -36,6 +36,9 @@ ignore = [
   "RUSTSEC-2026-0530", # parent-side NSEC taken as proof of nonexistence
   "RUSTSEC-2026-0531", # child-side NSEC/NSEC3 taken as proof of no DS record
   "RUSTSEC-2026-0532", # parent-side NSEC3 taken as proof of nonexistence
+  "RUSTSEC-2026-0549", # NSEC3 NODATA at a zone apex without a matching record
+  "RUSTSEC-2026-0550", # unsigned NSEC/NSEC3 used in a nonexistence proof
+  "RUSTSEC-2026-0551", # records of another DNS class marked secure unvalidated
 
   # RUSTSEC-2026-0344 (ruzstd 0.8.3)
   # Reached through object 0.37, which sp1-core-executor 6.8.1 pins with default
