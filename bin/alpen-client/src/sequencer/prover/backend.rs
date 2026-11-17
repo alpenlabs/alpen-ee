@@ -253,7 +253,7 @@ async fn build_programs(
     let mut built = Vec::new();
 
     match backend {
-        ProverBackendConfig::Native { programs } => {
+        ProverBackendConfig::Native { programs, .. } => {
             info!(target: "alpen-client", "EE chunk + acct provers: native host");
 
             for program in &programs {
@@ -289,6 +289,7 @@ async fn build_programs(
         ProverBackendConfig::Sp1 {
             programs,
             deadline_secs,
+            ..
         } => {
             let deadline_secs = deadline_secs.unwrap_or(DEFAULT_SP1_DEADLINE_SECS);
             let deadline = Duration::from_secs(deadline_secs);

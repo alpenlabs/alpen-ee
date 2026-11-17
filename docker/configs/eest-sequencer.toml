@@ -19,6 +19,10 @@ batch_sealing_block_count = 5
 # key files are mounted by the compose file, next to the p2p key.
 [sequencer.prover]
 backend = "native"
+# Native proving holds its unit of capacity through the whole proof, so these
+# also bound how many chunk and batch proofs run at once.
+max_concurrent_chunk_tasks = 2
+max_concurrent_acct_tasks = 1
 
 [[sequencer.prover.programs]]
 spec_version = "v0"
