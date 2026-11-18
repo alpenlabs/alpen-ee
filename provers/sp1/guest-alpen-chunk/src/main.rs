@@ -26,6 +26,9 @@ fn embedded_alpen_params() -> AlpenParams {
 const SPEC_VERSION: AlpenSpecId = AlpenSpecId::V2;
 
 fn main() {
+    // Route the BLS12-381 precompiles through the SP1-patched field
+    // arithmetic. Must precede any EVM execution.
+    alpen_bls_crypto::install();
     let params = embedded_alpen_params();
     process_ee_chunk(&Sp1ZkVmEnv, &params, SPEC_VERSION)
 }

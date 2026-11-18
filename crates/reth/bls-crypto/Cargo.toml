@@ -1,0 +1,17 @@
+[package]
+edition.workspace = true
+name = "alpen-bls-crypto"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "BLS12-381 backend for revm's EIP-2537 precompiles over the zkcrypto bls12_381 crate"
+
+[lints]
+workspace = true
+
+[dependencies]
+bls12_381.workspace = true
+revm.workspace = true
+
+[dev-dependencies]
+hex.workspace = true

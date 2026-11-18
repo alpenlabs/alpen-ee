@@ -513,6 +513,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "alpen-bls-crypto"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "bls12_381",
+ "revm",
+]
+
+[[package]]
 name = "alpen-chain-types"
 version = "0.3.0-alpha.1"
 dependencies = [
@@ -1278,6 +1286,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdd35008169921d80bc60d3d0ab416eecb028c4cd653352907921d95084790be"
 dependencies = [
  "hybrid-array",
+]
+
+[[package]]
+name = "bls12_381"
+version = "0.8.0"
+source = "git+https://github.com/sp1-patches/bls12_381?tag=patch-0.8.0-sp1-6.0.0#c6a3a331f8bee02913cc2c4eae2805360f888aaa"
+dependencies = [
+ "cfg-if",
+ "digest 0.10.7",
+ "ff",
+ "group",
+ "hex",
+ "pairing",
+ "rand_core 0.6.4",
+ "sp1-lib",
+ "subtle",
 ]
 
 [[package]]
@@ -2143,6 +2167,7 @@ dependencies = [
 name = "guest-sp1-alpen-chunk"
 version = "0.1.0"
 dependencies = [
+ "alpen-bls-crypto",
  "alpen-params",
  "alpen-proof-chunk",
  "serde_json",
@@ -2998,6 +3023,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cff962f8eaa5f36e0447cee7c241f6b4b475fadf3ee61f154327a26bb4e009ba"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "pairing"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81fec4625e73cf41ef4bb6846cafa6d44736525f442ba45e407c4a000a13996f"
+dependencies = [
+ "group",
 ]
 
 [[package]]

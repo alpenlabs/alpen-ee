@@ -90,6 +90,7 @@ alloy-consensus = { workspace = true, optional = true }
 alloy-rlp = { workspace = true, optional = true }
 alpen-acct-runtime = { workspace = true, optional = true }
 alpen-acct-types = { workspace = true, optional = true }
+alpen-bls-crypto.workspace = true
 alpen-chain-types = { workspace = true, optional = true }
 alpen-chunk-runtime = { workspace = true, optional = true }
 alpen-common.workspace = true
