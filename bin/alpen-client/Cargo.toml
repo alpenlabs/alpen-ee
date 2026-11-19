@@ -108,6 +108,7 @@ alpen-params.workspace = true
 alpen-primitives = { workspace = true, optional = true }
 alpen-proof-acct = { workspace = true, optional = true }
 alpen-proof-chunk = { workspace = true, optional = true }
+alpen-reth-bls-crypto.workspace = true
 alpen-reth-node.workspace = true
 alpen-reth-rpc.workspace = true
 alpen-reth-statediff = { workspace = true, optional = true }

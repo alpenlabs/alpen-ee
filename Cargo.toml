@@ -22,6 +22,7 @@ members = [
   "crates/primitives",
   "crates/proof/acct",
   "crates/proof/chunk",
+  "crates/reth/bls-crypto",
   "crates/reth/evm",
   "crates/reth/node",
   "crates/reth/rpc",
@@ -91,6 +92,7 @@ alpen-params = { path = "crates/params" }
 alpen-primitives = { path = "crates/primitives" }
 alpen-proof-acct = { path = "crates/proof/acct" }
 alpen-proof-chunk = { path = "crates/proof/chunk" }
+alpen-reth-bls-crypto = { path = "crates/reth/bls-crypto" }
 alpen-reth-evm = { path = "crates/reth/evm" }
 alpen-reth-node = { path = "crates/reth/node" }
 alpen-reth-rpc = { path = "crates/reth/rpc" }
@@ -106,6 +108,14 @@ alpen-storage-mdbx = { path = "crates/storage/mdbx" }
 alpen-storage-store = { path = "crates/storage/store", default-features = false }
 alpen-test-utils-evm-workload = { path = "crates/test-utils/evm-workload" }
 alpen-witness = { path = "crates/witness" }
+# zkcrypto BLS12-381, the backend of the EIP-2537 precompiles. The SP1 chunk
+# guest replaces it with sp1-patches/bls12_381 through [patch.crates-io].
+bls12_381 = { version = "0.8.0", default-features = false, features = [
+  "groups",
+  "pairings",
+  "alloc",
+  "experimental",
+] }
 
 # strata dependencies, pinned to a release tag of the pre-split repo so the EE
 # stays in lockstep with the OL side. The strata-common and zkaleido pins below
