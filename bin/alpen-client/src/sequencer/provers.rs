@@ -15,7 +15,7 @@
 //! All backed by `ProverDbMdbx`; see `alpen_storage_store::mdbxdb`
 //! for schemas.
 
-use std::sync::Arc;
+use std::{num::NonZeroUsize, sync::Arc};
 
 use alloy_primitives::{Address, B256};
 use alpen_common::SequencerOLClient;
@@ -26,7 +26,7 @@ use alpen_witness::{RangeWitnessData, RangeWitnessExtractor};
 use bitcoind_async_client::Client as BtcClient;
 use reth_ethereum_primitives::Block;
 use reth_provider::{BlockReader, StateProviderFactory};
-use strata_paas::{ProverBuilder, ReceiptStore, RetryConfig};
+use strata_paas::{ConcurrencyBudget, ProverBuilder, ReceiptStore, RetryConfig};
 use tracing::info;
 
 use super::prover::{
@@ -35,7 +35,7 @@ use super::prover::{
     EeBatchProofDbManager, EeChunkReceiptStore, EeChunkTaskStore, EeProverBuilders, EeProverStores,
     PaasBatchProver,
 };
-use crate::{config::ProverBackendConfig, service_executor::ServiceExecutor};
+use crate::{config::ProverConfig, service_executor::ServiceExecutor};
 
 /// Everything [`launch`] needs to build and launch the EE chunk + acct
 /// provers.
@@ -43,7 +43,7 @@ pub(crate) struct EeProverInputs<P> {
     pub(crate) storage: Arc<NodeStorage>,
     pub(crate) node_provider: P,
     pub(crate) btc_client: Arc<BtcClient>,
-    pub(crate) backend: ProverBackendConfig,
+    pub(crate) prover: ProverConfig,
     pub(crate) params: Arc<AlpenParams>,
 }
 
@@ -63,7 +63,7 @@ where
         storage,
         node_provider,
         btc_client,
-        backend,
+        prover,
         params,
     } = inputs;
 
@@ -83,6 +83,15 @@ where
         Arc::new(RangeWitnessExtractor::new(node_provider, storage.clone()));
     let da_ctx = dbs.da_context_db();
 
+    // One budget per prover kind, cloned into every resident program's
+    // builder of that kind. A task holds a unit from witness extraction until
+    // the proof is handed off, which is what bounds the memory a backlog of
+    // batches can take at once. The kinds do not share a pool: acct work is
+    // downstream of chunk work, and one pool would let a chunk backlog take
+    // every unit on every tick while the acct tasks that finalize batches wait.
+    let chunk_budget = budget_for(prover.max_concurrent_chunk_tasks);
+    let acct_budget = budget_for(prover.max_concurrent_acct_tasks);
+
     // A `ProverBuilder` is single-use (`.native(host)`/`.remote(host)`
     // consume it), but every resident prover program needs its own, so these
     // hand back a factory rather than a pre-built builder.
@@ -97,8 +106,9 @@ where
         let storage = storage.clone();
         let prover_db = prover_db.clone();
         let chunk_receipts = chunk_receipts.clone();
+        let budget = chunk_budget;
         Box::new(move |scope| {
-            ProverBuilder::new(ChunkSpec::new(
+            let builder = ProverBuilder::new(ChunkSpec::new(
                 chunk_storage_dyn.clone(),
                 storage.clone(),
                 scope.spec_version(),
@@ -106,7 +116,8 @@ where
             .task_store(EeChunkTaskStore::new(prover_db.clone(), scope.clone()))
             .receipt_store(chunk_receipts.clone())
             .receipt_hook(ChunkReceiptHook::new(chunk_storage_dyn.clone()))
-            .retry(RetryConfig::default())
+            .retry(RetryConfig::default());
+            with_budget(builder, &budget)
         })
     };
 
@@ -120,8 +131,9 @@ where
         let acct_state_reader = acct_state_reader.clone();
         let prover_db = prover_db.clone();
         let batch_proofs = batch_proofs.clone();
+        let budget = acct_budget;
         Box::new(move |scope| {
-            ProverBuilder::new(AcctSpec::new(
+            let builder = ProverBuilder::new(AcctSpec::new(
                 chunk_receipts.clone(),
                 batch_storage_dyn.clone(),
                 chunk_storage_dyn.clone(),
@@ -136,7 +148,8 @@ where
                 batch_storage_dyn.clone(),
                 batch_proofs.clone(),
             ))
-            .retry(RetryConfig::default())
+            .retry(RetryConfig::default());
+            with_budget(builder, &budget)
         })
     };
 
@@ -154,7 +167,7 @@ where
             batch_proofs,
             prover_db: prover_db.clone(),
         },
-        backend,
+        prover,
         params,
     )
     .await?;
@@ -166,6 +179,22 @@ where
     );
 
     Ok(batch_prover)
+}
+
+/// The budget for one prover kind's cap, or `None` for no cap.
+fn budget_for(max_concurrent_tasks: Option<NonZeroUsize>) -> Option<ConcurrencyBudget> {
+    max_concurrent_tasks.map(ConcurrencyBudget::new)
+}
+
+/// Gives `builder` the shared budget, when there is one.
+fn with_budget<H: strata_paas::ProofSpec>(
+    builder: ProverBuilder<H>,
+    budget: &Option<ConcurrencyBudget>,
+) -> ProverBuilder<H> {
+    match budget {
+        Some(budget) => builder.concurrency_budget(budget.clone()),
+        None => builder,
+    }
 }
 
 impl<F, S> AcctStateReader for RangeWitnessExtractor<F, S>

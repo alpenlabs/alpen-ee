@@ -162,7 +162,7 @@ strata-ssz-tests = { git = "https://github.com/alpenlabs/strata-common", tag = "
 # stacks live here; their closure (strata-prover-core, strata-service,
 # zkaleido) has no other strata crate in it, so the pin can move ahead of the
 # alpen tag.
-strata-paas = { git = "https://github.com/alpenlabs/strata-common-services", rev = "64e6ddb04b0d0ed3adbc9cbc632c6b6a7c445f06" }
+strata-paas = { git = "https://github.com/alpenlabs/strata-common-services", rev = "ffa45657abd155ed4be8c5d3d5c47f8c47aae3b4" }
 
 # zkaleido
 zkaleido = { git = "https://github.com/alpenlabs/zkaleido", features = [

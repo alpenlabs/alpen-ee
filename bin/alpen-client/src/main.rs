@@ -139,7 +139,9 @@ where
         seq.config
             .validate_chunk_sealing_gas_limit(&command.ext.alpen_params)?;
 
-        if matches!(seq.config.prover, ProverBackendConfig::Sp1 { .. }) && !cfg!(feature = "sp1") {
+        if matches!(seq.config.prover.backend, ProverBackendConfig::Sp1 { .. })
+            && !cfg!(feature = "sp1")
+        {
             error!(
                 target: "alpen-client",
                 component = "alpen",

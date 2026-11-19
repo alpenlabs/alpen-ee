@@ -99,6 +99,21 @@ but two programs can't tell whose they are. So startup refuses two programs for
 a version while one of those tasks is unfinished. Upgrade with one program, and
 add the second once the proofs that were running at the upgrade have finished.
 
+`sequencer.prover.max_concurrent_chunk_tasks` and
+`sequencer.prover.max_concurrent_acct_tasks` cap how many chunk and batch
+(acct) proof tasks prepare their input and submit at once, each across every
+program. The kinds are capped separately because a batch's acct proof needs
+its chunk proofs first: one shared pool would let a chunk backlog take every
+unit while the acct work that finalizes batches waits. A task holds a unit of
+capacity from witness extraction until the proof is handed off: with
+`backend = "native"` that is the whole proof, so the caps also bound proving;
+with `backend = "sp1"` the unit comes back once the prover network has the
+request, and the caps do not limit how many proofs the network runs for you.
+A task that finds no capacity waits in the task store and starts on a later
+tick, which comes every 5 seconds, so a capped prover starts at most its cap
+per 5 seconds. An unset cap means no cap for that kind, and a backlog of
+batches extracts every witness of that kind at the same time.
+
 Environment variables the entrypoint reads:
 
 | Variable | Default |

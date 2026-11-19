@@ -599,7 +599,7 @@ where
             storage: storage.clone(),
             node_provider: node_provider.clone(),
             btc_client,
-            backend: sequencer_config.prover.clone(),
+            prover: sequencer_config.prover.clone(),
             params: params.clone(),
         },
     )
