@@ -3,20 +3,20 @@ use alpen_params::AlpenSpecId;
 use bitcoin::Transaction;
 use strata_codec::CodecError;
 use strata_codec_utils::ChunkIterDecoder;
-use strata_identifiers::L1Height;
+use strata_identifiers::{L1BlockCommitment, L1Height};
 use strata_l1_envelope_fmt::{CommitRevealParseError, PayloadParser, PayloadParserConfig};
 
 /// EE DA transactions included in one L1 block.
 pub(crate) struct L1DaTransactions {
-    height: L1Height,
+    block: L1BlockCommitment,
     transactions: Vec<Transaction>,
 }
 
 impl L1DaTransactions {
     /// Creates an L1 DA transaction set.
-    pub(crate) fn new(height: L1Height, transactions: Vec<Transaction>) -> Self {
+    pub(crate) fn new(block: L1BlockCommitment, transactions: Vec<Transaction>) -> Self {
         Self {
-            height,
+            block,
             transactions,
         }
     }
@@ -60,7 +60,7 @@ pub(crate) fn recover_ee_da_blob(
     let mut last_block_height = None;
 
     for block_da_txs in da_txs_by_block {
-        let block_height = block_da_txs.height;
+        let block_height = block_da_txs.block.height();
         if let Some(previous) = last_block_height {
             if block_height <= previous {
                 return Err(DaBlobRecoveryError::NonIncreasingBlockHeight {
@@ -72,7 +72,7 @@ pub(crate) fn recover_ee_da_blob(
         last_block_height = Some(block_height);
 
         for payload in parser
-            .parse(&block_da_txs.transactions, block_height)
+            .parse(&block_da_txs.transactions, block_da_txs.block)
             .into_payloads()
         {
             if recovered_payload.replace(payload).is_some() {
@@ -111,11 +111,16 @@ mod tests {
     use alpen_da_types::EvmHeaderSummary;
     use alpen_params::HeaderExtra;
     use alpen_reth_statediff::BatchStateDiff;
+    use strata_identifiers::L1BlockId;
     use strata_l1_envelope_fmt::test_utils::build_commit_reveal_set;
 
     use super::*;
 
     const SPEC_VERSION: AlpenSpecId = AlpenSpecId::V1;
+
+    fn block_at(height: L1Height) -> L1BlockCommitment {
+        L1BlockCommitment::new(height, L1BlockId::default())
+    }
 
     fn make_blob(update_seq_no: u64) -> DaBlob {
         DaBlob {
@@ -144,8 +149,8 @@ mod tests {
             7,
         );
         let blocks = [
-            L1DaTransactions::new(42, vec![txs.commit]),
-            L1DaTransactions::new(43, txs.reveals),
+            L1DaTransactions::new(block_at(42), vec![txs.commit]),
+            L1DaTransactions::new(block_at(43), txs.reveals),
         ];
 
         let actual = recover_ee_da_blob(blocks, SPEC_VERSION).expect("blob recovers");
@@ -166,7 +171,10 @@ mod tests {
             7,
         );
         assert!(matches!(
-            recover_ee_da_blob([L1DaTransactions::new(42, vec![txs.commit])], SPEC_VERSION,),
+            recover_ee_da_blob(
+                [L1DaTransactions::new(block_at(42), vec![txs.commit])],
+                SPEC_VERSION,
+            ),
             Err(DaBlobRecoveryError::MissingPayload)
         ));
     }
@@ -184,7 +192,10 @@ mod tests {
         let mut transactions = vec![txs.commit];
         transactions.extend(txs.reveals);
         assert!(matches!(
-            recover_ee_da_blob([L1DaTransactions::new(42, transactions)], SPEC_VERSION,),
+            recover_ee_da_blob(
+                [L1DaTransactions::new(block_at(42), transactions)],
+                SPEC_VERSION,
+            ),
             Err(DaBlobRecoveryError::UnsupportedVersion { .. })
         ));
     }
@@ -209,7 +220,10 @@ mod tests {
         transactions.extend(first_txs.reveals);
         transactions.extend(second_txs.reveals);
         assert!(matches!(
-            recover_ee_da_blob([L1DaTransactions::new(42, transactions)], SPEC_VERSION,),
+            recover_ee_da_blob(
+                [L1DaTransactions::new(block_at(42), transactions)],
+                SPEC_VERSION,
+            ),
             Err(DaBlobRecoveryError::MultiplePayloads)
         ));
     }
@@ -219,8 +233,8 @@ mod tests {
         assert!(matches!(
             recover_ee_da_blob(
                 [
-                    L1DaTransactions::new(42, Vec::new()),
-                    L1DaTransactions::new(42, Vec::new()),
+                    L1DaTransactions::new(block_at(42), Vec::new()),
+                    L1DaTransactions::new(block_at(42), Vec::new()),
                 ],
                 SPEC_VERSION
             ),

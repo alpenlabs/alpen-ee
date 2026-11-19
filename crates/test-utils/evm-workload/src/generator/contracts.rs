@@ -112,7 +112,7 @@ pub(crate) fn bridge_out(pubkey_hash: [u8; 20]) -> Bytes {
 /// Schnorr precompile calldata checking a valid BIP-340 signature over
 /// `message` by `key`: `pubkey || message || signature`.
 pub(crate) fn schnorr_verify(key: B256, message: B256) -> Bytes {
-    let signing_key = schnorr::SigningKey::from_bytes(key.as_slice()).expect("valid schnorr key");
+    let signing_key = schnorr::SigningKey::from_bytes(&key.0.into()).expect("valid schnorr key");
     let signature = signing_key
         .sign_raw(message.as_slice(), &[0u8; 32])
         .expect("signing a 32-byte message cannot fail");

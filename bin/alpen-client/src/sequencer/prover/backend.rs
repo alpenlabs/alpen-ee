@@ -405,7 +405,7 @@ fn parse_native_schnorr_signing_key(hex: &str) -> eyre::Result<SigningKey> {
     let bytes: Buf32 = hex
         .parse()
         .map_err(|e| eyre::eyre!("failed to parse as 32-byte hex: {e}"))?;
-    SigningKey::from_bytes(bytes.as_ref())
+    SigningKey::from_bytes(&bytes.0.into())
         .map_err(|e| eyre::eyre!("invalid Schnorr signing key: {e}"))
 }
 

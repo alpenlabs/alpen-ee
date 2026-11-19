@@ -114,8 +114,8 @@ where
     /// The DA fee is applied here — the final post-execution step, after the gas refund
     /// (`reimburse_caller`) and the beneficiary reward — so it is drawn from the caller's
     /// unused, already-refunded gas budget. This keeps the DA logic separate from the
-    /// gas-reward hook and mirrors the split Citrea uses (base fee vs L1 fee). The default
-    /// output handling (which commits the transaction) then runs via [`MainnetHandler`].
+    /// gas-reward hook. The default output handling (which commits the transaction) then
+    /// runs via [`MainnetHandler`].
     fn execution_result(
         &mut self,
         evm: &mut Self::Evm,
