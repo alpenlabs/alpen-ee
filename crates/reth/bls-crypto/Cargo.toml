@@ -1,6 +1,6 @@
 [package]
 edition.workspace = true
-name = "alpen-bls-crypto"
+name = "alpen-reth-bls-crypto"
 version.workspace = true
 license.workspace = true
 repository.workspace = true

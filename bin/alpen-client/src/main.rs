@@ -70,7 +70,7 @@ fn main() {
     // The BLS12-381 precompile backend the SP1 guest proves with. Installed
     // first, before any EVM execution, so the node computes EIP-2537 the same
     // way its proofs do.
-    alpen_bls_crypto::install();
+    alpen_reth_bls_crypto::install();
 
     // Install reth's Prometheus recorder before anything records. Reth would
     // install it at launch, but the OL tracker, the DA fee rate and the engine

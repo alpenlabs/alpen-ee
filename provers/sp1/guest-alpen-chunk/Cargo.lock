@@ -513,14 +513,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "alpen-bls-crypto"
-version = "0.3.0-alpha.1"
-dependencies = [
- "bls12_381",
- "revm",
-]
-
-[[package]]
 name = "alpen-chain-types"
 version = "0.3.0-alpha.1"
 dependencies = [
@@ -640,6 +632,14 @@ dependencies = [
  "strata-predicate",
  "zkaleido",
  "zkaleido-native-adapter",
+]
+
+[[package]]
+name = "alpen-reth-bls-crypto"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "bls12_381",
+ "revm",
 ]
 
 [[package]]
@@ -2167,9 +2167,9 @@ dependencies = [
 name = "guest-sp1-alpen-chunk"
 version = "0.1.0"
 dependencies = [
- "alpen-bls-crypto",
  "alpen-params",
  "alpen-proof-chunk",
+ "alpen-reth-bls-crypto",
  "serde_json",
  "zkaleido-sp1-guest-env",
 ]

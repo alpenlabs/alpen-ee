@@ -90,7 +90,6 @@ alloy-consensus = { workspace = true, optional = true }
 alloy-rlp = { workspace = true, optional = true }
 alpen-acct-runtime = { workspace = true, optional = true }
 alpen-acct-types = { workspace = true, optional = true }
-alpen-bls-crypto.workspace = true
 alpen-chain-types = { workspace = true, optional = true }
 alpen-chunk-runtime = { workspace = true, optional = true }
 alpen-common.workspace = true
@@ -109,6 +108,7 @@ alpen-params.workspace = true
 alpen-primitives = { workspace = true, optional = true }
 alpen-proof-acct = { workspace = true, optional = true }
 alpen-proof-chunk = { workspace = true, optional = true }
+alpen-reth-bls-crypto.workspace = true
 alpen-reth-node.workspace = true
 alpen-reth-rpc.workspace = true
 alpen-reth-statediff = { workspace = true, optional = true }

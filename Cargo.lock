@@ -1214,15 +1214,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "alpen-bls-crypto"
-version = "0.3.0-alpha.1"
-dependencies = [
- "bls12_381",
- "hex",
- "revm",
-]
-
-[[package]]
 name = "alpen-chain-types"
 version = "0.3.0-alpha.1"
 dependencies = [
@@ -1267,7 +1258,6 @@ dependencies = [
  "alloy-rlp",
  "alpen-acct-runtime",
  "alpen-acct-types",
- "alpen-bls-crypto",
  "alpen-chain-types",
  "alpen-chunk-runtime",
  "alpen-common",
@@ -1284,6 +1274,7 @@ dependencies = [
  "alpen-primitives",
  "alpen-proof-acct",
  "alpen-proof-chunk",
+ "alpen-reth-bls-crypto",
  "alpen-reth-node",
  "alpen-reth-rpc",
  "alpen-reth-statediff",
@@ -1750,6 +1741,15 @@ dependencies = [
  "zkaleido",
  "zkaleido-perf-report",
  "zkaleido-sp1-host",
+]
+
+[[package]]
+name = "alpen-reth-bls-crypto"
+version = "0.3.0-alpha.1"
+dependencies = [
+ "bls12_381",
+ "hex",
+ "revm",
 ]
 
 [[package]]

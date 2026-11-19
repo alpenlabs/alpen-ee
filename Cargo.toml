@@ -75,7 +75,6 @@ rustdoc.all = "warn"
 alpen-acct-runtime = { path = "crates/acct-runtime" }
 alpen-acct-types = { path = "crates/acct-types" }
 alpen-block-assembly = { path = "crates/block-assembly" }
-alpen-bls-crypto = { path = "crates/reth/bls-crypto" }
 alpen-chain-types = { path = "crates/chain-types" }
 alpen-chunk-runtime = { path = "crates/chunk-runtime" }
 alpen-common = { path = "crates/common" }
@@ -93,6 +92,7 @@ alpen-params = { path = "crates/params" }
 alpen-primitives = { path = "crates/primitives" }
 alpen-proof-acct = { path = "crates/proof/acct" }
 alpen-proof-chunk = { path = "crates/proof/chunk" }
+alpen-reth-bls-crypto = { path = "crates/reth/bls-crypto" }
 alpen-reth-evm = { path = "crates/reth/evm" }
 alpen-reth-node = { path = "crates/reth/node" }
 alpen-reth-rpc = { path = "crates/reth/rpc" }
