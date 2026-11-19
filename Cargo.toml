@@ -251,11 +251,11 @@ reth-trie = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0", featu
 ] }
 reth-trie-common = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0", default-features = false }
 
-rsp-client-executor = { git = "https://github.com/succinctlabs/rsp", tag = "reth-2.2.0-sp1-6.8.1" }
-rsp-mpt = { git = "https://github.com/succinctlabs/rsp", tag = "reth-2.2.0-sp1-6.8.1" }
-sp1-build = "6.8.1"
-sp1-sdk = "6.8.1"
-sp1-verifier = "6.8.1"
+rsp-client-executor = { git = "https://github.com/succinctlabs/rsp", tag = "reth-2.2.0-sp1-6.10.0" }
+rsp-mpt = { git = "https://github.com/succinctlabs/rsp", tag = "reth-2.2.0-sp1-6.10.0" }
+sp1-build = "6.10.0"
+sp1-sdk = "6.10.0"
+sp1-verifier = "6.10.0"
 
 anyhow = "1.0.102"
 async-trait = "0.1.80"

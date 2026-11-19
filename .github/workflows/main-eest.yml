@@ -104,11 +104,11 @@ jobs:
       - name: Install SP1 core runner override
         uses: $/.github/actions/sp1-core-runner-override
         with:
-          version: "6.8.1" # sp1-core-executor-runner-binary in Cargo.lock
+          version: "6.10.0" # sp1-core-executor-runner-binary in Cargo.lock
 
       - name: Install SP1 toolchain
         env:
-          SP1_VERSION: "v6.8.1"
+          SP1_VERSION: "v6.10.0"
         run: |
           # sp1up comes straight from the SP1 repo at the pinned tag. The
           # `sp1.succinct.xyz` installer that used to fetch it went 404 on

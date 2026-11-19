@@ -13,17 +13,17 @@ member of the root workspace.
 - **Rust.** The toolchain pinned in the root `rust-toolchain.toml`.
 - **protoc.** The host SP1 crates compile protobuf files.
 - **SP1 toolchain**, for a local build. Install it with `sp1up` and pin it to
-  the version of the SP1 crates in the root `Cargo.lock` (currently `v6.8.1`).
+  the version of the SP1 crates in the root `Cargo.lock` (currently `v6.10.0`).
   `-c` also installs the RISC-V C toolchain, which crates such as
   `secp256k1-sys` need to build for the guest:
 
   ```sh
   mkdir -p "$HOME/.sp1/bin"
   curl -fsSL --proto '=https' --tlsv1.2 \
-    https://raw.githubusercontent.com/succinctlabs/sp1/v6.8.1/sp1up/sp1up \
+    https://raw.githubusercontent.com/succinctlabs/sp1/v6.10.0/sp1up/sp1up \
     -o "$HOME/.sp1/bin/sp1up"
   chmod +x "$HOME/.sp1/bin/sp1up"
-  "$HOME/.sp1/bin/sp1up" -v v6.8.1 -c
+  "$HOME/.sp1/bin/sp1up" -v v6.10.0 -c
   export PATH="$HOME/.sp1/bin:$PATH"
   cargo prove --version
   ```
