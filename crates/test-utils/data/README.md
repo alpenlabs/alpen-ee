@@ -50,3 +50,26 @@ Read by:
 - `alpen-evm-ee` execution tests (`src/execution.rs`), on the first block of `mixed`
 - `alpen-proof-chunk`, whose `test-utils` feature builds a chunk proof input from a workload
 - `alpen-prover-perf`, for both guests' inputs and native tests
+
+### `workloads/precompiles/`
+
+The workload the chunk guest's precompile cost is measured on. Same setup as `mixed`, then ten blocks. Each block calls every precompile Alpen's EVM exposes once, over one to three random transactions from the `mixed` table, so the chunk's cycles are the precompiles' cycles:
+
+| Precompile | Input |
+|---|---|
+| `ecrecover` | a secp256k1 signature by a seed-derived key |
+| `sha256`, `ripemd160`, `identity` | 256, 128 and 512 seed-derived bytes |
+| `modexp` | a 2048-bit base and modulus with exponent 65537, an RSA check |
+| BN254 add, mul, pairing | the generator plus itself, times a seed-derived scalar, and `e(G1, G2) · e(-G1, G2)` |
+| `blake2f` | one 12-round compression of a full block |
+| the seven BLS12-381 precompiles | the EIP-2537 test vectors |
+| P-256 verify | a signature by a seed-derived key |
+| Schnorr | a signature by a seed-derived key, as in `mixed` |
+
+Every call but Schnorr goes through `PrecompileCheck`, a contract deployed in setup that calls the precompile and reverts unless it returns the expected output. The expected output is fixed in the calldata: the EIP's vector for BLS12-381, otherwise what the node's own precompile code returned when the workload was built. A prover with a wrong precompile then fails the chunk's receipts-root check instead of proving a wrong answer. The summary counts each call under the precompile's name.
+
+The same `just prover-workload` regenerates it. Nothing proves it, so no proof needs regenerating.
+
+Read by:
+
+- `alpen-prover-perf`, for the `alpen-chunk-precompiles` program

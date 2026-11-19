@@ -19,12 +19,17 @@ use zkaleido_sp1_host::{SP1Host, SP1HostConfig};
 mod alpen_acct;
 mod alpen_chunk;
 
+use alpen_chunk::PerfWorkload;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum GuestProgram {
     // Declared in proving order: the account guest verifies the chunk proof.
     AlpenChunk,
     AlpenAcct,
+    /// The chunk guest on the `precompiles` workload. Measured only, never
+    /// proven: nothing verifies a proof of it.
+    AlpenChunkPrecompiles,
 }
 
 impl GuestProgram {
@@ -32,6 +37,7 @@ impl GuestProgram {
         match self {
             Self::AlpenChunk => "alpen-chunk",
             Self::AlpenAcct => "alpen-acct",
+            Self::AlpenChunkPrecompiles => "alpen-chunk-precompiles",
         }
     }
 }
@@ -49,6 +55,7 @@ impl FromStr for GuestProgram {
         match s.to_lowercase().as_str() {
             "alpen-acct" => Ok(GuestProgram::AlpenAcct),
             "alpen-chunk" => Ok(GuestProgram::AlpenChunk),
+            "alpen-chunk-precompiles" => Ok(GuestProgram::AlpenChunkPrecompiles),
             _ => Err(format!("unknown program: {s}")),
         }
     }
@@ -101,7 +108,10 @@ pub async fn run_sp1_programs(programs: &[GuestProgram]) -> Vec<(String, Executi
             GuestProgram::AlpenAcct => {
                 alpen_acct::gen_perf_report(&host, &load_proof(GuestProgram::AlpenChunk))
             }
-            GuestProgram::AlpenChunk => alpen_chunk::gen_perf_report(&host),
+            GuestProgram::AlpenChunk => alpen_chunk::gen_perf_report(&host, PerfWorkload::Mixed),
+            GuestProgram::AlpenChunkPrecompiles => {
+                alpen_chunk::gen_perf_report(&host, PerfWorkload::Precompiles)
+            }
         };
         reports.push(report);
     }
@@ -127,6 +137,9 @@ pub async fn gen_and_save_sp1_proofs(programs: &[GuestProgram]) {
             GuestProgram::AlpenAcct => {
                 alpen_acct::gen_proof(&host, &load_proof(GuestProgram::AlpenChunk))
             }
+            GuestProgram::AlpenChunkPrecompiles => {
+                panic!("{program} is measured only; nothing verifies a proof of it")
+            }
         };
         save_proof(program, &proof);
         info!(%program, path = %proof_path(program).display(), "saved proof");
@@ -137,7 +150,9 @@ pub async fn gen_and_save_sp1_proofs(programs: &[GuestProgram]) {
 async fn sp1_host(program: GuestProgram) -> SP1Host {
     let elf_path = match program {
         GuestProgram::AlpenAcct => GUEST_ALPEN_ACCT_ELF_PATH,
-        GuestProgram::AlpenChunk => GUEST_ALPEN_CHUNK_ELF_PATH,
+        GuestProgram::AlpenChunk | GuestProgram::AlpenChunkPrecompiles => {
+            GUEST_ALPEN_CHUNK_ELF_PATH
+        }
     };
     let elf = fs::read(elf_path)
         .unwrap_or_else(|e| panic!("failed to read guest elf at {elf_path}: {e}"));

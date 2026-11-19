@@ -1,6 +1,6 @@
 # Prover performance
 
-This binary measures the SP1 guests (`alpen-chunk` and `alpen-acct`) on a realistic workload and reports their cycle counts. It can also prove the guests and save the proofs.
+This binary measures the SP1 guests (`alpen-chunk` and `alpen-acct`) on checked-in workloads and reports their cycle counts. It can also prove the guests and save the proofs.
 
 Report formatting and PR posting come from [`zkaleido-perf-report`](https://github.com/alpenlabs/zkaleido). This crate supplies the guests and their inputs.
 
@@ -10,6 +10,8 @@ Both guests run on the checked-in `mixed` workload in `crates/test-utils/data/wo
 
 - `alpen-chunk` proves the 100 blocks as one chunk. Its input is assembled the way the sequencer's chunk prover assembles it.
 - `alpen-acct` proves one account update over that chunk. The update processes the chunk's deposits as inbox messages, verifies the saved Groth16 chunk proof, and checks the batch's DA. The DA is the real batch state diff, posted in SPS-51 commit and reveal transactions inside a full-size synthetic L1 block.
+
+A third program, `alpen-chunk-precompiles`, runs the chunk guest on the `precompiles` workload in `crates/test-utils/data/workloads/precompiles/`: ten blocks that each call every precompile Alpen's EVM exposes, through a checker that reverts on a wrong output. Its row in the report, "EVM EE Chunk (precompiles)", isolates what the precompile backends cost the prover, which the `mixed` traffic barely exercises. It is measured only; `--generate-proof` refuses it, since nothing verifies such a proof.
 
 ## Generating reports
 

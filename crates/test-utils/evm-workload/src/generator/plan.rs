@@ -13,7 +13,7 @@ use alpen_params::{AlpenParams, DEV_PARAMS_JSON};
 use alpen_primitives::{address_to_subject, BRIDGEOUT_PRECOMPILE_ADDRESS, WEI_PER_BTC};
 use alpen_reth_evm::constants::SCHNORR_PRECOMPILE_ADDRESS;
 use alpen_reth_statediff::BatchBuilder;
-use eyre::{ensure, eyre};
+use eyre::{ensure, eyre, WrapErr};
 use rand_chacha::{
     rand_core::{RngCore, SeedableRng},
     ChaCha8Rng,
@@ -26,6 +26,7 @@ use super::{
     accounts::{Account, SignedTx},
     chain::{BuiltBlock, DevChain, DA_RATE},
     contracts,
+    precompiles::{self, PrecompileOp},
 };
 use crate::{Deposit, Workload, WorkloadBlock};
 
@@ -38,6 +39,9 @@ const TRANSFER_GAS: u64 = 50_000;
 const TOKEN_GAS: u64 = 120_000;
 const SWAP_GAS: u64 = 250_000;
 const PRECOMPILE_GAS: u64 = 100_000;
+/// Enough for any call through the checker: the costliest is the two-pair
+/// BN254 pairing at 113,000 gas, plus its calldata.
+const PRECOMPILE_CHECK_GAS: u64 = 600_000;
 const DEPLOY_GAS: u64 = 3_000_000;
 
 /// Setup transactions packed into one block, by kind. Each pack stays under
@@ -69,9 +73,15 @@ pub struct Config {
     /// Random transactions per block in the range, drawn uniformly.
     pub min_txs_per_block: u64,
     pub max_txs_per_block: u64,
+    /// How many times each block calls every precompile the workload knows
+    /// (see `generator/precompiles.rs`) through the checker, and the Schnorr
+    /// precompile directly. Zero leaves the precompiles to the scheduled
+    /// Schnorr calls.
+    pub precompile_calls_per_block: u64,
 }
 
 impl Default for Config {
+    /// The `mixed` workload: a hundred blocks of ordinary traffic.
     fn default() -> Self {
         Self {
             seed: 0,
@@ -81,6 +91,22 @@ impl Default for Config {
             blocks: 100,
             min_txs_per_block: 10,
             max_txs_per_block: 30,
+            precompile_calls_per_block: 0,
+        }
+    }
+}
+
+impl Config {
+    /// The `precompiles` workload: ten blocks, each calling every precompile
+    /// once over a trickle of ordinary traffic, so the chunk's cost is the
+    /// precompiles' cost.
+    pub fn precompiles() -> Self {
+        Self {
+            blocks: 10,
+            min_txs_per_block: 1,
+            max_txs_per_block: 3,
+            precompile_calls_per_block: 1,
+            ..Self::default()
         }
     }
 }
@@ -115,6 +141,7 @@ enum Kind {
     BridgeOut,
     SchnorrVerify,
     TokenDeploy,
+    Precompile(PrecompileOp),
 }
 
 impl Kind {
@@ -131,6 +158,7 @@ impl Kind {
             Self::BridgeOut => "bridge_out",
             Self::SchnorrVerify => "schnorr_verify",
             Self::TokenDeploy => "token_deploy",
+            Self::Precompile(op) => op.name(),
         }
     }
 }
@@ -181,6 +209,9 @@ struct Generator {
     token_a: Address,
     token_b: Address,
     pair: Address,
+    /// The precompile checker, deployed only when the range calls
+    /// precompiles through it.
+    checker: Address,
     fresh_addresses: u64,
     next_spender: usize,
     pulls: Vec<Pull>,
@@ -204,6 +235,7 @@ impl Generator {
             token_a: Address::ZERO,
             token_b: Address::ZERO,
             pair: Address::ZERO,
+            checker: Address::ZERO,
             fresh_addresses: 0,
             pulls: Vec::new(),
             published_code_hashes: BTreeSet::new(),
@@ -258,14 +290,25 @@ impl Generator {
             contracts::add_liquidity(liquidity, liquidity),
             SWAP_GAS,
         );
-        self.setup_block(vec![
+        let mut txs = vec![
             deploy_a,
             deploy_b,
             deploy_pair,
             approve_a,
             approve_b,
             seed_pool,
-        ])?;
+        ];
+        if self.config.precompile_calls_per_block > 0 {
+            self.checker = self.funder.next_create_address();
+            txs.push(self.funder.eip1559(
+                chain_id,
+                None,
+                U256::ZERO,
+                contracts::precompile_check_init_code(),
+                DEPLOY_GAS,
+            ));
+        }
+        self.setup_block(txs)?;
         blocks += 1;
 
         let holding = U256::from(1_000_000 * TOKEN);
@@ -348,7 +391,7 @@ impl Generator {
         let mut state_diff = BatchBuilder::new();
 
         for index in 0..self.config.blocks {
-            let planned = self.plan_block(index);
+            let planned = self.plan_block(index)?;
             let deposits = self.plan_deposits(index);
             let (kinds, expected): (Vec<Kind>, Vec<Option<Bytes>>) = planned
                 .iter()
@@ -425,11 +468,18 @@ impl Generator {
     }
 
     /// Plans the transactions of block `index` of the range.
-    fn plan_block(&mut self, index: usize) -> Vec<Planned> {
+    fn plan_block(&mut self, index: usize) -> eyre::Result<Vec<Planned>> {
         let mut planned: Vec<Planned> = mem::take(&mut self.pulls)
             .into_iter()
             .map(|pull| self.pull(pull))
             .collect();
+
+        for _ in 0..self.config.precompile_calls_per_block {
+            for op in precompiles::ALL {
+                planned.push(self.precompile_call(op)?);
+            }
+            planned.push(self.schnorr_verify(index));
+        }
 
         if index % 10 == 3 {
             planned.push(self.bridge_out());
@@ -452,7 +502,7 @@ impl Generator {
             let kind = self.draw_kind();
             planned.push(self.random_tx(kind));
         }
-        planned
+        Ok(planned)
     }
 
     /// Deposits of block `index` of the range: one every ten blocks,
@@ -542,7 +592,11 @@ impl Generator {
                     SWAP_GAS,
                 )
             }
-            Kind::TokenTransferFrom | Kind::BridgeOut | Kind::SchnorrVerify | Kind::TokenDeploy => {
+            Kind::TokenTransferFrom
+            | Kind::BridgeOut
+            | Kind::SchnorrVerify
+            | Kind::TokenDeploy
+            | Kind::Precompile(_) => {
                 unreachable!("{kind:?} is scheduled, not drawn")
             }
         };
@@ -603,6 +657,27 @@ impl Generator {
             tx,
             expected_output: Some(Bytes::from_static(&[1])),
         }
+    }
+
+    /// Calls `op` through the checker, which reverts unless the precompile
+    /// returns the expected output. The call's own output is empty.
+    fn precompile_call(&mut self, op: PrecompileOp) -> eyre::Result<Planned> {
+        let from = self.random_index(self.config.eoas);
+        let call = op
+            .call(self.config.seed)
+            .wrap_err_with(|| format!("build the {} call", op.name()))?;
+        let tx = self.eoas[from].eip1559(
+            self.chain_id,
+            Some(self.checker),
+            U256::ZERO,
+            contracts::precompile_check(op.address(), call.input, call.expected),
+            PRECOMPILE_CHECK_GAS,
+        );
+        Ok(Planned {
+            kind: Kind::Precompile(op),
+            tx,
+            expected_output: Some(Bytes::new()),
+        })
     }
 
     fn range_deploy(&mut self, tag: u64) -> Planned {

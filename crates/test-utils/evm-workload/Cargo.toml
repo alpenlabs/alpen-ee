@@ -44,6 +44,7 @@ clap = { workspace = true, features = [
 ], optional = true }
 eyre = { workspace = true, optional = true }
 k256 = { workspace = true, optional = true }
+p256 = { workspace = true, optional = true }
 rand_chacha = { workspace = true, optional = true }
 reth-chainspec = { workspace = true, optional = true }
 reth-db-common = { workspace = true, optional = true }
@@ -52,6 +53,7 @@ reth-evm = { workspace = true, optional = true }
 reth-primitives-traits = { workspace = true, optional = true }
 reth-provider = { workspace = true, features = ["test-utils"], optional = true }
 reth-revm = { workspace = true, optional = true }
+revm = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 strata-acct-types = { workspace = true, optional = true }
 strata-codec = { workspace = true, optional = true }
@@ -83,6 +85,7 @@ generator = [
   "dep:clap",
   "dep:eyre",
   "dep:k256",
+  "dep:p256",
   "dep:rand_chacha",
   "dep:reth-chainspec",
   "dep:reth-db-common",
@@ -91,6 +94,7 @@ generator = [
   "dep:reth-primitives-traits",
   "dep:reth-provider",
   "dep:reth-revm",
+  "dep:revm",
   "dep:serde_json",
   "dep:strata-acct-types",
   "dep:strata-codec",

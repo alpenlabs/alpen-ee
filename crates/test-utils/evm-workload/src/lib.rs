@@ -30,6 +30,10 @@ pub const WORKLOAD_FILE: &str = "workload.bin";
 /// Name of the checked-in workload the prover-perf guests run on.
 pub const MIXED_WORKLOAD: &str = "mixed";
 
+/// Name of the checked-in workload that calls every precompile, which the
+/// chunk guest's precompile cost is measured on.
+pub const PRECOMPILES_WORKLOAD: &str = "precompiles";
+
 /// Returns the directory of the checked-in workload called `name`.
 pub fn workload_dir(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
