@@ -8,10 +8,10 @@ version = "0.1.0"
 [dependencies]
 alpen-params = { path = "../../../crates/params" }
 alpen-proof-acct = { path = "../../../crates/proof/acct" }
-strata-predicate = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.4.0", features = [
+strata-predicate = { git = "https://github.com/alpenlabs/strata-common", tag = "v0.6.0", features = [
   "sp1-groth16",
 ] }
-zkaleido-sp1-guest-env = { git = "https://github.com/alpenlabs/zkaleido", tag = "v0.4.0" }
+zkaleido-sp1-guest-env = { git = "https://github.com/alpenlabs/zkaleido", tag = "v0.6.0" }
 
 [patch.crates-io]
 secp256k1 = { git = "https://github.com/sp1-patches/rust-secp256k1", tag = "patch-0.29.1-sp1-6.10.0" }

@@ -33,6 +33,7 @@ use revm_primitives::KECCAK_EMPTY;
 use ssz::Decode;
 use strata_acct_types::l1_block_record_leaf_hash;
 use strata_codec::decode_buf_exact;
+use strata_identifiers::{Buf32, L1BlockCommitment, L1BlockId};
 use strata_snark_acct_types::{LedgerRefs, UpdateProofPubParams};
 
 use crate::payload::{recover_ee_da_blob, L1DaTransactions};
@@ -103,10 +104,12 @@ pub fn verify_da(
     let mut included_blocks = Vec::with_capacity(blocks.len());
     for block in blocks {
         let transactions = verify_block_witness(block, pub_params.ledger_refs())?;
-        included_blocks.push(L1DaTransactions::new(
-            block.inclusion().l1_block_height(),
-            transactions,
-        ));
+        let inclusion = block.inclusion();
+        let l1_block = L1BlockCommitment::new(
+            inclusion.l1_block_height(),
+            L1BlockId::from(Buf32::from(*inclusion.l1_block_hash())),
+        );
+        included_blocks.push(L1DaTransactions::new(l1_block, transactions));
     }
 
     let blob = recover_ee_da_blob(included_blocks, spec_version)?;

@@ -38,6 +38,20 @@ impl L1ChunkedEnvelopeDbMdbx {
 }
 
 impl L1ChunkedEnvelopeDatabase for L1ChunkedEnvelopeDbMdbx {
+    fn append_chunked_envelope_entry(&self, entry: ChunkedEnvelopeEntry) -> DbResult<u64> {
+        // The single MDBX writer makes the tip read and the put one atomic step.
+        self.env
+            .update(|w| {
+                let idx = w
+                    .last::<L1ChunkedEnvelopeSchema>()?
+                    .map(|(idx, _)| idx + 1)
+                    .unwrap_or(0);
+                w.put::<L1ChunkedEnvelopeSchema>(&idx, &entry)?;
+                Ok(idx)
+            })
+            .map_err(to_db_error)
+    }
+
     fn put_chunked_envelope_entry(&self, idx: u64, entry: ChunkedEnvelopeEntry) -> DbResult<()> {
         self.env
             .update(|w| w.put::<L1ChunkedEnvelopeSchema>(&idx, &entry))

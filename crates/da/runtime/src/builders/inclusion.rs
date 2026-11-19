@@ -90,7 +90,7 @@ pub(crate) async fn collect_l1_inclusion_blocks(
             ),
             txs,
         ));
-        included_blocks.push(L1DaTransactions::new(da_ref.block.height(), included_txs));
+        included_blocks.push(L1DaTransactions::new(da_ref.block.commitment, included_txs));
     }
 
     Ok((blocks, included_blocks))

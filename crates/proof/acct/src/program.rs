@@ -183,7 +183,7 @@ impl EeAcctProgram {
     /// Deterministic Schnorr signing key backing [`Self::test_predicate_key`] and
     /// [`Self::native_host`].
     pub fn test_signing_key() -> SigningKey {
-        SigningKey::from_bytes(&[0x02u8; 32]).expect("valid test signing key")
+        SigningKey::from_bytes(&[0x02u8; 32].into()).expect("valid test signing key")
     }
 
     /// Native host that can be used for testing.
