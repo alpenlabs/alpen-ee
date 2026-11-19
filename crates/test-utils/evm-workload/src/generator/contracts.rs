@@ -5,6 +5,10 @@ use alloy_sol_types::{sol, SolCall, SolValue};
 use k256::schnorr;
 
 sol! {
+    interface IPrecompileCheck {
+        function check(address target, bytes input, bytes expected) external view;
+    }
+
     interface IToken {
         function transfer(address to, uint256 value) external returns (bool);
         function approve(address spender, uint256 value) external returns (bool);
@@ -23,6 +27,10 @@ const TOKEN_INIT_CODE_HEX: &str = include_str!("../../contracts/out/Token.bin");
 /// Init code of `contracts/Pair.sol`, compiled by `contracts/compile.sh`.
 const PAIR_INIT_CODE_HEX: &str = include_str!("../../contracts/out/Pair.bin");
 
+/// Init code of `contracts/PrecompileCheck.sol`, compiled by `contracts/compile.sh`.
+const PRECOMPILE_CHECK_INIT_CODE_HEX: &str =
+    include_str!("../../contracts/out/PrecompileCheck.bin");
+
 /// Operator selection that lets any bridge operator take a withdrawal.
 const ANY_OPERATOR: u32 = u32::MAX;
 
@@ -37,6 +45,23 @@ pub(crate) fn token_init_code(tag: u64, supply: U256) -> Bytes {
 /// Init code deploying a pool over `token0` and `token1`.
 pub(crate) fn pair_init_code(token0: Address, token1: Address) -> Bytes {
     with_args(PAIR_INIT_CODE_HEX, (token0, token1).abi_encode_params())
+}
+
+/// Init code deploying the precompile checker.
+pub(crate) fn precompile_check_init_code() -> Bytes {
+    with_args(PRECOMPILE_CHECK_INIT_CODE_HEX, Vec::new())
+}
+
+/// Checker calldata calling precompile `target` with `input` and reverting
+/// unless it returns `expected`.
+pub(crate) fn precompile_check(target: Address, input: Bytes, expected: Bytes) -> Bytes {
+    IPrecompileCheck::checkCall {
+        target,
+        input,
+        expected,
+    }
+    .abi_encode()
+    .into()
 }
 
 fn with_args(init_code_hex: &str, args: Vec<u8>) -> Bytes {
