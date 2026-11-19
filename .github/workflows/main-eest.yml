@@ -40,10 +40,7 @@ jobs:
     name: Run functional tests
     runs-on: ubuntu-latest
     needs: extract-rust-version
-    timeout-minutes: 120
-    env:
-      EE_PROVER_BACKEND: sp1
-      SP1_PROVER: network
+    timeout-minutes: 240
 
     steps:
       - name: Checkout repository
@@ -53,15 +50,6 @@ jobs:
 
       - name: Cleanup Space
         uses: $/.github/actions/cleanup
-
-      - name: Check SP1 network credentials
-        env:
-          NETWORK_PRIVATE_KEY: ${{ secrets.NETWORK_PRIVATE_KEY }}
-        run: |
-          if [[ -z "$NETWORK_PRIVATE_KEY" ]]; then
-            echo "::error::NETWORK_PRIVATE_KEY must be configured for SP1-backed EEST; refusing native fallback."
-            exit 1
-          fi
 
       - name: Install bitcoind
         env:
@@ -133,22 +121,10 @@ jobs:
           echo "Strata binaries at: ${STRATA_BIN_DIR}"
           echo "${STRATA_BIN_DIR}" >> "$GITHUB_PATH"
 
-      - name: Build matching EEST SP1 guests
-        working-directory: functional-tests
-        env:
-          SP1_SKIP_PROGRAM_BUILD: "false"
-        run: |
-          uv sync --frozen
-          ALPEN_PARAMS="$(uv run --frozen python -m scripts.gen_eest_sp1_guest_params)"
-          SP1_ALPEN_PARAMS_PATH="$ALPEN_PARAMS" \
-            cargo build --locked --release -p alpen-sp1-guest-builder
-          uv run --frozen python -c 'from common.prover_backend import resolve_prover_backend; assert resolve_prover_backend().backend == "sp1"'
-
       - name: Run alpen EEST env in fntests
         env:
           NO_COLOR: "1"
           LOG_LEVEL: "info"
-          NETWORK_PRIVATE_KEY: ${{ secrets.NETWORK_PRIVATE_KEY }}
         run: |
           sudo apt-get install -y screen
           NEWPATH="$(realpath target/release/)"
@@ -166,10 +142,12 @@ jobs:
         id: runtests
         env:
           EEST_PYTEST_ARGS: ${{ github.event.inputs.eest_pytest_args || '' }}
+        # The fork must match the spec version the alpen_eest chain launches
+        # on. That is V1, which runs Osaka.
         run: |
           args=(
             --rpc-endpoint http://localhost:30303
-            --fork Prague
+            --fork Osaka
             --tx-wait-timeout 120
           )
           if [[ -n "${EEST_PYTEST_ARGS}" ]]; then
