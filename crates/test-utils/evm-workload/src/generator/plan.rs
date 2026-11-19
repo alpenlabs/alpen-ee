@@ -73,9 +73,10 @@ pub struct Config {
     /// Random transactions per block in the range, drawn uniformly.
     pub min_txs_per_block: u64,
     pub max_txs_per_block: u64,
-    /// How many times each block calls every precompile in
-    /// [`precompiles::ALL`], through the checker, and the Schnorr precompile
-    /// directly. Zero leaves the precompiles to the scheduled Schnorr calls.
+    /// How many times each block calls every precompile the workload knows
+    /// (see `generator/precompiles.rs`) through the checker, and the Schnorr
+    /// precompile directly. Zero leaves the precompiles to the scheduled
+    /// Schnorr calls.
     pub precompile_calls_per_block: u64,
 }
 
