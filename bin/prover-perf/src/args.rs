@@ -19,7 +19,8 @@ pub struct EvalArgs {
 
     /// Programs to run (comma-delimited and/or repeated),
     /// e.g. `--programs alpen-chunk,alpen-acct` or `--programs alpen-chunk
-    /// --programs alpen-acct`.
+    /// --programs alpen-acct`. `alpen-chunk-precompiles` runs the chunk
+    /// guest on the `precompiles` workload.
     #[arg(long)]
     pub programs: Vec<String>,
 }

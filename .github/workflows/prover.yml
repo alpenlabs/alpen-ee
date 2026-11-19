@@ -100,7 +100,7 @@ jobs:
         run: |
           RUST_LOG=info SP1_PROVER=light cargo run --profile prover-ci -- \
           --github-token "${{ secrets.GITHUB_TOKEN }}" \
-          --programs alpen-chunk,alpen-acct
+          --programs alpen-chunk,alpen-chunk-precompiles,alpen-acct
         working-directory: bin/prover-perf
         env:
           RUSTFLAGS: "-C target-cpu=native -C link-arg=-fuse-ld=lld"
