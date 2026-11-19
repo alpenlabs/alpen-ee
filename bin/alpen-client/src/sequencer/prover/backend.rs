@@ -34,7 +34,10 @@ use zkaleido_sp1_host::{SP1Host, SP1HostConfig};
 use super::{
     AcctSpec, BatchProverSources, ChunkSpec, EeBatchProofDbManager, PaasBatchProver, ProverProgram,
 };
-use crate::{config::ProverBackendConfig, service_executor::ServiceExecutor};
+use crate::{
+    config::{ProverBackendConfig, ProverConfig, ProverProgramConfig},
+    service_executor::ServiceExecutor,
+};
 
 /// Default end-to-end deadline applied to the SP1 prover network for the EE
 /// chunk + acct provers when `sequencer.prover.deadline_secs` is not set. Chosen
@@ -112,7 +115,7 @@ pub(crate) async fn launch_validated_ee_batch_prover(
     service_executor: &ServiceExecutor,
     builders: EeProverBuilders,
     stores: EeProverStores,
-    backend: ProverBackendConfig,
+    prover: ProverConfig,
     params: Arc<AlpenParams>,
 ) -> eyre::Result<Arc<PaasBatchProver>> {
     let ol_account_update_vk = ol_client
@@ -120,10 +123,10 @@ pub(crate) async fn launch_validated_ee_batch_prover(
         .await
         .context("failed to fetch OL account update_vk for prover validation")?;
 
-    let programs_per_version = count_programs_per_version(&backend);
+    let programs_per_version = count_programs_per_version(&prover.programs);
     ensure_no_legacy_open_tasks(&stores.prover_db, &programs_per_version)?;
 
-    let built = build_programs(&builders, backend, params, &ol_account_update_vk).await?;
+    let built = build_programs(&builders, prover, params, &ol_account_update_vk).await?;
     adopt_legacy_tasks(&stores.prover_db, &built, &programs_per_version)?;
 
     let mut programs = Vec::with_capacity(built.len());
@@ -144,9 +147,9 @@ pub(crate) async fn launch_validated_ee_batch_prover(
 }
 
 /// How many configured programs prove each spec version.
-fn count_programs_per_version(backend: &ProverBackendConfig) -> BTreeMap<AlpenSpecId, usize> {
+fn count_programs_per_version(programs: &[ProverProgramConfig]) -> BTreeMap<AlpenSpecId, usize> {
     let mut counts = BTreeMap::new();
-    for program in backend.programs() {
+    for program in programs {
         *counts.entry(program.spec_version).or_insert(0) += 1;
     }
     counts
@@ -235,25 +238,27 @@ fn adopt_legacy_tasks_of<K: ProverTaskKey>(
 /// Builds every configured program, and hard-fails unless one of them
 /// matches `ol_account_update_vk` and no two share a key.
 ///
-/// `backend` may carry several programs (see
-/// [`ProverProgramConfig`](crate::config::ProverProgramConfig)'s doc comment):
-/// an operator straddling a VK rotation configures both the currently-active
-/// and the not-yet-active program ahead of time, so the sequencer doesn't
-/// need restarting once the rotation lands — as long as the target program
-/// was already resident. Every program is built (not just whichever is active
-/// right now), since [`PaasBatchProver`] routes each batch's proof request by
-/// the key the OL checks that batch against, not by whatever's active at this
-/// moment.
+/// `prover` may carry several programs (see [`ProverProgramConfig`]'s doc
+/// comment): an operator straddling a VK rotation configures both the
+/// currently-active and the not-yet-active program ahead of time, so the
+/// sequencer doesn't need restarting once the rotation lands — as long as the
+/// target program was already resident. Every program is built (not just
+/// whichever is active right now), since [`PaasBatchProver`] routes each
+/// batch's proof request by the key the OL checks that batch against, not by
+/// whatever's active at this moment.
 async fn build_programs(
     builders: &EeProverBuilders,
-    backend: ProverBackendConfig,
+    prover: ProverConfig,
     params: Arc<AlpenParams>,
     ol_account_update_vk: &PredicateKey,
 ) -> eyre::Result<Vec<BuiltProgram>> {
+    let ProverConfig {
+        backend, programs, ..
+    } = prover;
     let mut built = Vec::new();
 
     match backend {
-        ProverBackendConfig::Native { programs, .. } => {
+        ProverBackendConfig::Native => {
             info!(target: "alpen-client", "EE chunk + acct provers: native host");
 
             for program in &programs {
@@ -286,11 +291,7 @@ async fn build_programs(
             }
         }
         #[cfg(feature = "sp1")]
-        ProverBackendConfig::Sp1 {
-            programs,
-            deadline_secs,
-            ..
-        } => {
+        ProverBackendConfig::Sp1 { deadline_secs } => {
             let deadline_secs = deadline_secs.unwrap_or(DEFAULT_SP1_DEADLINE_SECS);
             let deadline = Duration::from_secs(deadline_secs);
             let sp1_config = SP1HostConfig::default().with_deadline(deadline);

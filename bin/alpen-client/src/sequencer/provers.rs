@@ -35,7 +35,7 @@ use super::prover::{
     EeBatchProofDbManager, EeChunkReceiptStore, EeChunkTaskStore, EeProverBuilders, EeProverStores,
     PaasBatchProver,
 };
-use crate::{config::ProverBackendConfig, service_executor::ServiceExecutor};
+use crate::{config::ProverConfig, service_executor::ServiceExecutor};
 
 /// Everything [`launch`] needs to build and launch the EE chunk + acct
 /// provers.
@@ -43,7 +43,7 @@ pub(crate) struct EeProverInputs<P> {
     pub(crate) storage: Arc<NodeStorage>,
     pub(crate) node_provider: P,
     pub(crate) btc_client: Arc<BtcClient>,
-    pub(crate) backend: ProverBackendConfig,
+    pub(crate) prover: ProverConfig,
     pub(crate) params: Arc<AlpenParams>,
 }
 
@@ -63,7 +63,7 @@ where
         storage,
         node_provider,
         btc_client,
-        backend,
+        prover,
         params,
     } = inputs;
 
@@ -89,8 +89,8 @@ where
     // batches can take at once. The kinds do not share a pool: acct work is
     // downstream of chunk work, and one pool would let a chunk backlog take
     // every unit on every tick while the acct tasks that finalize batches wait.
-    let chunk_budget = budget_for(backend.max_concurrent_chunk_tasks());
-    let acct_budget = budget_for(backend.max_concurrent_acct_tasks());
+    let chunk_budget = budget_for(prover.max_concurrent_chunk_tasks);
+    let acct_budget = budget_for(prover.max_concurrent_acct_tasks);
 
     // A `ProverBuilder` is single-use (`.native(host)`/`.remote(host)`
     // consume it), but every resident prover program needs its own, so these
@@ -167,7 +167,7 @@ where
             batch_proofs,
             prover_db: prover_db.clone(),
         },
-        backend,
+        prover,
         params,
     )
     .await?;

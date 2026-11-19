@@ -323,31 +323,69 @@ pub(crate) struct ProverProgramConfig {
     pub(crate) acct_path: PathBuf,
 }
 
-/// `[sequencer.prover]` — which EE chunk/acct prover backend to run.
+/// `[sequencer.prover]` — the EE chunk/acct prover: its backend, the
+/// resident programs, and the per-kind caps on tasks in flight.
+///
+/// Holds paths rather than file contents: reading is left to whoever
+/// actually builds the backend.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct ProverConfig {
+    /// Which backend proves, with the settings only that backend needs.
+    #[serde(flatten)]
+    pub(crate) backend: ProverBackendConfig,
+    /// The cap on chunk tasks preparing input and submitting at once, shared
+    /// by every resident program's chunk prover, or `None` for no cap.
+    ///
+    /// A task takes a unit of capacity before it extracts its witness and
+    /// gives it back once the proof is handed off: under `native` that is
+    /// after the proof is signed, so the cap also bounds proving; under `sp1`
+    /// it is once the prover network has the request, so polling runs outside
+    /// the cap. A task that finds no capacity stays `Pending` in the task
+    /// store and starts on a later tick. Unset means every submitted chunk
+    /// task extracts its witness at the same time.
+    #[serde(default)]
+    pub(crate) max_concurrent_chunk_tasks: Option<NonZeroUsize>,
+    /// The same cap for batch (acct) tasks, shared by every resident
+    /// program's acct prover.
+    ///
+    /// The two kinds get separate caps because the acct prover is downstream
+    /// of the chunk prover, a batch's acct task needs its chunk proofs first,
+    /// so sharing one pool would let a chunk backlog crowd out the acct work
+    /// that turns finished chunks into finality.
+    #[serde(default)]
+    pub(crate) max_concurrent_acct_tasks: Option<NonZeroUsize>,
+    /// One or more resident programs (see [`ProverProgramConfig`]). An
+    /// operator straddling a VK rotation configures both the currently-active
+    /// and the not-yet-active program ahead of time, so the sequencer keeps
+    /// proving correctly across the rotation without a restart.
+    pub(crate) programs: Vec<ProverProgramConfig>,
+}
+
+impl ProverConfig {
+    /// Rejects an empty program set, which can't route any batch.
+    ///
+    /// Checked here rather than at prover startup so a bad config fails
+    /// before any node, DB, or DA work begins. The paths aren't checked —
+    /// reading them is left to whoever actually builds the backend, which
+    /// also refuses two programs that derive the same key.
+    fn validate(&self) -> eyre::Result<()> {
+        if self.programs.is_empty() {
+            return Err(eyre::eyre!(
+                "sequencer.prover needs at least one [[sequencer.prover.programs]] entry"
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+/// Which EE chunk/acct prover backend [`ProverConfig`] runs, flattened into
+/// its table.
 ///
 /// Tagged on `backend`, so each backend names only the fields it needs and
 /// serde rejects a config that omits one. That replaces the old bool plus
 /// separately-optional paths, where "these paths are required unless
 /// native" was a rule every layer had to re-check.
-///
-/// Holds paths rather than file contents: reading is left to whoever
-/// actually builds the backend.
-///
-/// `programs` holds one or more resident programs (see
-/// [`ProverProgramConfig`]). An operator straddling a VK rotation configures
-/// both the currently-active and the not-yet-active program ahead of time,
-/// so the sequencer keeps proving correctly across the rotation without a
-/// restart.
-///
-/// `max_concurrent_chunk_tasks` and `max_concurrent_acct_tasks` cap how many
-/// chunk and batch (acct) proof tasks prepare their input and submit at once,
-/// each across every resident program. The two kinds get separate caps
-/// because the acct prover is downstream of the chunk prover, a batch's acct
-/// task needs its chunk proofs first, so sharing one pool would let a chunk
-/// backlog crowd out the acct work that turns finished chunks into finality.
-/// Unset means no cap for that kind: every submitted task of it extracts its
-/// witness at the same time. See [`Self::max_concurrent_chunk_tasks`] for
-/// what a unit of capacity covers under each backend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "backend", rename_all = "snake_case")]
 pub(crate) enum ProverBackendConfig {
@@ -356,13 +394,7 @@ pub(crate) enum ProverBackendConfig {
     ///
     /// One program's account key has to match whatever the OL `update_vk`
     /// expects right now, or the predicate-key check at startup fails.
-    Native {
-        #[serde(default)]
-        max_concurrent_chunk_tasks: Option<NonZeroUsize>,
-        #[serde(default)]
-        max_concurrent_acct_tasks: Option<NonZeroUsize>,
-        programs: Vec<ProverProgramConfig>,
-    },
+    Native,
     /// SP1 remote hosts. Needs the `sp1` feature compiled in.
     ///
     /// Each program's paths are the compiled SP1 guest ELFs. Explicit so one
@@ -372,74 +404,7 @@ pub(crate) enum ProverBackendConfig {
         /// Falls back to `DEFAULT_SP1_DEADLINE_SECS` when unset, so nothing
         /// is resolved here.
         deadline_secs: Option<u64>,
-        #[serde(default)]
-        max_concurrent_chunk_tasks: Option<NonZeroUsize>,
-        #[serde(default)]
-        max_concurrent_acct_tasks: Option<NonZeroUsize>,
-        programs: Vec<ProverProgramConfig>,
     },
-}
-
-impl ProverBackendConfig {
-    /// The resident programs, whichever backend was selected.
-    pub(crate) fn programs(&self) -> &[ProverProgramConfig] {
-        match self {
-            Self::Native { programs, .. } | Self::Sp1 { programs, .. } => programs,
-        }
-    }
-
-    /// The cap on chunk tasks preparing input and submitting at once, shared
-    /// by every resident program's chunk prover, or `None` for no cap.
-    ///
-    /// A task takes a unit of capacity before it extracts its witness and
-    /// gives it back once the proof is handed off: under `native` that is
-    /// after the proof is signed, so the cap also bounds proving; under `sp1`
-    /// it is once the prover network has the request, so polling runs outside
-    /// the cap. A task that finds no capacity stays `Pending` in the task
-    /// store and starts on a later tick.
-    pub(crate) fn max_concurrent_chunk_tasks(&self) -> Option<NonZeroUsize> {
-        match self {
-            Self::Native {
-                max_concurrent_chunk_tasks,
-                ..
-            }
-            | Self::Sp1 {
-                max_concurrent_chunk_tasks,
-                ..
-            } => *max_concurrent_chunk_tasks,
-        }
-    }
-
-    /// The same cap for batch (acct) tasks, shared by every resident
-    /// program's acct prover. See [`Self::max_concurrent_chunk_tasks`].
-    pub(crate) fn max_concurrent_acct_tasks(&self) -> Option<NonZeroUsize> {
-        match self {
-            Self::Native {
-                max_concurrent_acct_tasks,
-                ..
-            }
-            | Self::Sp1 {
-                max_concurrent_acct_tasks,
-                ..
-            } => *max_concurrent_acct_tasks,
-        }
-    }
-
-    /// Rejects an empty program set, which can't route any batch.
-    ///
-    /// Checked here rather than at prover startup so a bad config fails
-    /// before any node, DB, or DA work begins. The paths aren't checked —
-    /// reading them is left to whoever actually builds the backend, which
-    /// also refuses two programs that derive the same key.
-    fn validate(&self) -> eyre::Result<()> {
-        if self.programs().is_empty() {
-            return Err(eyre::eyre!(
-                "sequencer.prover needs at least one [[sequencer.prover.programs]] entry"
-            ));
-        }
-
-        Ok(())
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -692,7 +657,7 @@ pub(crate) struct SequencerConfig {
     /// read from `STRATA_SUBMIT_RPC_TOKEN` rather than being a field here.
     pub(crate) ol_submit_url: Option<String>,
     /// `[sequencer.prover]` — the EE chunk/acct prover backend.
-    pub(crate) prover: ProverBackendConfig,
+    pub(crate) prover: ProverConfig,
     /// `[sequencer.bitcoind]` — reused verbatim from `strata_config`.
     // TODO(STR-4177): stop configuring `rpc_user`/`rpc_password` as plaintext TOML fields.
     pub(crate) bitcoind: BitcoindConfig,
@@ -1646,7 +1611,7 @@ mod tests {
             )
         }
 
-        fn prover_backend(prover: &str) -> eyre::Result<ProverBackendConfig> {
+        fn prover_config(prover: &str) -> eyre::Result<ProverConfig> {
             let config = AlpenClientConfig::from_toml_str(&sequencer_toml(prover))?;
             let NodeMode::Sequencer(seq) = config.mode else {
                 panic!("expected sequencer mode");
@@ -1654,7 +1619,7 @@ mod tests {
             Ok(seq.config.prover)
         }
 
-        let native = prover_backend(
+        let native = prover_config(
             r#"
             backend = "native"
             [[sequencer.prover.programs]]
@@ -1664,27 +1629,23 @@ mod tests {
             "#,
         )
         .unwrap();
-        let ProverBackendConfig::Native {
-            programs,
-            max_concurrent_chunk_tasks,
-            max_concurrent_acct_tasks,
-        } = native
-        else {
-            panic!("expected the native backend");
-        };
+        assert!(
+            matches!(native.backend, ProverBackendConfig::Native),
+            "expected the native backend"
+        );
         assert_eq!(
-            programs,
+            native.programs,
             vec![ProverProgramConfig {
                 spec_version: AlpenSpecId::V0,
                 chunk_path: PathBuf::from("/tmp/chunk.key"),
                 acct_path: PathBuf::from("/tmp/acct.key"),
             }]
         );
-        assert_eq!(max_concurrent_chunk_tasks, None);
-        assert_eq!(max_concurrent_acct_tasks, None);
+        assert_eq!(native.max_concurrent_chunk_tasks, None);
+        assert_eq!(native.max_concurrent_acct_tasks, None);
 
         // Each kind is capped on its own; one may stay uncapped.
-        let capped = prover_backend(
+        let capped = prover_config(
             r#"
             backend = "native"
             max_concurrent_chunk_tasks = 2
@@ -1695,11 +1656,11 @@ mod tests {
             "#,
         )
         .unwrap();
-        assert_eq!(capped.max_concurrent_chunk_tasks(), NonZeroUsize::new(2));
-        assert_eq!(capped.max_concurrent_acct_tasks(), None);
+        assert_eq!(capped.max_concurrent_chunk_tasks, NonZeroUsize::new(2));
+        assert_eq!(capped.max_concurrent_acct_tasks, None);
 
         // Zero would mean no task ever starts, so it is rejected at parse time.
-        let err = prover_backend(
+        let err = prover_config(
             r#"
             backend = "native"
             max_concurrent_acct_tasks = 0
@@ -1712,7 +1673,7 @@ mod tests {
         .unwrap_err();
         assert!(err.to_string().contains("nonzero"), "{err}");
 
-        let err = prover_backend(
+        let err = prover_config(
             r#"
             backend = "sp1"
             "#,
@@ -1722,7 +1683,7 @@ mod tests {
 
         // The old flat per-backend path keys mean nothing now, so they read
         // as the unknown fields they are rather than being dropped.
-        let err = prover_backend(
+        let err = prover_config(
             r#"
             backend = "sp1"
             acct_elf_path = "/tmp/acct.elf"
