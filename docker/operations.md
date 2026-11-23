@@ -27,7 +27,7 @@ Reth-native flag.
 | Input | Description |
 |-------|-------------|
 | `--alpen-config <path>` | This node's own TOML config: mode, OL connection, DA, sealing. Required. |
-| `--alpen-params <path>` | The chain/protocol params artifact (JSON): EE account id, bridge params, DA stream identity, embedded EVM chain spec. Shared by every node on the chain. Required. |
+| `--alpen-params <network\|path>` | The chain/protocol params: a network name (`mainnet`, `testnet`, `staging`, `dev`) for the copy of `params/<network>.json` built into the binary at compile time, or a path to a JSON artifact. Carries the EE account id, bridge params, DA stream identity, embedded EVM chain spec. Shared by every node on the chain. Required. |
 | `--p2p-secret-key <file>` | 32-byte hex secp256k1 key that fixes this node's enode identity. Reth generates one if the file is missing. |
 | `--authrpc.jwtsecret <file>` | JWT secret for the Engine API. |
 | `SEQUENCER_PRIVATE_KEY` (env) | Sequencer only. 32-byte hex Schnorr key used to sign gossip messages and DA reveals. The gossip pubkey is derived from it, so a sequencer never configures one. Accepts an `0x` prefix. |
