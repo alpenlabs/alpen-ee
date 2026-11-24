@@ -294,6 +294,38 @@ fn matches_default_backend_pairing_and_maps() {
     }
 }
 
+/// Zero is the one input zkcrypto's G2 map gets wrong; see
+/// [`MAP_FP2_TO_G2_OF_ZERO`]. Staging-v2 has V1 blocks that call the
+/// precompile with it, so a node that returned the identity there could not
+/// replay them.
+#[test]
+fn maps_zero_like_the_default_backend() {
+    let zero = [0u8; 48];
+    let mut one = [0u8; 48];
+    one[47] = 1;
+    for fp2 in [(zero, zero), (zero, one), (one, zero)] {
+        assert_eq!(
+            Bls12381Crypto.bls12_381_fp2_to_g2(fp2).unwrap(),
+            DefaultCrypto.bls12_381_fp2_to_g2(fp2).unwrap()
+        );
+    }
+    assert_eq!(
+        Bls12381Crypto.bls12_381_fp_to_g1(&zero).unwrap(),
+        DefaultCrypto.bls12_381_fp_to_g1(&zero).unwrap()
+    );
+}
+
+/// The upstream map still returns the identity for zero, so
+/// [`MAP_FP2_TO_G2_OF_ZERO`] stays needed. When this fails, upstream fixed the
+/// map and the special case can go.
+#[test]
+fn upstream_still_maps_zero_to_identity() {
+    let zero = read_fp2(&[0u8; 48], &[0u8; 48]).unwrap();
+    let point = G2Affine::from(G2Projective::map_to_curve(&zero).clear_h());
+    assert!(bool::from(point.is_identity()));
+    assert_ne!(MAP_FP2_TO_G2_OF_ZERO, [0u8; G2_LENGTH]);
+}
+
 // Rejections, with the same halt reasons as the default backend.
 
 fn halt<T>(r: Result<T, PrecompileHalt>) -> PrecompileHalt {
