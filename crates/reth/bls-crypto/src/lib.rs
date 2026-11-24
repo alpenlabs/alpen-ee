@@ -121,9 +121,48 @@ impl Crypto for Bls12381Crypto {
 
     fn bls12_381_fp2_to_g2(&self, fp2: ([u8; 48], [u8; 48])) -> Result<[u8; 192], PrecompileHalt> {
         let fp2 = read_fp2(&fp2.0, &fp2.1)?;
+        if bool::from(fp2.is_zero()) {
+            return Ok(MAP_FP2_TO_G2_OF_ZERO);
+        }
         let point = G2Projective::map_to_curve(&fp2).clear_h();
         Ok(encode_g2(&G2Affine::from(point)))
     }
+}
+
+/// `MAP_FP2_TO_G2(0)`, encoded as [`encode_g2`] does.
+///
+/// zkcrypto's simplified SWU map for G2 gets this one input wrong, in every
+/// release up to 0.9.2 and in the SP1 fork. At `u = 0` both `g(x1)` and the
+/// square-root candidate for it are zero, so the check that picks `x1` passes,
+/// `x` comes out as zero, and the cleared point is the identity. For any other
+/// `u`, exactly one of `g(x0)` and `g(x1)` is a square, so the map is right.
+/// The value here is the point revm's default backend returns, which is the
+/// one the chain recorded for the calls that sent zero.
+const MAP_FP2_TO_G2_OF_ZERO: [u8; G2_LENGTH] = hex_literal(concat!(
+    "018320896ec9eef9d5e619848dc29ce266f413d02dd31d9b9d44ec0c79cd61f18b075ddba6d7bd20b7ff27a4b324bfce",
+    "0a67d12118b5a35bb02d2e86b3ebfa7e23410db93de39fb06d7025fa95e96ffa428a7a27c3ae4dd4b40bd251ac658892",
+    "0260e03644d1a2c321256b3246bad2b895cad13890cbe6f85df55106a0d334604fb143c7a042d878006271865bc35941",
+    "04c69777a43f0bda07679d5805e63f18cf4e0e7c6112ac7f70266d199b4f76ae27c6269a3ceebdae30806e9a76aadf5c",
+));
+
+/// Decodes a hex string of exactly `N` bytes at compile time.
+const fn hex_literal<const N: usize>(hex: &str) -> [u8; N] {
+    const fn nibble(c: u8) -> u8 {
+        match c {
+            b'0'..=b'9' => c - b'0',
+            b'a'..=b'f' => c - b'a' + 10,
+            _ => panic!("lowercase hex expected"),
+        }
+    }
+    let hex = hex.as_bytes();
+    assert!(hex.len() == 2 * N, "hex length");
+    let mut out = [0u8; N];
+    let mut i = 0;
+    while i < N {
+        out[i] = (nibble(hex[2 * i]) << 4) | nibble(hex[2 * i + 1]);
+        i += 1;
+    }
+    out
 }
 
 /// Decodes a canonical big-endian field element.
