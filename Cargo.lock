@@ -1749,7 +1749,9 @@ version = "0.3.0-alpha.1"
 dependencies = [
  "bls12_381",
  "hex",
+ "proptest",
  "revm",
+ "serde_json",
 ]
 
 [[package]]

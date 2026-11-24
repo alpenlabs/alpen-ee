@@ -5,8 +5,14 @@
 //! same seven operations over the zkcrypto [`bls12_381`] crate, so that the
 //! SP1 guest can replace that crate with `sp1-patches/bls12_381` through
 //! `[patch.crates-io]` and run the field arithmetic on SP1 syscalls. Outside
-//! the zkVM the crate is plain Rust and the backend is simply another
-//! correct implementation of EIP-2537.
+//! the zkVM the crate is plain Rust.
+//!
+//! The node and the guest both execute with this backend. It still has to
+//! match revm's default backend bit for bit, on valid and invalid input
+//! alike, because blocks from before the switch were executed with the
+//! default backend and are replayed with this one. Where zkcrypto gets an
+//! input wrong, this crate returns the default backend's result instead (see
+//! `MAP_FP2_TO_G2_OF_ZERO`). `tests/differential.rs` checks the agreement.
 //!
 //! [`install`] registers the backend with revm. It must run before the
 //! first precompile call of the process; revm keeps the first backend
