@@ -1,9 +1,12 @@
 //! The EIP-2537 vectors, and a comparison with revm's default backend.
 
+// Used by the integration tests only.
+use proptest as _;
 use revm::precompile::{
     bls12_381::{G1Point, G2Point},
     DefaultCrypto,
 };
+use serde_json as _;
 
 use super::*;
 
