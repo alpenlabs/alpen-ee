@@ -192,6 +192,7 @@ Alpen's configuration of reth. These sit below `common` in the dependency graph.
 | Crate | Description |
 |-------|-------------|
 | `reth/evm` | Custom EVM with the Alpen precompiles |
+| `reth/bls-crypto` | The EIP-2537 precompiles on zkcrypto `bls12_381`, SP1-patched in the chunk guest; must match revm's default backend on every input |
 | `reth/rpc` | Custom reth RPC endpoints |
 | `reth/node` | Alpen Reth node implementation, gossip, and the built payload's stored encoding |
 | `reth/statediff` | State diff generation |
