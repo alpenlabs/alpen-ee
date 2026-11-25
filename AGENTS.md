@@ -219,7 +219,7 @@ The SP1 guest packages are local manifests with their own lockfiles, used by the
 
 ### Network Params
 
-`params/<network>.json` holds the full `AlpenParams` of each network (`dev`, `staging`, `testnet`, `mainnet`). It is the file `alpen-client --alpen-params` loads and the file the SP1 guests bake in through `SP1_ALPEN_PARAMS_PATH`, so changing it changes that network's guest ELFs. Tests and CI use `dev.json`. The `genesis_inner_state_roots_are_stable` test in `alpen-genesis` parses every file and pins its genesis root.
+`params/<network>.json` holds the full `AlpenParams` of each network (`dev`, `staging`, `testnet`, `mainnet`). `alpen-client` builds every file in, so `--alpen-params` takes a network name as well as a path. It is also the file the SP1 guests bake in through `SP1_ALPEN_PARAMS_PATH`, so changing it changes that network's guest ELFs. Tests and CI use `dev.json`. The `genesis_inner_state_roots_are_stable` test in `alpen-genesis` parses every file and pins its genesis root.
 
 ### Key Dependencies
 

@@ -25,13 +25,17 @@ pub(crate) struct AdditionalConfig {
     #[command(flatten)]
     pub display: DisplayArgs,
 
-    /// Path to the JSON-serialized Alpen params artifact.
+    /// Alpen params: a network name or a path to a JSON params file.
     ///
     /// Single source of truth for the chain: EE account id, bridge params,
     /// DA stream identity, fork schedule, and the embedded EVM chain spec.
+    ///
+    /// A network name (`mainnet`, `testnet`, `staging`, `dev`) loads that
+    /// network's `params/<network>.json`, built into the binary. Any other
+    /// value is read as a path.
     #[arg(
         long,
-        value_name = "PATH",
+        value_name = "NETWORK|PATH",
         required = true,
         value_parser = alpen_params_value_parser,
     )]
@@ -166,14 +170,34 @@ pub(crate) fn ol_submit_bearer_token_from_env() -> eyre::Result<String> {
     })
 }
 
-/// Loads the Alpen params artifact from a JSON file.
+/// Params JSON of each network in `params/`, built into the binary.
+const NETWORK_PARAMS: &[(&str, &str)] = &[
+    ("mainnet", include_str!("../../../params/mainnet.json")),
+    ("testnet", include_str!("../../../params/testnet.json")),
+    ("staging", include_str!("../../../params/staging.json")),
+    ("dev", include_str!("../../../params/dev.json")),
+];
+
+/// Loads the Alpen params artifact from a network name or a JSON file.
 ///
-/// Runs at CLI parse time so the embedded chain spec is available before the
-/// node command is assembled.
-fn alpen_params_value_parser(path: &str) -> eyre::Result<Arc<AlpenParams>> {
-    let path = Path::new(path);
-    let json = fs::read_to_string(path)
-        .with_context(|| format!("failed to read Alpen params file {path:?}"))?;
+/// A network name wins over a file of the same name in the working
+/// directory. Runs at CLI parse time so the embedded chain spec is available
+/// before the node command is assembled.
+fn alpen_params_value_parser(value: &str) -> eyre::Result<Arc<AlpenParams>> {
+    if let Some((network, json)) = NETWORK_PARAMS.iter().find(|(name, _)| *name == value) {
+        let params: AlpenParams = serde_json::from_str(json)
+            .with_context(|| format!("failed to parse built-in {network} Alpen params"))?;
+        return Ok(Arc::new(params));
+    }
+
+    let path = Path::new(value);
+    let json = fs::read_to_string(path).with_context(|| {
+        let networks: Vec<&str> = NETWORK_PARAMS.iter().map(|(name, _)| *name).collect();
+        format!(
+            "failed to read Alpen params file {path:?} (not a network name either: {})",
+            networks.join(", ")
+        )
+    })?;
     let params: AlpenParams = serde_json::from_str(&json)
         .with_context(|| format!("failed to parse Alpen params file {path:?}"))?;
     Ok(Arc::new(params))
@@ -226,6 +250,39 @@ mod tests {
 
         assert_eq!(config.alpen_params.genesis_block_info().blocknum(), 0);
         assert!(matches!(config.alpen_config.mode, NodeMode::FullNode(_)));
+    }
+
+    /// Every file in `params/` is a built-in network, and its name loads the
+    /// same params as its path.
+    #[test]
+    fn alpen_params_accepts_network_names() {
+        let params_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../params");
+        let mut files: Vec<String> = fs::read_dir(&params_dir)
+            .expect("params dir should be readable")
+            .map(|entry| entry.expect("params dir entry should be readable").path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+            .map(|path| {
+                path.file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .expect("params file name should be UTF-8")
+                    .to_owned()
+            })
+            .collect();
+        files.sort();
+        let mut built_in: Vec<&str> = NETWORK_PARAMS.iter().map(|(name, _)| *name).collect();
+        built_in.sort();
+        assert_eq!(
+            files, built_in,
+            "every params/<network>.json needs a NETWORK_PARAMS entry"
+        );
+
+        for (network, _) in NETWORK_PARAMS {
+            let by_name = alpen_params_value_parser(network).expect("network name should load");
+            let path = params_dir.join(format!("{network}.json"));
+            let by_path = alpen_params_value_parser(path.to_str().expect("path should be UTF-8"))
+                .expect("params file should load");
+            assert_eq!(by_name, by_path, "{network}");
+        }
     }
 
     /// Catches arg id / flag collisions between the flattened Alpen arg

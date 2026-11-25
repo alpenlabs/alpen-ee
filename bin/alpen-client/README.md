@@ -741,7 +741,7 @@ The client extends the standard Reth CLI with three Alpen-specific flags (see [m
 
 | Flag | Purpose |
 |------|---------|
-| `--alpen-params <path>` | Path to the JSON Alpen params artifact (required); carries the EE account id, bridge params, DA stream identity, and the embedded EVM chain spec |
+| `--alpen-params <network\|path>` | A network name (`mainnet`, `testnet`, `staging`, `dev`) or a path to a JSON Alpen params artifact (required); a name loads the copy of `params/<network>.json` built into the binary, so editing the file needs a rebuild. Carries the EE account id, bridge params, DA stream identity, and the embedded EVM chain spec |
 | `--alpen-config <path>` | Path to this node's TOML config (required); everything else — mode, OL connection, DA, sealing, observability |
 | `-v..-vvvvv` / `--quiet` / `--otlp-url` | Log verbosity and OTLP tracing endpoint (unchanged Reth-style display flags) |
 
