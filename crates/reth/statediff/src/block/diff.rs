@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use alloy_primitives::Bytes;
-use revm::database::BundleState;
+use evm2::block::BundleState;
 use revm_primitives::{Address, B256, KECCAK_EMPTY};
 use serde::{Deserialize, Serialize};
 
@@ -88,7 +88,7 @@ impl From<&BundleState> for BlockStateChanges {
             if code_hash != KECCAK_EMPTY && !result.deployed_bytecodes.contains_key(&code_hash) {
                 result
                     .deployed_bytecodes
-                    .insert(code_hash, Bytes::from(bytecode.original_bytes().to_vec()));
+                    .insert(code_hash, bytecode.original_bytes());
             }
         }
 

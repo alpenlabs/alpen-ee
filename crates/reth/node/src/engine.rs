@@ -1,25 +1,26 @@
+use alloy_primitives::Bytes;
 use alloy_rpc_types::engine::{
-    payload::ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV3,
-    ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6, ExecutionPayloadV1,
+    ExecutionPayload, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV5,
+    ExecutionPayloadEnvelopeV6, ExecutionPayloadV1, payload::ExecutionData,
 };
 use alpen_params::{AlpenSpecId, EvmSpec, HeaderExtraError};
 use reth_chainspec::ChainSpec;
 use reth_ethereum_payload_builder::EthereumExecutionPayloadValidator;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_node_api::{
-    payload::PayloadTypes, validate_execution_requests, validate_version_specific_fields,
     AddOnsContext, BuiltPayload, EngineApiMessageVersion, EngineApiValidator,
     EngineObjectValidationError, EngineTypes, FullNodeComponents, NewPayloadError, NodeTypes,
-    PayloadOrAttributes, PayloadValidator,
+    PayloadOrAttributes, PayloadValidator, payload::PayloadTypes, validate_execution_requests,
+    validate_version_specific_fields,
 };
 use reth_node_builder::rpc::PayloadValidatorBuilder;
 use reth_primitives_traits::{NodePrimitives, SealedBlock, SignedTransaction};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    evm_config::{payload_spec_version, version_indexed, MultiSpecEvmConfig},
-    payload::{AlpenBuiltPayload, AlpenExecutionPayloadEnvelopeV4},
     AlpenExecutionPayloadEnvelopeV2, AlpenPayloadAttributes,
+    evm_config::{MultiSpecEvmConfig, payload_spec_version, version_indexed},
+    payload::{AlpenBuiltPayload, AlpenExecutionPayloadEnvelopeV4},
 };
 
 /// Custom engine types for strata to use custom payload attributes and payload
@@ -36,9 +37,13 @@ impl PayloadTypes for AlpenEngineTypes {
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
+        bal: Option<Bytes>,
     ) -> Self::ExecutionData {
-        let (payload, sidecar) =
-            ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
+        let (payload, sidecar) = ExecutionPayload::from_block_unchecked_with_extras(
+            block.hash(),
+            &block.into_block(),
+            bal,
+        );
         ExecutionData { payload, sidecar }
     }
 }
@@ -180,13 +185,13 @@ pub struct AlpenEngineValidatorBuilder;
 impl<N> PayloadValidatorBuilder<N> for AlpenEngineValidatorBuilder
 where
     N: FullNodeComponents<
-        Types: NodeTypes<
-            Payload = AlpenEngineTypes,
-            ChainSpec = ChainSpec,
-            Primitives = EthPrimitives,
+            Types: NodeTypes<
+                Payload = AlpenEngineTypes,
+                ChainSpec = ChainSpec,
+                Primitives = EthPrimitives,
+            >,
+            Evm = MultiSpecEvmConfig,
         >,
-        Evm = MultiSpecEvmConfig,
-    >,
 {
     type Validator = AlpenEngineValidator;
 
@@ -197,7 +202,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use alloy_consensus::{crypto::SECP256K1N_HALF, BlockBody, SignableTransaction, TxLegacy};
+    use alloy_consensus::{BlockBody, SignableTransaction, TxLegacy, crypto::SECP256K1N_HALF};
     use alloy_primitives::{Signature, U256};
     use reth_ethereum_primitives::{Block, TransactionSigned};
     use reth_node_api::NewPayloadError;

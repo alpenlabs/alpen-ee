@@ -11,10 +11,11 @@
 use std::sync::Once;
 
 use bls12_381 as _;
+use evm2 as _;
 use proptest as _;
 use revm::precompile::{
-    bls12_381::{g1_add, g1_msm, g2_add, g2_msm, map_fp2_to_g2, map_fp_to_g1, pairing},
     EthPrecompileResult,
+    bls12_381::{g1_add, g1_msm, g2_add, g2_msm, map_fp_to_g1, map_fp2_to_g2, pairing},
 };
 use serde_json::Value;
 

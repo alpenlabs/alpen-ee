@@ -30,7 +30,7 @@ alpen-evm-ee = { workspace = true, optional = true }
 alpen-exex = { workspace = true, optional = true }
 alpen-params = { workspace = true, features = ["test-utils"], optional = true }
 alpen-primitives = { workspace = true, optional = true }
-alpen-reth-evm = { workspace = true, optional = true }
+alpen-reth-evm = { workspace = true, optional = true, features = ["host"] }
 alpen-reth-node = { workspace = true, optional = true }
 alpen-reth-statediff = { workspace = true, optional = true }
 alpen-storage-api = { workspace = true, optional = true }
@@ -49,10 +49,10 @@ rand_chacha = { workspace = true, optional = true }
 reth-chainspec = { workspace = true, optional = true }
 reth-db-common = { workspace = true, optional = true }
 reth-ethereum-primitives = { workspace = true, optional = true }
+evm2 = { workspace = true, optional = true }
 reth-evm = { workspace = true, optional = true }
 reth-primitives-traits = { workspace = true, optional = true }
 reth-provider = { workspace = true, features = ["test-utils"], optional = true }
-reth-revm = { workspace = true, optional = true }
 revm = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 strata-acct-types = { workspace = true, optional = true }
@@ -90,10 +90,10 @@ generator = [
   "dep:reth-chainspec",
   "dep:reth-db-common",
   "dep:reth-ethereum-primitives",
+  "dep:evm2",
   "dep:reth-evm",
   "dep:reth-primitives-traits",
   "dep:reth-provider",
-  "dep:reth-revm",
   "dep:revm",
   "dep:serde_json",
   "dep:strata-acct-types",

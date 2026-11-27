@@ -13,18 +13,17 @@ use std::{
 
 use alloy_consensus::Header;
 use alloy_primitives::{
-    keccak256,
+    Address, B256, U256, keccak256,
     map::{B256Set, DefaultHashBuilder, HashMap},
-    Address, B256, U256,
 };
 use alpen_evm_ee::EvmPartialState;
 use alpen_storage_api::AccessedStateStore;
-use eyre::{eyre, Result};
+use eyre::{Result, eyre};
 use reth_ethereum_primitives::Block;
 use reth_provider::{BlockReader, StateProvider, StateProviderFactory};
-use reth_revm::state::Bytecode;
 use reth_trie::{HashedPostState, MultiProofTargets, TrieInput};
 use reth_trie_common::KeccakKeyHasher;
+use revm::state::Bytecode;
 use rsp_mpt::EthereumState;
 use strata_acct_types::Hash;
 use strata_codec::encode_to_vec;

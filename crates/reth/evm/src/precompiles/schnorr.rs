@@ -1,29 +1,29 @@
-use std::borrow::Cow;
-
-use reth_evm::precompiles::DynPrecompile;
-use revm::precompile::{
-    eth_precompile_fn, utilities::right_pad, EthPrecompileOutput, EthPrecompileResult,
-    PrecompileFn, PrecompileHalt, PrecompileId,
+use evm2::{
+    Evm,
+    interpreter::{GasTracker, Message},
+    precompile::PrecompileOutput,
+    precompiles::PrecompileResult,
 };
+use revm::precompile::utilities::right_pad;
 use revm_primitives::Bytes;
 use strata_crypto::schnorr::verify_schnorr_sig;
 use strata_primitives::buf::{Buf32, Buf64};
 
-use crate::constants::SCHNORR_PRECOMPILE_PRECOMPILE_ID;
+use crate::evm2_settlement::AlpenEvmTypes;
 
 /// Fixed raw EVM gas charged for Schnorr signature verification.
 const SCHNORR_VERIFY_GAS: u64 = 3_000;
 
-/// Returns the Schnorr signature verification precompile.
-pub(crate) fn schnorr_signature_validation() -> DynPrecompile {
-    DynPrecompile::from((
-        PrecompileId::Custom(Cow::Borrowed(SCHNORR_PRECOMPILE_PRECOMPILE_ID)),
-        verify_schnorr_precompile_fn as PrecompileFn,
-    ))
+pub(crate) fn run(
+    evm: &mut Evm<'_, AlpenEvmTypes>,
+    message: &Message<AlpenEvmTypes>,
+    gas: &mut GasTracker,
+) -> PrecompileResult {
+    gas.spend(SCHNORR_VERIFY_GAS)?;
+    Ok(PrecompileOutput::new(verify_schnorr(
+        evm.message_input(message),
+    )))
 }
-
-// Adapts the gas-limit-only precompile to revm's reservoir-aware `PrecompileFn` signature.
-eth_precompile_fn!(verify_schnorr_precompile_fn, verify_schnorr_precompile);
 
 /// Internal representation of parsed Schnorr input bytes.
 struct SchnorrInput {
@@ -45,29 +45,31 @@ fn parse_schnorr_input(input: &[u8]) -> SchnorrInput {
     }
 }
 
-fn verify_schnorr_precompile(input: &[u8], gas_limit: u64) -> EthPrecompileResult {
+fn verify_schnorr(input: &[u8]) -> Bytes {
+    let input = parse_schnorr_input(input);
+    let valid = verify_schnorr_sig(&input.signature, &input.message_hash, &input.public_key);
+    Bytes::from([u8::from(valid)])
+}
+
+#[cfg(test)]
+fn verify_schnorr_precompile(
+    input: &[u8],
+    gas_limit: u64,
+) -> revm::precompile::EthPrecompileResult {
+    use revm::precompile::{EthPrecompileOutput, PrecompileHalt};
     if SCHNORR_VERIFY_GAS > gas_limit {
         return Err(PrecompileHalt::OutOfGas);
     }
-
-    let schnorr_input = parse_schnorr_input(input);
-
-    let result = verify_schnorr_sig(
-        &schnorr_input.signature,
-        &schnorr_input.message_hash,
-        &schnorr_input.public_key,
-    );
-    let verification_byte = Bytes::from([result as u8]);
-
     Ok(EthPrecompileOutput::new(
         SCHNORR_VERIFY_GAS,
-        verification_byte,
+        verify_schnorr(input),
     ))
 }
 
 #[cfg(test)]
 mod tests {
-    use secp256k1::{Keypair, SecretKey, SECP256K1};
+    use revm::precompile::PrecompileHalt;
+    use secp256k1::{Keypair, SECP256K1, SecretKey};
     use strata_crypto::sign_schnorr_sig;
     use strata_primitives::buf::{Buf32, Buf64};
 

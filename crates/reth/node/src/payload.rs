@@ -1,11 +1,11 @@
 use alloy_eips::eip7685::Requests;
 use alloy_rpc_types::{
+    Withdrawal,
     engine::{
         ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5,
         ExecutionPayloadEnvelopeV6, ExecutionPayloadV1, ExecutionPayloadV2,
-        PayloadAttributes as EthPayloadAttributes, PayloadId,
+        PayloadAttributes as EthPayloadAttributes, PayloadId, payload::ExecutionData,
     },
-    Withdrawal,
 };
 use alpen_params::{AlpenSpecId, HeaderExtraError};
 use alpen_primitives::WithdrawalIntent;
@@ -151,6 +151,12 @@ impl BuiltPayload for AlpenBuiltPayload {
 
     fn requests(&self) -> Option<Requests> {
         self.inner.requests()
+    }
+}
+
+impl From<AlpenBuiltPayload> for ExecutionData {
+    fn from(value: AlpenBuiltPayload) -> Self {
+        value.inner.into()
     }
 }
 

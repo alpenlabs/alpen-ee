@@ -10,18 +10,20 @@ use alloy_json_rpc::RpcObject;
 use alloy_network::TransactionBuilder;
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::{
-    state::{EvmOverrides, StateOverride},
     BlockId,
+    state::{EvmOverrides, StateOverride},
 };
 use alpen_params::HeaderExtra;
 use alpen_primitives::BPS_DENOMINATOR;
-use alpen_reth_evm::da_fee::{calc_diff_size, constrain_next_da_rate, DA_RATE_SAFETY_MARGIN_BPS};
+use alpen_reth_evm::da_fee::{
+    DA_RATE_SAFETY_MARGIN_BPS, calc_detached_diff_size, constrain_next_da_rate,
+};
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_provider::ProviderError;
 use reth_rpc_convert::RpcTxReq;
-use reth_rpc_eth_api::{helpers::Call, EthApiTypes, FromEvmError, RpcConvert, RpcNodeCore};
-use reth_rpc_eth_types::{error::FromEthApiError, EthApiError};
+use reth_rpc_eth_api::{EthApiTypes, FromEvmError, RpcConvert, RpcNodeCore, helpers::Call};
+use reth_rpc_eth_types::{EthApiError, error::FromEthApiError};
 use reth_storage_api::BlockReaderIdExt;
 use serde::{Deserialize, Serialize};
 
@@ -96,7 +98,7 @@ where
     /// Simulates `request` once and returns its DA fee components.
     ///
     /// Measures both the gas consumed and the resulting state-diff (the DA footprint) with
-    /// the same `calc_diff_size` estimator the STF charge uses. `da_rate_override` carries the
+    /// the same byte-cost rules as the STF charge. `da_rate_override` carries the
     /// next-block policy ceiling for mutable sequencer estimates; historical estimates read the
     /// committed rate from the simulated block's header.
     pub(crate) async fn da_fee_quote(
@@ -105,14 +107,12 @@ where
             <<AlpenEthApi<N, Rpc> as EthApiTypes>::RpcConvert as RpcConvert>::Network,
         >,
         at: BlockId,
-        state_override: Option<StateOverride>,
+        overrides: EvmOverrides,
         da_rate_override: Option<u64>,
     ) -> Result<DaFeeQuote, EthApiError> {
-        let res = self
-            .transact_call_at(request, at, EvmOverrides::new(state_override, None))
-            .await?;
+        let res = self.transact_call_at(request, at, overrides).await?;
         let gas_used = res.result.tx_gas_used();
-        let diff_size = calc_diff_size(&res.state);
+        let diff_size = calc_detached_diff_size(&res.pending_state);
 
         // Read the base fee and any historical DA rate from the header of the block the
         // transaction is simulated against (`at`). Falls back to the latest header when `at`
@@ -206,6 +206,7 @@ where
         // Pin the requested block so the simulations use the same state and base fee;
         // `latest` would otherwise be re-resolved by each call below.
         let block = self.pin_block_id(requested_block)?;
+        let overrides = EvmOverrides::state(state_override);
 
         // Resolve the signed gas limit first. `effective_gas` is the value a wallet signs as
         // its gas limit, so it must be a safe gas *limit*, not the gas *used* by one roomy
@@ -214,7 +215,7 @@ where
         // same path as `eth_estimateGas`, which binary-searches the execution gas and folds in
         // the DA-fee headroom.
         let effective_gas = self
-            .estimate_gas_at_with_da_rate(request.clone(), block, state_override.clone(), da_rate)
+            .estimate_gas_at_with_da_rate(request.clone(), block, overrides.clone(), da_rate)
             .await?
             .saturating_to::<u64>();
 
@@ -225,7 +226,7 @@ where
         let mut quote_request = request.clone();
         quote_request.as_mut().set_gas_limit(effective_gas);
         let quote = self
-            .da_fee_quote(quote_request, block, state_override, da_rate)
+            .da_fee_quote(quote_request, block, overrides, da_rate)
             .await?;
 
         // The execution fee is paid at the transaction's *effective* gas price, which the

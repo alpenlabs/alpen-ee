@@ -1,11 +1,8 @@
 use std::{cell::RefCell, collections::HashSet, fmt};
 
 use alloy_primitives::map::foldhash::HashMap;
-use reth_provider::{errors::db::DatabaseError, AccountReader, ProviderError, StateProvider};
-use reth_revm::{
-    state::{AccountInfo, Bytecode},
-    DatabaseRef,
-};
+use evm2::{AccountInfo, bytecode::Bytecode, evm::Database};
+use reth_provider::{AccountReader, ProviderError, StateProvider, errors::db::DatabaseError};
 use revm_primitives::alloy_primitives::{Address, B256, U256};
 
 /// A single storage slot key.
@@ -110,31 +107,31 @@ impl CacheDBProvider {
     }
 }
 
-impl DatabaseRef for CacheDBProvider {
+impl Database for CacheDBProvider {
     /// The database error type.
     type Error = ProviderError;
 
     /// Get basic account information.
-    fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+    fn get_account(&mut self, address: &Address) -> Result<Option<AccountInfo>, Self::Error> {
         let account_info = self
             .provider
-            .basic_account(&address)?
+            .basic_account(address)?
             .map(|account| account.into());
 
         // Record the account value to the state.
         self.accounts
             .borrow_mut()
-            .insert(address, account_info.clone().unwrap_or_default());
+            .insert(*address, account_info.clone().unwrap_or_default());
 
         Ok(account_info)
     }
 
     /// Get account code by its hash.
-    fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+    fn get_code_by_hash(&mut self, code_hash: &B256) -> Result<Bytecode, Self::Error> {
         let bytecode = self
             .provider
-            .bytecode_by_hash(&code_hash)?
-            .map(|code| Bytecode::new_raw(code.original_bytes()))
+            .bytecode_by_hash(code_hash)?
+            .map(|code| code.0)
             .ok_or_else(|| {
                 ProviderError::Database(DatabaseError::Other(format!(
                     "Bytecode for the given {code_hash:?} not found",
@@ -144,30 +141,31 @@ impl DatabaseRef for CacheDBProvider {
         // Record the bytecode with its hash as key
         self.bytecodes
             .borrow_mut()
-            .insert(code_hash, bytecode.clone());
+            .insert(*code_hash, bytecode.clone());
 
         Ok(bytecode)
     }
 
     /// Get storage value of address at index.
-    fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
+    fn get_storage(&mut self, address: &Address, index: &U256) -> Result<U256, Self::Error> {
         let storage_value = self
             .provider
-            .storage(address, index.into())?
+            .storage(*address, (*index).into())?
             .unwrap_or(U256::default());
 
         // Record the storage value to the state.
         self.storage
             .borrow_mut()
-            .entry(address)
+            .entry(*address)
             .or_default()
-            .insert(index, storage_value);
+            .insert(*index, storage_value);
 
         Ok(storage_value)
     }
 
     /// Get block hash by block number.
-    fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
+    fn get_block_hash(&mut self, number: &U256) -> Result<B256, Self::Error> {
+        let number = number.saturating_to::<u64>();
         let blk_id = self
             .provider
             .block_hash(number)?

@@ -1,11 +1,17 @@
 use alpen_primitives::{
-    wei_to_sats, WithdrawalCalldata, WithdrawalIntentEvent, BRIDGEOUT_PRECOMPILE_ADDRESS,
+    BRIDGEOUT_PRECOMPILE_ADDRESS, WithdrawalCalldata, WithdrawalIntentEvent, wei_to_sats,
 };
-use reth_evm::precompiles::PrecompileInput;
-use revm::precompile::{PrecompileError, PrecompileHalt, PrecompileOutput, PrecompileResult};
+use evm2::{
+    Evm, PrecompileError,
+    interpreter::{GasTracker, Message},
+    precompile::PrecompileOutput,
+    precompiles::PrecompileResult,
+};
 use revm_primitives::{Bytes, Log, LogData, U256};
 use strata_bridge_params::BridgeParams;
 use strata_primitives::bitcoin_bosd::Descriptor;
+
+use crate::evm2_settlement::AlpenEvmTypes;
 
 // REVIEW(STR-3676): Replace these draft values with protocol-approved launch constants.
 /// Fixed raw EVM gas charged for bridge-out precompile execution.
@@ -79,17 +85,8 @@ impl BridgeOutError {
     }
 }
 
-/// Builds a gas-refunding revert carrying an ABI-encoded custom error.
-///
-/// Unlike a [`PrecompileHalt`] — an exceptional halt that burns all gas forwarded to the
-/// call — a revert refunds the unspent gas (only `gas_used` is charged) and surfaces the
-/// typed error as the call's return data.
-fn revert_with_error(gas_used: u64, reservoir: u64, error: BridgeOutError) -> PrecompileResult {
-    Ok(PrecompileOutput::revert(
-        gas_used,
-        error.abi_encode(),
-        reservoir,
-    ))
+fn revert_with_error(error: BridgeOutError) -> PrecompileError {
+    PrecompileError::Revert(error.abi_encode())
 }
 
 /// Custom precompile to burn rollup native token and add bridge out intent of equal amount.
@@ -100,78 +97,51 @@ fn revert_with_error(gas_used: u64, reservoir: u64, error: BridgeOutError) -> Pr
 /// - `u32::MAX` (`0xFFFFFFFF`): no operator selection
 /// - Any other value: operator index
 pub(crate) fn bridge_context_call(
-    mut input: PrecompileInput<'_>,
-    bridge_params: BridgeParams,
+    evm: &mut Evm<'_, AlpenEvmTypes>,
+    message: &Message<AlpenEvmTypes>,
+    gas: &mut GasTracker,
 ) -> PrecompileResult {
-    // Compute the gas this call should be charged. A genuine "not enough gas to even
-    // run" condition is the one case that stays a hard out-of-gas halt.
-    let gas_cost = bridgeout_gas_cost(input.data.len())?;
-    if gas_cost > input.gas {
-        return Ok(PrecompileOutput::halt(
-            PrecompileHalt::OutOfGas,
-            input.reservoir,
-        ));
+    let data = evm.message_input(message);
+    gas.spend(bridgeout_gas_cost(data.len())?)?;
+
+    // The previous runtime compared execution and bytecode addresses. Keep that
+    // guard and its error ordering, including zero-value STATICCALL.
+    if message.destination != message.code_address {
+        return Err(revert_with_error(BridgeOutError::IncorrectCallType));
     }
 
-    // From here on, user-facing validation failures revert (refunding unspent gas and
-    // returning a typed error) rather than halting and burning all forwarded gas.
-    if !input.is_direct_call() {
-        return revert_with_error(gas_cost, input.reservoir, BridgeOutError::IncorrectCallType);
-    }
+    let bridge_params = evm
+        .ext()
+        .ok_or_else(|| PrecompileError::from("bridge params not configured"))?;
+    let calldata = WithdrawalCalldata::decode(data)
+        .ok_or_else(|| revert_with_error(BridgeOutError::MalformedCalldata))?;
+    validate_bosd(&calldata.bosd, &bridge_params).map_err(revert_with_error)?;
+    let amount =
+        validate_withdrawal_amount(message.value, &bridge_params).map_err(revert_with_error)?;
 
-    let Some(calldata) = WithdrawalCalldata::decode(input.data) else {
-        return revert_with_error(gas_cost, input.reservoir, BridgeOutError::MalformedCalldata);
-    };
-
-    // Validate that this is a valid BOSD within the configured length limit.
-    if let Err(error) = validate_bosd(&calldata.bosd, &bridge_params) {
-        return revert_with_error(gas_cost, input.reservoir, error);
-    }
-
-    // Verify that the transaction value is a positive exact multiple of the withdrawal
-    // denomination and within the cap.
-    let amount = match validate_withdrawal_amount(input.value, &bridge_params) {
-        Ok(amount) => amount,
-        Err(error) => return revert_with_error(gas_cost, input.reservoir, error),
-    };
-
-    // Log the bridge withdrawal intent
     let evt = WithdrawalIntentEvent {
         amount,
         destination: Bytes::from(calldata.bosd),
         selectedOperator: calldata.selected_operator.raw(),
     };
-
-    // Create a log entry for the bridge out intent
-    let logdata = LogData::from(&evt);
-    input.internals.log(Log {
+    evm.log(Log {
         address: BRIDGEOUT_PRECOMPILE_ADDRESS,
-        data: logdata,
+        data: LogData::from(&evt),
     });
-
-    // Burn value sent to bridge by adjusting the account balance of bridge precompile
-    input
-        .internals
-        .set_balance(BRIDGEOUT_PRECOMPILE_ADDRESS, U256::ZERO)
-        .map_err(|_| {
-            PrecompileError::Fatal("Failed to reset BRIDGEOUT_ADDRESS account balance".into())
-        })?;
-
-    Ok(PrecompileOutput::new(
-        gas_cost,
-        Bytes::new(),
-        input.reservoir,
-    ))
+    evm.state_mut()
+        .account(&BRIDGEOUT_PRECOMPILE_ADDRESS)?
+        .set_balance(U256::ZERO);
+    Ok(PrecompileOutput::default())
 }
 
 fn bridgeout_gas_cost(calldata_len: usize) -> Result<u64, PrecompileError> {
     let calldata_len = u64::try_from(calldata_len)
-        .map_err(|_| PrecompileError::Fatal("Bridgeout calldata length exceeds u64".into()))?;
+        .map_err(|_| PrecompileError::from("Bridgeout calldata length exceeds u64"))?;
 
     BRIDGEOUT_CALLDATA_BYTE_GAS
         .checked_mul(calldata_len)
         .and_then(|calldata_gas| BRIDGEOUT_BASE_GAS.checked_add(calldata_gas))
-        .ok_or_else(|| PrecompileError::Fatal("Bridgeout gas cost overflow".into()))
+        .ok_or_else(|| PrecompileError::from("Bridgeout gas cost overflow"))
 }
 
 /// Validates that the withdrawal amount is a positive exact multiple of the denomination
@@ -225,12 +195,8 @@ fn validate_bosd(data: &[u8], bridge_params: &BridgeParams) -> Result<(), Bridge
 #[cfg(test)]
 mod tests {
     use alpen_primitives::WEI_PER_BTC;
-    use reth_evm::EvmInternals;
-    use revm::{
-        context::{BlockEnv, CfgEnv, Journal, JournalEntry, JournalTr, TxEnv},
-        database::EmptyDB,
-        primitives::address,
-    };
+    use evm2::{PrecompileHalt, env::BlockEnv, evm::EmptyDB, interpreter::MessageKind};
+    use revm_primitives::Address;
     use strata_ol_bridge_types::OperatorSelection;
 
     use super::*;
@@ -428,117 +394,141 @@ mod tests {
         data
     }
 
-    #[test]
-    fn test_bridgeout_rejects_delegatecall_apparent_value() {
-        let calldata = valid_bridgeout_calldata();
-        let mut journal: Journal<EmptyDB, JournalEntry> = Journal::new(EmptyDB::new());
-        let block_env = BlockEnv::default();
-        let cfg_env: CfgEnv = CfgEnv::default();
-        let tx_env = TxEnv::default();
-        let input = PrecompileInput {
-            data: &calldata,
-            gas: u64::MAX,
-            reservoir: 0,
-            is_static: false,
-            caller: address!("1111111111111111111111111111111111111111"),
-            value: FIXED_WITHDRAWAL_WEI,
-            target_address: address!("2222222222222222222222222222222222222222"),
-            bytecode_address: BRIDGEOUT_PRECOMPILE_ADDRESS,
-            internals: EvmInternals::new(&mut journal, &block_env, &cfg_env, &tx_env),
-        };
-
-        let output = bridge_context_call(input, bridge_params()).unwrap();
-
-        // Misuse reverts (refunding gas) with a typed error rather than halting.
-        assert!(output.is_revert());
-        assert_eq!(
-            selector_of(&output.bytes),
-            BridgeOutError::IncorrectCallType.selector()
+    fn call_bridge(
+        kind: MessageKind,
+        is_static: bool,
+        value: U256,
+        gas_limit: u64,
+    ) -> (u64, PrecompileResult, Vec<Log>, U256) {
+        use crate::{evm2_settlement::tx_registry, precompiles::create_precompiles};
+        let spec = evm2::SpecId::PRAGUE;
+        let mut evm = Evm::new(
+            spec,
+            BlockEnv::<AlpenEvmTypes>::default(),
+            tx_registry(spec),
+            EmptyDB::default(),
+            create_precompiles(spec),
         );
+        *evm.ext_mut() = Some(bridge_params());
+        let mut account = evm
+            .state_mut()
+            .account(&BRIDGEOUT_PRECOMPILE_ADDRESS)
+            .unwrap();
+        account.set_balance(value);
+        drop(account);
+        let message = Message::<AlpenEvmTypes> {
+            kind,
+            caller_is_static: is_static,
+            caller: Address::with_last_byte(42),
+            destination: if matches!(kind, MessageKind::DelegateCall | MessageKind::CallCode) {
+                Address::with_last_byte(55)
+            } else {
+                BRIDGEOUT_PRECOMPILE_ADDRESS
+            },
+            call_target: BRIDGEOUT_PRECOMPILE_ADDRESS,
+            code_address: BRIDGEOUT_PRECOMPILE_ADDRESS,
+            value,
+            input: Bytes::from(valid_bridgeout_calldata()).into(),
+            ..Default::default()
+        };
+        let mut gas = GasTracker::new(gas_limit);
+        let output = bridge_context_call(&mut evm, &message, &mut gas);
+        let logs = evm.state().logs().to_vec();
+        let balance = evm
+            .state_mut()
+            .account(&BRIDGEOUT_PRECOMPILE_ADDRESS)
+            .unwrap()
+            .balance();
+        (
+            gas_limit.saturating_sub(gas.remaining()),
+            output,
+            logs,
+            balance,
+        )
+    }
+
+    #[test]
+    fn test_bridgeout_rejects_non_direct_call() {
+        for (kind, is_static) in [
+            (MessageKind::DelegateCall, false),
+            (MessageKind::CallCode, false),
+        ] {
+            let (_, output, logs, balance) =
+                call_bridge(kind, is_static, FIXED_WITHDRAWAL_WEI, 100_000);
+            let Err(PrecompileError::Revert(bytes)) = output else {
+                panic!("expected typed revert")
+            };
+            assert_eq!(
+                selector_of(&bytes),
+                BridgeOutError::IncorrectCallType.selector()
+            );
+            assert!(logs.is_empty());
+            assert_eq!(balance, FIXED_WITHDRAWAL_WEI);
+        }
+    }
+
+    #[test]
+    fn test_staticcall_preserves_the_zero_value_revert() {
+        let (_, output, logs, balance) =
+            call_bridge(MessageKind::StaticCall, false, U256::ZERO, 100_000);
+        let Err(PrecompileError::Revert(bytes)) = output else {
+            panic!("expected typed revert")
+        };
+        assert_eq!(
+            selector_of(&bytes),
+            BridgeOutError::IncorrectAmount {
+                denomination: U256::ZERO
+            }
+            .selector()
+        );
+        assert!(logs.is_empty());
+        assert_eq!(balance, U256::ZERO);
     }
 
     #[test]
     fn test_bridgeout_insufficient_gas_halts() {
-        let calldata = valid_bridgeout_calldata();
-        let mut journal: Journal<EmptyDB, JournalEntry> = Journal::new(EmptyDB::new());
-        let block_env = BlockEnv::default();
-        let cfg_env: CfgEnv = CfgEnv::default();
-        let tx_env = TxEnv::default();
-        let input = PrecompileInput {
-            data: &calldata,
-            gas: bridgeout_gas_cost(calldata.len()).unwrap() - 1,
-            reservoir: 0,
-            is_static: false,
-            caller: address!("1111111111111111111111111111111111111111"),
-            value: FIXED_WITHDRAWAL_WEI,
-            target_address: BRIDGEOUT_PRECOMPILE_ADDRESS,
-            bytecode_address: BRIDGEOUT_PRECOMPILE_ADDRESS,
-            internals: EvmInternals::new(&mut journal, &block_env, &cfg_env, &tx_env),
-        };
-
-        let output = bridge_context_call(input, bridge_params()).unwrap();
-
-        // Not enough gas to even run is the one case that halts (burning the forwarded gas)
-        // rather than reverting with a refund.
-        assert!(output.is_halt());
-        assert_eq!(output.halt_reason(), Some(&PrecompileHalt::OutOfGas));
+        let needed = bridgeout_gas_cost(valid_bridgeout_calldata().len()).unwrap();
+        let (_, output, logs, _) =
+            call_bridge(MessageKind::Call, false, FIXED_WITHDRAWAL_WEI, needed - 1);
+        assert!(matches!(
+            output,
+            Err(PrecompileError::Halt(PrecompileHalt::OutOfGas))
+        ));
+        assert!(logs.is_empty());
     }
 
     #[test]
     fn test_bridgeout_accepts_direct_call_value() {
-        let calldata = valid_bridgeout_calldata();
-        let mut journal: Journal<EmptyDB, JournalEntry> = Journal::new(EmptyDB::new());
-        let block_env = BlockEnv::default();
-        let cfg_env: CfgEnv = CfgEnv::default();
-        let tx_env = TxEnv::default();
-        let input = PrecompileInput {
-            data: &calldata,
-            gas: u64::MAX,
-            reservoir: 0,
-            is_static: false,
-            caller: address!("1111111111111111111111111111111111111111"),
-            value: FIXED_WITHDRAWAL_WEI,
-            target_address: BRIDGEOUT_PRECOMPILE_ADDRESS,
-            bytecode_address: BRIDGEOUT_PRECOMPILE_ADDRESS,
-            internals: EvmInternals::new(&mut journal, &block_env, &cfg_env, &tx_env),
-        };
-
-        assert!(bridge_context_call(input, bridge_params()).is_ok());
+        let (gas, output, logs, balance) =
+            call_bridge(MessageKind::Call, false, FIXED_WITHDRAWAL_WEI, 100_000);
+        assert!(output.is_ok());
+        assert_eq!(
+            gas,
+            bridgeout_gas_cost(valid_bridgeout_calldata().len()).unwrap()
+        );
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].address, BRIDGEOUT_PRECOMPILE_ADDRESS);
+        assert_eq!(balance, U256::ZERO);
     }
 
     #[test]
     fn test_bridgeout_over_cap_reverts_with_typed_error() {
-        let calldata = valid_bridgeout_calldata();
-        let mut journal: Journal<EmptyDB, JournalEntry> = Journal::new(EmptyDB::new());
-        let block_env = BlockEnv::default();
-        let cfg_env: CfgEnv = CfgEnv::default();
-        let tx_env = TxEnv::default();
-        let input = PrecompileInput {
-            data: &calldata,
-            gas: u64::MAX,
-            reservoir: 0,
-            is_static: false,
-            caller: address!("1111111111111111111111111111111111111111"),
-            value: FIXED_WITHDRAWAL_WEI * U256::from(11),
-            target_address: BRIDGEOUT_PRECOMPILE_ADDRESS,
-            bytecode_address: BRIDGEOUT_PRECOMPILE_ADDRESS,
-            internals: EvmInternals::new(&mut journal, &block_env, &cfg_env, &tx_env),
+        let value = FIXED_WITHDRAWAL_WEI * U256::from(11);
+        let (gas, output, logs, balance) = call_bridge(MessageKind::Call, false, value, 100_000);
+        let Err(PrecompileError::Revert(bytes)) = output else {
+            panic!("expected typed revert")
         };
-
-        let output = bridge_context_call(input, bridge_params()).unwrap();
-
-        assert!(output.is_revert());
-        // Only the computed gas cost is charged; the caller keeps the remainder.
         assert_eq!(
-            output.gas_used,
+            gas,
             bridgeout_gas_cost(valid_bridgeout_calldata().len()).unwrap()
         );
         assert_eq!(
-            selector_of(&output.bytes),
+            selector_of(&bytes),
             BridgeOutError::OversizeWithdrawal { max: U256::ZERO }.selector()
         );
-        // The error carries the configured cap (10 BTC in sats).
-        assert_eq!(uint_param(&output.bytes), 1_000_000_000);
+        assert_eq!(uint_param(&bytes), 1_000_000_000);
+        assert!(logs.is_empty());
+        assert_eq!(balance, value);
     }
 
     #[test]

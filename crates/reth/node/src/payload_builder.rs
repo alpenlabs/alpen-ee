@@ -1,40 +1,35 @@
-use std::{
-    cell::Cell,
-    io,
-    sync::{atomic::Ordering, Arc},
-};
+use std::{cell::Cell, io, sync::Arc};
 
 use alloy_consensus::{Header, Transaction};
 use alloy_eips::eip4895::Withdrawals;
 use alpen_params::{FeeSpec, HeaderExtra};
 use alpen_primitives::{
-    extract_withdrawal_intents, WithdrawalIntent, BRIDGEOUT_PRECOMPILE_ADDRESS,
+    BRIDGEOUT_PRECOMPILE_ADDRESS, WithdrawalIntent, extract_withdrawal_intents,
 };
 use alpen_reth_evm::{
     base_fee::next_floored_base_fee,
-    da_fee::{constrain_next_da_rate, DA_COVERAGE_CAPPED, DA_COVERAGE_UNKNOWN},
+    da_fee::{DA_COVERAGE_CAPPED, constrain_next_da_rate},
 };
+use evm2::evm::{CacheDB, Db};
 use reth_basic_payload_builder::*;
 use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{BlockExecutionError, BlockValidationError};
 use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_ethereum_primitives::{EthPrimitives, Receipt, TransactionSigned};
 use reth_evm::{
-    block::CommitChanges,
+    CommitChanges, EvmEnv, NextBlockEnvAttributes,
+    database::StateProviderDatabase,
     execute::{BlockBuilder, BlockBuilderOutcome},
-    Evm, NextBlockEnvAttributes,
 };
 use reth_node_api::{ConfigureEvm, FullNodeTypes, NodeTypes};
-use reth_node_builder::{components::PayloadBuilderBuilder, BuilderContext, PayloadBuilderConfig};
+use reth_node_builder::{BuilderContext, PayloadBuilderConfig, components::PayloadBuilderBuilder};
 use reth_payload_builder::{BlobSidecars, EthBuiltPayload, PayloadBuilderError};
 use reth_primitives_traits::transaction::error::InvalidTransactionError;
-use reth_provider::{HeaderProvider, StateProviderFactory};
-use reth_revm::database::StateProviderDatabase;
+use reth_provider::{HeaderProvider, StateProvider, StateProviderFactory};
 use reth_transaction_pool::{
-    error::InvalidPoolTransactionError, BestTransactions, BestTransactionsAttributes,
-    PoolTransaction, TransactionPool, ValidPoolTransaction,
+    BestTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
+    ValidPoolTransaction, error::InvalidPoolTransactionError,
 };
-use revm::{context::Block, database::State};
 use revm_primitives::U256;
 use tracing::{debug, info, trace, warn};
 
@@ -226,6 +221,7 @@ where
         parent_header,
         attributes,
         payload_id,
+        ..
     } = config;
     // Refuse a spec version this binary has no variant for: it was resolved by newer code,
     // and failing beats building under rules older than the ones asked for.
@@ -250,11 +246,10 @@ where
     let versioned_config = evm_config.config_for(spec_version);
 
     let state_provider = client.state_by_block_hash(parent_header.hash())?;
-    let state = StateProviderDatabase::new(&state_provider);
-    let mut db = State::builder()
-        .with_database(cached_reads.as_db_mut(state))
-        .with_bundle_update()
-        .build();
+    let state = StateProviderDatabase::new((&state_provider).into_evm_state_provider());
+    // A per-build read cache is distinct from the reusable payload reads and
+    // from evm2's accepted transaction writes; retain it for inline witnessing.
+    let mut db = CacheDB::new(Db::new(cached_reads.as_db_mut(state)));
 
     let next_block_attrs = NextBlockEnvAttributes {
         timestamp: attributes.timestamp,
@@ -294,37 +289,23 @@ where
         attributes.timestamp,
         fee_spec.base_fee_floor(spec_version),
     ) {
-        evm_env.block_env.basefee = base_fee;
+        evm_env.block.basefee = U256::from(base_fee);
     }
 
-    let evm = evm_config.evm_with_env(&mut db, evm_env);
+    let evm = evm_config.evm_with_env(&mut db, evm_env.clone());
     let block_ctx = evm_config
         .context_for_next_block_with(&parent_header, next_block_attrs, header_extra)
         .map_err(PayloadBuilderError::other)?;
-    let mut builder = evm_config.create_block_builder(evm, &parent_header, block_ctx);
-
-    // Shared handle to *this build EVM's* DA-coverage cell: the in-EVM charge writes it per
-    // transaction (`CAPPED` means the DA fee was capped by the tx's unused authorized gas —
-    // under-covered / would be subsidized), and the tx loop reads it to skip such txs (see
-    // the sequencer-admission skip below). Owned by the EVM, not shared factory state.
-    let da_report = builder.evm().da_report_handle();
+    let mut builder = evm_config.create_block_builder(evm, evm_env, &parent_header, block_ctx);
 
     // Fork queries must agree with the EVM env, so use the per-version spec
     // the block builds under, not the node's boot chain spec.
     debug!(target: "payload_builder", id=%payload_id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
     let mut cumulative_gas_used = 0;
-    let block_gas_limit: u64 = builder.evm_mut().block().gas_limit;
-
-    let base_fee = builder.evm_mut().block().basefee;
-
-    let mut best_txs = best_txs(BestTransactionsAttributes::new(
-        base_fee,
-        builder
-            .evm_mut()
-            .block()
-            .blob_gasprice()
-            .map(|gasprice| gasprice as u64),
-    ));
+    let block_gas_limit = builder.evm().block().gas_limit.saturating_to::<u64>();
+    let base_fee = builder.evm_env().block_base_fee();
+    // Alpen never admits blob transactions.
+    let mut best_txs = best_txs(BestTransactionsAttributes::new(base_fee, None));
     let mut total_fees = U256::ZERO;
 
     builder.apply_pre_execution_changes().map_err(|err| {
@@ -369,7 +350,7 @@ where
             trace!(target: "payload_builder", gas_limit = pool_tx.gas_limit(), remaining_gas, "rejecting oversized transaction: speculative execution budget exhausted");
             best_txs.mark_invalid(
                 &pool_tx,
-                &InvalidPoolTransactionError::ExceedsGasLimit(pool_tx.gas_limit(), block_gas_limit),
+                InvalidPoolTransactionError::ExceedsGasLimit(pool_tx.gas_limit(), block_gas_limit),
             );
             continue;
         }
@@ -392,32 +373,27 @@ where
         // oversized limit is kept — and (b) its DA fee is fully covered by its unused
         // authorized gas.
         //
-        // Reset the shared coverage cell to `UNKNOWN` first so a stale value from a prior tx
-        // (or a tx that skips the charge, e.g. zero-fee) can never be read as covered; the
-        // in-EVM charge overwrites it with `OK`/`CAPPED` during execution (before this closure
-        // runs). A `CAPPED` charge means the tx under-provisioned and the protocol would
-        // subsidize its DA cost, so we skip it (coverage only matters when `da_rate != 0`).
-        da_report.store(DA_COVERAGE_UNKNOWN, Ordering::Relaxed);
         // Captures the execution gas and reason of a tx the commit condition rejects, so the
         // skip arms can charge the burned gas against the speculative budget and pick the
         // right invalidation reason (the no-commit path returns neither).
         let does_not_fit = Cell::new(false);
         let rejected_gas = Cell::new(0u64);
-        let exec_outcome = builder.execute_transaction_with_commit_condition(tx.clone(), |res| {
-            let gas_used = res.result.result.tx_gas_used();
-            // (a) Fit on actual executed gas, not the DA-inflated signed limit.
-            if cumulative_gas_used + gas_used > block_gas_limit {
-                does_not_fit.set(true);
-                rejected_gas.set(gas_used);
-                return CommitChanges::No;
-            }
-            // (b) DA coverage: skip under-covered txs the protocol would subsidize.
-            if da_rate != 0 && da_report.load(Ordering::Relaxed) == DA_COVERAGE_CAPPED {
-                rejected_gas.set(gas_used);
-                return CommitChanges::No;
-            }
-            CommitChanges::Yes
-        });
+        let exec_outcome =
+            builder.execute_transaction_with_commit_condition(tx.clone(), |result, _changes| {
+                let gas_used = result.tx_gas_used();
+                // (a) Fit on actual executed gas, not the DA-inflated signed limit.
+                if cumulative_gas_used + gas_used > block_gas_limit {
+                    does_not_fit.set(true);
+                    rejected_gas.set(gas_used);
+                    return CommitChanges::No;
+                }
+                // (b) DA coverage: skip under-covered txs the protocol would subsidize.
+                if da_rate != 0 && result.ext == DA_COVERAGE_CAPPED {
+                    rejected_gas.set(gas_used);
+                    return CommitChanges::No;
+                }
+                CommitChanges::Yes
+            });
 
         let gas_used = match exec_outcome {
             Ok(Some(gas_output)) => gas_output.tx_gas_used(),
@@ -432,14 +408,14 @@ where
                     trace!(target: "payload_builder", ?tx, "skipping transaction that exceeds remaining block gas");
                     best_txs.mark_invalid(
                         &pool_tx,
-                        &InvalidPoolTransactionError::ExceedsGasLimit(
+                        InvalidPoolTransactionError::ExceedsGasLimit(
                             pool_tx.gas_limit(),
                             block_gas_limit,
                         ),
                     );
                 } else {
                     trace!(target: "payload_builder", ?tx, "skipping DA-undercovered transaction");
-                    best_txs.mark_invalid(&pool_tx, &InvalidPoolTransactionError::Underpriced);
+                    best_txs.mark_invalid(&pool_tx, InvalidPoolTransactionError::Underpriced);
                 }
                 continue;
             }
@@ -455,7 +431,7 @@ where
                     trace!(target: "payload_builder", %error, ?tx, "skipping invalid transaction and its descendants");
                     best_txs.mark_invalid(
                         &pool_tx,
-                        &InvalidPoolTransactionError::Consensus(
+                        InvalidPoolTransactionError::Consensus(
                             InvalidTransactionError::TxTypeNotSupported,
                         ),
                     );
@@ -487,6 +463,7 @@ where
 
     let BlockBuilderOutcome {
         execution_result,
+        execution_state,
         block,
         ..
     } = builder.finish(&state_provider, None)?;
@@ -500,7 +477,8 @@ where
     let block_num = block.header().number;
     let block_rlp = alloy_rlp::encode(block.sealed_block().clone_block());
     let record = build_block_witness_from_executed_state(
-        &db,
+        &mut db,
+        &execution_state,
         &state_provider,
         &client,
         block_num,
@@ -508,6 +486,7 @@ where
         parent_header.header(),
     )
     .map_err(|e| PayloadBuilderError::other(io::Error::other(format!("witness capture: {e}"))))?;
+    drop(db);
     let block_witness = record.encode().map_err(|e| {
         PayloadBuilderError::other(io::Error::other(format!("witness encode: {e}")))
     })?;
@@ -515,14 +494,6 @@ where
     let requests = chain_spec
         .is_prague_active_at_timestamp(attributes.timestamp)
         .then_some(execution_result.requests);
-
-    let sealed_block = Arc::new(block.sealed_block().clone());
-    debug!(target: "payload_builder", id=%payload_id, sealed_block_header = ?sealed_block.sealed_header(), "sealed built block");
-
-    let eth_payload = EthBuiltPayload::new(sealed_block, total_fees, requests, None)
-        // Blob transactions are not supported in the Alpen environment.
-        // Using empty blob sidecars to maintain compatibility with the Engine API.
-        .with_sidecars(BlobSidecars::Empty);
 
     // collect receipts from the executed transactions
     let receipts: Vec<Receipt> = execution_result.receipts;
@@ -546,6 +517,14 @@ where
             "extracted withdrawal intents from built payload receipts",
         );
     }
+
+    let sealed_block = Arc::new(block);
+    debug!(target: "payload_builder", id=%payload_id, sealed_block_header = ?sealed_block.sealed_header(), "sealed built block");
+
+    let eth_payload = EthBuiltPayload::new(sealed_block, total_fees, requests, None)
+        // Blob transactions are not supported in the Alpen environment.
+        // Using empty blob sidecars to maintain compatibility with the Engine API.
+        .with_sidecars(BlobSidecars::Empty);
 
     let strata_payload = AlpenBuiltPayload::new(eth_payload, withdrawal_intents)
         .with_payload_id(payload_id)

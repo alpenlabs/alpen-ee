@@ -20,7 +20,6 @@
 //! depending on heavy reth crates.
 
 use alpen_primitives::BPS_DENOMINATOR;
-use reth_evm::{eth::EthEvmContext, Database};
 use revm::state::EvmState;
 use revm_primitives::{KECCAK_EMPTY, U256};
 
@@ -82,14 +81,22 @@ const SLOT_VALUE_BYTES: u64 = 1 + 32;
 /// address there, plus that entry's slot-count prefix (`u32`, at most 5 bytes).
 const STORAGE_ACCOUNT_OVERHEAD_BYTES: u64 = ACCOUNT_KEY_BYTES + 5;
 
-/// DA-coverage report values written by the charge handler into the shared report cell
-/// and read by the sequencer's payload builder for tx admission.
-///
-/// The default / reset value is [`DA_COVERAGE_UNKNOWN`] (`0`) — deliberately *not* `OK` —
-/// so a cell that was never written for the current transaction (e.g. a zero-fee system
-/// call that skips the charge, or a stale value from a previous tx) is never mistaken for
-/// "covered". The payload builder skips a transaction only on an explicit
-/// [`DA_COVERAGE_CAPPED`]; `UNKNOWN` and `OK` both mean "include".
+/// DA bytes for one touched account and the code it wrote, if any.
+pub(crate) fn account_diff_size(code_len: Option<u64>) -> u64 {
+    let code_size = code_len.map_or(0, |len| CODE_HASH_BYTES.saturating_add(len));
+    (ACCOUNT_KEY_BYTES + ACCOUNT_INFO_BYTES).saturating_add(code_size)
+}
+
+/// DA bytes for an account's changed storage slots.
+pub(crate) fn storage_diff_size(changed_slots: u64) -> u64 {
+    if changed_slots == 0 {
+        return 0;
+    }
+    STORAGE_ACCOUNT_OVERHEAD_BYTES
+        .saturating_add(changed_slots.saturating_mul(SLOT_KEY_BYTES + SLOT_VALUE_BYTES))
+}
+
+/// Settlement reports this if it did not evaluate DA coverage (e.g. a zero-fee transaction).
 pub const DA_COVERAGE_UNKNOWN: u64 = 0;
 /// The transaction's DA fee was fully covered by its unused authorized gas.
 pub const DA_COVERAGE_OK: u64 = 1;
@@ -116,9 +123,6 @@ pub fn calc_diff_size(state: &EvmState) -> u64 {
             continue;
         }
 
-        // Balance + nonce deltas, encoded the same way for every touched account.
-        diff_size = diff_size.saturating_add(ACCOUNT_KEY_BYTES + ACCOUNT_INFO_BYTES);
-
         // The code-hash register and deployed bytecode reach L1 DA whenever a transaction
         // changes an account's code. Two cases produce that in one transaction:
         //   * contract *creation* (`is_created`), which writes freshly deployed bytecode;
@@ -138,11 +142,12 @@ pub fn calc_diff_size(state: &EvmState) -> u64 {
             Some(code) if code.is_eip7702() => true,
             Some(_) | None => account.is_created() && account.info.code_hash != KECCAK_EMPTY,
         };
-        if code_written {
-            diff_size = diff_size.saturating_add(CODE_HASH_BYTES);
-            if let Some(code) = &account.info.code {
-                diff_size = diff_size.saturating_add(code.original_byte_slice().len() as u64);
-            }
+        let code_len = code_written.then(|| {
+            let len = account
+                .info
+                .code
+                .as_ref()
+                .map_or(0, |c| c.original_byte_slice().len() as u64);
 
             // KNOWN UNDERCOUNT (deliberate, deferred): this charges the account's code-hash
             // register and the raw bytecode length, but NOT the framing of the separate
@@ -154,7 +159,9 @@ pub fn calc_diff_size(state: &EvmState) -> u64 {
             // the bytes actually posted, i.e. a small, bounded DA subsidy on deployments.
             // Left uncharged for now to keep the per-tx estimate simple; revisit alongside the
             // sizing refactor (see the module `TODO(STR-4226)`).
-        }
+            len
+        });
+        diff_size = diff_size.saturating_add(account_diff_size(code_len));
 
         // Changed storage slots live in a second, address-keyed map, so an account with any
         // changed slot pays the storage-map framing once plus each slot's key/value.
@@ -163,14 +170,36 @@ pub fn calc_diff_size(state: &EvmState) -> u64 {
             .values()
             .filter(|slot| slot.is_changed())
             .count() as u64;
-        if changed_slots > 0 {
-            diff_size = diff_size.saturating_add(STORAGE_ACCOUNT_OVERHEAD_BYTES);
-            diff_size = diff_size
-                .saturating_add(changed_slots.saturating_mul(SLOT_KEY_BYTES + SLOT_VALUE_BYTES));
-        }
+        diff_size = diff_size.saturating_add(storage_diff_size(changed_slots));
     }
 
     diff_size
+}
+
+/// Estimates DA bytes for the detached execution returned by RPC simulation.
+///
+/// This uses the same byte costs as the charge path. EVM finalization has
+/// already run, so only the charge path can account for pre-finalization flags.
+pub fn calc_detached_diff_size(state: &evm2::PendingState) -> u64 {
+    state
+        .account_changes()
+        .filter(|change| change.touched)
+        .fold(0u64, |size, change| {
+            let info = change.current;
+            let code = info.and_then(|info| info.code.as_ref());
+            let charge_code = code.is_some_and(|code| code.is_eip7702())
+                || (change.created && info.is_some_and(|info| info.code_hash != KECCAK_EMPTY));
+            let code_len =
+                charge_code.then(|| code.map_or(0, |code| code.original_byte_slice().len() as u64));
+            let changed_slots = change
+                .storage
+                .slots
+                .values()
+                .filter(|slot| slot.value.original != slot.value.current)
+                .count() as u64;
+            size.saturating_add(account_diff_size(code_len))
+                .saturating_add(storage_diff_size(changed_slots))
+        })
 }
 
 /// Caps a candidate DA rate to the increase covered by the fee-quote safety margin.
@@ -243,27 +272,10 @@ pub fn bounded_da_fee(da_rate: U256, diff_size: u64, remaining_value: U256) -> U
         .min(remaining_value)
 }
 
-/// Read access to the raw EVM state change-set on the concrete EVM context.
-///
-/// The generic revm `Handler` cannot reach the whole `EvmState` through `JournalTr`, but
-/// the concrete [`EthEvmContext`] exposes it via its journal. The DA charge binds to this
-/// trait so it can size the diff in the handler. The fee itself is applied through the
-/// journal (`load_account_mut`), not by mutating this map, so accounts stay loaded.
-pub trait DaStateAccess {
-    /// Returns the transaction's state change-set.
-    fn evm_state(&self) -> &EvmState;
-}
-
-impl<DB: Database> DaStateAccess for EthEvmContext<DB> {
-    fn evm_state(&self) -> &EvmState {
-        &self.journaled_state.state
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use revm::state::{Account, AccountInfo, Bytecode, EvmStorageSlot};
-    use revm_primitives::{Address, Bytes, B256, U256};
+    use revm_primitives::{Address, B256, Bytes, U256};
 
     use super::*;
 

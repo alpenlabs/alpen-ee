@@ -183,7 +183,8 @@ impl EvmPartialState {
     /// from the root its own leaf commits to, so the omitted storage is preserved rather
     /// than erased.
     pub fn merge_write_batch(&mut self, wb: &EvmWriteBatch) {
-        self.ethereum_state.update(wb.hashed_post_state());
+        self.ethereum_state
+            .update_with_storage_wipes(wb.hashed_post_state(), wb.wiped_storage());
     }
 }
 

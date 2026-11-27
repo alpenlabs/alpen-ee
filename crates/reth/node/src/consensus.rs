@@ -12,18 +12,19 @@
 
 use std::{iter, sync::Arc};
 
-use alpen_params::{header_spec_version, AlpenSpecId, EvmSpec, FeeSpec};
+use alpen_params::{AlpenSpecId, EvmSpec, FeeSpec, header_spec_version};
 use alpen_reth_evm::consensus::{
-    validate_header_extra, validate_header_extra_against_parent, FlooredConsensus,
+    FlooredConsensus, validate_header_extra, validate_header_extra_against_parent,
 };
+use evm2::block::BlockExecutionResult;
 use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, FullConsensus, HeaderValidator, ReceiptRootBloom};
 use reth_errors::ConsensusError;
 use reth_ethereum_primitives::{Block, BlockBody, EthPrimitives, Receipt};
-use reth_evm::block::BlockExecutionResult;
 use reth_node_api::{FullNodeTypes, NodeTypes};
-use reth_node_builder::{components::ConsensusBuilder, BuilderContext};
+use reth_node_builder::{BuilderContext, components::ConsensusBuilder};
 use reth_primitives_traits::{Header, RecoveredBlock, SealedBlock, SealedHeader};
+use revm_primitives::B256;
 
 use crate::evm_config::version_indexed;
 
@@ -105,6 +106,7 @@ impl FullConsensus<EthPrimitives> for AlpenConsensus {
         block: &RecoveredBlock<Block>,
         result: &BlockExecutionResult<Receipt>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
+        block_access_list_hash: Option<B256>,
     ) -> Result<(), ConsensusError> {
         let inner = self.inner_for(block.header())?;
         FullConsensus::<EthPrimitives>::validate_block_post_execution(
@@ -112,6 +114,7 @@ impl FullConsensus<EthPrimitives> for AlpenConsensus {
             block,
             result,
             receipt_root_bloom,
+            block_access_list_hash,
         )
     }
 }
@@ -240,9 +243,11 @@ mod tests {
             })
         };
 
-        assert!(consensus
-            .validate_header_against_parent(&child(1_100), &parent)
-            .is_ok());
+        assert!(
+            consensus
+                .validate_header_against_parent(&child(1_100), &parent)
+                .is_ok()
+        );
         let err = consensus
             .validate_header_against_parent(&child(1_101), &parent)
             .expect_err("DA rate increases above the quote margin must be invalid");
@@ -345,9 +350,11 @@ mod tests {
         });
 
         let unfloored = child_with_base_fee(&parent, AlpenSpecId::V0, DECAYED_BASE_FEE);
-        assert!(consensus
-            .validate_header_against_parent(&unfloored, &parent)
-            .is_ok());
+        assert!(
+            consensus
+                .validate_header_against_parent(&unfloored, &parent)
+                .is_ok()
+        );
 
         let floored = child_with_base_fee(&parent, AlpenSpecId::V0, BASE_FEE_FLOOR);
         assert_base_fee_diff(consensus.validate_header_against_parent(&floored, &parent));

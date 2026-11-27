@@ -14,17 +14,17 @@ use alpen_engine_api::{
 use alpen_reth_node::{AlpenBuiltPayload, AlpenEngineTypes, AlpenPayloadAttributes};
 use alpen_storage_api::BlockWitnessStore;
 use async_trait::async_trait;
-use eyre::{eyre, Context};
+use eyre::{Context, eyre};
 use metrics::{counter, histogram};
 use reth_node_builder::{ConsensusEngineHandle, PayloadKind};
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderError, PayloadBuilderHandle};
 use strata_acct_types::Hash;
 use tokio::time::sleep;
-use tracing::{debug, info, info_span, warn, Instrument};
+use tracing::{Instrument, debug, info, info_span, warn};
 
 use crate::{
-    metrics::{PAYLOAD_BUILD_FAILURES, PAYLOAD_BUILD_RETRIES, PAYLOAD_BUILD_SECONDS},
     AlpenRethExecEngine,
+    metrics::{PAYLOAD_BUILD_FAILURES, PAYLOAD_BUILD_RETRIES, PAYLOAD_BUILD_SECONDS},
 };
 
 const MISSING_PARENT_RETRY_DELAY_MS: u64 = 250;
@@ -141,6 +141,7 @@ impl AlpenRethPayloadEngine {
                 suggested_fee_recipient: self.beneficiary_address,
                 withdrawals: Some(withdrawals),
                 slot_number: None,
+                target_gas_limit: None,
             },
             build_attrs.spec_version(),
         );
@@ -158,8 +159,7 @@ impl AlpenRethPayloadEngine {
                 .send_new_payload(BuildNewPayload {
                     attributes: payload_attrs.clone(),
                     parent_hash: parent,
-                    cache: None,
-                    trie_handle: None,
+                    resources: Default::default(),
                 })
                 .await
             {
