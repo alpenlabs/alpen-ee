@@ -21,7 +21,7 @@
 
 use alpen_primitives::BPS_DENOMINATOR;
 use revm::state::EvmState;
-use revm_primitives::{KECCAK_EMPTY, U256};
+use revm_primitives::{Address, KECCAK_EMPTY, U256};
 
 /// Safety margin used by fee quotes and as the maximum next-block DA-rate increase.
 pub const DA_RATE_SAFETY_MARGIN_BPS: u64 = 1_000;
@@ -178,13 +178,18 @@ pub fn calc_diff_size(state: &EvmState) -> u64 {
 
 /// Estimates DA bytes for the detached execution returned by RPC simulation.
 ///
-/// This uses the same byte costs as the charge path. EVM finalization has
-/// already run, so only the charge path can account for pre-finalization flags.
-pub fn calc_detached_diff_size(state: &evm2::PendingState) -> u64 {
+/// The call simulation disables fee settlement, but an included transaction credits its
+/// beneficiary. Count that account once even if the simulated execution did not touch it.
+pub fn calc_detached_diff_size(state: &evm2::PendingState, beneficiary: Address) -> u64 {
+    let fee_recipient_overhead = if state.account_changes_for(&beneficiary).is_none() {
+        account_diff_size(None)
+    } else {
+        0
+    };
     state
         .account_changes()
-        .filter(|change| change.touched)
-        .fold(0u64, |size, change| {
+        .filter(|change| change.touched || change.address == beneficiary)
+        .fold(fee_recipient_overhead, |size, change| {
             let info = change.current;
             let code = info.and_then(|info| info.code.as_ref());
             let charge_code = code.is_some_and(|code| code.is_eip7702())
@@ -278,6 +283,18 @@ mod tests {
     use revm_primitives::{Address, Bytes, B256, U256};
 
     use super::*;
+
+    #[test]
+    fn detached_quote_counts_the_beneficiary_once() {
+        let beneficiary = Address::repeat_byte(0x42);
+        let mut state = evm2::PendingState::default();
+        let account_bytes = account_diff_size(None);
+        assert_eq!(calc_detached_diff_size(&state, beneficiary), account_bytes);
+
+        let account = evm2::evm::AccountInfo::default();
+        state.insert_account(beneficiary, Some(account.clone()), Some(account));
+        assert_eq!(calc_detached_diff_size(&state, beneficiary), account_bytes);
+    }
 
     fn touched_eoa() -> Account {
         let mut account = Account::from(AccountInfo::default());

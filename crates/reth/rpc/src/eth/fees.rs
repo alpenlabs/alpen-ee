@@ -20,11 +20,16 @@ use alpen_reth_evm::da_fee::{
 };
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_evm::EvmEnv;
 use reth_provider::ProviderError;
 use reth_rpc_convert::RpcTxReq;
-use reth_rpc_eth_api::{helpers::Call, EthApiTypes, FromEvmError, RpcConvert, RpcNodeCore};
+use reth_rpc_eth_api::{
+    helpers::{Call, SpawnBlocking},
+    EthApiTypes, FromEvmError, RpcConvert, RpcNodeCore,
+};
 use reth_rpc_eth_types::{error::FromEthApiError, EthApiError};
 use reth_storage_api::BlockReaderIdExt;
+use reth_tasks::CancelOnDrop;
 use serde::{Deserialize, Serialize};
 
 use crate::AlpenEthApi;
@@ -110,9 +115,32 @@ where
         overrides: EvmOverrides,
         da_rate_override: Option<u64>,
     ) -> Result<DaFeeQuote, EthApiError> {
-        let res = self.transact_call_at(request, at, overrides).await?;
-        let gas_used = res.result.tx_gas_used();
-        let diff_size = calc_detached_diff_size(&res.pending_state);
+        // Read the beneficiary from the same call environment, after block overrides.
+        // Simulate with fee charging disabled as usual; only the DA quote adds the
+        // fee recipient's state footprint.
+        let permit = self
+            .acquire_owned_blocking_io()
+            .await
+            .map_err(|_| EthApiError::InternalEthError)?;
+        let guard = CancelOnDrop::default();
+        let cancel = guard.clone();
+        let this = self.clone();
+        let quote = self
+            .spawn_with_call_at(request, at, overrides, move |db, evm_env, tx_env| {
+                let _permit = permit;
+                if cancel.is_cancelled() {
+                    return Err(EthApiError::InternalEthError);
+                }
+                let beneficiary = evm_env.block_env().beneficiary;
+                let res = this.transact(db, evm_env, tx_env)?;
+                Ok((
+                    res.result.tx_gas_used(),
+                    calc_detached_diff_size(&res.pending_state, beneficiary),
+                ))
+            })
+            .await;
+        drop(guard);
+        let (gas_used, diff_size) = quote?;
 
         // Read the base fee and any historical DA rate from the header of the block the
         // transaction is simulated against (`at`). Falls back to the latest header when `at`
