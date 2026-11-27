@@ -279,6 +279,7 @@ pub fn bounded_da_fee(da_rate: U256, diff_size: u64, remaining_value: U256) -> U
 
 #[cfg(test)]
 mod tests {
+    use evm2::evm::AccountInfo as Evm2AccountInfo;
     use revm::state::{Account, AccountInfo, Bytecode, EvmStorageSlot};
     use revm_primitives::{Address, Bytes, B256, U256};
 
@@ -291,7 +292,7 @@ mod tests {
         let account_bytes = account_diff_size(None);
         assert_eq!(calc_detached_diff_size(&state, beneficiary), account_bytes);
 
-        let account = evm2::evm::AccountInfo::default();
+        let account = Evm2AccountInfo::default();
         state.insert_account(beneficiary, Some(account.clone()), Some(account));
         assert_eq!(calc_detached_diff_size(&state, beneficiary), account_bytes);
     }
