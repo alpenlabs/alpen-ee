@@ -29,7 +29,7 @@ reth-errors.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-evm.workspace = true
 reth-primitives-traits.workspace = true
-reth-trie-common.workspace = true                # Used for HashedPostState in EvmWriteBatch
+reth-trie-common.workspace = true         # Used for HashedPostState in EvmWriteBatch
 
 # REVM
 evm2.workspace = true
@@ -37,9 +37,9 @@ revm.workspace = true
 revm-primitives.workspace = true
 
 # Alloy for Ethereum types
+alloy-consensus = { workspace = true, features = ["serde-bincode-compat"] }
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
-alloy-consensus = { workspace = true, features = ["serde-bincode-compat"] }
 alloy-rlp.workspace = true
 alloy-rpc-types-debug.workspace = true
 

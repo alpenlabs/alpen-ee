@@ -24,6 +24,7 @@ alloy-rlp.workspace = true
 alloy-rpc-types.workspace = true
 bincode.workspace = true
 ciborium.workspace = true
+evm2.workspace = true
 eyre.workspace = true
 futures.workspace = true
 reth-basic-payload-builder.workspace = true
@@ -35,7 +36,6 @@ reth-eth-wire.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-ethereum-payload-builder.workspace = true
 reth-ethereum-primitives.workspace = true
-evm2.workspace = true
 reth-evm = { workspace = true, features = ["witness"] }
 reth-network.workspace = true
 reth-network-api.workspace = true

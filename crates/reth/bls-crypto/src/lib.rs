@@ -26,8 +26,8 @@
 //! default backend does.
 
 use bls12_381::{
-    G1Affine, G1Projective, G2Affine, G2Prepared, G2Projective, Gt, Scalar,
-    hash_to_curve::MapToCurve, multi_miller_loop,
+    hash_to_curve::MapToCurve, multi_miller_loop, G1Affine, G1Projective, G2Affine, G2Prepared,
+    G2Projective, Gt, Scalar,
 };
 
 /// The base field. The crate keeps its field modules private; the
@@ -36,10 +36,9 @@ type Fp = <G1Projective as MapToCurve>::Field;
 /// The quadratic extension field.
 type Fp2 = <G2Projective as MapToCurve>::Field;
 use revm::precompile::{
-    Crypto, PrecompileHalt,
     bls12_381::{G1Point, G1PointScalar, G2Point, G2PointScalar},
     bls12_381_const::{FP_LENGTH, G1_LENGTH, G2_LENGTH, SCALAR_LENGTH},
-    install_crypto,
+    install_crypto, Crypto, PrecompileHalt,
 };
 
 /// revm [`Crypto`] backend computing the BLS12-381 precompiles with the

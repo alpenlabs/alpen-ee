@@ -12,9 +12,9 @@
 
 use std::{iter, sync::Arc};
 
-use alpen_params::{AlpenSpecId, EvmSpec, FeeSpec, header_spec_version};
+use alpen_params::{header_spec_version, AlpenSpecId, EvmSpec, FeeSpec};
 use alpen_reth_evm::consensus::{
-    FlooredConsensus, validate_header_extra, validate_header_extra_against_parent,
+    validate_header_extra, validate_header_extra_against_parent, FlooredConsensus,
 };
 use evm2::block::BlockExecutionResult;
 use reth_chainspec::ChainSpec;
@@ -22,7 +22,7 @@ use reth_consensus::{Consensus, FullConsensus, HeaderValidator, ReceiptRootBloom
 use reth_errors::ConsensusError;
 use reth_ethereum_primitives::{Block, BlockBody, EthPrimitives, Receipt};
 use reth_node_api::{FullNodeTypes, NodeTypes};
-use reth_node_builder::{BuilderContext, components::ConsensusBuilder};
+use reth_node_builder::{components::ConsensusBuilder, BuilderContext};
 use reth_primitives_traits::{Header, RecoveredBlock, SealedBlock, SealedHeader};
 use revm_primitives::B256;
 
@@ -243,11 +243,9 @@ mod tests {
             })
         };
 
-        assert!(
-            consensus
-                .validate_header_against_parent(&child(1_100), &parent)
-                .is_ok()
-        );
+        assert!(consensus
+            .validate_header_against_parent(&child(1_100), &parent)
+            .is_ok());
         let err = consensus
             .validate_header_against_parent(&child(1_101), &parent)
             .expect_err("DA rate increases above the quote margin must be invalid");
@@ -350,11 +348,9 @@ mod tests {
         });
 
         let unfloored = child_with_base_fee(&parent, AlpenSpecId::V0, DECAYED_BASE_FEE);
-        assert!(
-            consensus
-                .validate_header_against_parent(&unfloored, &parent)
-                .is_ok()
-        );
+        assert!(consensus
+            .validate_header_against_parent(&unfloored, &parent)
+            .is_ok());
 
         let floored = child_with_base_fee(&parent, AlpenSpecId::V0, BASE_FEE_FLOOR);
         assert_base_fee_diff(consensus.validate_header_against_parent(&floored, &parent));

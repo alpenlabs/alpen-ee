@@ -10,7 +10,7 @@ use tracing::{debug, info, warn};
 
 use crate::{
     metrics::FORKCHOICE_FAILURES,
-    retry::{ENGINE_CALL_MAX_RETRIES, engine_call_backoff},
+    retry::{engine_call_backoff, ENGINE_CALL_MAX_RETRIES},
 };
 
 /// Logs a forkchoice update that reth did not apply.

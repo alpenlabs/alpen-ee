@@ -1,9 +1,9 @@
-use evm2::{Evm, Precompiles, SpecId, TxResult, registry::TxRegistry};
+use evm2::{registry::TxRegistry, Evm, Precompiles, SpecId, TxResult};
 use reth_evm_ethereum::EvmFactory;
 use strata_bridge_params::BridgeParams;
 
 use crate::{
-    evm2_settlement::{AlpenEvmTypes, tx_registry},
+    evm2_settlement::{tx_registry, AlpenEvmTypes},
     precompiles::create_precompiles,
 };
 

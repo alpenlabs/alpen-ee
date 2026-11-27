@@ -57,8 +57,8 @@
 use std::{convert::Infallible, sync::Arc};
 
 use alloy_consensus::{
-    Block, BlockBody, BlockHeader, EMPTY_OMMER_ROOT_HASH, Header, Transaction as _, TxReceipt,
     proofs::{self, calculate_receipt_root},
+    Block, BlockBody, BlockHeader, Header, Transaction as _, TxReceipt, EMPTY_OMMER_ROOT_HASH,
 };
 use alloy_eips::{
     eip4895::Withdrawals,
@@ -70,7 +70,7 @@ use alloy_eips::{
 use alloy_rpc_types_engine::ExecutionData;
 use alpen_params::{AlpenParams, AlpenSpecId, HeaderExtra, HeaderExtraError};
 use evm2::{
-    block::ethereum::{EthTransactionResultWithState, execution},
+    block::ethereum::{execution, EthTransactionResultWithState},
     evm::{Bal, DynDatabase},
 };
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
@@ -83,7 +83,7 @@ use reth_evm::{
 #[cfg(feature = "host")]
 use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator};
 use reth_evm_ethereum::{EthBlockExecutionCtx, EthEvmConfig};
-use reth_primitives_traits::{SealedBlock, SealedHeader, logs_bloom};
+use reth_primitives_traits::{logs_bloom, SealedBlock, SealedHeader};
 use strata_bridge_params::BridgeParams;
 
 use crate::{evm::AlpenEvmFactory, evm2_settlement::AlpenEvmTypes};
@@ -210,11 +210,11 @@ pub struct AlpenBlockExecutor<E> {
 impl<'a, E> BlockExecutor for AlpenBlockExecutor<E>
 where
     E: BlockExecutor<
-            Transaction = TransactionSigned,
-            Evm = evm2::Evm<'a, AlpenEvmTypes>,
-            TransactionResultWithState = EthTransactionResultWithState<AlpenEvmTypes>,
-            BlockAccessList = Bal,
-        >,
+        Transaction = TransactionSigned,
+        Evm = evm2::Evm<'a, AlpenEvmTypes>,
+        TransactionResultWithState = EthTransactionResultWithState<AlpenEvmTypes>,
+        BlockAccessList = Bal,
+    >,
 {
     type Transaction = E::Transaction;
     type Receipt = E::Receipt;
@@ -674,11 +674,9 @@ mod tests {
     #[test]
     fn unstamped_block_runs_only_under_v0() {
         let unstamped = block(1, Bytes::new());
-        assert!(
-            config(AlpenSpecId::V0)
-                .context_for_block(&unstamped)
-                .is_ok()
-        );
+        assert!(config(AlpenSpecId::V0)
+            .context_for_block(&unstamped)
+            .is_ok());
         assert_eq!(
             config(AlpenSpecId::V1).context_for_block(&unstamped).err(),
             wrong_version(AlpenSpecId::V1, AlpenSpecId::V0)
@@ -713,11 +711,9 @@ mod tests {
             ExecutionPayload::from_block_unchecked(sealed.hash(), &sealed.clone_block());
         let payload = ExecutionData { payload, sidecar };
 
-        assert!(
-            config(AlpenSpecId::V0)
-                .context_for_payload(&payload)
-                .is_ok()
-        );
+        assert!(config(AlpenSpecId::V0)
+            .context_for_payload(&payload)
+            .is_ok());
         assert_eq!(
             config(AlpenSpecId::V1).context_for_payload(&payload).err(),
             wrong_version(AlpenSpecId::V1, AlpenSpecId::V0)

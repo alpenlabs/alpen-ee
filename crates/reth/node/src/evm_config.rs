@@ -30,8 +30,8 @@ use alloy_eips::Decodable2718;
 use alloy_primitives::Bytes;
 use alloy_rpc_types::engine::payload::ExecutionData;
 use alpen_params::{
-    AlpenParams, AlpenSpecId, EvmSpec, HeaderExtra, HeaderExtraError, header_spec_version,
-    peek_spec_version,
+    header_spec_version, peek_spec_version, AlpenParams, AlpenSpecId, EvmSpec, HeaderExtra,
+    HeaderExtraError,
 };
 use alpen_reth_evm::{
     config::{
@@ -42,9 +42,9 @@ use alpen_reth_evm::{
 };
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
+    execute::{BlockAssembler, BlockAssemblerInput, BlockExecutionError},
     BlockExecutorFactory, ConfigureEngineEvm, ConfigureEvm, DynDatabase, EvmEnvFor,
     ExecutableTxIterator, NextBlockEnvAttributes,
-    execute::{BlockAssembler, BlockAssemblerInput, BlockExecutionError},
 };
 use reth_primitives_traits::{Header, Recovered, SealedBlock, SealedHeader, SignedTransaction};
 
@@ -326,14 +326,14 @@ mod tests {
     use alpen_params::{AlpenSpecId, EvmSpec, HeaderExtra, HeaderExtraError};
     use evm2::SpecId;
     use reth_evm::{
-        ConfigureEvm, EvmEnv, NextBlockEnvAttributes,
         database::StateProviderDatabase,
         execute::{BlockAssembler, BlockAssemblerInput, BlockBuilder},
+        ConfigureEvm, EvmEnv, NextBlockEnvAttributes,
     };
     use reth_primitives_traits::{Header, SealedHeader};
-    use reth_storage_api::{StateProvider, noop::NoopProvider};
+    use reth_storage_api::{noop::NoopProvider, StateProvider};
 
-    use super::{MultiSpecEvmConfig, test_params};
+    use super::{test_params, MultiSpecEvmConfig};
 
     /// A non-zero DA rate, so the tests catch a stamp that silently drops it.
     const DA_RATE: u64 = 1_500_000_000;
@@ -354,7 +354,7 @@ mod tests {
             suggested_fee_recipient: Default::default(),
             prev_randao: Default::default(),
             gas_limit: 30_000_000,
-            parent_beacon_block_root: None,
+            parent_beacon_block_root: Some(Default::default()),
             withdrawals: Some(Default::default()),
             extra_data: Default::default(),
             slot_number: None,
@@ -432,8 +432,8 @@ mod tests {
     /// version and rate the block was built with.
     #[test]
     fn production_builder_stamps_the_resolved_version() {
-        // Shanghai-only so the empty-state build needs no post-Cancun system
-        // calls; the per-version derivation on top is the real one.
+        // Use the real per-version derivation. The shared test attributes include
+        // a zero beacon root for versions with EIP-4788 active.
         let evm_spec: EvmSpec =
             serde_json::from_str(r#"{"config":{"chainId":2892,"shanghaiTime":0}}"#)
                 .expect("genesis document parses");

@@ -18,13 +18,13 @@ strata-codec.workspace = true
 # External
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
+evm2.workspace = true
 eyre.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-provider.workspace = true
-evm2.workspace = true
-revm.workspace = true
 reth-trie.workspace = true
 reth-trie-common = { workspace = true, features = ["eip1186"] }
+revm.workspace = true
 revm-primitives.workspace = true
 rsp-mpt.workspace = true
 tokio.workspace = true

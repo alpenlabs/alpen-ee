@@ -13,14 +13,14 @@ use std::fmt::Debug;
 
 use alpen_reth_bls_crypto::Bls12381Crypto;
 use bls12_381::{
-    G1Affine, G1Projective, G2Affine, G2Projective, Scalar, hash_to_curve::MapToCurve,
+    hash_to_curve::MapToCurve, G1Affine, G1Projective, G2Affine, G2Projective, Scalar,
 };
 use evm2 as _;
 use hex as _;
 use proptest::{collection::vec, prelude::*};
 use revm::precompile::{
-    Crypto, DefaultCrypto, PrecompileHalt,
     bls12_381::{G1Point, G2Point},
+    Crypto, DefaultCrypto, PrecompileHalt,
 };
 use serde_json as _;
 

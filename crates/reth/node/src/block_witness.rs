@@ -15,9 +15,9 @@
 use std::collections::BTreeMap;
 
 use alloy_consensus::Header;
-use alloy_primitives::{B256, Bytes, keccak256};
+use alloy_primitives::{keccak256, Bytes, B256};
 use evm2::evm::{CacheDB, DynDatabase};
-use reth_evm::{BundleState, witness::ExecutionWitnessRecord};
+use reth_evm::{witness::ExecutionWitnessRecord, BundleState};
 use reth_provider::{
     AccountReader, BytecodeReader, HashedPostStateProvider, HeaderProvider, StateProofProvider,
 };
@@ -247,10 +247,10 @@ mod tests {
 
     use alloy_primitives::{Address, U256};
     use evm2::{
-        AccountInfo,
         block::bundle_state::{AccountStatus, BundleAccount},
         bytecode::Bytecode,
         evm::EmptyDB,
+        AccountInfo,
     };
     use reth_errors::ProviderResult;
     use reth_primitives_traits::Bytecode as RethBytecode;
@@ -374,16 +374,14 @@ mod tests {
             .accounts
             .insert(Address::repeat_byte(0x7), Some(info));
 
-        assert!(
-            collect_accessed_codes(
-                &state,
-                &bundle,
-                &StubBytecodeProvider::default(),
-                Vec::new()
-            )
-            .unwrap()
-            .is_empty()
-        );
+        assert!(collect_accessed_codes(
+            &state,
+            &bundle,
+            &StubBytecodeProvider::default(),
+            Vec::new()
+        )
+        .unwrap()
+        .is_empty());
     }
 
     /// Locks the exact bug shape: reth's raw `ExecutionWitnessRecord` can miss

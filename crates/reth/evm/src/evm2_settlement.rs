@@ -1,20 +1,20 @@
 //! Alpen gas settlement and DA sizing for the evm2 transaction handler.
 
 use evm2::{
-    Evm, EvmFeatures, EvmTypesHost, SpecId, TxResult,
-    ethereum::{TxEnvelope, eip1559, eip2930, eip7702, finalize_gas, legacy},
+    ethereum::{eip1559, eip2930, eip7702, finalize_gas, legacy, TxEnvelope},
     evm::{
-        State,
         config::BaseEvmConfigSelector,
         handler::{GasSettlement, TxHandlerHooks},
+        State,
     },
-    registry::{HandlerResult, TxRegistry, handler},
+    registry::{handler, HandlerResult, TxRegistry},
+    Evm, EvmFeatures, EvmTypesHost, SpecId, TxResult,
 };
 use revm_primitives::{Address, U256};
 use strata_bridge_params::BridgeParams;
 
 use crate::da_fee::{
-    DA_COVERAGE_CAPPED, DA_COVERAGE_OK, account_diff_size, bounded_da_fee, storage_diff_size,
+    account_diff_size, bounded_da_fee, storage_diff_size, DA_COVERAGE_CAPPED, DA_COVERAGE_OK,
 };
 
 /// Runtime types shared by all Alpen EVM instances.
@@ -188,8 +188,8 @@ pub(crate) fn calc_overlay_diff_size(state: &mut State<'_>) -> evm2::evm::DbResu
 
 #[cfg(test)]
 mod tests {
-    use alloy_consensus::{TxEip1559, TxLegacy, transaction::Recovered};
-    use evm2::{AccountInfo, env::BlockEnv, evm::InMemoryDB};
+    use alloy_consensus::{transaction::Recovered, TxEip1559, TxLegacy};
+    use evm2::{env::BlockEnv, evm::InMemoryDB, AccountInfo};
     use revm_primitives::TxKind;
 
     use super::*;

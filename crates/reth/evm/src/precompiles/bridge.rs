@@ -1,11 +1,11 @@
 use alpen_primitives::{
-    BRIDGEOUT_PRECOMPILE_ADDRESS, WithdrawalCalldata, WithdrawalIntentEvent, wei_to_sats,
+    wei_to_sats, WithdrawalCalldata, WithdrawalIntentEvent, BRIDGEOUT_PRECOMPILE_ADDRESS,
 };
 use evm2::{
-    Evm, PrecompileError,
     interpreter::{GasTracker, Message},
     precompile::PrecompileOutput,
     precompiles::PrecompileResult,
+    Evm, PrecompileError,
 };
 use revm_primitives::{Bytes, Log, LogData, U256};
 use strata_bridge_params::BridgeParams;
@@ -195,7 +195,7 @@ fn validate_bosd(data: &[u8], bridge_params: &BridgeParams) -> Result<(), Bridge
 #[cfg(test)]
 mod tests {
     use alpen_primitives::WEI_PER_BTC;
-    use evm2::{PrecompileHalt, env::BlockEnv, evm::EmptyDB, interpreter::MessageKind};
+    use evm2::{env::BlockEnv, evm::EmptyDB, interpreter::MessageKind, PrecompileHalt};
     use revm_primitives::Address;
     use strata_ol_bridge_types::OperatorSelection;
 

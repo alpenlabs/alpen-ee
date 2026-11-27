@@ -32,8 +32,8 @@ use evm2::bytecode::Bytecode;
 use futures_util::TryStreamExt;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm::{
-    ConfigureEvm,
     execute::{BasicBlockExecutor, Executor},
+    ConfigureEvm,
 };
 use reth_exex::{ExExContext, ExExEvent};
 use reth_node_api::{FullNodeComponents, NodeTypes};
@@ -56,9 +56,9 @@ pub struct AccessedStateGenerator<
 }
 
 impl<
-    Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>,
-    S: AccessedStateStore + 'static,
-> AccessedStateGenerator<Node, S>
+        Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>,
+        S: AccessedStateStore + 'static,
+    > AccessedStateGenerator<Node, S>
 where
     Node::Provider: StateProviderFactory + BlockReader<Block = Block> + Clone + Send + Sync,
     Node::Evm: ConfigureEvm<Primitives = EthPrimitives> + Clone + Send + Sync,

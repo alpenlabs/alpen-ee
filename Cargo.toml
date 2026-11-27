@@ -207,7 +207,9 @@ revm-primitives = { version = "23.0.0", features = [
   "serde",
 ], default-features = false }
 
-evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "66687c18b34d3bdbb899f5eb7605070615c03475", default-features = false, features = ["block"] }
+evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "66687c18b34d3bdbb899f5eb7605070615c03475", default-features = false, features = [
+  "block",
+] }
 
 # reth itself:
 reth-basic-payload-builder = { git = "https://github.com/paradigmxyz/reth", tag = "v2.11.0" }

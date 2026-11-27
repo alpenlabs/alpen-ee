@@ -4,11 +4,11 @@ use std::sync::Arc;
 
 use alloy_eips::BlockNumberOrTag;
 use reth_rpc_eth_api::{
+    helpers::{pending_block::PendingEnvBuilder, LoadPendingBlock},
     FromEvmError, RpcConvert, RpcNodeCore,
-    helpers::{LoadPendingBlock, pending_block::PendingEnvBuilder},
 };
 use reth_rpc_eth_types::{
-    EthApiError, PendingBlock, block::BlockAndReceipts, builder::config::PendingBlockKind,
+    block::BlockAndReceipts, builder::config::PendingBlockKind, EthApiError, PendingBlock,
 };
 use reth_storage_api::{BlockReader, BlockReaderIdExt, ReceiptProvider};
 use tokio::sync::Mutex;

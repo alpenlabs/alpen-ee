@@ -14,17 +14,17 @@ use alpen_engine_api::{
 use alpen_reth_node::{AlpenBuiltPayload, AlpenEngineTypes, AlpenPayloadAttributes};
 use alpen_storage_api::BlockWitnessStore;
 use async_trait::async_trait;
-use eyre::{Context, eyre};
+use eyre::{eyre, Context};
 use metrics::{counter, histogram};
 use reth_node_builder::{ConsensusEngineHandle, PayloadKind};
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderError, PayloadBuilderHandle};
 use strata_acct_types::Hash;
 use tokio::time::sleep;
-use tracing::{Instrument, debug, info, info_span, warn};
+use tracing::{debug, info, info_span, warn, Instrument};
 
 use crate::{
-    AlpenRethExecEngine,
     metrics::{PAYLOAD_BUILD_FAILURES, PAYLOAD_BUILD_RETRIES, PAYLOAD_BUILD_SECONDS},
+    AlpenRethExecEngine,
 };
 
 const MISSING_PARENT_RETRY_DELAY_MS: u64 = 250;

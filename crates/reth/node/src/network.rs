@@ -5,18 +5,19 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use alloy_primitives::Bytes;
 use reth_chainspec::{ForkId, Hardforks};
 use reth_discv5::{
-    Config as Discv5Config, ConfigBuilder as Discv5ConfigBuilder, NetworkStackId,
     discv5::{ListenConfig, ProtocolIdentity},
+    Config as Discv5Config, ConfigBuilder as Discv5ConfigBuilder, NetworkStackId,
+    DEFAULT_DISCOVERY_V5_PORT,
 };
 use reth_network::{
-    NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo,
-    primitives::BasicNetworkPrimitives, types::NatResolver,
+    primitives::BasicNetworkPrimitives, types::NatResolver, NetworkConfig, NetworkHandle,
+    NetworkManager, NetworkPrimitives, PeersInfo,
 };
 use reth_node_api::{PrimitivesTy, TxTy};
 use reth_node_builder::{
-    BuilderContext,
     components::NetworkBuilder,
     node::{FullNodeTypes, NodeTypes},
+    BuilderContext,
 };
 use reth_node_core::args::{DiscoveryArgs, NetworkArgs};
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
@@ -134,13 +135,20 @@ fn isolate_discovery<C, N: NetworkPrimitives>(
 /// RLPx port is free on UDP. geth also runs discovery on its RLPx port by
 /// default.
 ///
-/// An explicit discovery-port override is preserved.
+/// Reth's parsed args use `Some(default_port)` even when the flag is absent.
+/// As before, an explicit override equal to the upstream default also moves.
 fn discv5_on_rlpx_port(discovery: &DiscoveryArgs, rlpx_port: u16) -> DiscoveryArgs {
     let mut discovery = discovery.clone();
-    if discovery.discv5_port.is_none() {
+    if discovery
+        .discv5_port
+        .is_none_or(|port| port == DEFAULT_DISCOVERY_V5_PORT)
+    {
         discovery.discv5_port = Some(rlpx_port);
     }
-    if discovery.discv5_port_ipv6.is_none() {
+    if discovery
+        .discv5_port_ipv6
+        .is_none_or(|port| port == DEFAULT_DISCOVERY_V5_PORT)
+    {
         discovery.discv5_port_ipv6 = Some(rlpx_port);
     }
     discovery
@@ -246,9 +254,9 @@ mod tests {
         sync::Arc,
     };
 
-    use reth_chainspec::{ChainSpec, DEV, ForkHash};
-    use reth_discv5::{Discv5, discv5};
-    use reth_network::{EthNetworkPrimitives, NetworkConfigBuilder, config::rng_secret_key};
+    use reth_chainspec::{ChainSpec, ForkHash, DEV};
+    use reth_discv5::{discv5, Discv5};
+    use reth_network::{config::rng_secret_key, EthNetworkPrimitives, NetworkConfigBuilder};
     use reth_storage_api::noop::NoopProvider;
     use reth_tasks::Runtime;
 

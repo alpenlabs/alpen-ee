@@ -2,15 +2,14 @@ use std::sync::Arc;
 
 use alpen_params::AlpenParams;
 use alpen_reth_rpc::{
-    SequencerClient,
     eth::{AlpenEthApiBuilder, LiveDaFeeRateProvider},
+    SequencerClient,
 };
 use reth_chainspec::ChainSpec;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{ConfigureEvm, NextBlockEnvAttributes};
 use reth_node_api::{FullNodeComponents, NodeAddOns};
 use reth_node_builder::{
-    Node, NodeAdapter, NodeComponentsBuilder,
     components::{BasicPayloadServiceBuilder, ComponentsBuilder},
     node::{FullNodeTypes, NodeTypes},
     rpc::{
@@ -18,14 +17,16 @@ use reth_node_builder::{
         EngineValidatorBuilder, EthApiBuilder, Identity, PayloadValidatorBuilder, RethRpcAddOns,
         RpcAddOns, RpcHandle, RpcHooks,
     },
+    Node, NodeAdapter, NodeComponentsBuilder,
 };
 use reth_provider::EthStorage;
-use reth_rpc_eth_types::{EthApiError, error::FromEvmError};
+use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 
 use crate::{
-    AlpenEngineTypes, DaFeeRateHandle, consensus::AlpenConsensusBuilder,
-    engine::AlpenEngineValidatorBuilder, evm::AlpenExecutorBuilder, network::AlpenNetworkBuilder,
-    payload_builder::AlpenPayloadBuilderBuilder, pool::AlpenEthereumPoolBuilder,
+    consensus::AlpenConsensusBuilder, engine::AlpenEngineValidatorBuilder,
+    evm::AlpenExecutorBuilder, network::AlpenNetworkBuilder,
+    payload_builder::AlpenPayloadBuilderBuilder, pool::AlpenEthereumPoolBuilder, AlpenEngineTypes,
+    DaFeeRateHandle,
 };
 
 /// Which role the node plays on the network.
@@ -267,14 +268,14 @@ where
 impl<N, EthB, PVB, EB, EVB> NodeAddOns<N> for AlpenRethNodeAddOns<N, EthB, PVB, EB, EVB>
 where
     N: FullNodeComponents<
-            Types: NodeTypes<
-                ChainSpec = ChainSpec,
-                Primitives = EthPrimitives,
-                Storage = EthStorage,
-                Payload = AlpenEngineTypes,
-            >,
-            Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
+        Types: NodeTypes<
+            ChainSpec = ChainSpec,
+            Primitives = EthPrimitives,
+            Storage = EthStorage,
+            Payload = AlpenEngineTypes,
         >,
+        Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
+    >,
     EthB: EthApiBuilder<N>,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
@@ -294,14 +295,14 @@ where
 impl<N, EthB, PVB, EB, EVB> RethRpcAddOns<N> for AlpenRethNodeAddOns<N, EthB, PVB, EB, EVB>
 where
     N: FullNodeComponents<
-            Types: NodeTypes<
-                ChainSpec = ChainSpec,
-                Primitives = EthPrimitives,
-                Storage = EthStorage,
-                Payload = AlpenEngineTypes,
-            >,
-            Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
+        Types: NodeTypes<
+            ChainSpec = ChainSpec,
+            Primitives = EthPrimitives,
+            Storage = EthStorage,
+            Payload = AlpenEngineTypes,
         >,
+        Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
+    >,
     EthB: EthApiBuilder<N>,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,

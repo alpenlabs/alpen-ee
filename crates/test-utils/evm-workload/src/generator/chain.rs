@@ -4,32 +4,32 @@
 use std::{cell::Cell, sync::Arc};
 
 use alloy_eips::eip4895::{Withdrawal, Withdrawals};
-use alloy_primitives::{Address, B256, Bytes, U256, address};
+use alloy_primitives::{address, Address, Bytes, B256, U256};
 use alpen_exex::build_accessed_state;
 use alpen_params::{AlpenParams, AlpenSpecId, HeaderExtra};
 use alpen_primitives::GWEI_PER_SAT;
 use alpen_reth_evm::{base_fee::next_floored_base_fee, da_fee::DA_COVERAGE_CAPPED};
 use alpen_reth_node::{
-    BlockWitnessRecord, MultiSpecEvmConfig, build_block_witness_from_executed_state,
+    build_block_witness_from_executed_state, BlockWitnessRecord, MultiSpecEvmConfig,
 };
 use alpen_reth_statediff::BlockStateChanges;
 use alpen_witness::RangeWitnessExtractor;
 use evm2::evm::{CacheDB, Db};
-use eyre::{Context, bail};
+use eyre::{bail, Context};
 use reth_chainspec::ChainSpec;
 use reth_db_common::init::init_genesis_with_settings;
 use reth_evm::{
-    CommitChanges, ConfigureEvm, NextBlockEnvAttributes,
     database::StateProviderDatabase,
     execute::{BlockBuilder, BlockBuilderOutcome},
+    CommitChanges, ConfigureEvm, NextBlockEnvAttributes,
 };
 use reth_primitives_traits::SealedHeader;
 use reth_provider::{
+    providers::BlockchainProvider,
+    test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
     BlockWriter, ExecutionOutcome, HistoryWriter, OriginalValuesKnown, ProviderFactory,
     StageCheckpointWriter, StateProvider, StateWriteConfig, StateWriter, StorageSettings,
     TrieWriter,
-    providers::BlockchainProvider,
-    test_utils::{MockNodeTypesWithDB, create_test_provider_factory_with_chain_spec},
 };
 use strata_acct_types::Hash;
 

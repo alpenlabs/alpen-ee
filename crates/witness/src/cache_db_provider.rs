@@ -1,8 +1,8 @@
 use std::{cell::RefCell, collections::HashSet, fmt};
 
 use alloy_primitives::map::foldhash::HashMap;
-use evm2::{AccountInfo, bytecode::Bytecode, evm::Database};
-use reth_provider::{AccountReader, ProviderError, StateProvider, errors::db::DatabaseError};
+use evm2::{bytecode::Bytecode, evm::Database, AccountInfo};
+use reth_provider::{errors::db::DatabaseError, AccountReader, ProviderError, StateProvider};
 use revm_primitives::alloy_primitives::{Address, B256, U256};
 
 /// A single storage slot key.

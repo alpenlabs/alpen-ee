@@ -42,6 +42,7 @@ clap = { workspace = true, features = [
   "usage",
   "error-context",
 ], optional = true }
+evm2 = { workspace = true, optional = true }
 eyre = { workspace = true, optional = true }
 k256 = { workspace = true, optional = true }
 p256 = { workspace = true, optional = true }
@@ -49,7 +50,6 @@ rand_chacha = { workspace = true, optional = true }
 reth-chainspec = { workspace = true, optional = true }
 reth-db-common = { workspace = true, optional = true }
 reth-ethereum-primitives = { workspace = true, optional = true }
-evm2 = { workspace = true, optional = true }
 reth-evm = { workspace = true, optional = true }
 reth-primitives-traits = { workspace = true, optional = true }
 reth-provider = { workspace = true, features = ["test-utils"], optional = true }

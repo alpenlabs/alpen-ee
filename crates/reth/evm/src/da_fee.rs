@@ -275,7 +275,7 @@ pub fn bounded_da_fee(da_rate: U256, diff_size: u64, remaining_value: U256) -> U
 #[cfg(test)]
 mod tests {
     use revm::state::{Account, AccountInfo, Bytecode, EvmStorageSlot};
-    use revm_primitives::{Address, B256, Bytes, U256};
+    use revm_primitives::{Address, Bytes, B256, U256};
 
     use super::*;
 

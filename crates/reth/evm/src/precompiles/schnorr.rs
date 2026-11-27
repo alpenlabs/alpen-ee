@@ -1,8 +1,8 @@
 use evm2::{
-    Evm,
     interpreter::{GasTracker, Message},
     precompile::PrecompileOutput,
     precompiles::PrecompileResult,
+    Evm,
 };
 use revm::precompile::utilities::right_pad;
 use revm_primitives::Bytes;
@@ -69,7 +69,7 @@ fn verify_schnorr_precompile(
 #[cfg(test)]
 mod tests {
     use revm::precompile::PrecompileHalt;
-    use secp256k1::{Keypair, SECP256K1, SecretKey};
+    use secp256k1::{Keypair, SecretKey, SECP256K1};
     use strata_crypto::sign_schnorr_sig;
     use strata_primitives::buf::{Buf32, Buf64};
 

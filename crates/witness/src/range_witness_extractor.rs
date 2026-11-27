@@ -13,12 +13,13 @@ use std::{
 
 use alloy_consensus::Header;
 use alloy_primitives::{
-    Address, B256, U256, keccak256,
+    keccak256,
     map::{B256Set, DefaultHashBuilder, HashMap},
+    Address, B256, U256,
 };
 use alpen_evm_ee::EvmPartialState;
 use alpen_storage_api::AccessedStateStore;
-use eyre::{Result, eyre};
+use eyre::{eyre, Result};
 use reth_ethereum_primitives::Block;
 use reth_provider::{BlockReader, StateProvider, StateProviderFactory};
 use reth_trie::{HashedPostState, MultiProofTargets, TrieInput};

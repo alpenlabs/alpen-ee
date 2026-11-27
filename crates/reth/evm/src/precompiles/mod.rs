@@ -1,7 +1,7 @@
 use alpen_primitives::BRIDGEOUT_PRECOMPILE_ADDRESS;
 use evm2::{
-    Precompiles, SpecId,
     precompiles::{Precompile, PrecompileId},
+    Precompiles, SpecId,
 };
 use revm_primitives::Address;
 
@@ -42,13 +42,13 @@ mod tests {
     use alloy_consensus::Header;
     use alpen_params::{AlpenParams, AlpenSpecId, DEV_PARAMS_JSON};
     use evm2::{
-        Evm, PrecompileError, PrecompileHalt,
         evm::EmptyDB,
         interpreter::{GasTracker, Message},
         precompiles::PrecompileResult,
+        Evm, PrecompileError, PrecompileHalt,
     };
     use reth_evm::{BlockExecutorFactory, ConfigureEvm, EvmEnv};
-    use revm_primitives::{B256, hex};
+    use revm_primitives::{hex, B256};
 
     use super::*;
     use crate::config::AlpenEvmConfig;

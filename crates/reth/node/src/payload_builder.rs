@@ -4,11 +4,11 @@ use alloy_consensus::{Header, Transaction};
 use alloy_eips::eip4895::Withdrawals;
 use alpen_params::{FeeSpec, HeaderExtra};
 use alpen_primitives::{
-    BRIDGEOUT_PRECOMPILE_ADDRESS, WithdrawalIntent, extract_withdrawal_intents,
+    extract_withdrawal_intents, WithdrawalIntent, BRIDGEOUT_PRECOMPILE_ADDRESS,
 };
 use alpen_reth_evm::{
     base_fee::next_floored_base_fee,
-    da_fee::{DA_COVERAGE_CAPPED, constrain_next_da_rate},
+    da_fee::{constrain_next_da_rate, DA_COVERAGE_CAPPED},
 };
 use evm2::evm::{CacheDB, Db};
 use reth_basic_payload_builder::*;
@@ -17,18 +17,18 @@ use reth_errors::{BlockExecutionError, BlockValidationError};
 use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_ethereum_primitives::{EthPrimitives, Receipt, TransactionSigned};
 use reth_evm::{
-    CommitChanges, EvmEnv, NextBlockEnvAttributes,
     database::StateProviderDatabase,
     execute::{BlockBuilder, BlockBuilderOutcome},
+    CommitChanges, EvmEnv, NextBlockEnvAttributes,
 };
 use reth_node_api::{ConfigureEvm, FullNodeTypes, NodeTypes};
-use reth_node_builder::{BuilderContext, PayloadBuilderConfig, components::PayloadBuilderBuilder};
+use reth_node_builder::{components::PayloadBuilderBuilder, BuilderContext, PayloadBuilderConfig};
 use reth_payload_builder::{BlobSidecars, EthBuiltPayload, PayloadBuilderError};
 use reth_primitives_traits::transaction::error::InvalidTransactionError;
 use reth_provider::{HeaderProvider, StateProvider, StateProviderFactory};
 use reth_transaction_pool::{
-    BestTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
-    ValidPoolTransaction, error::InvalidPoolTransactionError,
+    error::InvalidPoolTransactionError, BestTransactions, BestTransactionsAttributes,
+    PoolTransaction, TransactionPool, ValidPoolTransaction,
 };
 use revm_primitives::U256;
 use tracing::{debug, info, trace, warn};
@@ -583,6 +583,7 @@ mod tests {
                 EthPayloadAttributes {
                     timestamp,
                     withdrawals: Some(Vec::new()),
+                    parent_beacon_block_root: Some(Default::default()),
                     ..Default::default()
                 },
                 AlpenSpecId::V1,
