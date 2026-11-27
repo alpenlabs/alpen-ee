@@ -5,6 +5,10 @@ edition = "2024"
 license.workspace = true
 repository.workspace = true
 
+[features]
+# Needed when native Reth providers enable reth-evm/std transitively.
+host = ["alpen-reth-evm/host"]
+
 [dependencies]
 # Alpen crates
 alpen-da-types.workspace = true

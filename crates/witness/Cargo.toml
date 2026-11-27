@@ -10,7 +10,7 @@ workspace = true
 
 [dependencies]
 # Internal
-alpen-evm-ee.workspace = true
+alpen-evm-ee = { workspace = true, features = ["host"] }
 alpen-storage-api.workspace = true
 strata-acct-types.workspace = true
 strata-codec.workspace = true
