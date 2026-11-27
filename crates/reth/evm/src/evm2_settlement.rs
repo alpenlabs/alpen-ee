@@ -5,7 +5,7 @@ use evm2::{
     evm::{
         config::BaseEvmConfigSelector,
         handler::{GasSettlement, TxHandlerHooks},
-        State,
+        DbResult, State,
     },
     registry::{handler, HandlerResult, TxRegistry},
     Evm, EvmFeatures, EvmTypesHost, SpecId, TxResult,
@@ -147,7 +147,7 @@ fn adjust_balance(
     state: &mut State<'_>,
     address: &Address,
     update: impl FnOnce(U256) -> Option<U256>,
-) -> evm2::evm::DbResult<()> {
+) -> DbResult<()> {
     let mut account = state.account(address)?;
     if let Some(balance) = update(account.balance()) {
         account.set_balance(balance);
@@ -158,7 +158,7 @@ fn adjust_balance(
 }
 
 /// Sizes the transaction-local overlay before finalization or the DA transfer.
-pub(crate) fn calc_overlay_diff_size(state: &mut State<'_>) -> evm2::evm::DbResult<u64> {
+pub(crate) fn calc_overlay_diff_size(state: &mut State<'_>) -> DbResult<u64> {
     let loaded: Vec<_> = state
         .loaded_accounts()
         .map(|(address, slots)| (*address, slots.copied().collect::<Vec<_>>()))
@@ -193,6 +193,7 @@ mod tests {
     use revm_primitives::TxKind;
 
     use super::*;
+    use crate::precompiles::create_precompiles;
 
     const SENDER: Address = Address::with_last_byte(0x77);
     const RECIPIENT: Address = Address::with_last_byte(0x78);
@@ -216,13 +217,7 @@ mod tests {
             ext: rate,
             ..Default::default()
         };
-        Evm::new(
-            spec,
-            block,
-            tx_registry(spec),
-            db,
-            crate::precompiles::create_precompiles(spec),
-        )
+        Evm::new(spec, block, tx_registry(spec), db, create_precompiles(spec))
     }
 
     fn tx(dynamic: bool) -> Recovered<TxEnvelope> {

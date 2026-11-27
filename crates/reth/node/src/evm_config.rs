@@ -328,7 +328,7 @@ mod tests {
     use reth_evm::{
         database::StateProviderDatabase,
         execute::{BlockAssembler, BlockAssemblerInput, BlockBuilder},
-        ConfigureEvm, EvmEnv, NextBlockEnvAttributes,
+        ConfigureEvm, NextBlockEnvAttributes,
     };
     use reth_primitives_traits::{Header, SealedHeader};
     use reth_storage_api::{noop::NoopProvider, StateProvider};

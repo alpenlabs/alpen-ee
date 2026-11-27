@@ -169,8 +169,8 @@ mod tests {
                 call(&mut evm, &precompiles, MODEXP_ADDRESS, &oversized_modexp)
                     .1
                     .err()
-                    .and_then(|err| match err {
-                        PrecompileError::Halt(halt) => Some(halt),
+                    .map(|err| match err {
+                        PrecompileError::Halt(halt) => halt,
                         err => panic!("unexpected precompile error: {err}"),
                     }),
                 expected

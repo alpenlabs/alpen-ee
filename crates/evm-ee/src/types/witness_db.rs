@@ -5,7 +5,10 @@
 
 use std::{cell::RefCell, collections::BTreeMap, fmt};
 
-use evm2::{bytecode::Bytecode as Evm2Bytecode, evm::AccountInfo as Evm2AccountInfo};
+use evm2::{
+    bytecode::Bytecode as Evm2Bytecode,
+    evm::{AccountInfo as Evm2AccountInfo, Database as Evm2Database},
+};
 use reth_errors::ProviderError;
 use reth_trie_common::TrieAccount;
 use revm::{
@@ -169,7 +172,7 @@ impl WitnessDB<'_> {
     }
 }
 
-impl evm2::evm::Database for WitnessDB<'_> {
+impl Evm2Database for WitnessDB<'_> {
     type Error = ProviderError;
 
     fn is_fatal(_error: &Self::Error) -> bool {

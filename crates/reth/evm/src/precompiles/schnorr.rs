@@ -5,6 +5,8 @@ use evm2::{
     Evm,
 };
 use revm::precompile::utilities::right_pad;
+#[cfg(test)]
+use revm::precompile::EthPrecompileResult;
 use revm_primitives::Bytes;
 use strata_crypto::schnorr::verify_schnorr_sig;
 use strata_primitives::buf::{Buf32, Buf64};
@@ -52,10 +54,7 @@ fn verify_schnorr(input: &[u8]) -> Bytes {
 }
 
 #[cfg(test)]
-fn verify_schnorr_precompile(
-    input: &[u8],
-    gas_limit: u64,
-) -> revm::precompile::EthPrecompileResult {
+fn verify_schnorr_precompile(input: &[u8], gas_limit: u64) -> EthPrecompileResult {
     use revm::precompile::{EthPrecompileOutput, PrecompileHalt};
     if SCHNORR_VERIFY_GAS > gas_limit {
         return Err(PrecompileHalt::OutOfGas);
