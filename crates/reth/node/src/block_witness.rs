@@ -67,13 +67,12 @@ impl BlockWitnessRecord {
 /// Harvests the raw depth-0 witness parts from an already-executed block state,
 /// with **no re-execution**.
 ///
-/// Reads the access set directly out of the `executed_state` produced while the
-/// block was built — the live reth [`State`] right after `BlockBuilder::finish`.
-/// Reusing that state is the whole point of inline capture: the single
-/// production execution both commits state and yields its access set.
+/// Combine the [`CacheDB`] reads recorded while building the block with the
+/// committed [`BundleState`] from `BlockBuilder::finish`. The single production
+/// execution both commits state and yields its access set.
 ///
-/// `executed_state` supplies the access set (touched accounts/slots, loaded
-/// `codes`, BLOCKHASH range) via reth's [`ExecutionWitnessRecord`].
+/// Reth's [`ExecutionWitnessRecord`] combines the touched accounts and slots,
+/// loaded code, and BLOCKHASH accesses with the committed changes.
 /// `state_provider` must be the parent state (it serves the depth-0
 /// [`StateProofProvider::witness`] trie nodes and the pre-state code of
 /// accounts whose code changed in the block), and `header_provider` must cover
