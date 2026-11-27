@@ -10,6 +10,7 @@ mod execution;
 mod types;
 mod utils;
 
+pub use codec_shims::{decode_ethereum_state, encode_ethereum_state};
 pub use errors::EvmEnvError;
 pub use execution::EvmExecutionEnvironment;
 pub use types::{EvmBlock, EvmHeader, EvmPartialState, EvmWriteBatch};
