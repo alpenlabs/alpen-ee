@@ -1,9 +1,10 @@
 //! EVM write batch implementation.
 
 use alloy_consensus::Header;
+use alloy_primitives::{keccak256, map::B256Set};
+use evm2::block::BundleState;
 use reth_primitives_traits::SealedHeader;
-use reth_trie::{HashedPostState, KeccakKeyHasher};
-use revm::database::BundleState;
+use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 use strata_codec::{Codec, CodecError};
 
 use crate::codec_shims::{
@@ -20,6 +21,7 @@ use crate::codec_shims::{
 #[derive(Clone, Debug)]
 pub struct EvmWriteBatch {
     hashed_post_state: HashedPostState,
+    wiped_storage: B256Set,
     header: SealedHeader<Header>,
 }
 
@@ -28,6 +30,7 @@ impl EvmWriteBatch {
     pub fn new(hashed_post_state: HashedPostState, header: SealedHeader<Header>) -> Self {
         Self {
             hashed_post_state,
+            wiped_storage: B256Set::default(),
             header,
         }
     }
@@ -35,10 +38,20 @@ impl EvmWriteBatch {
     /// Creates the write batch of a block's execution from the state changes
     /// it made.
     pub fn from_bundle_state(state: &BundleState, header: SealedHeader<Header>) -> Self {
-        Self::new(
+        let mut batch = Self::new(
             HashedPostState::from_bundle_state::<KeccakKeyHasher>(&state.state),
             header,
-        )
+        );
+        // Reth 2.11 tracks the wipe in BundleState, not in HashedStorage.
+        // Keep the old wire flag for surviving accounts and retain empty wipe entries.
+        for (address, account) in &state.state {
+            if account.was_destroyed() && account.info.is_some() {
+                let hashed = keccak256(address);
+                batch.wiped_storage.insert(hashed);
+                batch.hashed_post_state.storages.entry(hashed).or_default();
+            }
+        }
+        batch
     }
 
     /// Gets the header of the block that made these changes.
@@ -51,6 +64,10 @@ impl EvmWriteBatch {
         &self.hashed_post_state
     }
 
+    pub(crate) const fn wiped_storage(&self) -> &B256Set {
+        &self.wiped_storage
+    }
+
     /// Consumes self and returns the underlying HashedPostState.
     pub fn into_hashed_post_state(self) -> HashedPostState {
         self.hashed_post_state
@@ -59,16 +76,17 @@ impl EvmWriteBatch {
 
 impl Codec for EvmWriteBatch {
     fn encode(&self, enc: &mut impl strata_codec::Encoder) -> Result<(), CodecError> {
-        encode_hashed_post_state(&self.hashed_post_state, enc)?;
+        encode_hashed_post_state(&self.hashed_post_state, &self.wiped_storage, enc)?;
         encode_rlp_with_length(self.header.header(), enc)
     }
 
     fn decode(dec: &mut impl strata_codec::Decoder) -> Result<Self, CodecError> {
-        let hashed_post_state = decode_hashed_post_state(dec)?;
+        let (hashed_post_state, wiped_storage) = decode_hashed_post_state(dec)?;
         let header = decode_rlp_with_length(dec)?;
-        Ok(Self::new(
+        Ok(Self {
             hashed_post_state,
-            SealedHeader::new_unhashed(header),
-        ))
+            wiped_storage,
+            header: SealedHeader::new_unhashed(header),
+        })
     }
 }

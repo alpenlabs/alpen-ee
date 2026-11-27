@@ -76,7 +76,7 @@ impl ExecutionEngine for AlpenRethExecEngine {
                 let block = payload.block();
                 let payload_status = self
                     .beacon_engine_handle
-                    .new_payload(AlpenEngineTypes::block_to_payload(block.to_owned()))
+                    .new_payload(AlpenEngineTypes::block_to_payload(block.to_owned(), None))
                     .await
                     .map_err(|e| ExecutionEngineError::payload_submission(e.to_string()))?;
                 log_new_payload_status(block.hash(), block.number, &payload_status);

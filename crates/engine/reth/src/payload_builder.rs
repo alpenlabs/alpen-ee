@@ -141,6 +141,7 @@ impl AlpenRethPayloadEngine {
                 suggested_fee_recipient: self.beneficiary_address,
                 withdrawals: Some(withdrawals),
                 slot_number: None,
+                target_gas_limit: None,
             },
             build_attrs.spec_version(),
         );
@@ -158,8 +159,7 @@ impl AlpenRethPayloadEngine {
                 .send_new_payload(BuildNewPayload {
                     attributes: payload_attrs.clone(),
                     parent_hash: parent,
-                    cache: None,
-                    trie_handle: None,
+                    resources: Default::default(),
                 })
                 .await
             {

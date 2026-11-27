@@ -10,7 +10,8 @@
 use std::{collections::BTreeMap, io};
 
 use alloy_consensus::constants::EMPTY_ROOT_HASH;
-use reth_trie::{HashedPostState, TrieAccount};
+use alloy_primitives::map::B256Set;
+use reth_trie_common::{HashedPostState, TrieAccount};
 use revm_primitives::{B256, HashMap as RevmHashMap};
 use rsp_mpt::{EthereumState, MptNode};
 use strata_codec::{Codec, CodecError, Varint};
@@ -232,6 +233,7 @@ fn validate_storage_tries(state: &EthereumState) -> Result<(), CodecError> {
 /// by key before encoding to ensure deterministic iteration order.
 pub(crate) fn encode_hashed_post_state(
     state: &HashedPostState,
+    wiped_storage: &B256Set,
     enc: &mut impl strata_codec::Encoder,
 ) -> Result<(), CodecError> {
     // Sort accounts by key for deterministic encoding
@@ -272,7 +274,7 @@ pub(crate) fn encode_hashed_post_state(
         enc.write_buf(address_hash.as_slice())?;
 
         // Encode HashedStorage
-        hashed_storage.wiped.encode(enc)?;
+        wiped_storage.contains(address_hash).encode(enc)?;
 
         // Sort storage slots by key
         let sorted_storage_slots: BTreeMap<_, _> = hashed_storage.storage.iter().collect();
@@ -290,13 +292,14 @@ pub(crate) fn encode_hashed_post_state(
 /// Decodes HashedPostState.
 pub(crate) fn decode_hashed_post_state(
     dec: &mut impl strata_codec::Decoder,
-) -> Result<HashedPostState, CodecError> {
+) -> Result<(HashedPostState, B256Set), CodecError> {
     use reth_primitives_traits::Account;
-    use reth_trie::HashedStorage;
+    use reth_trie_common::HashedStorage;
     use revm_primitives::U256;
 
     // Start with empty HashedPostState
     let mut state = HashedPostState::default();
+    let mut wiped_storage = B256Set::default();
 
     // Decode accounts
     let accounts_count = u32::decode(dec)? as usize;
@@ -360,18 +363,20 @@ pub(crate) fn decode_hashed_post_state(
             hashed_storage.storage.insert(slot_hash, value);
         }
 
-        hashed_storage.wiped = wiped;
+        if wiped {
+            wiped_storage.insert(address_hash);
+        }
         state.storages.insert(address_hash, hashed_storage);
     }
 
-    Ok(state)
+    Ok((state, wiped_storage))
 }
 
 #[cfg(test)]
 mod tests {
     use alloy_rpc_types_debug::ExecutionWitness;
     use reth_primitives_traits::Account;
-    use reth_trie::HashedStorage;
+    use reth_trie_common::HashedStorage;
     use revm_primitives::{Address, Bytes, U256, keccak256};
 
     use super::*;
@@ -433,7 +438,7 @@ mod tests {
                 }),
             );
 
-            let mut storage = HashedStorage::new(false);
+            let mut storage = HashedStorage::default();
             storage
                 .storage
                 .insert(keccak256([byte; 32]), U256::from(byte));

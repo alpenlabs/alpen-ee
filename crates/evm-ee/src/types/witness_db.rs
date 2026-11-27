@@ -5,10 +5,13 @@
 
 use std::{cell::RefCell, collections::BTreeMap, fmt};
 
+use evm2::{
+    bytecode::Bytecode as Evm2Bytecode,
+    evm::{AccountInfo as Evm2AccountInfo, Database as Evm2Database},
+};
 use reth_errors::ProviderError;
-use reth_trie::TrieAccount;
+use reth_trie_common::TrieAccount;
 use revm::{
-    DatabaseRef,
     primitives::{Address, B256, U256, keccak256},
     state::{AccountInfo, Bytecode},
 };
@@ -70,10 +73,8 @@ impl<'a> WitnessDB<'a> {
     }
 }
 
-impl<'a> DatabaseRef for WitnessDB<'a> {
-    type Error = ProviderError;
-
-    fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+impl WitnessDB<'_> {
+    fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, ProviderError> {
         // Check if address hash is cached, otherwise compute and cache it
         let hashed_address = {
             let cache = self.address_hash_cache.borrow();
@@ -108,18 +109,7 @@ impl<'a> DatabaseRef for WitnessDB<'a> {
         Ok(account)
     }
 
-    fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        // Look up bytecode by hash and clone it (required by DatabaseRef trait)
-        // This clone is unavoidable as the trait requires returning owned Bytecode,
-        // but it happens only once per unique bytecode during execution (EVM caches it)
-        Ok(self
-            .bytecodes
-            .get(&code_hash)
-            .cloned()
-            .expect("Bytecode must be present in witness"))
-    }
-
-    fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
+    fn storage_ref(&self, address: Address, index: U256) -> Result<U256, ProviderError> {
         // Check if address hash is cached, otherwise compute and cache it
         let hashed_address = {
             let cache = self.address_hash_cache.borrow();
@@ -169,7 +159,7 @@ impl<'a> DatabaseRef for WitnessDB<'a> {
             .unwrap_or_default())
     }
 
-    fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
+    pub(crate) fn block_hash_ref(&self, number: u64) -> Result<B256, ProviderError> {
         // Fail rather than defaulting to zero. The EVM only asks for numbers
         // it is prepared to use (revm returns zero for out-of-range ones
         // without consulting the database), so a missing entry means the
@@ -179,5 +169,40 @@ impl<'a> DatabaseRef for WitnessDB<'a> {
             .get(&number)
             .copied()
             .ok_or(ProviderError::HeaderNotFound(number.into()))
+    }
+}
+
+impl Evm2Database for WitnessDB<'_> {
+    type Error = ProviderError;
+
+    fn is_fatal(_error: &Self::Error) -> bool {
+        // The backing input is the supplied witness, not a node database.
+        false
+    }
+
+    fn get_account(&mut self, address: &Address) -> Result<Option<Evm2AccountInfo>, ProviderError> {
+        Ok(self.basic_ref(*address)?.map(|account| {
+            Evm2AccountInfo::new(account.balance, account.nonce, account.code_hash, None)
+        }))
+    }
+
+    fn get_code_by_hash(&mut self, code_hash: &B256) -> Result<Evm2Bytecode, ProviderError> {
+        let code = self.bytecodes.get(code_hash).ok_or_else(|| {
+            ProviderError::TrieWitnessError(format!("missing bytecode {code_hash}"))
+        })?;
+        Evm2Bytecode::new_raw_checked(code.original_bytes()).map_err(|err| {
+            ProviderError::TrieWitnessError(format!("invalid bytecode {code_hash}: {err}"))
+        })
+    }
+
+    fn get_storage(&mut self, address: &Address, key: &U256) -> Result<U256, ProviderError> {
+        self.storage_ref(*address, *key)
+    }
+
+    fn get_block_hash(&mut self, number: &U256) -> Result<B256, ProviderError> {
+        let number: u64 = (*number).try_into().map_err(|_| {
+            ProviderError::TrieWitnessError(format!("out-of-range block number {number}"))
+        })?;
+        self.block_hash_ref(number)
     }
 }

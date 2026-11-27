@@ -14,8 +14,8 @@
 //! input wrong, this crate returns the default backend's result instead (see
 //! `MAP_FP2_TO_G2_OF_ZERO`). `tests/differential.rs` checks the agreement.
 //!
-//! [`install`] registers the backend with revm. It must run before the
-//! first precompile call of the process; revm keeps the first backend
+//! [`install`] registers the backend with evm2 and the legacy REVM test path. It must run before
+//! the first precompile call of the process; revm keeps the first backend
 //! installed.
 //!
 //! Encodings follow EIP-2537: field elements are 48-byte big-endian and
@@ -51,7 +51,9 @@ pub struct Bls12381Crypto;
 /// Returns `false` when a backend was already installed, in which case the
 /// earlier one stays. Call it at program start, before any EVM execution.
 pub fn install() -> bool {
-    install_crypto(Bls12381Crypto)
+    let installed = evm2::install_crypto(Bls12381Crypto);
+    install_crypto(Bls12381Crypto);
+    installed
 }
 
 impl Crypto for Bls12381Crypto {
@@ -132,6 +134,80 @@ impl Crypto for Bls12381Crypto {
         }
         let point = G2Projective::map_to_curve(&fp2).clear_h();
         Ok(encode_g2(&G2Affine::from(point)))
+    }
+}
+
+// Both engines use the same point representation. Keep the proven arithmetic shared.
+fn evm2_halt(error: PrecompileHalt) -> evm2::PrecompileHalt {
+    use evm2::PrecompileHalt as Out;
+    match error {
+        PrecompileHalt::Bls12381G1NotInSubgroup => Out::Bls12381G1NotInSubgroup,
+        PrecompileHalt::Bls12381G1NotOnCurve => Out::Bls12381G1NotOnCurve,
+        PrecompileHalt::Bls12381G2NotInSubgroup => Out::Bls12381G2NotInSubgroup,
+        PrecompileHalt::Bls12381G2NotOnCurve => Out::Bls12381G2NotOnCurve,
+        _ => Out::NonCanonicalFp,
+    }
+}
+
+impl evm2::Crypto for Bls12381Crypto {
+    fn bls12_381_g1_add(&self, a: G1Point, b: G1Point) -> Result<[u8; 96], evm2::PrecompileHalt> {
+        Crypto::bls12_381_g1_add(self, a, b).map_err(evm2_halt)
+    }
+
+    fn bls12_381_g1_msm(
+        &self,
+        pairs: &mut dyn Iterator<Item = Result<G1PointScalar, evm2::PrecompileHalt>>,
+    ) -> Result<[u8; 96], evm2::PrecompileHalt> {
+        let mut error = None;
+        let result = Crypto::bls12_381_g1_msm(
+            self,
+            &mut pairs.map(|pair| {
+                pair.map_err(|halt| {
+                    error = Some(halt);
+                    PrecompileHalt::NonCanonicalFp
+                })
+            }),
+        );
+        result.map_err(|halt| error.unwrap_or_else(|| evm2_halt(halt)))
+    }
+
+    fn bls12_381_g2_add(&self, a: G2Point, b: G2Point) -> Result<[u8; 192], evm2::PrecompileHalt> {
+        Crypto::bls12_381_g2_add(self, a, b).map_err(evm2_halt)
+    }
+
+    fn bls12_381_g2_msm(
+        &self,
+        pairs: &mut dyn Iterator<Item = Result<G2PointScalar, evm2::PrecompileHalt>>,
+    ) -> Result<[u8; 192], evm2::PrecompileHalt> {
+        let mut error = None;
+        let result = Crypto::bls12_381_g2_msm(
+            self,
+            &mut pairs.map(|pair| {
+                pair.map_err(|halt| {
+                    error = Some(halt);
+                    PrecompileHalt::NonCanonicalFp
+                })
+            }),
+        );
+        result.map_err(|halt| error.unwrap_or_else(|| evm2_halt(halt)))
+    }
+
+    fn bls12_381_pairing_check(
+        &self,
+        pairs: &[(G1Point, G2Point)],
+    ) -> Result<bool, evm2::PrecompileHalt> {
+        Crypto::bls12_381_pairing_check(self, pairs).map_err(evm2_halt)
+    }
+
+    fn bls12_381_fp_to_g1(&self, fp: &[u8; 48]) -> Result<[u8; 96], evm2::PrecompileHalt> {
+        Crypto::bls12_381_fp_to_g1(self, fp).map_err(evm2_halt)
+    }
+
+    fn bls12_381_fp2_to_g2(
+        &self,
+        fp2: ([u8; 48], [u8; 48]),
+    ) -> Result<[u8; 192], evm2::PrecompileHalt> {
+        Crypto::bls12_381_fp2_to_g2(self, fp2).map_err(evm2_halt)
     }
 }
 

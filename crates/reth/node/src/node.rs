@@ -7,7 +7,7 @@ use alpen_reth_rpc::{
 };
 use reth_chainspec::ChainSpec;
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::{ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes};
+use reth_evm::{ConfigureEvm, NextBlockEnvAttributes};
 use reth_node_api::{FullNodeComponents, NodeAddOns};
 use reth_node_builder::{
     components::{BasicPayloadServiceBuilder, ComponentsBuilder},
@@ -21,7 +21,6 @@ use reth_node_builder::{
 };
 use reth_provider::EthStorage;
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
-use revm::context::TxEnv;
 
 use crate::{
     consensus::AlpenConsensusBuilder, engine::AlpenEngineValidatorBuilder,
@@ -282,7 +281,6 @@ where
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
-    EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
 {
     type Handle = RpcHandle<N, EthB::EthApi>;
 
@@ -310,7 +308,6 @@ where
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
-    EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
 {
     type EthApi = EthB::EthApi;
 
@@ -333,7 +330,6 @@ where
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
-    EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
 {
     type ValidatorBuilder = EVB;
 

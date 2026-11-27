@@ -17,7 +17,8 @@ strata-primitives.workspace = true
 
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
-alloy-rpc-types-engine.workspace = true
+alloy-rpc-types-engine = { workspace = true, optional = true }
+evm2.workspace = true
 reth-chainspec.workspace = true
 reth-consensus.workspace = true
 reth-consensus-common.workspace = true
@@ -36,3 +37,7 @@ secp256k1.workspace = true
 strata-crypto.workspace = true
 strata-ol-bridge-types.workspace = true
 serde_json.workspace = true
+
+[features]
+default = []
+host = ["dep:alloy-rpc-types-engine", "reth-evm/std", "reth-evm-ethereum/std"]

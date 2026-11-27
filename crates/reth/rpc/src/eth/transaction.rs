@@ -2,7 +2,6 @@
 
 use std::time::Duration;
 
-use alloy_consensus::transaction::Recovered;
 use alloy_eips::eip2718::WithEncoded;
 use alloy_primitives::{Bytes, B256};
 use reth_rpc_eth_api::{
@@ -11,7 +10,8 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_transaction_pool::{
-    AddedTransactionOutcome, PoolPooledTx, PoolTransaction, TransactionOrigin, TransactionPool,
+    AddedTransactionOutcome, PoolPooledTx, PoolTransaction, PoolTx, TransactionOrigin,
+    TransactionPool,
 };
 
 use crate::{AlpenEthApi, SequencerClient, StrataNodeCore};
@@ -38,13 +38,12 @@ where
     /// unreachable sequencer still returns a hash. A pool rejection returns an
     /// error even though the sequencer already has the transaction and may
     /// well include it.
-    async fn send_transaction(
+    async fn send_pool_transaction(
         &self,
         origin: TransactionOrigin,
-        tx: WithEncoded<Recovered<PoolPooledTx<Self::Pool>>>,
+        tx: WithEncoded<PoolTx<Self::Pool>>,
     ) -> Result<B256, Self::Error> {
-        let (tx, recovered) = tx.split();
-        let pool_transaction = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
+        let (tx, pool_transaction) = tx.split();
 
         // Forward before validating anything past the signature. The sequencer runs its own
         // checks on what it receives, and it is the only node whose pool decides inclusion.

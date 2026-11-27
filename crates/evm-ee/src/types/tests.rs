@@ -9,8 +9,8 @@ use alpen_da_types::EvmHeaderSummary;
 use alpen_params::{AlpenSpecId, HeaderExtra};
 use reth_ethereum_primitives::Block;
 use reth_primitives_traits::{Account, SealedHeader};
-use reth_trie::{HashedPostState, HashedStorage, TrieAccount};
-use revm::{DatabaseRef, state::Bytecode};
+use reth_trie_common::{HashedPostState, HashedStorage, TrieAccount};
+use revm::state::Bytecode;
 use revm_primitives::alloy_primitives::{Address, B256, Bloom, Bytes, U256, keccak256};
 use rsp_client_executor::io::EthClientExecutorInput;
 use rsp_mpt::EthereumState;
@@ -378,7 +378,7 @@ fn test_evm_partial_state_codec_roundtrip_execution() {
 
 #[test]
 fn test_evm_write_batch_codec_roundtrip() {
-    use reth_trie::HashedPostState;
+    use reth_trie_common::HashedPostState;
 
     use super::EvmWriteBatch;
 
@@ -421,7 +421,7 @@ fn single_account_state(address: Address, slot: Option<(U256, U256)>) -> Ethereu
     );
 
     if let Some((key, value)) = slot {
-        let mut storage = HashedStorage::new(false);
+        let mut storage = HashedStorage::default();
         storage
             .storage
             .insert(keccak256(key.to_be_bytes::<32>()), value);
@@ -607,4 +607,37 @@ fn test_merge_write_batch_preserves_untouched_storage() {
         account_storage_root(partial_state.ethereum_state(), hashed_address),
         storage_root
     );
+}
+
+#[test]
+fn test_write_batch_roundtrip_keeps_empty_storage_wipe() {
+    use evm2::{
+        AccountInfo,
+        block::bundle_state::{AccountStatus, BundleAccount, BundleState},
+    };
+    let address = Address::with_last_byte(0x44);
+    let mut bundle = BundleState::default();
+    bundle.state.insert(
+        address,
+        BundleAccount::new(
+            Some(AccountInfo::empty()),
+            Some(AccountInfo::empty()),
+            Default::default(),
+            AccountStatus::DestroyedChanged,
+        ),
+    );
+    let batch =
+        EvmWriteBatch::from_bundle_state(&bundle, SealedHeader::new_unhashed(Header::default()));
+    let encoded = encode_to_vec(&batch).unwrap();
+    let decoded: EvmWriteBatch = decode_buf_exact(&encoded).unwrap();
+    assert!(decoded.wiped_storage().contains(&keccak256(address)));
+    assert!(
+        decoded
+            .hashed_post_state()
+            .storages
+            .get(&keccak256(address))
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(encode_to_vec(&decoded).unwrap(), encoded);
 }

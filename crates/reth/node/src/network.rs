@@ -135,15 +135,21 @@ fn isolate_discovery<C, N: NetworkPrimitives>(
 /// RLPx port is free on UDP. geth also runs discovery on its RLPx port by
 /// default.
 ///
-/// Reth can't tell a port left at its default from one set to the same value,
-/// so an explicit `--discovery.v5.port` equal to reth's default moves too.
+/// Reth's parsed args use `Some(default_port)` even when the flag is absent.
+/// As before, an explicit override equal to the upstream default also moves.
 fn discv5_on_rlpx_port(discovery: &DiscoveryArgs, rlpx_port: u16) -> DiscoveryArgs {
     let mut discovery = discovery.clone();
-    if discovery.discv5_port == DEFAULT_DISCOVERY_V5_PORT {
-        discovery.discv5_port = rlpx_port;
+    if discovery
+        .discv5_port
+        .is_none_or(|port| port == DEFAULT_DISCOVERY_V5_PORT)
+    {
+        discovery.discv5_port = Some(rlpx_port);
     }
-    if discovery.discv5_port_ipv6 == DEFAULT_DISCOVERY_V5_PORT {
-        discovery.discv5_port_ipv6 = rlpx_port;
+    if discovery
+        .discv5_port_ipv6
+        .is_none_or(|port| port == DEFAULT_DISCOVERY_V5_PORT)
+    {
+        discovery.discv5_port_ipv6 = Some(rlpx_port);
     }
     discovery
 }
@@ -355,7 +361,7 @@ mod tests {
     #[tokio::test]
     async fn isolate_discovery_keeps_an_explicit_discv5_port() {
         let mut args = NetworkArgs::default();
-        args.discovery.discv5_port = 9300;
+        args.discovery.discv5_port = Some(9300);
         let mut config = isolate_discovery(stock_config(&args, true), &args);
 
         let discv5 = config
@@ -475,7 +481,7 @@ mod tests {
 
         let node = start(|port| {
             let mut args = args.clone();
-            args.discovery.discv5_port = port;
+            args.discovery.discv5_port = Some(port);
             let config = isolate_discovery(stock_config(&args, true), &args);
             config.discovery_v5_config.expect("discv5 stays on")
         })

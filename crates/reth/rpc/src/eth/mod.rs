@@ -21,19 +21,20 @@ use alloy_rpc_types_eth::BlockId;
 use reth_chainspec::{EthereumHardforks, Hardforks};
 use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes};
-use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
+use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx, RpcNodeCoreFor};
 use reth_provider::{BlockReader, ChainSpecProvider, ProviderHeader};
 use reth_rpc::{eth::core::EthApiInner, RpcTypes};
 use reth_rpc_eth_api::{
     helpers::{
-        pending_block::BuildPendingEnv, EthApiSpec, EthFees, EthState, GetBlockAccessList, LoadFee,
-        LoadPendingBlock, LoadState, SpawnBlocking, Trace,
+        pending_block::BuildPendingEnv, EthApiSpec, EthFees, EthState, EthSubscriptions,
+        GetBlockAccessList, LoadFee, LoadPendingBlock, LoadState, SpawnBlocking, Trace,
     },
     EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcConverter, RpcNodeCore,
     RpcNodeCoreExt,
 };
 use reth_rpc_eth_types::{
-    receipt::EthReceiptConverter, EthApiError, EthStateCache, FeeHistoryCache, GasPriceOracle,
+    receipt::EthReceiptConverter, EthApiError, EthApiSettings, EthStateCache, FeeHistoryCache,
+    GasPriceOracle,
 };
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
@@ -116,6 +117,13 @@ fn sample_live_da_fee_rate(
         .flatten()
 }
 
+impl<N, Rpc> EthSubscriptions for AlpenEthApi<N, Rpc>
+where
+    N: RpcNodeCore,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError>,
+{
+}
+
 impl<N, Rpc> EthApiTypes for AlpenEthApi<N, Rpc>
 where
     N: RpcNodeCore,
@@ -124,6 +132,10 @@ where
     type Error = EthApiError;
     type NetworkTypes = Rpc::Network;
     type RpcConvert = Rpc;
+
+    fn eth_api_settings(&self) -> &EthApiSettings {
+        self.inner.eth_api.eth_api_settings()
+    }
 
     fn converter(&self) -> &Self::RpcConvert {
         self.inner.eth_api.converter()
@@ -383,10 +395,10 @@ where
     >,
     NetworkT: RpcTypes,
     AlpenRpcConvert<N, NetworkT>: RpcConvert<Network = NetworkT>,
-    AlpenEthApi<N, AlpenRpcConvert<N, NetworkT>>:
+    AlpenEthApi<RpcNodeCoreFor<N>, AlpenRpcConvert<N, NetworkT>>:
         FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
 {
-    type EthApi = AlpenEthApi<N, AlpenRpcConvert<N, NetworkT>>;
+    type EthApi = AlpenEthApi<RpcNodeCoreFor<N>, AlpenRpcConvert<N, NetworkT>>;
 
     async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
         let Self {

@@ -21,6 +21,7 @@ use std::sync::Arc;
 
 use alloy_consensus::BlockHeader as _;
 use alpen_params::{HeaderExtra, HeaderExtraError};
+use evm2::block::BlockExecutionResult;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator, ReceiptRootBloom};
 use reth_consensus_common::validation::{
@@ -29,8 +30,8 @@ use reth_consensus_common::validation::{
 };
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_primitives::{Block, BlockBody, EthPrimitives, Receipt};
-use reth_evm::block::BlockExecutionResult;
 use reth_primitives_traits::{GotExpected, Header, RecoveredBlock, SealedBlock, SealedHeader};
+use revm_primitives::B256;
 
 use crate::{base_fee::expected_floored_base_fee, da_fee::validate_da_rate_against_parent};
 
@@ -179,12 +180,14 @@ impl FullConsensus<EthPrimitives> for FlooredConsensus {
         block: &RecoveredBlock<Block>,
         result: &BlockExecutionResult<Receipt>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
+        block_access_list_hash: Option<B256>,
     ) -> Result<(), ConsensusError> {
         <EthBeaconConsensus<ChainSpec> as FullConsensus<EthPrimitives>>::validate_block_post_execution(
             &self.inner,
             block,
             result,
             receipt_root_bloom,
+            block_access_list_hash,
         )
     }
 }

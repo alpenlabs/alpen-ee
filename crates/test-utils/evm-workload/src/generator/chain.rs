@@ -1,40 +1,36 @@
 //! A dev chain on a throwaway reth database, built the way the sequencer
 //! builds blocks.
 
-use std::{
-    cell::Cell,
-    sync::{atomic::Ordering, Arc},
-};
+use std::{cell::Cell, sync::Arc};
 
 use alloy_eips::eip4895::{Withdrawal, Withdrawals};
-use alloy_primitives::{address, Address, Bytes, B256};
+use alloy_primitives::{address, Address, Bytes, B256, U256};
 use alpen_exex::build_accessed_state;
 use alpen_params::{AlpenParams, AlpenSpecId, HeaderExtra};
 use alpen_primitives::GWEI_PER_SAT;
-use alpen_reth_evm::{
-    base_fee::next_floored_base_fee,
-    da_fee::{DA_COVERAGE_CAPPED, DA_COVERAGE_UNKNOWN},
-};
+use alpen_reth_evm::{base_fee::next_floored_base_fee, da_fee::DA_COVERAGE_CAPPED};
 use alpen_reth_node::{
     build_block_witness_from_executed_state, BlockWitnessRecord, MultiSpecEvmConfig,
 };
 use alpen_reth_statediff::BlockStateChanges;
 use alpen_witness::RangeWitnessExtractor;
+use evm2::evm::{CacheDB, Db};
 use eyre::{bail, Context};
 use reth_chainspec::ChainSpec;
 use reth_db_common::init::init_genesis_with_settings;
 use reth_evm::{
+    database::StateProviderDatabase,
     execute::{BlockBuilder, BlockBuilderOutcome},
-    ConfigureEvm, NextBlockEnvAttributes,
+    CommitChanges, ConfigureEvm, NextBlockEnvAttributes,
 };
 use reth_primitives_traits::SealedHeader;
 use reth_provider::{
     providers::BlockchainProvider,
     test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
     BlockWriter, ExecutionOutcome, HistoryWriter, OriginalValuesKnown, ProviderFactory,
-    StageCheckpointWriter, StateWriteConfig, StateWriter, StorageSettings, TrieWriter,
+    StageCheckpointWriter, StateProvider, StateWriteConfig, StateWriter, StorageSettings,
+    TrieWriter,
 };
-use reth_revm::{database::StateProviderDatabase, db::State};
 use strata_acct_types::Hash;
 
 use super::{accounts::SignedTx, store::MemAccessedStateStore};
@@ -123,10 +119,8 @@ impl DevChain {
         deposits: &[(Address, u64)],
     ) -> eyre::Result<BuiltBlock> {
         let state_provider = self.factory.latest()?;
-        let mut db = State::builder()
-            .with_database(StateProviderDatabase::new(&state_provider))
-            .with_bundle_update()
-            .build();
+        let db = StateProviderDatabase::new((&state_provider).into_evm_state_provider());
+        let mut db = CacheDB::new(Db::new(db));
 
         let withdrawals = deposits
             .iter()
@@ -162,29 +156,34 @@ impl DevChain {
             timestamp,
             self.base_fee_floor,
         ) {
-            evm_env.block_env.basefee = base_fee;
+            evm_env.block.basefee = U256::from(base_fee);
         }
 
-        let evm = self.evm_config.evm_with_env(&mut db, evm_env);
+        let evm = self.evm_config.evm_with_env(&mut db, evm_env.clone());
         let ctx = self.evm_config.context_for_next_block_with(
             &self.parent,
             attributes,
             HeaderExtra::new(SPEC_VERSION, DA_RATE),
         )?;
-        let mut builder = self.evm_config.create_block_builder(evm, &self.parent, ctx);
-        let da_report = builder.evm().da_report_handle();
+        let mut builder = self
+            .evm_config
+            .create_block_builder(evm, evm_env, &self.parent, ctx);
         builder.apply_pre_execution_changes()?;
 
         let mut outcomes = Vec::with_capacity(txs.len());
         for (index, tx) in txs.into_iter().enumerate() {
-            da_report.store(DA_COVERAGE_UNKNOWN, Ordering::Relaxed);
             let success = Cell::new(false);
             let output = Cell::new(Bytes::new());
-            builder.execute_transaction_with_result_closure(tx, |res| {
-                success.set(res.result.result.is_success());
-                output.set(res.result.result.output().cloned().unwrap_or_default());
+            let gas = builder.execute_transaction_with_commit_condition(tx, |result, _| {
+                success.set(result.is_success());
+                output.set(result.output.clone());
+                if result.ext == DA_COVERAGE_CAPPED {
+                    CommitChanges::No
+                } else {
+                    CommitChanges::Yes
+                }
             })?;
-            if da_report.load(Ordering::Relaxed) == DA_COVERAGE_CAPPED {
+            if gas.is_none() {
                 bail!("tx {index} does not cover its DA fee; raise its gas limit");
             }
             outcomes.push(TxOutcome {
@@ -195,25 +194,28 @@ impl DevChain {
 
         let BlockBuilderOutcome {
             execution_result,
+            execution_state,
             hashed_state,
             trie_updates,
             block,
+            ..
         } = builder.finish(&state_provider, None)?;
         let number = block.number;
         let hash = block.hash();
 
         let record = build_block_witness_from_executed_state(
-            &db,
+            &mut db,
+            &execution_state,
             &state_provider,
             &self.factory,
             number,
             alloy_rlp::encode(block.sealed_block().clone_block()),
             self.parent.header(),
         )?;
-        let state_changes = BlockStateChanges::from(&db.bundle_state);
+        let state_changes = BlockStateChanges::from(&execution_state);
 
         let outcome = ExecutionOutcome::new(
-            db.take_bundle(),
+            execution_state,
             vec![execution_result.receipts],
             number,
             vec![execution_result.requests],

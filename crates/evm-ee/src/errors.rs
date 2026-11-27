@@ -39,6 +39,13 @@ pub enum EvmEnvError {
     #[error("witnessed parent {witnessed} is not the block's parent {expected}")]
     AncestorMismatch { expected: B256, witnessed: B256 },
 
+    /// The block access list reconstructed during execution does not match the header.
+    #[error("block access list hash mismatch: expected {expected:?}, executed {actual:?}")]
+    BlockAccessListMismatch {
+        expected: Option<B256>,
+        actual: Option<B256>,
+    },
+
     /// The EVM failed to execute the block.
     #[error("block execution failed: {0}")]
     Execution(#[source] Box<BlockExecutionError>),

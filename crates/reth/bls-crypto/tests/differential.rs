@@ -15,6 +15,7 @@ use alpen_reth_bls_crypto::Bls12381Crypto;
 use bls12_381::{
     hash_to_curve::MapToCurve, G1Affine, G1Projective, G2Affine, G2Projective, Scalar,
 };
+use evm2 as _;
 use hex as _;
 use proptest::{collection::vec, prelude::*};
 use revm::precompile::{

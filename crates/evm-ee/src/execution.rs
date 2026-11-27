@@ -4,6 +4,7 @@
 //! using RSP's sparse state and Reth's EVM execution engine.
 
 use alloy_consensus::Header;
+use alloy_eips::eip7928::compute_block_access_list_hash;
 use alpen_acct_types::{ExecBlockOutput, ExecutionEnvironment};
 use alpen_chain_types::{ExecInputs, ExecOutputs, OutputMessage};
 use alpen_params::{AlpenParams, AlpenSpecId};
@@ -12,14 +13,13 @@ use alpen_reth_evm::{
     config::AlpenEvmConfig,
     consensus::{FlooredConsensus, validate_header_extra_against_parent},
 };
+use evm2::{block::BlockExecutionResult, evm::Db};
 use reth_consensus::{Consensus, FullConsensus, HeaderValidator};
 use reth_ethereum_primitives::{Block, BlockBody, Receipt as EthereumReceipt};
 use reth_evm::{
-    block::BlockExecutionResult,
-    execute::{BasicBlockExecutor, BlockExecutionOutput, Executor},
+    BlockExecutionError, BlockExecutionOutput, BlockExecutor, BlockExecutorFactory, ConfigureEvm,
 };
 use reth_primitives_traits::RecoveredBlock;
-use revm::database::WrapDatabaseRef;
 use strata_acct_types::{BRIDGE_GATEWAY_ACCT_ID, BitcoinAmount, MsgPayload};
 use strata_codec::encode_to_vec;
 use strata_msg_fmt::{Msg as MsgTrait, OwnedMsg};
@@ -127,15 +127,33 @@ impl EvmExecutionEnvironment {
         block: &RecoveredBlock<Block>,
         pre_state: &EvmPartialState,
     ) -> Result<BlockExecutionOutput<EthereumReceipt>, EvmEnvError> {
-        let db = {
-            let wit_db = pre_state.create_witness_db();
-            WrapDatabaseRef(wit_db)
-        };
-        // The per-block DA rate (committed in the header `extra_data`) is applied inside
-        // `AlpenEvmConfig`'s execution context, which `BasicBlockExecutor` builds per block,
-        // so the DA fee charge sees the block's committed rate with no plumbing here.
-        let block_executor = BasicBlockExecutor::new(&self.evm_config, db);
-        Ok(block_executor.execute(block)?)
+        let config = &self.evm_config;
+        let factory = config.block_executor_factory();
+        let env = config
+            .evm_env(block.header())
+            .map_err(BlockExecutionError::other)?;
+        let ctx = config
+            .context_for_block(block.sealed_block())
+            .map_err(BlockExecutionError::other)?;
+        let evm = factory.evm_with_env(Db::new(pre_state.create_witness_db()), env);
+        let mut executor = factory.create_executor(evm, ctx);
+        let expected_bal = block.header().block_access_list_hash;
+        if expected_bal.is_some() {
+            executor.enable_block_access_list_builder();
+        }
+        executor.apply_pre_execution_changes()?;
+        for tx in block.transactions_recovered() {
+            executor.execute_transaction(tx)?;
+        }
+        let (output, bal) = executor.finish_with_block_access_list()?;
+        let actual_bal = bal.as_deref().map(compute_block_access_list_hash);
+        if expected_bal != actual_bal {
+            return Err(EvmEnvError::BlockAccessListMismatch {
+                expected: expected_bal,
+                actual: actual_bal,
+            });
+        }
+        Ok(output)
     }
 }
 
@@ -230,8 +248,12 @@ impl ExecutionEnvironment for EvmExecutionEnvironment {
             },
             Vec::new(),
         );
-        self.consensus
-            .validate_block_post_execution(&block, exec_output.block_output(), None)?;
+        self.consensus.validate_block_post_execution(
+            &block,
+            exec_output.block_output(),
+            None,
+            header.header().block_access_list_hash,
+        )?;
 
         if !claimed_outputs.matches_executed(exec_output.outputs()) {
             return Err(EvmEnvError::OutputMismatch {
@@ -270,8 +292,7 @@ mod tests {
     use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
     use reth_primitives_traits::SealedHeader;
-    use reth_trie::HashedPostState;
-    use revm::DatabaseRef;
+    use reth_trie_common::HashedPostState;
     use revm_primitives::{
         B256,
         alloy_primitives::{Bloom, Signature},

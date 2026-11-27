@@ -12,7 +12,7 @@ workspace = true
 alpen-engine-api.workspace = true
 alpen-params.workspace = true
 alpen-primitives.workspace = true
-alpen-reth-evm.workspace = true
+alpen-reth-evm = { workspace = true, features = ["host"] }
 alpen-reth-rpc.workspace = true
 strata-acct-types.workspace = true
 strata-primitives.workspace = true
@@ -24,6 +24,7 @@ alloy-rlp.workspace = true
 alloy-rpc-types.workspace = true
 bincode.workspace = true
 ciborium.workspace = true
+evm2.workspace = true
 eyre.workspace = true
 futures.workspace = true
 reth-basic-payload-builder.workspace = true
@@ -35,7 +36,7 @@ reth-eth-wire.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-ethereum-payload-builder.workspace = true
 reth-ethereum-primitives.workspace = true
-reth-evm.workspace = true
+reth-evm = { workspace = true, features = ["witness"] }
 reth-network.workspace = true
 reth-network-api.workspace = true
 reth-node-api.workspace = true
@@ -44,18 +45,9 @@ reth-node-core.workspace = true
 reth-payload-builder.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true
-reth-revm.workspace = true
 reth-rpc-eth-types.workspace = true
 reth-transaction-pool.workspace = true
 reth-trie.workspace = true
-# The precompile backends and memory limit reth's Ethereum node turns on.
-revm = { workspace = true, features = [
-  "blst",
-  "c-kzg",
-  "memory_limit",
-  "p256-aws-lc-rs",
-  "secp256k1",
-] }
 revm-primitives.workspace = true
 serde.workspace = true
 thiserror.workspace = true

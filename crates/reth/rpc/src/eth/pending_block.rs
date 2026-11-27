@@ -8,7 +8,9 @@ use reth_rpc_eth_api::{
     FromEvmError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::{
-    block::BlockAndReceipts, builder::config::PendingBlockKind, EthApiError, PendingBlock,
+    block::{BlockAndReceipts, SharedReceipts},
+    builder::config::PendingBlockKind,
+    EthApiError, PendingBlock,
 };
 use reth_storage_api::{BlockReader, BlockReaderIdExt, ReceiptProvider};
 use tokio::sync::Mutex;
@@ -58,7 +60,7 @@ where
 
         Ok(Some(BlockAndReceipts {
             block: Arc::new(block),
-            receipts: Arc::new(receipts),
+            receipts: SharedReceipts::Receipts(Arc::new(receipts)),
         }))
     }
 }

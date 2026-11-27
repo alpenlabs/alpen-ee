@@ -25,6 +25,8 @@ pub enum AlpenEnginePayloadError {
     Serialization(#[from] bincode::Error),
     #[error("RLP decoding failed: {0}")]
     RlpDecode(#[from] alloy_rlp::Error),
+    #[error("stored block has an invalid transaction signature")]
+    SenderRecovery,
 }
 
 /// The node stores each block's payload in this encoding and replays the stored
@@ -124,7 +126,10 @@ impl TryFrom<SerializablePayload> for AlpenBuiltPayload {
         let sealed_block: SealedBlock<<EthPrimitives as NodePrimitives>::Block> =
             block.seal_unchecked(block_hash);
 
-        let eth_built_payload = EthBuiltPayload::new(sealed_block.into(), fees, requests, None);
+        let recovered = sealed_block
+            .try_recover()
+            .map_err(|_| AlpenEnginePayloadError::SenderRecovery)?;
+        let eth_built_payload = EthBuiltPayload::new(recovered.into(), fees, requests, None);
 
         Ok(
             AlpenBuiltPayload::new(eth_built_payload, withdrawal_intents)
@@ -188,8 +193,12 @@ mod tests {
         };
         let block = Block::new(header, body).seal_slow();
         let requests = Requests::new(vec![Bytes::from_static(&[0x01, 0xaa])]);
-        let eth_payload =
-            EthBuiltPayload::new(Arc::new(block), U256::from(21_000), Some(requests), None);
+        let eth_payload = EthBuiltPayload::new(
+            Arc::new(block.try_recover().unwrap()),
+            U256::from(21_000),
+            Some(requests),
+            None,
+        );
 
         let mut destination = vec![0x03];
         destination.extend_from_slice(&[0x22; 20]);

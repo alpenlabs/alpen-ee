@@ -42,13 +42,11 @@ use alpen_reth_evm::{
 };
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
-    block::{BlockExecutorFactory, StateDB},
     execute::{BlockAssembler, BlockAssemblerInput, BlockExecutionError},
-    ConfigureEngineEvm, ConfigureEvm, EvmEnvFor, EvmFactory, ExecutableTxIterator,
-    NextBlockEnvAttributes,
+    BlockExecutorFactory, ConfigureEngineEvm, ConfigureEvm, DynDatabase, EvmEnvFor,
+    ExecutableTxIterator, NextBlockEnvAttributes,
 };
 use reth_primitives_traits::{Header, Recovered, SealedBlock, SealedHeader, SignedTransaction};
-use revm::Inspector;
 
 /// Version-aware [`ConfigureEvm`] over one [`AlpenEvmConfig`] per spec version.
 #[derive(Debug, Clone)]
@@ -147,9 +145,10 @@ impl BlockExecutorFactory for MultiSpecBlockExecutorFactory {
     type ExecutionCtx<'a> = AlpenBlockExecutionCtx<'a>;
     type Transaction = <AlpenBlockExecutorFactory as BlockExecutorFactory>::Transaction;
     type Receipt = <AlpenBlockExecutorFactory as BlockExecutorFactory>::Receipt;
-    type TxExecutionResult = <AlpenBlockExecutorFactory as BlockExecutorFactory>::TxExecutionResult;
-    type Executor<'a, DB: StateDB, I: Inspector<<Self::EvmFactory as EvmFactory>::Context<DB>>> =
-        <AlpenBlockExecutorFactory as BlockExecutorFactory>::Executor<'a, DB, I>;
+    type EvmTypes = <AlpenBlockExecutorFactory as BlockExecutorFactory>::EvmTypes;
+    type EvmEnv = <AlpenBlockExecutorFactory as BlockExecutorFactory>::EvmEnv;
+    type Evm<'a> = <AlpenBlockExecutorFactory as BlockExecutorFactory>::Evm<'a>;
+    type Executor<'a> = <AlpenBlockExecutorFactory as BlockExecutorFactory>::Executor<'a>;
 
     fn evm_factory(&self) -> &Self::EvmFactory {
         // Every version shares the node's EVM factory; any entry serves.
@@ -159,14 +158,17 @@ impl BlockExecutorFactory for MultiSpecBlockExecutorFactory {
             .evm_factory()
     }
 
-    fn create_executor<'a, DB, I>(
+    fn evm_with_env<'a, DB: DynDatabase + 'a>(&self, db: DB, env: Self::EvmEnv) -> Self::Evm<'a> {
+        self.inners[0].evm_with_env(db, env)
+    }
+
+    fn create_executor<'a>(
         &'a self,
-        evm: <Self::EvmFactory as EvmFactory>::Evm<DB, I>,
+        evm: Self::Evm<'a>,
         ctx: Self::ExecutionCtx<'a>,
-    ) -> Self::Executor<'a, DB, I>
+    ) -> Self::Executor<'a>
     where
-        DB: StateDB,
-        I: Inspector<<Self::EvmFactory as EvmFactory>::Context<DB>>,
+        Self: 'a,
     {
         version_indexed(&self.inners, ctx.header_extra().spec_version()).create_executor(evm, ctx)
     }
@@ -195,9 +197,10 @@ impl BlockAssembler<MultiSpecBlockExecutorFactory> for MultiSpecBlockAssembler {
             input.parent,
             input.transactions,
             input.output,
-            input.bundle_state,
+            input.execution_state,
             input.state_provider,
             input.state_root,
+            input.block_access_list_hash,
         ))
     }
 }
@@ -239,7 +242,10 @@ impl ConfigureEvm for MultiSpecEvmConfig {
     fn context_for_block<'a>(
         &self,
         block: &'a SealedBlock<reth_ethereum_primitives::Block>,
-    ) -> Result<AlpenBlockExecutionCtx<'a>, Self::Error> {
+    ) -> Result<AlpenBlockExecutionCtx<'a>, Self::Error>
+    where
+        Self: 'a,
+    {
         self.config_for_header(block.header())?
             .context_for_block(block)
     }
@@ -318,14 +324,14 @@ pub(crate) fn test_params(evm_spec: EvmSpec) -> AlpenParams {
 mod tests {
     use alloy_primitives::Bytes;
     use alpen_params::{AlpenSpecId, EvmSpec, HeaderExtra, HeaderExtraError};
+    use evm2::SpecId;
     use reth_evm::{
+        database::StateProviderDatabase,
         execute::{BlockAssembler, BlockAssemblerInput, BlockBuilder},
-        ConfigureEvm, EvmEnv, NextBlockEnvAttributes,
+        ConfigureEvm, NextBlockEnvAttributes,
     };
     use reth_primitives_traits::{Header, SealedHeader};
-    use reth_revm::database::StateProviderDatabase;
-    use reth_storage_api::noop::NoopProvider;
-    use revm::{database::State, primitives::hardfork::SpecId};
+    use reth_storage_api::{noop::NoopProvider, StateProvider};
 
     use super::{test_params, MultiSpecEvmConfig};
 
@@ -348,7 +354,7 @@ mod tests {
             suggested_fee_recipient: Default::default(),
             prev_randao: Default::default(),
             gas_limit: 30_000_000,
-            parent_beacon_block_root: None,
+            parent_beacon_block_root: Some(Default::default()),
             withdrawals: Some(Default::default()),
             extra_data: Default::default(),
             slot_number: None,
@@ -370,12 +376,12 @@ mod tests {
         let v0_env = config
             .evm_env(&stamped_header(AlpenSpecId::V0))
             .expect("v0 stamp resolves");
-        assert_eq!(v0_env.cfg_env.spec, SpecId::PRAGUE);
+        assert_eq!(v0_env.spec, SpecId::PRAGUE);
 
         let v1_env = config
             .evm_env(&stamped_header(AlpenSpecId::V1))
             .expect("v1 stamp resolves");
-        assert_eq!(v1_env.cfg_env.spec, SpecId::OSAKA);
+        assert_eq!(v1_env.spec, SpecId::OSAKA);
     }
 
     /// Strict resolution: a truncated or future stamp fails instead of
@@ -390,8 +396,8 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            config.evm_env(&truncated),
-            Err(HeaderExtraError::TooShort { len: 1 }.into())
+            config.evm_env(&truncated).unwrap_err(),
+            HeaderExtraError::TooShort { len: 1 }.into()
         );
 
         let future = Header {
@@ -400,8 +406,8 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            config.evm_env(&future),
-            Err(HeaderExtraError::UnknownVersion(7).into())
+            config.evm_env(&future).unwrap_err(),
+            HeaderExtraError::UnknownVersion(7).into()
         );
     }
 
@@ -417,7 +423,7 @@ mod tests {
         };
 
         let env = config.evm_env(&genesis).expect("genesis is exempt");
-        assert_eq!(env.cfg_env.spec, SpecId::PRAGUE);
+        assert_eq!(env.spec, SpecId::PRAGUE);
     }
 
     /// The production path pins what the functional fullnode-sync flow
@@ -426,8 +432,8 @@ mod tests {
     /// version and rate the block was built with.
     #[test]
     fn production_builder_stamps_the_resolved_version() {
-        // Shanghai-only so the empty-state build needs no post-Cancun system
-        // calls; the per-version derivation on top is the real one.
+        // Use the real per-version derivation. The shared test attributes include
+        // a zero beacon root for versions with EIP-4788 active.
         let evm_spec: EvmSpec =
             serde_json::from_str(r#"{"config":{"chainId":2892,"shanghaiTime":0}}"#)
                 .expect("genesis document parses");
@@ -440,16 +446,13 @@ mod tests {
         let provider = NoopProvider::default();
 
         for version in [AlpenSpecId::V0, AlpenSpecId::V1] {
-            let mut db = State::builder()
-                .with_database(StateProviderDatabase::new(&provider))
-                .with_bundle_update()
-                .build();
+            let db = StateProviderDatabase::new((&provider).into_evm_state_provider());
             let attributes = next_block_attributes();
             let evm_env = config
                 .config_for(version)
                 .next_evm_env(&parent, &attributes)
                 .expect("next env resolves");
-            let evm = config.evm_with_env(&mut db, evm_env);
+            let evm = config.evm_with_env(db, evm_env.clone());
             let ctx = config
                 .context_for_next_block_with(
                     &parent,
@@ -457,7 +460,7 @@ mod tests {
                     HeaderExtra::new(version, DA_RATE),
                 )
                 .expect("the stamp picks its own version's config");
-            let mut builder = config.create_block_builder(evm, &parent, ctx);
+            let mut builder = config.create_block_builder(evm, evm_env, &parent, ctx);
             builder
                 .apply_pre_execution_changes()
                 .expect("empty pre-execution succeeds");
@@ -496,7 +499,7 @@ mod tests {
             let block = config
                 .assembler
                 .assemble_block(BlockAssemblerInput::new(
-                    EvmEnv::default(),
+                    Default::default(),
                     ctx,
                     &parent,
                     Vec::new(),
@@ -504,6 +507,7 @@ mod tests {
                     &bundle_state,
                     &provider,
                     Default::default(),
+                    None,
                 ))
                 .expect("empty block assembles");
 

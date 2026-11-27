@@ -17,7 +17,7 @@ alloy-primitives.workspace = true
 alloy-rpc-types-eth.workspace = true
 alpen-params.workspace = true
 alpen-primitives.workspace = true
-alpen-reth-evm.workspace = true
+alpen-reth-evm = { workspace = true, features = ["host"] }
 async-trait.workspace = true
 eyre.workspace = true
 jsonrpsee = { workspace = true, features = ["server", "macros"] }

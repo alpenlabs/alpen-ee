@@ -28,6 +28,7 @@ use alloy_primitives::B256;
 use alpen_common::{AccessedAccount, AccessedStateRecord};
 use alpen_storage_api::AccessedStateStore;
 use alpen_witness::CacheDBProvider;
+use evm2::bytecode::Bytecode;
 use futures_util::TryStreamExt;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm::{
@@ -38,7 +39,6 @@ use reth_exex::{ExExContext, ExExEvent};
 use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_primitives_traits::Block as _;
 use reth_provider::{BlockReader, Chain, StateProviderFactory};
-use reth_revm::{db::CacheDB, state::Bytecode};
 use strata_acct_types::Hash;
 use tokio::task;
 use tracing::{debug, error, warn};
@@ -231,10 +231,8 @@ where
     let recovered = sealed.try_recover()?;
 
     let history = provider.history_by_block_number(block_num.saturating_sub(1))?;
-    let cache_provider = CacheDBProvider::new(history);
-    let cache_db = CacheDB::new(&cache_provider);
-
-    let executor = BasicBlockExecutor::new(evm_config, cache_db);
+    let mut cache_provider = CacheDBProvider::new(history);
+    let executor = BasicBlockExecutor::new(evm_config, &mut cache_provider);
     let _output = executor.execute(&recovered)?;
 
     let accessed = cache_provider.get_accessed_state();
@@ -303,7 +301,7 @@ mod tests {
         let bytecode = Bytecode::new_raw(runtime.clone());
 
         assert_eq!(bytecode.original_bytes(), runtime);
-        assert_ne!(bytecode.bytes(), runtime);
+        assert_eq!(bytecode.original_byte_slice(), runtime.as_ref());
 
         let entries = bytecode_entries_from_accessed_contracts(once((&code_hash, &bytecode)));
 

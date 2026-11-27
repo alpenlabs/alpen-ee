@@ -15,7 +15,9 @@ fi
 matches=$(grep -r \
     --include="*.rs" \
     -E '(struct|type|enum)\s+[A-Z][a-z]+[A-Za-z0-9_]*With[A-Z][A-Za-z0-9_]*(<[^>]*>)?' \
-    "$root_dir" 2>/dev/null)
+    "$root_dir" 2>/dev/null |
+    # Required associated type of upstream alloy-evm's BlockExecutor trait.
+    grep -vE '(^|/)crates/reth/evm/src/config[.]rs:[[:space:]]+type TransactionResultWithState = E::TransactionResultWithState;$')
 
 if [ -n "$matches" ]; then
     echo "found bad 'With' type declarations in path $root_dir"

@@ -2,13 +2,14 @@ use core::future::Future;
 
 use alloy_network::TransactionBuilder;
 use alloy_primitives::U256;
-use alloy_rpc_types_eth::{state::StateOverride, BlockId};
+use alloy_rpc_types_eth::{state::EvmOverrides, BlockId};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_api::{
     helpers::{estimate::EstimateCall, Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking},
     EthApiTypes, FromEvmError, RpcNodeCore,
 };
 use reth_rpc_eth_types::EthApiError;
+use reth_storage_api::StateProvider;
 
 use crate::{eth::fees::da_fee_to_gas, AlpenEthApi};
 
@@ -41,7 +42,7 @@ where
             <<AlpenEthApi<N, Rpc> as EthApiTypes>::RpcConvert as RpcConvert>::Network,
         >,
         at: BlockId,
-        state_override: Option<StateOverride>,
+        overrides: EvmOverrides,
         da_rate: Option<u64>,
     ) -> Result<U256, <AlpenEthApi<N, Rpc> as EthApiTypes>::Error>
     where
@@ -50,11 +51,17 @@ where
         // reth's standard binary-search estimate for the execution-gas component.
         let (evm_env, resolved_at) = self.evm_env_at(at).await?;
         let exec_request = request.clone();
-        let exec_override = state_override.clone();
+        let exec_override = overrides.clone();
         let raw_gas = self
             .spawn_blocking_io_fut(move |this| async move {
                 let state = this.state_at_block_id(resolved_at).await?;
-                EstimateCall::estimate_gas_with(&this, evm_env, exec_request, state, exec_override)
+                EstimateCall::estimate_gas_with(
+                    &this,
+                    evm_env,
+                    exec_request,
+                    state.into_evm_state_provider(),
+                    exec_override,
+                )
             })
             .await?;
 
@@ -88,7 +95,7 @@ where
                 .as_mut()
                 .set_gas_limit(effective_gas.saturating_to::<u64>());
             let quote = self
-                .da_fee_quote(quote_request, resolved_at, state_override.clone(), da_rate)
+                .da_fee_quote(quote_request, resolved_at, overrides.clone(), da_rate)
                 .await?;
             let da_gas = da_fee_to_gas(quote.da_fee, quote.base_fee);
             max_da_gas = max_da_gas.max(da_gas);
@@ -126,13 +133,13 @@ where
         &self,
         request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         at: BlockId,
-        state_override: Option<StateOverride>,
+        overrides: EvmOverrides,
     ) -> impl Future<Output = Result<U256, Self::Error>> + Send
     where
         Self: LoadPendingBlock,
     {
         let da_rate = self.live_da_fee_rate(at);
-        self.estimate_gas_at_with_da_rate(request, at, state_override, da_rate)
+        self.estimate_gas_at_with_da_rate(request, at, overrides, da_rate)
     }
 }
 
